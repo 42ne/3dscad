@@ -8,6 +8,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
@@ -149,9 +150,9 @@ void MainWindow::addCube()
     s.name = QString("Cube %1").arg(m_scene.shapeCount() + 1);
     s.size = QVector3D(20, 20, 20);
 
-    const int row = m_scene.addShape(s);
+    const int id = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(row);
+    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
 }
 
 void MainWindow::addSphere()
@@ -161,9 +162,9 @@ void MainWindow::addSphere()
     s.name = QString("Sphere %1").arg(m_scene.shapeCount() + 1);
     s.radius = 10;
 
-    const int row = m_scene.addShape(s);
+    const int id = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(row);
+    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
 }
 
 void MainWindow::addCylinder()
@@ -174,14 +175,15 @@ void MainWindow::addCylinder()
     s.radius = 10;
     s.height = 30;
 
-    const int row = m_scene.addShape(s);
+    const int id = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(row);
+    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
 }
 
 void MainWindow::onSelectionChanged(int row)
 {
-    m_scene.setSelectedIndex(row);
+    QListWidgetItem *item = m_shapeList->item(row);
+    m_scene.setSelectedShapeId(item ? item->data(Qt::UserRole).toInt() : -1);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
 }
@@ -208,7 +210,9 @@ void MainWindow::refreshShapeList()
     m_shapeList->clear();
 
     for (const ShapeNode &s : m_scene.shapes()) {
-        m_shapeList->addItem(s.name);
+        auto *item = new QListWidgetItem(s.name);
+        item->setData(Qt::UserRole, s.id);
+        m_shapeList->addItem(item);
     }
 
     refreshOpenScadCode();

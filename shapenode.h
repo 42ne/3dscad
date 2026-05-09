@@ -12,6 +12,7 @@ struct ShapeNode
         Cylinder
     };
 
+    int id = -1;
     Type type = Cube;
     QString name;
 
