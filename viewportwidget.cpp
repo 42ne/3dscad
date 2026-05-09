@@ -40,6 +40,58 @@ static int clampColorChannel(float value)
     return qBound(0, qRound(value), 255);
 }
 
+static QVector3D toCameraPoint(const QVector3D &world, float yawDegrees, float pitchDegrees, float cameraDistance)
+{
+    const float yaw = qDegreesToRadians(yawDegrees);
+    const float pitch = qDegreesToRadians(pitchDegrees);
+    QVector3D p = world;
+
+    p = QVector3D(
+        p.x() * qCos(yaw) + p.z() * qSin(yaw),
+        p.y(),
+        -p.x() * qSin(yaw) + p.z() * qCos(yaw));
+
+    p = QVector3D(
+        p.x(),
+        p.y() * qCos(pitch) - p.z() * qSin(pitch),
+        p.y() * qSin(pitch) + p.z() * qCos(pitch));
+
+    p.setZ(p.z() + cameraDistance);
+    return p;
+}
+
+static ProjectedPoint projectWorldPoint(const QVector3D &world,
+                                        const QSize &viewportSize,
+                                        float yawDegrees,
+                                        float pitchDegrees,
+                                        float cameraDistance)
+{
+    const float focalLength = 420.0f;
+    ProjectedPoint projected;
+    const QVector3D camera = toCameraPoint(world, yawDegrees, pitchDegrees, cameraDistance);
+    projected.depth = camera.z();
+    projected.visible = camera.z() > 8.0f;
+
+    const float scale = focalLength / qMax(8.0f, camera.z());
+    projected.point = QPointF(
+        viewportSize.width() / 2.0f + camera.x() * scale,
+        viewportSize.height() / 2.0f - camera.y() * scale);
+
+    return projected;
+}
+
+static float distanceToSegment(const QPointF &point, const QPointF &a, const QPointF &b)
+{
+    const QVector2D segment(b - a);
+    const float lengthSquared = segment.lengthSquared();
+
+    if (lengthSquared <= 0.0001f)
+        return QVector2D(point - a).length();
+
+    const float t = qBound(0.0f, QVector2D::dotProduct(QVector2D(point - a), segment) / lengthSquared, 1.0f);
+    return QVector2D(point - (a + (b - a) * t)).length();
+}
+
 static QColor litColor(const QColor &baseColor, const QVector3D &normal, const QVector<SceneLight> &lights)
 {
     float red = baseColor.redF() * 0.22f;
@@ -188,44 +240,14 @@ void ViewportWidget::paintGL()
 
     painter.fillRect(rect(), QColor(30, 32, 36));
 
-    const float yaw = qDegreesToRadians(m_cameraYaw);
-    const float pitch = qDegreesToRadians(m_cameraPitch);
-    const float focalLength = 420.0f;
     const QVector<SceneLight> lights = {
         {QVector3D(-0.45f, -0.35f, 1.0f).normalized(), QColor(255, 244, 214), 0.78f},
         {QVector3D(0.85f, 0.15f, 0.45f).normalized(), QColor(160, 205, 255), 0.34f},
         {QVector3D(-0.2f, 0.9f, 0.25f).normalized(), QColor(255, 170, 110), 0.24f}
     };
 
-    auto toCamera = [&](const QVector3D &world) {
-        QVector3D p = world;
-
-        p = QVector3D(
-            p.x() * qCos(yaw) + p.z() * qSin(yaw),
-            p.y(),
-            -p.x() * qSin(yaw) + p.z() * qCos(yaw));
-
-        p = QVector3D(
-            p.x(),
-            p.y() * qCos(pitch) - p.z() * qSin(pitch),
-            p.y() * qSin(pitch) + p.z() * qCos(pitch));
-
-        p.setZ(p.z() + m_cameraDistance);
-        return p;
-    };
-
     auto project = [&](const QVector3D &world) {
-        ProjectedPoint projected;
-        const QVector3D camera = toCamera(world);
-        projected.depth = camera.z();
-        projected.visible = camera.z() > 8.0f;
-
-        const float scale = focalLength / qMax(8.0f, camera.z());
-        projected.point = QPointF(
-            width() / 2.0f + camera.x() * scale,
-            height() / 2.0f - camera.y() * scale);
-
-        return projected;
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance);
     };
 
     auto drawGrid = [&]() {
@@ -331,10 +353,29 @@ void ViewportWidget::paintGL()
 
         m_pickBufferSize = size();
         drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer);
+
+        if (m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size()) {
+            const QVector3D origin = m_shapes->at(m_selectedIndex).position;
+            const QVector<QPair<QVector3D, QColor>> axes = {
+                {QVector3D(36.0f, 0.0f, 0.0f), QColor(235, 80, 80)},
+                {QVector3D(0.0f, 36.0f, 0.0f), QColor(80, 210, 120)},
+                {QVector3D(0.0f, 0.0f, 36.0f), QColor(90, 155, 245)}
+            };
+
+            for (const auto &axis : axes) {
+                const QPointF start = project(origin).point;
+                const QPointF end = project(origin + axis.first).point;
+                painter.setPen(QPen(axis.second, 3, Qt::SolidLine, Qt::RoundCap));
+                painter.drawLine(start, end);
+                painter.setBrush(axis.second);
+                painter.setPen(Qt::NoPen);
+                painter.drawEllipse(end, 4, 4);
+            }
+        }
     }
 
     painter.setPen(QColor(220, 220, 220));
-    painter.drawText(12, 24, "3D viewport: drag to orbit, mouse wheel to zoom; 3 scene lights");
+    painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move");
 
     painter.end();
 }
@@ -342,6 +383,40 @@ void ViewportWidget::paintGL()
 void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
+
+    if (event->button() == Qt::LeftButton
+        && m_shapes
+        && m_selectedIndex >= 0
+        && m_selectedIndex < m_shapes->size()) {
+        const QVector3D origin = m_shapes->at(m_selectedIndex).position;
+        const QVector<QPair<DragMode, QVector3D>> axes = {
+            {AxisXDrag, QVector3D(36.0f, 0.0f, 0.0f)},
+            {AxisYDrag, QVector3D(0.0f, 36.0f, 0.0f)},
+            {AxisZDrag, QVector3D(0.0f, 0.0f, 36.0f)}
+        };
+
+        float bestDistance = 9.0f;
+        DragMode pickedAxis = NoDrag;
+        const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+
+        for (const auto &axis : axes) {
+            const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+            const float distance = distanceToSegment(event->pos(), start, end);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                pickedAxis = axis.first;
+            }
+        }
+
+        if (pickedAxis != NoDrag) {
+            m_draggingShape = true;
+            m_dragMode = pickedAxis;
+            m_dragShapeIndex = m_selectedIndex;
+            m_dragStartMousePosition = event->pos();
+            emit shapeDragStarted(m_selectedIndex);
+            return;
+        }
+    }
 
     int shapeIndex = -1;
     if (event->button() == Qt::LeftButton
@@ -364,6 +439,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 
     if (event->modifiers() & Qt::ShiftModifier) {
         m_draggingShape = true;
+        m_dragMode = PlaneDrag;
         m_dragShapeIndex = shapeIndex;
         m_dragStartMousePosition = event->pos();
         emit shapeDragStarted(shapeIndex);
@@ -375,9 +451,32 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
     if (m_draggingShape && (event->buttons() & Qt::LeftButton)) {
         const QPoint pixelDelta = event->pos() - m_dragStartMousePosition;
         const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
-        const QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
-                                   -pixelDelta.y() * worldUnitsPerPixel,
-                                   0.0f);
+        QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
+                             -pixelDelta.y() * worldUnitsPerPixel,
+                             0.0f);
+
+        if (m_shapes && m_dragShapeIndex >= 0 && m_dragShapeIndex < m_shapes->size() && m_dragMode != PlaneDrag) {
+            QVector3D axisVector;
+            if (m_dragMode == AxisXDrag)
+                axisVector = QVector3D(1.0f, 0.0f, 0.0f);
+            else if (m_dragMode == AxisYDrag)
+                axisVector = QVector3D(0.0f, 1.0f, 0.0f);
+            else if (m_dragMode == AxisZDrag)
+                axisVector = QVector3D(0.0f, 0.0f, 1.0f);
+
+            const QVector3D origin = m_shapes->at(m_dragShapeIndex).position;
+            const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+            const QPointF screenEnd = projectWorldPoint(origin + axisVector * 36.0f, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+            QVector2D screenAxis(screenEnd - screenOrigin);
+
+            if (screenAxis.lengthSquared() > 0.0001f) {
+                screenAxis.normalize();
+                const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
+                worldDelta = axisVector * screenAmount * worldUnitsPerPixel;
+            } else {
+                worldDelta = QVector3D();
+            }
+        }
 
         emit shapeDragged(m_dragShapeIndex, worldDelta);
         m_lastMousePosition = event->pos();
@@ -400,6 +499,7 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton && m_draggingShape) {
         const int shapeIndex = m_dragShapeIndex;
         m_draggingShape = false;
+        m_dragMode = NoDrag;
         m_dragShapeIndex = -1;
         emit shapeDragFinished(shapeIndex);
     }

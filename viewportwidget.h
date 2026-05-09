@@ -35,6 +35,14 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
+    enum DragMode {
+        NoDrag,
+        PlaneDrag,
+        AxisXDrag,
+        AxisYDrag,
+        AxisZDrag
+    };
+
     const QVector<ShapeNode> *m_shapes = nullptr;
     int m_selectedIndex = -1;
     float m_cameraYaw = -35.0f;
@@ -43,6 +51,7 @@ private:
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
     bool m_draggingShape = false;
+    DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
     QVector<int> m_pickBuffer;
     QSize m_pickBufferSize;
