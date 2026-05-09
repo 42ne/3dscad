@@ -106,6 +106,9 @@ void MainWindow::buildUi()
     connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
+    connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
+        m_shapeList->setCurrentRow(index);
+    });
     connect(m_shapeList, &QListWidget::currentRowChanged, this, &MainWindow::onSelectionChanged);
 
     // Right dock: properties

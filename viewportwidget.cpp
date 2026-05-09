@@ -20,6 +20,7 @@ struct Face2D
     QVector<float> depths;
     QColor color;
     float depth = 0.0f;
+    int shapeIndex = -1;
     QPen pen = Qt::NoPen;
 };
 
@@ -72,6 +73,7 @@ static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
 
 static void rasterizeTriangle(QImage *image,
                               QVector<float> *depthBuffer,
+                              QVector<int> *pickBuffer,
                               const QSize &viewportSize,
                               const QPointF &a,
                               const QPointF &b,
@@ -79,7 +81,8 @@ static void rasterizeTriangle(QImage *image,
                               float depthA,
                               float depthB,
                               float depthC,
-                              const QColor &color)
+                              const QColor &color,
+                              int shapeIndex)
 {
     const float area = edgeValue(a, b, c);
     if (qFuzzyIsNull(area))
@@ -112,19 +115,25 @@ static void rasterizeTriangle(QImage *image,
 
             if (depth < depthBuffer->at(bufferIndex)) {
                 (*depthBuffer)[bufferIndex] = depth;
+                if (pickBuffer)
+                    (*pickBuffer)[bufferIndex] = shapeIndex;
+
                 image->setPixelColor(x, y, color);
             }
         }
     }
 }
 
-static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, const QSize &viewportSize)
+static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, const QSize &viewportSize, QVector<int> *pickBuffer)
 {
     QImage image(viewportSize, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
 
     QVector<float> depthBuffer(viewportSize.width() * viewportSize.height(),
                                std::numeric_limits<float>::max());
+
+    if (pickBuffer)
+        pickBuffer->fill(-1, viewportSize.width() * viewportSize.height());
 
     for (const Face2D &face : faces) {
         if (face.points.size() < 3 || face.points.size() != face.depths.size())
@@ -133,6 +142,7 @@ static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, 
         for (int i = 1; i + 1 < face.points.size(); ++i) {
             rasterizeTriangle(&image,
                               &depthBuffer,
+                              pickBuffer,
                               viewportSize,
                               face.points[0],
                               face.points[i],
@@ -140,7 +150,8 @@ static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, 
                               face.depths[0],
                               face.depths[i],
                               face.depths[i + 1],
-                              face.color);
+                              face.color,
+                              face.shapeIndex);
         }
     }
 
@@ -317,7 +328,7 @@ void ViewportWidget::paintGL()
         painter.drawPolygon(shadow);
     };
 
-    auto appendCube = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor) {
+    auto appendCube = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
         const QVector3D half = shape.size * 0.5f;
         QVector<QVector3D> vertices = {
             {-half.x(), -half.y(), -half.z()}, {half.x(), -half.y(), -half.z()},
@@ -342,6 +353,7 @@ void ViewportWidget::paintGL()
             const QVector<int> indices = faceIndices[i];
             const QVector3D normal = faceNormal(vertices[indices[0]], vertices[indices[1]], vertices[indices[2]]);
             face.color = litColor(baseColor.lighter(shade[i]), normal, lights);
+            face.shapeIndex = shapeIndex;
             face.pen = QPen(baseColor.darker(145), 1);
 
             for (int index : indices) {
@@ -356,7 +368,7 @@ void ViewportWidget::paintGL()
         }
     };
 
-    auto appendSphere = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor) {
+    auto appendSphere = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
         QVector<QVector3D> shadowPoints;
         for (int i = 0; i < 24; ++i) {
             const float angle = 2.0f * M_PI * i / 24.0f;
@@ -372,6 +384,7 @@ void ViewportWidget::paintGL()
         Face2D face;
         face.color = litColor(baseColor, QVector3D(-0.25f, -0.3f, 1.0f).normalized(), lights);
         face.depth = center.depth;
+        face.shapeIndex = shapeIndex;
         face.pen = QPen(baseColor.darker(150), 1);
 
         for (int i = 0; i < 36; ++i) {
@@ -383,7 +396,7 @@ void ViewportWidget::paintGL()
         faces.append(face);
     };
 
-    auto appendCylinder = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor) {
+    auto appendCylinder = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
         QVector<QVector3D> top;
         QVector<QVector3D> bottom;
 
@@ -402,6 +415,7 @@ void ViewportWidget::paintGL()
             Face2D side;
             const QVector3D normal = faceNormal(bottom[i], bottom[next], top[next]);
             side.color = litColor(baseColor, normal, lights);
+            side.shapeIndex = shapeIndex;
             side.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : {bottom[i], bottom[next], top[next], top[i]}) {
@@ -420,6 +434,7 @@ void ViewportWidget::paintGL()
             Face2D cap;
             const QVector3D normal = faceNormal(caps[i][0], caps[i][1], caps[i][2]);
             cap.color = litColor(baseColor.lighter(i == 1 ? 120 : 82), normal, lights);
+            cap.shapeIndex = shapeIndex;
             cap.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : caps[i]) {
@@ -446,14 +461,15 @@ void ViewportWidget::paintGL()
                                : QColor(80, 160, 255);
 
             if (s.type == ShapeNode::Cube)
-                appendCube(faces, s, color);
+                appendCube(faces, s, color, i);
             else if (s.type == ShapeNode::Sphere)
-                appendSphere(faces, s, color);
+                appendSphere(faces, s, color, i);
             else if (s.type == ShapeNode::Cylinder)
-                appendCylinder(faces, s, color);
+                appendCylinder(faces, s, color, i);
         }
 
-        drawFacesWithDepth(&painter, faces, size());
+        m_pickBufferSize = size();
+        drawFacesWithDepth(&painter, faces, size(), &m_pickBuffer);
     }
 
     painter.setPen(QColor(220, 220, 220));
@@ -465,6 +481,21 @@ void ViewportWidget::paintGL()
 void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
+
+    if (event->button() == Qt::LeftButton
+        && m_pickBufferSize == size()
+        && event->pos().x() >= 0
+        && event->pos().x() < m_pickBufferSize.width()
+        && event->pos().y() >= 0
+        && event->pos().y() < m_pickBufferSize.height()) {
+        const int bufferIndex = event->pos().y() * m_pickBufferSize.width() + event->pos().x();
+
+        if (bufferIndex >= 0 && bufferIndex < m_pickBuffer.size()) {
+            const int shapeIndex = m_pickBuffer[bufferIndex];
+            if (shapeIndex >= 0)
+                emit shapeClicked(shapeIndex);
+        }
+    }
 }
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent *event)

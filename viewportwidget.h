@@ -19,6 +19,9 @@ public:
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
 
+signals:
+    void shapeClicked(int index);
+
 protected:
     void initializeGL() override;
     void resizeGL(int w, int h) override;
@@ -34,6 +37,8 @@ private:
     float m_cameraPitch = 28.0f;
     float m_cameraDistance = 220.0f;
     QPoint m_lastMousePosition;
+    QVector<int> m_pickBuffer;
+    QSize m_pickBufferSize;
 };
 
 #endif
