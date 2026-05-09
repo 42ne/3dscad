@@ -378,8 +378,7 @@ void ViewportWidget::paintGL()
         drawShadow(shadowPoints);
 
         const ProjectedPoint center = project(shape.position);
-        const ProjectedPoint edge = project(shape.position + QVector3D(shape.radius, 0, 0));
-        const float radius = QLineF(center.point, edge.point).length();
+        const float radius = shape.radius * focalLength / qMax(8.0f, center.depth);
 
         Face2D face;
         face.color = litColor(baseColor, QVector3D(-0.25f, -0.3f, 1.0f).normalized(), lights);
