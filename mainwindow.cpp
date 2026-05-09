@@ -224,19 +224,31 @@ void MainWindow::onSelectionChanged(int row)
 
 void MainWindow::onPropertyChanged()
 {
-    ShapeNode *s = m_scene.selectedShape();
-    if (!s)
+    if (m_updatingProperties)
         return;
 
-    s->position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
-    s->rotation = QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value());
-    s->size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
+    const ShapeNode *selectedShape = m_scene.selectedShape();
+    if (!selectedShape)
+        return;
 
-    s->radius = m_radius->value();
-    s->height = m_height->value();
+    ShapeNode updatedShape = *selectedShape;
+    updatedShape.position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
+    updatedShape.rotation = QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value());
+    updatedShape.size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
 
-    refreshOpenScadCode();
-    m_viewport->update();
+    updatedShape.radius = m_radius->value();
+    updatedShape.height = m_height->value();
+
+    auto *command = new UpdateShapeCommand(&m_scene, *selectedShape, updatedShape, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::refreshShapeList()
@@ -290,6 +302,8 @@ void MainWindow::refreshProperties()
     if (!s)
         return;
 
+    m_updatingProperties = true;
+
     QList<QDoubleSpinBox *> allBoxes = boxes;
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(true);
@@ -311,6 +325,8 @@ void MainWindow::refreshProperties()
 
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(false);
+
+    m_updatingProperties = false;
 
     bool cube = s->type == ShapeNode::Cube;
     bool sphere = s->type == ShapeNode::Sphere;

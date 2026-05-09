@@ -110,6 +110,17 @@ int SceneDocument::insertShape(int index, const ShapeNode &shape)
     return shapeWithId.id;
 }
 
+bool SceneDocument::updateShape(const ShapeNode &shape)
+{
+    ShapeNode *existingShape = shapeById(shape.id);
+    if (!existingShape)
+        return false;
+
+    *existingShape = shape;
+    m_selectedShapeId = shape.id;
+    return true;
+}
+
 bool SceneDocument::takeShapeById(int id, ShapeNode *removedShape, int *removedIndex)
 {
     const int index = indexOfShapeId(id);

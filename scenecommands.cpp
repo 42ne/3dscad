@@ -87,3 +87,39 @@ void DeleteShapeCommand::redo()
         m_onChanged();
 }
 
+UpdateShapeCommand::UpdateShapeCommand(SceneDocument *scene, const ShapeNode &oldShape, const ShapeNode &newShape, std::function<void()> onChanged)
+    : QUndoCommand("Update shape")
+    , m_scene(scene)
+    , m_oldShape(oldShape)
+    , m_newShape(newShape)
+    , m_valid(oldShape.id == newShape.id && oldShape != newShape)
+    , m_onChanged(onChanged)
+{
+}
+
+bool UpdateShapeCommand::isValid() const
+{
+    return m_valid;
+}
+
+void UpdateShapeCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->updateShape(m_oldShape);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void UpdateShapeCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->updateShape(m_newShape);
+
+    if (m_onChanged)
+        m_onChanged();
+}

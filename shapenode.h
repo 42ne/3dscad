@@ -24,4 +24,21 @@ struct ShapeNode
     float height = 20.0f;
 };
 
+inline bool operator==(const ShapeNode &left, const ShapeNode &right)
+{
+    return left.id == right.id
+           && left.type == right.type
+           && left.name == right.name
+           && left.position == right.position
+           && left.rotation == right.rotation
+           && left.size == right.size
+           && left.radius == right.radius
+           && left.height == right.height;
+}
+
+inline bool operator!=(const ShapeNode &left, const ShapeNode &right)
+{
+    return !(left == right);
+}
+
 #endif

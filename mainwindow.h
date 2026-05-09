@@ -42,6 +42,7 @@ private:
     QUndoStack *m_undoStack = nullptr;
     QAction *m_undoAction = nullptr;
     QAction *m_redoAction = nullptr;
+    bool m_updatingProperties = false;
 
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;

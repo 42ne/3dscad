@@ -39,4 +39,21 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class UpdateShapeCommand : public QUndoCommand
+{
+public:
+    UpdateShapeCommand(SceneDocument *scene, const ShapeNode &oldShape, const ShapeNode &newShape, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    ShapeNode m_oldShape;
+    ShapeNode m_newShape;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 #endif

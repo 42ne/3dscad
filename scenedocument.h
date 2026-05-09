@@ -28,6 +28,7 @@ public:
 
     int addShape(const ShapeNode &shape);
     int insertShape(int index, const ShapeNode &shape);
+    bool updateShape(const ShapeNode &shape);
     bool removeShapeById(int id);
     bool removeSelectedShape();
     bool takeShapeById(int id, ShapeNode *removedShape, int *removedIndex);
