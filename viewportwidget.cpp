@@ -5,6 +5,7 @@
 #include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
+#include <limits>
 
 struct ProjectedPoint
 {
@@ -16,7 +17,8 @@ struct ProjectedPoint
 struct Face2D
 {
     QVector<QPointF> points;
-    QBrush brush;
+    QVector<float> depths;
+    QColor color;
     float depth = 0.0f;
     QPen pen = Qt::NoPen;
 };
@@ -60,6 +62,89 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal, const Q
         clampColorChannel(red * 255.0f),
         clampColorChannel(green * 255.0f),
         clampColorChannel(blue * 255.0f));
+}
+
+static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
+{
+    return static_cast<float>((point.x() - a.x()) * (b.y() - a.y())
+                              - (point.y() - a.y()) * (b.x() - a.x()));
+}
+
+static void rasterizeTriangle(QImage *image,
+                              QVector<float> *depthBuffer,
+                              const QSize &viewportSize,
+                              const QPointF &a,
+                              const QPointF &b,
+                              const QPointF &c,
+                              float depthA,
+                              float depthB,
+                              float depthC,
+                              const QColor &color)
+{
+    const float area = edgeValue(a, b, c);
+    if (qFuzzyIsNull(area))
+        return;
+
+    const int minX = qMax(0, qFloor(qMin(a.x(), qMin(b.x(), c.x()))));
+    const int maxX = qMin(viewportSize.width() - 1, qCeil(qMax(a.x(), qMax(b.x(), c.x()))));
+    const int minY = qMax(0, qFloor(qMin(a.y(), qMin(b.y(), c.y()))));
+    const int maxY = qMin(viewportSize.height() - 1, qCeil(qMax(a.y(), qMax(b.y(), c.y()))));
+
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const QPointF pixelCenter(x + 0.5, y + 0.5);
+            const float w0 = edgeValue(b, c, pixelCenter);
+            const float w1 = edgeValue(c, a, pixelCenter);
+            const float w2 = edgeValue(a, b, pixelCenter);
+
+            const bool inside = area > 0.0f
+                                    ? (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f)
+                                    : (w0 <= 0.0f && w1 <= 0.0f && w2 <= 0.0f);
+
+            if (!inside)
+                continue;
+
+            const float normalizedW0 = w0 / area;
+            const float normalizedW1 = w1 / area;
+            const float normalizedW2 = w2 / area;
+            const float depth = normalizedW0 * depthA + normalizedW1 * depthB + normalizedW2 * depthC;
+            const int bufferIndex = y * viewportSize.width() + x;
+
+            if (depth < depthBuffer->at(bufferIndex)) {
+                (*depthBuffer)[bufferIndex] = depth;
+                image->setPixelColor(x, y, color);
+            }
+        }
+    }
+}
+
+static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, const QSize &viewportSize)
+{
+    QImage image(viewportSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    QVector<float> depthBuffer(viewportSize.width() * viewportSize.height(),
+                               std::numeric_limits<float>::max());
+
+    for (const Face2D &face : faces) {
+        if (face.points.size() < 3 || face.points.size() != face.depths.size())
+            continue;
+
+        for (int i = 1; i + 1 < face.points.size(); ++i) {
+            rasterizeTriangle(&image,
+                              &depthBuffer,
+                              viewportSize,
+                              face.points[0],
+                              face.points[i],
+                              face.points[i + 1],
+                              face.depths[0],
+                              face.depths[i],
+                              face.depths[i + 1],
+                              face.color);
+        }
+    }
+
+    painter->drawImage(0, 0, image);
 }
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
@@ -256,12 +341,13 @@ void ViewportWidget::paintGL()
             Face2D face;
             const QVector<int> indices = faceIndices[i];
             const QVector3D normal = faceNormal(vertices[indices[0]], vertices[indices[1]], vertices[indices[2]]);
-            face.brush = litColor(baseColor.lighter(shade[i]), normal, lights);
+            face.color = litColor(baseColor.lighter(shade[i]), normal, lights);
             face.pen = QPen(baseColor.darker(145), 1);
 
             for (int index : indices) {
                 const ProjectedPoint projected = project(vertices[index]);
                 face.points.append(projected.point);
+                face.depths.append(projected.depth);
                 face.depth += projected.depth;
             }
 
@@ -284,17 +370,14 @@ void ViewportWidget::paintGL()
         const float radius = QLineF(center.point, edge.point).length();
 
         Face2D face;
-        QRadialGradient gradient(center.point - QPointF(radius * 0.35f, radius * 0.45f), radius * 1.25f);
-        gradient.setColorAt(0.0, litColor(baseColor.lighter(150), QVector3D(-0.45f, -0.35f, 1.0f).normalized(), lights));
-        gradient.setColorAt(0.45, litColor(baseColor, QVector3D(0.0f, 0.0f, 1.0f), lights));
-        gradient.setColorAt(1.0, litColor(baseColor.darker(155), QVector3D(0.45f, 0.35f, -0.25f).normalized(), lights));
-        face.brush = QBrush(gradient);
+        face.color = litColor(baseColor, QVector3D(-0.25f, -0.3f, 1.0f).normalized(), lights);
         face.depth = center.depth;
         face.pen = QPen(baseColor.darker(150), 1);
 
         for (int i = 0; i < 36; ++i) {
             const float angle = 2.0f * M_PI * i / 36.0f;
             face.points.append(center.point + QPointF(qCos(angle) * radius, qSin(angle) * radius));
+            face.depths.append(center.depth);
         }
 
         faces.append(face);
@@ -318,12 +401,13 @@ void ViewportWidget::paintGL()
             const int next = (i + 1) % top.size();
             Face2D side;
             const QVector3D normal = faceNormal(bottom[i], bottom[next], top[next]);
-            side.brush = litColor(baseColor, normal, lights);
+            side.color = litColor(baseColor, normal, lights);
             side.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : {bottom[i], bottom[next], top[next], top[i]}) {
                 const ProjectedPoint projected = project(point);
                 side.points.append(projected.point);
+                side.depths.append(projected.depth);
                 side.depth += projected.depth;
             }
 
@@ -335,12 +419,13 @@ void ViewportWidget::paintGL()
         for (int i = 0; i < caps.size(); ++i) {
             Face2D cap;
             const QVector3D normal = faceNormal(caps[i][0], caps[i][1], caps[i][2]);
-            cap.brush = litColor(baseColor.lighter(i == 1 ? 120 : 82), normal, lights);
+            cap.color = litColor(baseColor.lighter(i == 1 ? 120 : 82), normal, lights);
             cap.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : caps[i]) {
                 const ProjectedPoint projected = project(point);
                 cap.points.append(projected.point);
+                cap.depths.append(projected.depth);
                 cap.depth += projected.depth;
             }
 
@@ -368,15 +453,7 @@ void ViewportWidget::paintGL()
                 appendCylinder(faces, s, color);
         }
 
-        std::sort(faces.begin(), faces.end(), [](const Face2D &left, const Face2D &right) {
-            return left.depth > right.depth;
-        });
-
-        for (const Face2D &face : faces) {
-            painter.setBrush(face.brush);
-            painter.setPen(face.pen);
-            painter.drawPolygon(QPolygonF(face.points));
-        }
+        drawFacesWithDepth(&painter, faces, size());
     }
 
     painter.setPen(QColor(220, 220, 220));
