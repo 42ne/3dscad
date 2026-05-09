@@ -10,6 +10,8 @@ class QListWidget;
 class QDoubleSpinBox;
 class QComboBox;
 class QPushButton;
+class QAction;
+class QUndoStack;
 class ViewportWidget;
 
 class MainWindow : public QMainWindow
@@ -33,9 +35,13 @@ private:
     void refreshShapeList();
     void refreshProperties();
     void refreshOpenScadCode();
+    void refreshSceneViews();
 
 private:
     SceneDocument m_scene;
+    QUndoStack *m_undoStack = nullptr;
+    QAction *m_undoAction = nullptr;
+    QAction *m_redoAction = nullptr;
 
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;

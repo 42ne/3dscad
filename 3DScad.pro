@@ -14,12 +14,14 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     openscadgenerator.cpp \
+    scenecommands.cpp \
     scenedocument.cpp \
     viewportwidget.cpp
 
 HEADERS += \
     mainwindow.h \
     openscadgenerator.h \
+    scenecommands.h \
     scenedocument.h \
     shapenode.h \
     viewportwidget.h

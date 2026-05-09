@@ -91,17 +91,36 @@ int SceneDocument::indexOfShapeId(int id) const
 
 int SceneDocument::addShape(const ShapeNode &shape)
 {
+    return insertShape(m_shapes.size(), shape);
+}
+
+int SceneDocument::insertShape(int index, const ShapeNode &shape)
+{
     ShapeNode shapeWithId = shape;
-    shapeWithId.id = m_nextShapeId++;
-    m_shapes.append(shapeWithId);
+
+    if (shapeWithId.id < 0)
+        shapeWithId.id = m_nextShapeId++;
+    else
+        m_nextShapeId = qMax(m_nextShapeId, shapeWithId.id + 1);
+
+    const int insertIndex = qBound(0, index, m_shapes.size());
+    m_shapes.insert(insertIndex, shapeWithId);
+    m_selectedShapeId = shapeWithId.id;
+
     return shapeWithId.id;
 }
 
-bool SceneDocument::removeShapeById(int id)
+bool SceneDocument::takeShapeById(int id, ShapeNode *removedShape, int *removedIndex)
 {
     const int index = indexOfShapeId(id);
     if (!isValidIndex(index))
         return false;
+
+    if (removedShape)
+        *removedShape = m_shapes[index];
+
+    if (removedIndex)
+        *removedIndex = index;
 
     const bool wasSelected = m_shapes[index].id == m_selectedShapeId;
     m_shapes.removeAt(index);
@@ -116,6 +135,11 @@ bool SceneDocument::removeShapeById(int id)
     }
 
     return true;
+}
+
+bool SceneDocument::removeShapeById(int id)
+{
+    return takeShapeById(id, nullptr, nullptr);
 }
 
 bool SceneDocument::removeSelectedShape()

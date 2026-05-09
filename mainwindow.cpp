@@ -1,7 +1,9 @@
 #include "mainwindow.h"
 #include "openscadgenerator.h"
+#include "scenecommands.h"
 #include "viewportwidget.h"
 
+#include <QAction>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -9,9 +11,12 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QMenu>
+#include <QMenuBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 // ---------------- MainWindow ----------------
@@ -36,6 +41,16 @@ static QDoubleSpinBox *makeSpinBox()
 void MainWindow::buildUi()
 {
     setWindowTitle("OpenSCAD Visual Editor Prototype");
+
+    m_undoStack = new QUndoStack(this);
+    m_undoAction = m_undoStack->createUndoAction(this, "Undo");
+    m_redoAction = m_undoStack->createRedoAction(this, "Redo");
+    m_undoAction->setShortcut(QKeySequence::Undo);
+    m_redoAction->setShortcut(QKeySequence::Redo);
+
+    auto *editMenu = menuBar()->addMenu("Edit");
+    editMenu->addAction(m_undoAction);
+    editMenu->addAction(m_redoAction);
 
     m_viewport = new ViewportWidget;
     m_viewport->setShapes(&m_scene.shapes());
@@ -155,9 +170,9 @@ void MainWindow::addCube()
     s.name = QString("Cube %1").arg(m_scene.shapeCount() + 1);
     s.size = QVector3D(20, 20, 20);
 
-    const int id = m_scene.addShape(s);
-    refreshShapeList();
-    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() {
+        refreshSceneViews();
+    }));
 }
 
 void MainWindow::addSphere()
@@ -167,9 +182,9 @@ void MainWindow::addSphere()
     s.name = QString("Sphere %1").arg(m_scene.shapeCount() + 1);
     s.radius = 10;
 
-    const int id = m_scene.addShape(s);
-    refreshShapeList();
-    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() {
+        refreshSceneViews();
+    }));
 }
 
 void MainWindow::addCylinder()
@@ -180,20 +195,23 @@ void MainWindow::addCylinder()
     s.radius = 10;
     s.height = 30;
 
-    const int id = m_scene.addShape(s);
-    refreshShapeList();
-    m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() {
+        refreshSceneViews();
+    }));
 }
 
 void MainWindow::deleteSelectedShape()
 {
-    if (!m_scene.removeSelectedShape())
-        return;
+    auto *command = new DeleteShapeCommand(&m_scene, m_scene.selectedShapeId(), [this]() {
+        refreshSceneViews();
+    });
 
-    refreshShapeList();
-    m_shapeList->setCurrentRow(m_scene.selectedIndex());
-    m_viewport->setSelectedIndex(m_scene.selectedIndex());
-    refreshProperties();
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::onSelectionChanged(int row)
@@ -235,6 +253,18 @@ void MainWindow::refreshShapeList()
 
     refreshOpenScadCode();
     m_viewport->update();
+}
+
+void MainWindow::refreshSceneViews()
+{
+    refreshShapeList();
+
+    m_shapeList->blockSignals(true);
+    m_shapeList->setCurrentRow(m_scene.selectedIndex());
+    m_shapeList->blockSignals(false);
+
+    m_viewport->setSelectedIndex(m_scene.selectedIndex());
+    refreshProperties();
 }
 
 void MainWindow::refreshProperties()
