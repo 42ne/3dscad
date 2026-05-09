@@ -13,11 +13,13 @@ win32:LIBS += -lopengl32
 SOURCES += \
     main.cpp \
     mainwindow.cpp \
+    openscadgenerator.cpp \
     scenedocument.cpp \
     viewportwidget.cpp
 
 HEADERS += \
     mainwindow.h \
+    openscadgenerator.h \
     scenedocument.h \
     shapenode.h \
     viewportwidget.h

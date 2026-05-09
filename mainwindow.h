@@ -31,8 +31,6 @@ private:
     void refreshShapeList();
     void refreshProperties();
     void refreshOpenScadCode();
-    QString generateOpenScadCode() const;
-    QString shapeToOpenScad(const ShapeNode &shape) const;
 
 private:
     SceneDocument m_scene;
