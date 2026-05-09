@@ -1,10 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "shapenode.h"
+#include "scenedocument.h"
 
 #include <QMainWindow>
-#include <QVector>
 
 class QTextEdit;
 class QListWidget;
@@ -36,8 +35,7 @@ private:
     QString shapeToOpenScad(const ShapeNode &shape) const;
 
 private:
-    QVector<ShapeNode> m_shapes;
-    int m_selectedIndex = -1;
+    SceneDocument m_scene;
 
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;

@@ -35,7 +35,7 @@ void MainWindow::buildUi()
     setWindowTitle("OpenSCAD Visual Editor Prototype");
 
     m_viewport = new ViewportWidget;
-    m_viewport->setShapes(&m_shapes);
+    m_viewport->setShapes(&m_scene.shapes());
 
     m_codeEditor = new QTextEdit;
     m_codeEditor->setReadOnly(false);
@@ -145,59 +145,58 @@ void MainWindow::addCube()
 {
     ShapeNode s;
     s.type = ShapeNode::Cube;
-    s.name = QString("Cube %1").arg(m_shapes.size() + 1);
+    s.name = QString("Cube %1").arg(m_scene.shapeCount() + 1);
     s.size = QVector3D(20, 20, 20);
 
-    m_shapes.append(s);
+    const int row = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(m_shapes.size() - 1);
+    m_shapeList->setCurrentRow(row);
 }
 
 void MainWindow::addSphere()
 {
     ShapeNode s;
     s.type = ShapeNode::Sphere;
-    s.name = QString("Sphere %1").arg(m_shapes.size() + 1);
+    s.name = QString("Sphere %1").arg(m_scene.shapeCount() + 1);
     s.radius = 10;
 
-    m_shapes.append(s);
+    const int row = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(m_shapes.size() - 1);
+    m_shapeList->setCurrentRow(row);
 }
 
 void MainWindow::addCylinder()
 {
     ShapeNode s;
     s.type = ShapeNode::Cylinder;
-    s.name = QString("Cylinder %1").arg(m_shapes.size() + 1);
+    s.name = QString("Cylinder %1").arg(m_scene.shapeCount() + 1);
     s.radius = 10;
     s.height = 30;
 
-    m_shapes.append(s);
+    const int row = m_scene.addShape(s);
     refreshShapeList();
-    m_shapeList->setCurrentRow(m_shapes.size() - 1);
+    m_shapeList->setCurrentRow(row);
 }
 
 void MainWindow::onSelectionChanged(int row)
 {
-    m_selectedIndex = row;
-    m_viewport->setSelectedIndex(row);
+    m_scene.setSelectedIndex(row);
+    m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
 }
 
 void MainWindow::onPropertyChanged()
 {
-    if (m_selectedIndex < 0 || m_selectedIndex >= m_shapes.size())
+    ShapeNode *s = m_scene.selectedShape();
+    if (!s)
         return;
 
-    ShapeNode &s = m_shapes[m_selectedIndex];
+    s->position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
+    s->rotation = QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value());
+    s->size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
 
-    s.position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
-    s.rotation = QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value());
-    s.size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
-
-    s.radius = m_radius->value();
-    s.height = m_height->value();
+    s->radius = m_radius->value();
+    s->height = m_height->value();
 
     refreshOpenScadCode();
     m_viewport->update();
@@ -207,7 +206,7 @@ void MainWindow::refreshShapeList()
 {
     m_shapeList->clear();
 
-    for (const ShapeNode &s : m_shapes) {
+    for (const ShapeNode &s : m_scene.shapes()) {
         m_shapeList->addItem(s.name);
     }
 
@@ -217,7 +216,7 @@ void MainWindow::refreshShapeList()
 
 void MainWindow::refreshProperties()
 {
-    bool hasSelection = m_selectedIndex >= 0 && m_selectedIndex < m_shapes.size();
+    bool hasSelection = m_scene.hasSelection();
 
     QList<QDoubleSpinBox *> boxes = {
         m_posX, m_posY, m_posZ,
@@ -232,33 +231,35 @@ void MainWindow::refreshProperties()
     if (!hasSelection)
         return;
 
-    const ShapeNode &s = m_shapes[m_selectedIndex];
+    const ShapeNode *s = m_scene.selectedShape();
+    if (!s)
+        return;
 
     QList<QDoubleSpinBox *> allBoxes = boxes;
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(true);
 
-    m_posX->setValue(s.position.x());
-    m_posY->setValue(s.position.y());
-    m_posZ->setValue(s.position.z());
+    m_posX->setValue(s->position.x());
+    m_posY->setValue(s->position.y());
+    m_posZ->setValue(s->position.z());
 
-    m_rotX->setValue(s.rotation.x());
-    m_rotY->setValue(s.rotation.y());
-    m_rotZ->setValue(s.rotation.z());
+    m_rotX->setValue(s->rotation.x());
+    m_rotY->setValue(s->rotation.y());
+    m_rotZ->setValue(s->rotation.z());
 
-    m_sizeX->setValue(s.size.x());
-    m_sizeY->setValue(s.size.y());
-    m_sizeZ->setValue(s.size.z());
+    m_sizeX->setValue(s->size.x());
+    m_sizeY->setValue(s->size.y());
+    m_sizeZ->setValue(s->size.z());
 
-    m_radius->setValue(s.radius);
-    m_height->setValue(s.height);
+    m_radius->setValue(s->radius);
+    m_height->setValue(s->height);
 
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(false);
 
-    bool cube = s.type == ShapeNode::Cube;
-    bool sphere = s.type == ShapeNode::Sphere;
-    bool cylinder = s.type == ShapeNode::Cylinder;
+    bool cube = s->type == ShapeNode::Cube;
+    bool sphere = s->type == ShapeNode::Sphere;
+    bool cylinder = s->type == ShapeNode::Cylinder;
 
     m_sizeX->setEnabled(cube);
     m_sizeY->setEnabled(cube);
@@ -280,14 +281,14 @@ QString MainWindow::generateOpenScadCode() const
     code += "// Generated by OpenSCAD Visual Editor Prototype\n";
     code += "// UI -> OpenSCAD code\n\n";
 
-    if (m_shapes.isEmpty()) {
+    if (m_scene.isEmpty()) {
         code += "// Add shapes from the left panel.\n";
         return code;
     }
 
     code += "union() {\n";
 
-    for (const ShapeNode &s : m_shapes) {
+    for (const ShapeNode &s : m_scene.shapes()) {
         QString shapeCode = shapeToOpenScad(s);
         const QStringList lines = shapeCode.split('\n');
 
