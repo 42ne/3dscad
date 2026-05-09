@@ -110,6 +110,18 @@ int SceneDocument::insertShape(int index, const ShapeNode &shape)
     return shapeWithId.id;
 }
 
+void SceneDocument::replaceShapes(const QVector<ShapeNode> &shapes)
+{
+    m_shapes.clear();
+    m_selectedShapeId = -1;
+
+    for (const ShapeNode &shape : shapes)
+        addShape(shape);
+
+    if (!m_shapes.isEmpty())
+        m_selectedShapeId = m_shapes.first().id;
+}
+
 bool SceneDocument::updateShape(const ShapeNode &shape)
 {
     ShapeNode *existingShape = shapeById(shape.id);

@@ -14,6 +14,7 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     openscadgenerator.cpp \
+    openscadparser.cpp \
     scenecommands.cpp \
     scenedocument.cpp \
     viewportwidget.cpp
@@ -21,6 +22,7 @@ SOURCES += \
 HEADERS += \
     mainwindow.h \
     openscadgenerator.h \
+    openscadparser.h \
     scenecommands.h \
     scenedocument.h \
     shapenode.h \

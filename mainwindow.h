@@ -26,6 +26,7 @@ private slots:
     void addSphere();
     void addCylinder();
     void deleteSelectedShape();
+    void applyOpenScadCode();
 
     void onSelectionChanged(int row);
     void onPropertyChanged();
@@ -47,6 +48,7 @@ private:
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;
     QTextEdit *m_codeEditor = nullptr;
+    QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_deleteShapeButton = nullptr;
 
     QDoubleSpinBox *m_posX = nullptr;

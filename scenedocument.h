@@ -28,6 +28,7 @@ public:
 
     int addShape(const ShapeNode &shape);
     int insertShape(int index, const ShapeNode &shape);
+    void replaceShapes(const QVector<ShapeNode> &shapes);
     bool updateShape(const ShapeNode &shape);
     bool removeShapeById(int id);
     bool removeSelectedShape();

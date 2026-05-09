@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "openscadgenerator.h"
+#include "openscadparser.h"
 #include "scenecommands.h"
 #include "viewportwidget.h"
 
@@ -13,6 +14,7 @@
 #include <QListWidgetItem>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
@@ -60,9 +62,17 @@ void MainWindow::buildUi()
     m_codeEditor->setMinimumHeight(180);
     m_codeEditor->setFontFamily("Consolas");
 
+    m_applyCodeButton = new QPushButton("Apply code");
+
+    auto *codePanel = new QWidget;
+    auto *codeLayout = new QVBoxLayout(codePanel);
+    codeLayout->setContentsMargins(0, 0, 0, 0);
+    codeLayout->addWidget(m_codeEditor);
+    codeLayout->addWidget(m_applyCodeButton);
+
     auto *mainSplitter = new QSplitter(Qt::Vertical);
     mainSplitter->addWidget(m_viewport);
-    mainSplitter->addWidget(m_codeEditor);
+    mainSplitter->addWidget(codePanel);
     mainSplitter->setStretchFactor(0, 4);
     mainSplitter->setStretchFactor(1, 1);
 
@@ -95,6 +105,7 @@ void MainWindow::buildUi()
     connect(addSphereButton, &QPushButton::clicked, this, &MainWindow::addSphere);
     connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
+    connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
     connect(m_shapeList, &QListWidget::currentRowChanged, this, &MainWindow::onSelectionChanged);
 
     // Right dock: properties
@@ -212,6 +223,21 @@ void MainWindow::deleteSelectedShape()
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::applyOpenScadCode()
+{
+    QVector<ShapeNode> shapes;
+    QString errorMessage;
+
+    if (!OpenScadParser::parse(m_codeEditor->toPlainText(), &shapes, &errorMessage)) {
+        QMessageBox::warning(this, "OpenSCAD parse error", errorMessage);
+        return;
+    }
+
+    m_scene.replaceShapes(shapes);
+    m_undoStack->clear();
+    refreshSceneViews();
 }
 
 void MainWindow::onSelectionChanged(int row)
