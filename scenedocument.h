@@ -27,6 +27,8 @@ public:
     int indexOfShapeId(int id) const;
 
     int addShape(const ShapeNode &shape);
+    bool removeShapeById(int id);
+    bool removeSelectedShape();
 
 private:
     bool isValidIndex(int index) const;

@@ -97,6 +97,32 @@ int SceneDocument::addShape(const ShapeNode &shape)
     return shapeWithId.id;
 }
 
+bool SceneDocument::removeShapeById(int id)
+{
+    const int index = indexOfShapeId(id);
+    if (!isValidIndex(index))
+        return false;
+
+    const bool wasSelected = m_shapes[index].id == m_selectedShapeId;
+    m_shapes.removeAt(index);
+
+    if (wasSelected) {
+        if (m_shapes.isEmpty()) {
+            m_selectedShapeId = -1;
+        } else {
+            const int nextIndex = qMin(index, m_shapes.size() - 1);
+            m_selectedShapeId = m_shapes[nextIndex].id;
+        }
+    }
+
+    return true;
+}
+
+bool SceneDocument::removeSelectedShape()
+{
+    return removeShapeById(m_selectedShapeId);
+}
+
 bool SceneDocument::isValidIndex(int index) const
 {
     return index >= 0 && index < m_shapes.size();

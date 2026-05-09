@@ -9,6 +9,7 @@ class QTextEdit;
 class QListWidget;
 class QDoubleSpinBox;
 class QComboBox;
+class QPushButton;
 class ViewportWidget;
 
 class MainWindow : public QMainWindow
@@ -22,6 +23,7 @@ private slots:
     void addCube();
     void addSphere();
     void addCylinder();
+    void deleteSelectedShape();
 
     void onSelectionChanged(int row);
     void onPropertyChanged();
@@ -38,6 +40,7 @@ private:
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;
     QTextEdit *m_codeEditor = nullptr;
+    QPushButton *m_deleteShapeButton = nullptr;
 
     QDoubleSpinBox *m_posX = nullptr;
     QDoubleSpinBox *m_posY = nullptr;

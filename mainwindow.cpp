@@ -21,6 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     buildUi();
     refreshOpenScadCode();
+    refreshProperties();
 }
 
 static QDoubleSpinBox *makeSpinBox()
@@ -60,12 +61,15 @@ void MainWindow::buildUi()
     auto *addCubeButton = new QPushButton("Add cube");
     auto *addSphereButton = new QPushButton("Add sphere");
     auto *addCylinderButton = new QPushButton("Add cylinder");
+    m_deleteShapeButton = new QPushButton("Delete selected");
+    m_deleteShapeButton->setEnabled(false);
 
     m_shapeList = new QListWidget;
 
     leftLayout->addWidget(addCubeButton);
     leftLayout->addWidget(addSphereButton);
     leftLayout->addWidget(addCylinderButton);
+    leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(new QLabel("Scene tree:"));
     leftLayout->addWidget(m_shapeList);
 
@@ -75,6 +79,7 @@ void MainWindow::buildUi()
     connect(addCubeButton, &QPushButton::clicked, this, &MainWindow::addCube);
     connect(addSphereButton, &QPushButton::clicked, this, &MainWindow::addSphere);
     connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
+    connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
     connect(m_shapeList, &QListWidget::currentRowChanged, this, &MainWindow::onSelectionChanged);
 
     // Right dock: properties
@@ -180,6 +185,17 @@ void MainWindow::addCylinder()
     m_shapeList->setCurrentRow(m_scene.indexOfShapeId(id));
 }
 
+void MainWindow::deleteSelectedShape()
+{
+    if (!m_scene.removeSelectedShape())
+        return;
+
+    refreshShapeList();
+    m_shapeList->setCurrentRow(m_scene.selectedIndex());
+    m_viewport->setSelectedIndex(m_scene.selectedIndex());
+    refreshProperties();
+}
+
 void MainWindow::onSelectionChanged(int row)
 {
     QListWidgetItem *item = m_shapeList->item(row);
@@ -207,6 +223,7 @@ void MainWindow::onPropertyChanged()
 
 void MainWindow::refreshShapeList()
 {
+    m_shapeList->blockSignals(true);
     m_shapeList->clear();
 
     for (const ShapeNode &s : m_scene.shapes()) {
@@ -214,6 +231,7 @@ void MainWindow::refreshShapeList()
         item->setData(Qt::UserRole, s.id);
         m_shapeList->addItem(item);
     }
+    m_shapeList->blockSignals(false);
 
     refreshOpenScadCode();
     m_viewport->update();
@@ -232,6 +250,8 @@ void MainWindow::refreshProperties()
 
     for (QDoubleSpinBox *box : boxes)
         box->setEnabled(hasSelection);
+
+    m_deleteShapeButton->setEnabled(hasSelection);
 
     if (!hasSelection)
         return;
