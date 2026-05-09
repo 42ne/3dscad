@@ -348,9 +348,12 @@ void ViewportWidget::paintGL()
 
         for (int i = 0; i < m_shapes->size(); ++i) {
             const ShapeNode &s = m_shapes->at(i);
-            QColor color = (i == m_selectedIndex)
-                               ? QColor(255, 180, 60)
+            QColor color = s.booleanMode == ShapeNode::Subtract
+                               ? QColor(225, 95, 95)
                                : QColor(80, 160, 255);
+
+            if (i == m_selectedIndex)
+                color = s.booleanMode == ShapeNode::Subtract ? QColor(255, 125, 80) : QColor(255, 180, 60);
 
             appendMesh(triangles, buildShapeMesh(s), color, i);
         }

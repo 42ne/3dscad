@@ -5,6 +5,7 @@
 #include "viewportwidget.h"
 
 #include <QAction>
+#include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -147,6 +148,9 @@ void MainWindow::buildUi()
 
     m_radius = makeSpinBox();
     m_height = makeSpinBox();
+    m_booleanMode = new QComboBox;
+    m_booleanMode->addItem("Add solid", ShapeNode::Add);
+    m_booleanMode->addItem("Subtract hole", ShapeNode::Subtract);
 
     m_sizeX->setMinimum(0.1);
     m_sizeY->setMinimum(0.1);
@@ -159,6 +163,7 @@ void MainWindow::buildUi()
     shapeLayout->addRow("Size Z", m_sizeZ);
     shapeLayout->addRow("Radius", m_radius);
     shapeLayout->addRow("Height", m_height);
+    shapeLayout->addRow("Boolean mode", m_booleanMode);
 
     rightLayout->addWidget(transformBox);
     rightLayout->addWidget(shapeBox);
@@ -178,6 +183,9 @@ void MainWindow::buildUi()
         connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged),
                 this, &MainWindow::onPropertyChanged);
     }
+
+    connect(m_booleanMode, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onPropertyChanged);
 }
 
 void MainWindow::addCube()
@@ -277,6 +285,7 @@ void MainWindow::onPropertyChanged()
 
     updatedShape.radius = m_radius->value();
     updatedShape.height = m_height->value();
+    updatedShape.booleanMode = static_cast<ShapeNode::BooleanMode>(m_booleanMode->currentData().toInt());
 
     auto *command = new UpdateShapeCommand(&m_scene, *selectedShape, updatedShape, [this]() {
         refreshSceneViews();
@@ -351,7 +360,10 @@ void MainWindow::refreshShapeList()
     m_shapeList->clear();
 
     for (const ShapeNode &s : m_scene.shapes()) {
-        auto *item = new QListWidgetItem(s.name);
+        const QString label = s.booleanMode == ShapeNode::Subtract
+                                  ? QString("%1 (subtract)").arg(s.name)
+                                  : s.name;
+        auto *item = new QListWidgetItem(label);
         item->setData(Qt::UserRole, s.id);
         m_shapeList->addItem(item);
     }
@@ -388,6 +400,7 @@ void MainWindow::refreshProperties()
         box->setEnabled(hasSelection);
 
     m_deleteShapeButton->setEnabled(hasSelection);
+    m_booleanMode->setEnabled(hasSelection);
 
     if (!hasSelection)
         return;
@@ -401,6 +414,7 @@ void MainWindow::refreshProperties()
     QList<QDoubleSpinBox *> allBoxes = boxes;
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(true);
+    m_booleanMode->blockSignals(true);
 
     m_posX->setValue(s->position.x());
     m_posY->setValue(s->position.y());
@@ -416,9 +430,11 @@ void MainWindow::refreshProperties()
 
     m_radius->setValue(s->radius);
     m_height->setValue(s->height);
+    m_booleanMode->setCurrentIndex(m_booleanMode->findData(s->booleanMode));
 
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(false);
+    m_booleanMode->blockSignals(false);
 
     m_updatingProperties = false;
 

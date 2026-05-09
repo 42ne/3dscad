@@ -14,15 +14,45 @@ QString OpenScadGenerator::generate(const SceneDocument &scene)
         return code;
     }
 
-    code += "union() {\n";
+    bool hasAddShapes = false;
+    bool hasSubtractShapes = false;
+    for (const ShapeNode &shape : scene.shapes()) {
+        if (shape.booleanMode == ShapeNode::Subtract)
+            hasSubtractShapes = true;
+        else
+            hasAddShapes = true;
+    }
+
+    hasSubtractShapes = hasAddShapes && hasSubtractShapes;
+    code += hasSubtractShapes ? "difference() {\n    union() {\n" : "union() {\n";
 
     for (const ShapeNode &shape : scene.shapes()) {
+        if (hasSubtractShapes && shape.booleanMode == ShapeNode::Subtract)
+            continue;
+
         const QString shapeCode = shapeToOpenScad(shape);
         const QStringList lines = shapeCode.split('\n');
 
         for (const QString &line : lines) {
             if (!line.trimmed().isEmpty())
-                code += "    " + line + "\n";
+                code += (hasSubtractShapes ? "        " : "    ") + line + "\n";
+        }
+    }
+
+    if (hasSubtractShapes) {
+        code += "    }\n";
+
+        for (const ShapeNode &shape : scene.shapes()) {
+            if (shape.booleanMode != ShapeNode::Subtract)
+                continue;
+
+            const QString shapeCode = shapeToOpenScad(shape);
+            const QStringList lines = shapeCode.split('\n');
+
+            for (const QString &line : lines) {
+                if (!line.trimmed().isEmpty())
+                    code += "    " + line + "\n";
+            }
         }
     }
 

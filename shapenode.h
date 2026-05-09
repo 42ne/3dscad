@@ -12,8 +12,14 @@ struct ShapeNode
         Cylinder
     };
 
+    enum BooleanMode {
+        Add,
+        Subtract
+    };
+
     int id = -1;
     Type type = Cube;
+    BooleanMode booleanMode = Add;
     QString name;
 
     QVector3D position = QVector3D(0, 0, 0);
@@ -28,6 +34,7 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
 {
     return left.id == right.id
            && left.type == right.type
+           && left.booleanMode == right.booleanMode
            && left.name == right.name
            && left.position == right.position
            && left.rotation == right.rotation

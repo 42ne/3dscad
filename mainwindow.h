@@ -70,6 +70,7 @@ private:
 
     QDoubleSpinBox *m_radius = nullptr;
     QDoubleSpinBox *m_height = nullptr;
+    QComboBox *m_booleanMode = nullptr;
 };
 
 #endif

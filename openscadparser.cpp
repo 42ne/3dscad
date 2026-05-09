@@ -25,6 +25,9 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
     QVector3D pendingRotation;
     bool hasTranslate = false;
     bool hasRotate = false;
+    bool inDifference = false;
+    bool inDifferenceBaseUnion = false;
+    ShapeNode::BooleanMode currentBooleanMode = ShapeNode::Add;
     int cubeCount = 0;
     int sphereCount = 0;
     int cylinderCount = 0;
@@ -39,8 +42,32 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
     for (int i = 0; i < lines.size(); ++i) {
         const QString line = lines[i].trimmed();
 
-        if (line.isEmpty() || line.startsWith("//") || line == "union() {" || line == "}")
+        if (line.isEmpty() || line.startsWith("//"))
             continue;
+
+        if (line == "difference() {") {
+            inDifference = true;
+            currentBooleanMode = ShapeNode::Add;
+            continue;
+        }
+
+        if (line == "union() {") {
+            if (inDifference)
+                inDifferenceBaseUnion = true;
+            continue;
+        }
+
+        if (line == "}") {
+            if (inDifferenceBaseUnion) {
+                inDifferenceBaseUnion = false;
+                currentBooleanMode = ShapeNode::Subtract;
+            } else if (inDifference) {
+                inDifference = false;
+                currentBooleanMode = ShapeNode::Add;
+            }
+
+            continue;
+        }
 
         QRegularExpressionMatch match = translateRegex.match(line);
         if (match.hasMatch()) {
@@ -75,6 +102,7 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
         ShapeNode shape;
         shape.position = pendingPosition;
         shape.rotation = pendingRotation;
+        shape.booleanMode = currentBooleanMode;
 
         match = cubeRegex.match(line);
         if (match.hasMatch()) {
@@ -176,4 +204,3 @@ bool OpenScadParser::parseVector3(const QString &text, QVector3D *vector)
     *vector = QVector3D(x, y, z);
     return true;
 }
-
