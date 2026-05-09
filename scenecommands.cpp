@@ -123,3 +123,43 @@ void UpdateShapeCommand::redo()
     if (m_onChanged)
         m_onChanged();
 }
+
+ReplaceSceneCommand::ReplaceSceneCommand(SceneDocument *scene, const QVector<ShapeNode> &newShapes, std::function<void()> onChanged)
+    : QUndoCommand("Apply OpenSCAD code")
+    , m_scene(scene)
+    , m_newShapes(newShapes)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_oldSnapshot.shapes != m_newShapes;
+}
+
+bool ReplaceSceneCommand::isValid() const
+{
+    return m_valid;
+}
+
+void ReplaceSceneCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void ReplaceSceneCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->replaceShapes(m_newShapes);
+
+    if (m_onChanged)
+        m_onChanged();
+}

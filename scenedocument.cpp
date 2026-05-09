@@ -122,6 +122,22 @@ void SceneDocument::replaceShapes(const QVector<ShapeNode> &shapes)
         m_selectedShapeId = m_shapes.first().id;
 }
 
+SceneDocument::Snapshot SceneDocument::snapshot() const
+{
+    Snapshot snapshot;
+    snapshot.shapes = m_shapes;
+    snapshot.selectedShapeId = m_selectedShapeId;
+    snapshot.nextShapeId = m_nextShapeId;
+    return snapshot;
+}
+
+void SceneDocument::restoreSnapshot(const Snapshot &snapshot)
+{
+    m_shapes = snapshot.shapes;
+    m_nextShapeId = snapshot.nextShapeId;
+    setSelectedShapeId(snapshot.selectedShapeId);
+}
+
 bool SceneDocument::updateShape(const ShapeNode &shape)
 {
     ShapeNode *existingShape = shapeById(shape.id);

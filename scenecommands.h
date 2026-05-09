@@ -56,4 +56,21 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class ReplaceSceneCommand : public QUndoCommand
+{
+public:
+    ReplaceSceneCommand(SceneDocument *scene, const QVector<ShapeNode> &newShapes, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    QVector<ShapeNode> m_newShapes;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 #endif

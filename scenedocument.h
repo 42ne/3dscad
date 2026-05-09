@@ -8,6 +8,13 @@
 class SceneDocument
 {
 public:
+    struct Snapshot
+    {
+        QVector<ShapeNode> shapes;
+        int selectedShapeId = -1;
+        int nextShapeId = 1;
+    };
+
     const QVector<ShapeNode> &shapes() const;
     int shapeCount() const;
     bool isEmpty() const;
@@ -29,6 +36,8 @@ public:
     int addShape(const ShapeNode &shape);
     int insertShape(int index, const ShapeNode &shape);
     void replaceShapes(const QVector<ShapeNode> &shapes);
+    Snapshot snapshot() const;
+    void restoreSnapshot(const Snapshot &snapshot);
     bool updateShape(const ShapeNode &shape);
     bool removeShapeById(int id);
     bool removeSelectedShape();

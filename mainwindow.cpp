@@ -235,9 +235,16 @@ void MainWindow::applyOpenScadCode()
         return;
     }
 
-    m_scene.replaceShapes(shapes);
-    m_undoStack->clear();
-    refreshSceneViews();
+    auto *command = new ReplaceSceneCommand(&m_scene, shapes, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::onSelectionChanged(int row)
