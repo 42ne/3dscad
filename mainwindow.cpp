@@ -293,6 +293,10 @@ void MainWindow::onPropertyChanged()
 void MainWindow::onViewportShapeDragStarted(int index)
 {
     m_scene.setSelectedIndex(index);
+    m_shapeList->blockSignals(true);
+    m_shapeList->setCurrentRow(m_scene.selectedIndex());
+    m_shapeList->blockSignals(false);
+    m_viewport->setSelectedIndex(m_scene.selectedIndex());
 
     const ShapeNode *shape = m_scene.selectedShape();
     if (!shape)
@@ -314,7 +318,6 @@ void MainWindow::onViewportShapeDragged(int index, const QVector3D &delta)
     *shape = m_viewportDragStartShape;
     shape->position = m_viewportDragStartShape.position + delta;
 
-    refreshOpenScadCode();
     m_viewport->update();
     refreshProperties();
 }
