@@ -21,6 +21,9 @@ public:
 
 signals:
     void shapeClicked(int index);
+    void shapeDragStarted(int index);
+    void shapeDragged(int index, const QVector3D &delta);
+    void shapeDragFinished(int index);
 
 protected:
     void initializeGL() override;
@@ -28,6 +31,7 @@ protected:
     void paintGL() override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
 private:
@@ -37,6 +41,9 @@ private:
     float m_cameraPitch = 28.0f;
     float m_cameraDistance = 220.0f;
     QPoint m_lastMousePosition;
+    QPoint m_dragStartMousePosition;
+    bool m_draggingShape = false;
+    int m_dragShapeIndex = -1;
     QVector<int> m_pickBuffer;
     QSize m_pickBufferSize;
 };

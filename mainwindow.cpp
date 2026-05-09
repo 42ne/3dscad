@@ -109,6 +109,9 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
         m_shapeList->setCurrentRow(index);
     });
+    connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
+    connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
+    connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
     connect(m_shapeList, &QListWidget::currentRowChanged, this, &MainWindow::onSelectionChanged);
 
     // Right dock: properties
@@ -276,6 +279,58 @@ void MainWindow::onPropertyChanged()
     updatedShape.height = m_height->value();
 
     auto *command = new UpdateShapeCommand(&m_scene, *selectedShape, updatedShape, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::onViewportShapeDragStarted(int index)
+{
+    m_scene.setSelectedIndex(index);
+
+    const ShapeNode *shape = m_scene.selectedShape();
+    if (!shape)
+        return;
+
+    m_viewportDragStartShape = *shape;
+    m_viewportDragActive = true;
+}
+
+void MainWindow::onViewportShapeDragged(int index, const QVector3D &delta)
+{
+    if (!m_viewportDragActive || m_scene.selectedIndex() != index)
+        return;
+
+    ShapeNode *shape = m_scene.selectedShape();
+    if (!shape)
+        return;
+
+    *shape = m_viewportDragStartShape;
+    shape->position = m_viewportDragStartShape.position + delta;
+
+    refreshOpenScadCode();
+    m_viewport->update();
+    refreshProperties();
+}
+
+void MainWindow::onViewportShapeDragFinished(int index)
+{
+    if (!m_viewportDragActive || m_scene.selectedIndex() != index)
+        return;
+
+    m_viewportDragActive = false;
+
+    const ShapeNode *shape = m_scene.selectedShape();
+    if (!shape)
+        return;
+
+    auto *command = new UpdateShapeCommand(&m_scene, m_viewportDragStartShape, *shape, [this]() {
         refreshSceneViews();
     });
 

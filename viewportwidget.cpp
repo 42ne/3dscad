@@ -482,6 +482,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
 
+    int shapeIndex = -1;
     if (event->button() == Qt::LeftButton
         && m_pickBufferSize == size()
         && event->pos().x() >= 0
@@ -491,15 +492,37 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
         const int bufferIndex = event->pos().y() * m_pickBufferSize.width() + event->pos().x();
 
         if (bufferIndex >= 0 && bufferIndex < m_pickBuffer.size()) {
-            const int shapeIndex = m_pickBuffer[bufferIndex];
-            if (shapeIndex >= 0)
-                emit shapeClicked(shapeIndex);
+            shapeIndex = m_pickBuffer[bufferIndex];
         }
+    }
+
+    if (shapeIndex < 0)
+        return;
+
+    emit shapeClicked(shapeIndex);
+
+    if (event->modifiers() & Qt::ShiftModifier) {
+        m_draggingShape = true;
+        m_dragShapeIndex = shapeIndex;
+        m_dragStartMousePosition = event->pos();
+        emit shapeDragStarted(shapeIndex);
     }
 }
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_draggingShape && (event->buttons() & Qt::LeftButton)) {
+        const QPoint pixelDelta = event->pos() - m_dragStartMousePosition;
+        const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
+        const QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
+                                   -pixelDelta.y() * worldUnitsPerPixel,
+                                   0.0f);
+
+        emit shapeDragged(m_dragShapeIndex, worldDelta);
+        m_lastMousePosition = event->pos();
+        return;
+    }
+
     if (event->buttons() & Qt::LeftButton) {
         const QPoint delta = event->pos() - m_lastMousePosition;
         m_cameraYaw += delta.x() * 0.45f;
@@ -509,6 +532,16 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     m_lastMousePosition = event->pos();
+}
+
+void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && m_draggingShape) {
+        const int shapeIndex = m_dragShapeIndex;
+        m_draggingShape = false;
+        m_dragShapeIndex = -1;
+        emit shapeDragFinished(shapeIndex);
+    }
 }
 
 void ViewportWidget::wheelEvent(QWheelEvent *event)

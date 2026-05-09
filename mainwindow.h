@@ -30,6 +30,9 @@ private slots:
 
     void onSelectionChanged(int row);
     void onPropertyChanged();
+    void onViewportShapeDragStarted(int index);
+    void onViewportShapeDragged(int index, const QVector3D &delta);
+    void onViewportShapeDragFinished(int index);
 
 private:
     void buildUi();
@@ -44,6 +47,8 @@ private:
     QAction *m_undoAction = nullptr;
     QAction *m_redoAction = nullptr;
     bool m_updatingProperties = false;
+    bool m_viewportDragActive = false;
+    ShapeNode m_viewportDragStartShape;
 
     ViewportWidget *m_viewport = nullptr;
     QListWidget *m_shapeList = nullptr;
