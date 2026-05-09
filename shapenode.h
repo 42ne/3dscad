@@ -14,7 +14,8 @@ struct ShapeNode
 
     enum BooleanMode {
         Add,
-        Subtract
+        Subtract,
+        Intersect
     };
 
     int id = -1;

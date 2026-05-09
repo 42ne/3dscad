@@ -27,6 +27,9 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
     bool hasRotate = false;
     bool inDifference = false;
     bool inDifferenceBaseUnion = false;
+    bool inIntersection = false;
+    bool intersectionBaseClosed = false;
+    bool inIntersectionCutterUnion = false;
     ShapeNode::BooleanMode currentBooleanMode = ShapeNode::Add;
     int cubeCount = 0;
     int sphereCount = 0;
@@ -51,18 +54,43 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
             continue;
         }
 
+        if (line == "intersection() {") {
+            inIntersection = true;
+            intersectionBaseClosed = false;
+            currentBooleanMode = ShapeNode::Add;
+            continue;
+        }
+
         if (line == "union() {") {
             if (inDifference)
                 inDifferenceBaseUnion = true;
+            else if (inIntersection && intersectionBaseClosed) {
+                inIntersectionCutterUnion = true;
+                currentBooleanMode = ShapeNode::Intersect;
+            }
             continue;
         }
 
         if (line == "}") {
-            if (inDifferenceBaseUnion) {
+            if (inIntersectionCutterUnion) {
+                inIntersectionCutterUnion = false;
+                currentBooleanMode = ShapeNode::Add;
+            } else if (inDifferenceBaseUnion) {
                 inDifferenceBaseUnion = false;
                 currentBooleanMode = ShapeNode::Subtract;
             } else if (inDifference) {
                 inDifference = false;
+                if (inIntersection) {
+                    intersectionBaseClosed = true;
+                    currentBooleanMode = ShapeNode::Intersect;
+                } else {
+                    currentBooleanMode = ShapeNode::Add;
+                }
+            } else if (inIntersection && !intersectionBaseClosed) {
+                intersectionBaseClosed = true;
+                currentBooleanMode = ShapeNode::Intersect;
+            } else if (inIntersection) {
+                inIntersection = false;
                 currentBooleanMode = ShapeNode::Add;
             }
 

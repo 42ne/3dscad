@@ -151,6 +151,7 @@ void MainWindow::buildUi()
     m_booleanMode = new QComboBox;
     m_booleanMode->addItem("Add solid", ShapeNode::Add);
     m_booleanMode->addItem("Subtract hole", ShapeNode::Subtract);
+    m_booleanMode->addItem("Intersect mask", ShapeNode::Intersect);
 
     m_sizeX->setMinimum(0.1);
     m_sizeY->setMinimum(0.1);
@@ -360,9 +361,12 @@ void MainWindow::refreshShapeList()
     m_shapeList->clear();
 
     for (const ShapeNode &s : m_scene.shapes()) {
-        const QString label = s.booleanMode == ShapeNode::Subtract
-                                  ? QString("%1 (subtract)").arg(s.name)
-                                  : s.name;
+        QString label = s.name;
+        if (s.booleanMode == ShapeNode::Subtract)
+            label = QString("%1 (subtract)").arg(s.name);
+        else if (s.booleanMode == ShapeNode::Intersect)
+            label = QString("%1 (intersect)").arg(s.name);
+
         auto *item = new QListWidgetItem(label);
         item->setData(Qt::UserRole, s.id);
         m_shapeList->addItem(item);

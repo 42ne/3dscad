@@ -2,6 +2,17 @@
 
 #include <QStringList>
 
+void OpenScadGenerator::appendShape(QString *code, const ShapeNode &shape, const QString &indent)
+{
+    const QString shapeCode = shapeToOpenScad(shape);
+    const QStringList lines = shapeCode.split('\n');
+
+    for (const QString &line : lines) {
+        if (!line.trimmed().isEmpty())
+            *code += indent + line + "\n";
+    }
+}
+
 QString OpenScadGenerator::generate(const SceneDocument &scene)
 {
     QString code;
@@ -16,47 +27,62 @@ QString OpenScadGenerator::generate(const SceneDocument &scene)
 
     bool hasAddShapes = false;
     bool hasSubtractShapes = false;
+    bool hasIntersectShapes = false;
     for (const ShapeNode &shape : scene.shapes()) {
         if (shape.booleanMode == ShapeNode::Subtract)
             hasSubtractShapes = true;
+        else if (shape.booleanMode == ShapeNode::Intersect)
+            hasIntersectShapes = true;
         else
             hasAddShapes = true;
     }
 
     hasSubtractShapes = hasAddShapes && hasSubtractShapes;
-    code += hasSubtractShapes ? "difference() {\n    union() {\n" : "union() {\n";
+    hasIntersectShapes = hasAddShapes && hasIntersectShapes;
+
+    if (hasIntersectShapes)
+        code += "intersection() {\n";
+
+    code += hasSubtractShapes
+                ? QString("%1difference() {\n%2union() {\n").arg(hasIntersectShapes ? "    " : "").arg(hasIntersectShapes ? "        " : "    ")
+                : QString("%1union() {\n").arg(hasIntersectShapes ? "    " : "");
 
     for (const ShapeNode &shape : scene.shapes()) {
-        if (hasSubtractShapes && shape.booleanMode == ShapeNode::Subtract)
+        if (hasAddShapes && shape.booleanMode != ShapeNode::Add)
             continue;
 
-        const QString shapeCode = shapeToOpenScad(shape);
-        const QStringList lines = shapeCode.split('\n');
-
-        for (const QString &line : lines) {
-            if (!line.trimmed().isEmpty())
-                code += (hasSubtractShapes ? "        " : "    ") + line + "\n";
-        }
+        appendShape(&code, shape, hasIntersectShapes ? (hasSubtractShapes ? "            " : "        ")
+                                                     : (hasSubtractShapes ? "        " : "    "));
     }
 
     if (hasSubtractShapes) {
-        code += "    }\n";
+        code += hasIntersectShapes ? "        }\n" : "    }\n";
 
         for (const ShapeNode &shape : scene.shapes()) {
             if (shape.booleanMode != ShapeNode::Subtract)
                 continue;
 
-            const QString shapeCode = shapeToOpenScad(shape);
-            const QStringList lines = shapeCode.split('\n');
-
-            for (const QString &line : lines) {
-                if (!line.trimmed().isEmpty())
-                    code += "    " + line + "\n";
-            }
+            appendShape(&code, shape, hasIntersectShapes ? "        " : "    ");
         }
     }
 
-    code += "}\n";
+    code += hasIntersectShapes ? "    }\n" : "}\n";
+
+    if (hasIntersectShapes) {
+        code += "    union() {\n";
+
+        for (const ShapeNode &shape : scene.shapes()) {
+            if (shape.booleanMode != ShapeNode::Intersect)
+                continue;
+
+            appendShape(&code, shape, "        ");
+        }
+
+        code += "    }\n";
+    }
+
+    if (hasIntersectShapes)
+        code += "}\n";
 
     return code;
 }
