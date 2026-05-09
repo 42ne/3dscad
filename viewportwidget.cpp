@@ -1,5 +1,7 @@
 #include "viewportwidget.h"
 
+#include "scenemesh.h"
+
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
@@ -34,16 +36,6 @@ struct SceneLight
 static int clampColorChannel(float value)
 {
     return qBound(0, qRound(value), 255);
-}
-
-static QVector3D faceNormal(const QVector3D &a, const QVector3D &b, const QVector3D &c)
-{
-    QVector3D normal = -QVector3D::crossProduct(b - a, c - a);
-
-    if (normal.lengthSquared() <= 0.0001f)
-        return QVector3D(0.0f, 0.0f, 1.0f);
-
-    return normal.normalized();
 }
 
 static QColor litColor(const QColor &baseColor, const QVector3D &normal, const QVector<SceneLight> &lights)
@@ -156,32 +148,6 @@ static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, 
     }
 
     painter->drawImage(0, 0, image);
-}
-
-static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
-{
-    const float rx = qDegreesToRadians(degrees.x());
-    const float ry = qDegreesToRadians(degrees.y());
-    const float rz = qDegreesToRadians(degrees.z());
-
-    QVector3D p = point;
-
-    p = QVector3D(
-        p.x(),
-        p.y() * qCos(rx) - p.z() * qSin(rx),
-        p.y() * qSin(rx) + p.z() * qCos(rx));
-
-    p = QVector3D(
-        p.x() * qCos(ry) + p.z() * qSin(ry),
-        p.y(),
-        -p.x() * qSin(ry) + p.z() * qCos(ry));
-
-    p = QVector3D(
-        p.x() * qCos(rz) - p.y() * qSin(rz),
-        p.x() * qSin(rz) + p.y() * qCos(rz),
-        p.z());
-
-    return p;
 }
 
 ViewportWidget::ViewportWidget(QWidget *parent)
@@ -328,156 +294,24 @@ void ViewportWidget::paintGL()
         painter.drawPolygon(shadow);
     };
 
-    auto appendCube = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
-        const QVector3D half = shape.size * 0.5f;
-        QVector<QVector3D> vertices = {
-            {-half.x(), -half.y(), -half.z()}, {half.x(), -half.y(), -half.z()},
-            {half.x(), half.y(), -half.z()}, {-half.x(), half.y(), -half.z()},
-            {-half.x(), -half.y(), half.z()}, {half.x(), -half.y(), half.z()},
-            {half.x(), half.y(), half.z()}, {-half.x(), half.y(), half.z()}
-        };
+    auto appendMesh = [&](QVector<Face2D> &faces, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex) {
+        drawShadow(mesh.shadowPoints);
 
-        for (QVector3D &vertex : vertices)
-            vertex = rotatePoint(vertex, shape.rotation) + shape.position;
-
-        drawShadow(vertices);
-
-        const QVector<QVector<int>> faceIndices = {
-            {0, 1, 2, 3}, {4, 7, 6, 5}, {0, 4, 5, 1},
-            {1, 5, 6, 2}, {2, 6, 7, 3}, {3, 7, 4, 0}
-        };
-
-        const QVector<int> shade = {82, 116, 92, 105, 122, 96};
-        for (int i = 0; i < faceIndices.size(); ++i) {
+        for (const MeshFace &meshFace : mesh.faces) {
             Face2D face;
-            const QVector<int> indices = faceIndices[i];
-            const QVector3D normal = faceNormal(vertices[indices[0]], vertices[indices[1]], vertices[indices[2]]);
-            face.color = litColor(baseColor.lighter(shade[i]), normal, lights);
-            face.shapeIndex = shapeIndex;
-            face.pen = QPen(baseColor.darker(145), 1);
-
-            for (int index : indices) {
-                const ProjectedPoint projected = project(vertices[index]);
-                face.points.append(projected.point);
-                face.depths.append(projected.depth);
-                face.depth += projected.depth;
-            }
-
-            face.depth /= indices.size();
-            faces.append(face);
-        }
-    };
-
-    auto appendSphere = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
-        QVector<QVector3D> shadowPoints;
-        for (int i = 0; i < 24; ++i) {
-            const float angle = 2.0f * M_PI * i / 24.0f;
-            shadowPoints.append(shape.position + QVector3D(shape.radius * qCos(angle), shape.radius * qSin(angle), shape.radius));
-        }
-
-        drawShadow(shadowPoints);
-
-        auto spherePoint = [&](int stack, int sector) {
-            const int stacks = 12;
-            const int sectors = 24;
-            const float theta = M_PI * stack / stacks;
-            const float phi = 2.0f * M_PI * sector / sectors;
-            const float ringRadius = shape.radius * qSin(theta);
-
-            return shape.position + QVector3D(
-                       ringRadius * qCos(phi),
-                       ringRadius * qSin(phi),
-                       shape.radius * qCos(theta));
-        };
-
-        auto appendSphereFace = [&](const QVector<QVector3D> &vertices) {
-            Face2D face;
-            const QVector3D normal = faceNormal(vertices[0], vertices[1], vertices[2]);
-            face.color = litColor(baseColor, normal, lights);
+            face.color = litColor(baseColor.lighter(meshFace.shade), meshFace.normal, lights);
             face.shapeIndex = shapeIndex;
             face.pen = QPen(baseColor.darker(150), 1);
 
-            for (const QVector3D &vertex : vertices) {
+            for (const QVector3D &vertex : meshFace.vertices) {
                 const ProjectedPoint projected = project(vertex);
                 face.points.append(projected.point);
                 face.depths.append(projected.depth);
                 face.depth += projected.depth;
             }
 
-            face.depth /= vertices.size();
+            face.depth /= meshFace.vertices.size();
             faces.append(face);
-        };
-
-        const int stacks = 12;
-        const int sectors = 24;
-        for (int stack = 0; stack < stacks; ++stack) {
-            for (int sector = 0; sector < sectors; ++sector) {
-                const int nextSector = (sector + 1) % sectors;
-                const QVector3D topLeft = spherePoint(stack, sector);
-                const QVector3D bottomLeft = spherePoint(stack + 1, sector);
-                const QVector3D bottomRight = spherePoint(stack + 1, nextSector);
-                const QVector3D topRight = spherePoint(stack, nextSector);
-
-                if (stack == 0)
-                    appendSphereFace({topLeft, bottomLeft, bottomRight});
-                else if (stack == stacks - 1)
-                    appendSphereFace({topLeft, bottomLeft, topRight});
-                else
-                    appendSphereFace({topLeft, bottomLeft, bottomRight, topRight});
-            }
-        }
-    };
-
-    auto appendCylinder = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor, int shapeIndex) {
-        QVector<QVector3D> top;
-        QVector<QVector3D> bottom;
-
-        for (int i = 0; i < 24; ++i) {
-            const float angle = 2.0f * M_PI * i / 24.0f;
-            const QVector3D ringPoint(shape.radius * qCos(angle), shape.radius * qSin(angle), 0);
-            top.append(rotatePoint(ringPoint + QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
-            bottom.append(rotatePoint(ringPoint - QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
-        }
-
-        QVector<QVector3D> shadowPoints = bottom + top;
-        drawShadow(shadowPoints);
-
-        for (int i = 0; i < top.size(); ++i) {
-            const int next = (i + 1) % top.size();
-            Face2D side;
-            const QVector3D normal = faceNormal(bottom[i], bottom[next], top[next]);
-            side.color = litColor(baseColor, normal, lights);
-            side.shapeIndex = shapeIndex;
-            side.pen = QPen(baseColor.darker(150), 1);
-
-            for (const QVector3D &point : {bottom[i], bottom[next], top[next], top[i]}) {
-                const ProjectedPoint projected = project(point);
-                side.points.append(projected.point);
-                side.depths.append(projected.depth);
-                side.depth += projected.depth;
-            }
-
-            side.depth /= 4.0f;
-            faces.append(side);
-        }
-
-        const QVector<QVector<QVector3D>> caps = {bottom, top};
-        for (int i = 0; i < caps.size(); ++i) {
-            Face2D cap;
-            const QVector3D normal = faceNormal(caps[i][0], caps[i][1], caps[i][2]);
-            cap.color = litColor(baseColor.lighter(i == 1 ? 120 : 82), normal, lights);
-            cap.shapeIndex = shapeIndex;
-            cap.pen = QPen(baseColor.darker(150), 1);
-
-            for (const QVector3D &point : caps[i]) {
-                const ProjectedPoint projected = project(point);
-                cap.points.append(projected.point);
-                cap.depths.append(projected.depth);
-                cap.depth += projected.depth;
-            }
-
-            cap.depth /= caps[i].size();
-            faces.append(cap);
         }
     };
 
@@ -492,12 +326,7 @@ void ViewportWidget::paintGL()
                                ? QColor(255, 180, 60)
                                : QColor(80, 160, 255);
 
-            if (s.type == ShapeNode::Cube)
-                appendCube(faces, s, color, i);
-            else if (s.type == ShapeNode::Sphere)
-                appendSphere(faces, s, color, i);
-            else if (s.type == ShapeNode::Cylinder)
-                appendCylinder(faces, s, color, i);
+            appendMesh(faces, buildShapeMesh(s), color, i);
         }
 
         m_pickBufferSize = size();
