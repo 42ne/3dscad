@@ -32,10 +32,51 @@ struct ProjectedPoint
 struct Face2D
 {
     QVector<QPointF> points;
-    QColor color;
+    QBrush brush;
     float depth = 0.0f;
     QPen pen = Qt::NoPen;
 };
+
+struct SceneLight
+{
+    QVector3D direction;
+    QColor color;
+    float intensity = 1.0f;
+};
+
+static int clampColorChannel(float value)
+{
+    return qBound(0, qRound(value), 255);
+}
+
+static QVector3D faceNormal(const QVector3D &a, const QVector3D &b, const QVector3D &c)
+{
+    QVector3D normal = -QVector3D::crossProduct(b - a, c - a);
+
+    if (normal.lengthSquared() <= 0.0001f)
+        return QVector3D(0.0f, 0.0f, 1.0f);
+
+    return normal.normalized();
+}
+
+static QColor litColor(const QColor &baseColor, const QVector3D &normal, const QVector<SceneLight> &lights)
+{
+    float red = baseColor.redF() * 0.22f;
+    float green = baseColor.greenF() * 0.22f;
+    float blue = baseColor.blueF() * 0.22f;
+
+    for (const SceneLight &light : lights) {
+        const float amount = qMax(0.0f, QVector3D::dotProduct(normal, light.direction.normalized())) * light.intensity;
+        red += baseColor.redF() * light.color.redF() * amount;
+        green += baseColor.greenF() * light.color.greenF() * amount;
+        blue += baseColor.blueF() * light.color.blueF() * amount;
+    }
+
+    return QColor(
+        clampColorChannel(red * 255.0f),
+        clampColorChannel(green * 255.0f),
+        clampColorChannel(blue * 255.0f));
+}
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
 {
@@ -104,6 +145,11 @@ void ViewportWidget::paintGL()
     const float yaw = qDegreesToRadians(m_cameraYaw);
     const float pitch = qDegreesToRadians(m_cameraPitch);
     const float focalLength = 420.0f;
+    const QVector<SceneLight> lights = {
+        {QVector3D(-0.45f, -0.35f, 1.0f).normalized(), QColor(255, 244, 214), 0.78f},
+        {QVector3D(0.85f, 0.15f, 0.45f).normalized(), QColor(160, 205, 255), 0.34f},
+        {QVector3D(-0.2f, 0.9f, 0.25f).normalized(), QColor(255, 170, 110), 0.24f}
+    };
 
     auto toCamera = [&](const QVector3D &world) {
         QVector3D p = world;
@@ -224,16 +270,18 @@ void ViewportWidget::paintGL()
         const QVector<int> shade = {82, 116, 92, 105, 122, 96};
         for (int i = 0; i < faceIndices.size(); ++i) {
             Face2D face;
-            face.color = baseColor.lighter(shade[i]);
+            const QVector<int> indices = faceIndices[i];
+            const QVector3D normal = faceNormal(vertices[indices[0]], vertices[indices[1]], vertices[indices[2]]);
+            face.brush = litColor(baseColor.lighter(shade[i]), normal, lights);
             face.pen = QPen(baseColor.darker(145), 1);
 
-            for (int index : faceIndices[i]) {
+            for (int index : indices) {
                 const ProjectedPoint projected = project(vertices[index]);
                 face.points.append(projected.point);
                 face.depth += projected.depth;
             }
 
-            face.depth /= faceIndices[i].size();
+            face.depth /= indices.size();
             faces.append(face);
         }
     };
@@ -252,7 +300,11 @@ void ViewportWidget::paintGL()
         const float radius = QLineF(center.point, edge.point).length();
 
         Face2D face;
-        face.color = baseColor;
+        QRadialGradient gradient(center.point - QPointF(radius * 0.35f, radius * 0.45f), radius * 1.25f);
+        gradient.setColorAt(0.0, litColor(baseColor.lighter(150), QVector3D(-0.45f, -0.35f, 1.0f).normalized(), lights));
+        gradient.setColorAt(0.45, litColor(baseColor, QVector3D(0.0f, 0.0f, 1.0f), lights));
+        gradient.setColorAt(1.0, litColor(baseColor.darker(155), QVector3D(0.45f, 0.35f, -0.25f).normalized(), lights));
+        face.brush = QBrush(gradient);
         face.depth = center.depth;
         face.pen = QPen(baseColor.darker(150), 1);
 
@@ -281,7 +333,8 @@ void ViewportWidget::paintGL()
         for (int i = 0; i < top.size(); ++i) {
             const int next = (i + 1) % top.size();
             Face2D side;
-            side.color = baseColor.lighter(88 + (i % 6) * 6);
+            const QVector3D normal = faceNormal(bottom[i], bottom[next], top[next]);
+            side.brush = litColor(baseColor, normal, lights);
             side.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : {bottom[i], bottom[next], top[next], top[i]}) {
@@ -297,7 +350,8 @@ void ViewportWidget::paintGL()
         const QVector<QVector<QVector3D>> caps = {bottom, top};
         for (int i = 0; i < caps.size(); ++i) {
             Face2D cap;
-            cap.color = baseColor.lighter(i == 1 ? 120 : 82);
+            const QVector3D normal = faceNormal(caps[i][0], caps[i][1], caps[i][2]);
+            cap.brush = litColor(baseColor.lighter(i == 1 ? 120 : 82), normal, lights);
             cap.pen = QPen(baseColor.darker(150), 1);
 
             for (const QVector3D &point : caps[i]) {
@@ -335,14 +389,14 @@ void ViewportWidget::paintGL()
         });
 
         for (const Face2D &face : faces) {
-            painter.setBrush(face.color);
+            painter.setBrush(face.brush);
             painter.setPen(face.pen);
             painter.drawPolygon(QPolygonF(face.points));
         }
     }
 
     painter.setPen(QColor(220, 220, 220));
-    painter.drawText(12, 24, "3D viewport: drag to orbit, mouse wheel to zoom");
+    painter.drawText(12, 24, "3D viewport: drag to orbit, mouse wheel to zoom; 3 scene lights");
 
     painter.end();
 }
