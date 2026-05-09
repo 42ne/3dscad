@@ -12,10 +12,13 @@ win32:LIBS += -lopengl32
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    viewportwidget.cpp
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    shapenode.h \
+    viewportwidget.h
 
 FORMS += \
     mainwindow.ui
