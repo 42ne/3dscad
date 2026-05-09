@@ -159,6 +159,49 @@ void ViewportWidget::paintGL()
         painter.drawLine(project(QVector3D(0, 0, 0)).point, project(QVector3D(0, 0, 90)).point);
     };
 
+    auto drawShadow = [&](const QVector<QVector3D> &points) {
+        if (points.isEmpty())
+            return;
+
+        const QVector3D lightDirection(-0.45f, -0.35f, 1.0f);
+        QVector<QVector3D> groundPoints;
+        QVector3D center;
+
+        for (const QVector3D &point : points) {
+            const float height = qMax(0.0f, point.z());
+            const QVector3D shadowPoint(
+                point.x() - lightDirection.x() * height / lightDirection.z(),
+                point.y() - lightDirection.y() * height / lightDirection.z(),
+                0.0f);
+
+            groundPoints.append(shadowPoint);
+            center += shadowPoint;
+        }
+
+        center /= groundPoints.size();
+
+        std::sort(groundPoints.begin(), groundPoints.end(), [center](const QVector3D &left, const QVector3D &right) {
+            return qAtan2(left.y() - center.y(), left.x() - center.x())
+                   < qAtan2(right.y() - center.y(), right.x() - center.x());
+        });
+
+        QPolygonF shadow;
+        float averageHeight = 0.0f;
+
+        for (const QVector3D &point : points)
+            averageHeight += qMax(0.0f, point.z());
+
+        averageHeight /= points.size();
+
+        for (const QVector3D &point : groundPoints)
+            shadow.append(project(point).point);
+
+        const int alpha = qBound(28, 52 + static_cast<int>(averageHeight * 0.55f), 96);
+        painter.setBrush(QColor(0, 0, 0, alpha));
+        painter.setPen(Qt::NoPen);
+        painter.drawPolygon(shadow);
+    };
+
     auto appendCube = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor) {
         const QVector3D half = shape.size * 0.5f;
         QVector<QVector3D> vertices = {
@@ -170,6 +213,8 @@ void ViewportWidget::paintGL()
 
         for (QVector3D &vertex : vertices)
             vertex = rotatePoint(vertex, shape.rotation) + shape.position;
+
+        drawShadow(vertices);
 
         const QVector<QVector<int>> faceIndices = {
             {0, 1, 2, 3}, {4, 7, 6, 5}, {0, 4, 5, 1},
@@ -194,6 +239,14 @@ void ViewportWidget::paintGL()
     };
 
     auto appendSphere = [&](QVector<Face2D> &faces, const ShapeNode &shape, const QColor &baseColor) {
+        QVector<QVector3D> shadowPoints;
+        for (int i = 0; i < 24; ++i) {
+            const float angle = 2.0f * M_PI * i / 24.0f;
+            shadowPoints.append(shape.position + QVector3D(shape.radius * qCos(angle), shape.radius * qSin(angle), shape.radius));
+        }
+
+        drawShadow(shadowPoints);
+
         const ProjectedPoint center = project(shape.position);
         const ProjectedPoint edge = project(shape.position + QVector3D(shape.radius, 0, 0));
         const float radius = QLineF(center.point, edge.point).length();
@@ -221,6 +274,9 @@ void ViewportWidget::paintGL()
             top.append(rotatePoint(ringPoint + QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
             bottom.append(rotatePoint(ringPoint - QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
         }
+
+        QVector<QVector3D> shadowPoints = bottom + top;
+        drawShadow(shadowPoints);
 
         for (int i = 0; i < top.size(); ++i) {
             const int next = (i + 1) % top.size();
