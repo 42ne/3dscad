@@ -6,16 +6,18 @@
 #include <QVector>
 #include <QVector3D>
 
-struct MeshFace
+struct MeshTriangle
 {
-    QVector<QVector3D> vertices;
+    QVector3D a;
+    QVector3D b;
+    QVector3D c;
     QVector3D normal = QVector3D(0.0f, 0.0f, 1.0f);
     int shade = 100;
 };
 
 struct SceneMesh
 {
-    QVector<MeshFace> faces;
+    QVector<MeshTriangle> triangles;
     QVector<QVector3D> shadowPoints;
 };
 

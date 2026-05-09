@@ -38,16 +38,25 @@ static QVector3D faceNormal(const QVector3D &a, const QVector3D &b, const QVecto
     return normal.normalized();
 }
 
-static MeshFace makeFace(const QVector<QVector3D> &vertices, int shade = 100)
+static MeshTriangle makeTriangle(const QVector3D &a, const QVector3D &b, const QVector3D &c, int shade = 100)
 {
-    MeshFace face;
-    face.vertices = vertices;
-    face.shade = shade;
+    MeshTriangle triangle;
+    triangle.a = a;
+    triangle.b = b;
+    triangle.c = c;
+    triangle.normal = faceNormal(a, b, c);
+    triangle.shade = shade;
 
-    if (vertices.size() >= 3)
-        face.normal = faceNormal(vertices[0], vertices[1], vertices[2]);
+    return triangle;
+}
 
-    return face;
+static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVector3D> &vertices, int shade = 100)
+{
+    if (vertices.size() < 3)
+        return;
+
+    for (int i = 1; i + 1 < vertices.size(); ++i)
+        triangles->append(makeTriangle(vertices[0], vertices[i], vertices[i + 1], shade));
 }
 
 static SceneMesh buildCubeMesh(const ShapeNode &shape)
@@ -77,7 +86,7 @@ static SceneMesh buildCubeMesh(const ShapeNode &shape)
         for (int index : faceIndices[i])
             faceVertices.append(vertices[index]);
 
-        mesh.faces.append(makeFace(faceVertices, shades[i]));
+        appendPolygon(&mesh.triangles, faceVertices, shades[i]);
     }
 
     return mesh;
@@ -116,11 +125,11 @@ static SceneMesh buildSphereMesh(const ShapeNode &shape)
             const QVector3D topRight = spherePoint(stack, nextSector);
 
             if (stack == 0)
-                mesh.faces.append(makeFace({topLeft, bottomLeft, bottomRight}));
+                appendPolygon(&mesh.triangles, {topLeft, bottomLeft, bottomRight});
             else if (stack == stacks - 1)
-                mesh.faces.append(makeFace({topLeft, bottomLeft, topRight}));
+                appendPolygon(&mesh.triangles, {topLeft, bottomLeft, topRight});
             else
-                mesh.faces.append(makeFace({topLeft, bottomLeft, bottomRight, topRight}));
+                appendPolygon(&mesh.triangles, {topLeft, bottomLeft, bottomRight, topRight});
         }
     }
 
@@ -145,11 +154,11 @@ static SceneMesh buildCylinderMesh(const ShapeNode &shape)
 
     for (int i = 0; i < top.size(); ++i) {
         const int next = (i + 1) % top.size();
-        mesh.faces.append(makeFace({bottom[i], bottom[next], top[next], top[i]}));
+        appendPolygon(&mesh.triangles, {bottom[i], bottom[next], top[next], top[i]});
     }
 
-    mesh.faces.append(makeFace(bottom, 82));
-    mesh.faces.append(makeFace(top, 120));
+    appendPolygon(&mesh.triangles, bottom, 82);
+    appendPolygon(&mesh.triangles, top, 120);
 
     return mesh;
 }

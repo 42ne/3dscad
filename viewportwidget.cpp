@@ -16,14 +16,16 @@ struct ProjectedPoint
     bool visible = true;
 };
 
-struct Face2D
+struct Triangle2D
 {
-    QVector<QPointF> points;
-    QVector<float> depths;
+    QPointF a;
+    QPointF b;
+    QPointF c;
+    float depthA = 0.0f;
+    float depthB = 0.0f;
+    float depthC = 0.0f;
     QColor color;
-    float depth = 0.0f;
     int shapeIndex = -1;
-    QPen pen = Qt::NoPen;
 };
 
 struct SceneLight
@@ -116,7 +118,10 @@ static void rasterizeTriangle(QImage *image,
     }
 }
 
-static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, const QSize &viewportSize, QVector<int> *pickBuffer)
+static void drawTrianglesWithDepth(QPainter *painter,
+                                   const QVector<Triangle2D> &triangles,
+                                   const QSize &viewportSize,
+                                   QVector<int> *pickBuffer)
 {
     QImage image(viewportSize, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
@@ -127,24 +132,19 @@ static void drawFacesWithDepth(QPainter *painter, const QVector<Face2D> &faces, 
     if (pickBuffer)
         pickBuffer->fill(-1, viewportSize.width() * viewportSize.height());
 
-    for (const Face2D &face : faces) {
-        if (face.points.size() < 3 || face.points.size() != face.depths.size())
-            continue;
-
-        for (int i = 1; i + 1 < face.points.size(); ++i) {
-            rasterizeTriangle(&image,
-                              &depthBuffer,
-                              pickBuffer,
-                              viewportSize,
-                              face.points[0],
-                              face.points[i],
-                              face.points[i + 1],
-                              face.depths[0],
-                              face.depths[i],
-                              face.depths[i + 1],
-                              face.color,
-                              face.shapeIndex);
-        }
+    for (const Triangle2D &triangle : triangles) {
+        rasterizeTriangle(&image,
+                          &depthBuffer,
+                          pickBuffer,
+                          viewportSize,
+                          triangle.a,
+                          triangle.b,
+                          triangle.c,
+                          triangle.depthA,
+                          triangle.depthB,
+                          triangle.depthC,
+                          triangle.color,
+                          triangle.shapeIndex);
     }
 
     painter->drawImage(0, 0, image);
@@ -294,31 +294,31 @@ void ViewportWidget::paintGL()
         painter.drawPolygon(shadow);
     };
 
-    auto appendMesh = [&](QVector<Face2D> &faces, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex) {
+    auto appendMesh = [&](QVector<Triangle2D> &triangles, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex) {
         drawShadow(mesh.shadowPoints);
 
-        for (const MeshFace &meshFace : mesh.faces) {
-            Face2D face;
-            face.color = litColor(baseColor.lighter(meshFace.shade), meshFace.normal, lights);
-            face.shapeIndex = shapeIndex;
-            face.pen = QPen(baseColor.darker(150), 1);
+        for (const MeshTriangle &meshTriangle : mesh.triangles) {
+            const ProjectedPoint a = project(meshTriangle.a);
+            const ProjectedPoint b = project(meshTriangle.b);
+            const ProjectedPoint c = project(meshTriangle.c);
 
-            for (const QVector3D &vertex : meshFace.vertices) {
-                const ProjectedPoint projected = project(vertex);
-                face.points.append(projected.point);
-                face.depths.append(projected.depth);
-                face.depth += projected.depth;
-            }
-
-            face.depth /= meshFace.vertices.size();
-            faces.append(face);
+            Triangle2D triangle;
+            triangle.a = a.point;
+            triangle.b = b.point;
+            triangle.c = c.point;
+            triangle.depthA = a.depth;
+            triangle.depthB = b.depth;
+            triangle.depthC = c.depth;
+            triangle.color = litColor(baseColor.lighter(meshTriangle.shade), meshTriangle.normal, lights);
+            triangle.shapeIndex = shapeIndex;
+            triangles.append(triangle);
         }
     };
 
     drawGrid();
 
     if (m_shapes) {
-        QVector<Face2D> faces;
+        QVector<Triangle2D> triangles;
 
         for (int i = 0; i < m_shapes->size(); ++i) {
             const ShapeNode &s = m_shapes->at(i);
@@ -326,11 +326,11 @@ void ViewportWidget::paintGL()
                                ? QColor(255, 180, 60)
                                : QColor(80, 160, 255);
 
-            appendMesh(faces, buildShapeMesh(s), color, i);
+            appendMesh(triangles, buildShapeMesh(s), color, i);
         }
 
         m_pickBufferSize = size();
-        drawFacesWithDepth(&painter, faces, size(), &m_pickBuffer);
+        drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer);
     }
 
     painter.setPen(QColor(220, 220, 220));
