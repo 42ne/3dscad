@@ -3,6 +3,7 @@
 
 #include "shapenode.h"
 
+#include <QImage>
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QVector>
@@ -50,10 +51,13 @@ private:
     float m_cameraDistance = 220.0f;
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
+    QVector3D m_lastDragDelta;
     bool m_draggingShape = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
     QVector<int> m_pickBuffer;
+    QVector<float> m_depthBuffer;
+    QImage m_renderImage;
     QSize m_pickBufferSize;
 };
 

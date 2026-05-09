@@ -319,7 +319,6 @@ void MainWindow::onViewportShapeDragged(int index, const QVector3D &delta)
     shape->position = m_viewportDragStartShape.position + delta;
 
     m_viewport->update();
-    refreshProperties();
 }
 
 void MainWindow::onViewportShapeDragFinished(int index)
@@ -339,6 +338,7 @@ void MainWindow::onViewportShapeDragFinished(int index)
 
     if (!command->isValid()) {
         delete command;
+        refreshProperties();
         return;
     }
 

@@ -173,20 +173,24 @@ static void rasterizeTriangle(QImage *image,
 static void drawTrianglesWithDepth(QPainter *painter,
                                    const QVector<Triangle2D> &triangles,
                                    const QSize &viewportSize,
-                                   QVector<int> *pickBuffer)
+                                   QVector<int> *pickBuffer,
+                                   QVector<float> *depthBuffer,
+                                   QImage *image)
 {
-    QImage image(viewportSize, QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
+    if (image->size() != viewportSize || image->format() != QImage::Format_ARGB32_Premultiplied)
+        *image = QImage(viewportSize, QImage::Format_ARGB32_Premultiplied);
 
-    QVector<float> depthBuffer(viewportSize.width() * viewportSize.height(),
-                               std::numeric_limits<float>::max());
+    image->fill(Qt::transparent);
+
+    const int bufferSize = viewportSize.width() * viewportSize.height();
+    depthBuffer->fill(std::numeric_limits<float>::max(), bufferSize);
 
     if (pickBuffer)
-        pickBuffer->fill(-1, viewportSize.width() * viewportSize.height());
+        pickBuffer->fill(-1, bufferSize);
 
     for (const Triangle2D &triangle : triangles) {
-        rasterizeTriangle(&image,
-                          &depthBuffer,
+        rasterizeTriangle(image,
+                          depthBuffer,
                           pickBuffer,
                           viewportSize,
                           triangle.a,
@@ -199,7 +203,7 @@ static void drawTrianglesWithDepth(QPainter *painter,
                           triangle.shapeIndex);
     }
 
-    painter->drawImage(0, 0, image);
+    painter->drawImage(0, 0, *image);
 }
 
 ViewportWidget::ViewportWidget(QWidget *parent)
@@ -352,7 +356,7 @@ void ViewportWidget::paintGL()
         }
 
         m_pickBufferSize = size();
-        drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer);
+        drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
 
         if (m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size()) {
             const QVector3D origin = m_shapes->at(m_selectedIndex).position;
@@ -413,6 +417,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
             m_dragMode = pickedAxis;
             m_dragShapeIndex = m_selectedIndex;
             m_dragStartMousePosition = event->pos();
+            m_lastDragDelta = QVector3D();
             emit shapeDragStarted(m_selectedIndex);
             return;
         }
@@ -442,6 +447,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
         m_dragMode = PlaneDrag;
         m_dragShapeIndex = shapeIndex;
         m_dragStartMousePosition = event->pos();
+        m_lastDragDelta = QVector3D();
         emit shapeDragStarted(shapeIndex);
     }
 }
@@ -478,6 +484,12 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
             }
         }
 
+        if ((worldDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
+            m_lastMousePosition = event->pos();
+            return;
+        }
+
+        m_lastDragDelta = worldDelta;
         emit shapeDragged(m_dragShapeIndex, worldDelta);
         m_lastMousePosition = event->pos();
         return;
