@@ -18,11 +18,11 @@ It stores:
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
 It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
-The document model now exposes group operations for the upcoming UI layer: add group, remove group by promoting children, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
+The document model exposes group operations used by the UI layer: add group, remove group by promoting children, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
-The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; dragging a primitive row onto a boolean group changes its flat `ShapeNode::booleanMode`.
+The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups.
 
 `ViewportWidget` owns interactive viewing and picking:
 
@@ -149,6 +149,7 @@ Dragging:
 
 - Axis gizmo drag emits shape drag signals.
 - `Shift + drag` supports plane dragging.
+- Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
 - Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
 
@@ -157,15 +158,15 @@ Dragging:
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
-- The flat boolean mode per shape is simple, but a real OpenSCAD model needs an operation tree.
-- The explicit document tree does not yet support arbitrary nested user-created groups.
+- Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
+- Group selection is still UI-only; preserving selected group ids across refreshes is a future polish step.
 - Parser and generator are coupled to a narrow generated subset.
 
 ## Recommended Next Work
 
 Short term:
 
-- Add UI buttons/actions for the `SceneDocument` group operations.
+- Add context menus and better selection persistence for the `SceneDocument` group operations.
 - Formalize Manifold setup as a submodule, bootstrap script, or CMake migration.
 - Add visible reason text when Manifold is unavailable and fallback preview is active.
 - Add smoke tests for generator/parser roundtrip and CSG backend availability.

@@ -27,7 +27,11 @@ private slots:
     void addCube();
     void addSphere();
     void addCylinder();
+    void addUnionGroup();
+    void addDifferenceGroup();
+    void addIntersectionGroup();
     void deleteSelectedShape();
+    void deleteSelectedGroup();
     void applyOpenScadCode();
     void sendToOpenScad();
 
@@ -45,6 +49,9 @@ private:
     void refreshCsgStatus();
     void refreshSceneViews();
     void selectShapeInSceneTree(int shapeId);
+    int selectedTreeGroupId() const;
+    void addGroup(SceneDocument::TreeNode::Operation operation);
+    void moveTreeNodeToGroup(int nodeId, int parentGroupId);
     void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);
     QString previewScadPath() const;
     bool writeOpenScadPreview(bool notify);
@@ -64,6 +71,7 @@ private:
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_sendToOpenScadButton = nullptr;
     QPushButton *m_deleteShapeButton = nullptr;
+    QPushButton *m_deleteGroupButton = nullptr;
     QLabel *m_csgStatusLabel = nullptr;
     QLabel *m_openScadPreviewLabel = nullptr;
 

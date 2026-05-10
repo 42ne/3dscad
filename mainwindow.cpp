@@ -36,7 +36,8 @@
 // ---------------- MainWindow ----------------
 
 static constexpr int ShapeIdRole = Qt::UserRole;
-static constexpr int GroupBooleanModeRole = Qt::UserRole + 1;
+static constexpr int TreeNodeIdRole = Qt::UserRole + 1;
+static constexpr int GroupOperationRole = Qt::UserRole + 2;
 
 class SceneTreeWidget : public QTreeWidget
 {
@@ -51,12 +52,12 @@ public:
         setDefaultDropAction(Qt::MoveAction);
     }
 
-    std::function<void(int, ShapeNode::BooleanMode)> onShapeDroppedOnGroup;
+    std::function<void(int, int)> onTreeNodeDroppedOnGroup;
 
 protected:
     void dragMoveEvent(QDragMoveEvent *event) override
     {
-        if (dropTarget(event->pos()).shapeId >= 0)
+        if (dropTarget(event->pos()).nodeId > 0)
             event->acceptProposedAction();
         else
             event->ignore();
@@ -65,13 +66,13 @@ protected:
     void dropEvent(QDropEvent *event) override
     {
         const DropTarget target = dropTarget(event->pos());
-        if (target.shapeId < 0) {
+        if (target.nodeId <= 0) {
             event->ignore();
             return;
         }
 
-        if (onShapeDroppedOnGroup)
-            onShapeDroppedOnGroup(target.shapeId, target.booleanMode);
+        if (onTreeNodeDroppedOnGroup)
+            onTreeNodeDroppedOnGroup(target.nodeId, target.parentGroupId);
 
         event->acceptProposedAction();
     }
@@ -79,8 +80,8 @@ protected:
 private:
     struct DropTarget
     {
-        int shapeId = -1;
-        ShapeNode::BooleanMode booleanMode = ShapeNode::Add;
+        int nodeId = 0;
+        int parentGroupId = 0;
     };
 
     DropTarget dropTarget(const QPoint &position) const
@@ -90,8 +91,8 @@ private:
         if (selected.size() != 1)
             return target;
 
-        const int shapeId = selected.first()->data(0, ShapeIdRole).toInt();
-        if (shapeId < 0)
+        const int nodeId = selected.first()->data(0, TreeNodeIdRole).toInt();
+        if (nodeId <= 0)
             return target;
 
         QTreeWidgetItem *targetItem = itemAt(position);
@@ -104,12 +105,12 @@ private:
         if (!targetItem)
             return target;
 
-        const QVariant modeData = targetItem->data(0, GroupBooleanModeRole);
-        if (!modeData.isValid())
+        const QVariant operationData = targetItem->data(0, GroupOperationRole);
+        if (!operationData.isValid())
             return target;
 
-        target.shapeId = shapeId;
-        target.booleanMode = static_cast<ShapeNode::BooleanMode>(modeData.toInt());
+        target.nodeId = nodeId;
+        target.parentGroupId = targetItem->data(0, TreeNodeIdRole).toInt();
         return target;
     }
 };
@@ -141,24 +142,16 @@ static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
     return "union()";
 }
 
-static ShapeNode::BooleanMode booleanModeForGroup(SceneDocument::TreeNode::Operation operation)
-{
-    if (operation == SceneDocument::TreeNode::Difference)
-        return ShapeNode::Subtract;
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return ShapeNode::Intersect;
-    return ShapeNode::Add;
-}
-
-static void markGroupItem(QTreeWidgetItem *item, SceneDocument::TreeNode::Operation operation)
+static void markGroupItem(QTreeWidgetItem *item, const SceneDocument::TreeNode &node)
 {
     QFont font = item->font(0);
     font.setBold(true);
     item->setFont(0, font);
     item->setData(0, ShapeIdRole, -1);
-    item->setData(0, GroupBooleanModeRole, booleanModeForGroup(operation));
+    item->setData(0, TreeNodeIdRole, node.id);
+    item->setData(0, GroupOperationRole, node.operation);
     item->setForeground(0, QColor(82, 82, 82));
-    item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsDropEnabled);
+    item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
 }
 
 static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
@@ -173,13 +166,14 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
         auto *item = new QTreeWidgetItem(parent);
         item->setText(0, shape->name);
         item->setData(0, ShapeIdRole, shape->id);
+        item->setData(0, TreeNodeIdRole, node.id);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         return item;
     }
 
     auto *groupItem = new QTreeWidgetItem(parent);
     groupItem->setText(0, booleanGroupLabel(node.operation));
-    markGroupItem(groupItem, node.operation);
+    markGroupItem(groupItem, node);
 
     for (const SceneDocument::TreeNode &child : node.children)
         appendBooleanTreeItem(groupItem, child, scene);
@@ -240,12 +234,17 @@ void MainWindow::buildUi()
     auto *addCubeButton = new QPushButton("Add cube");
     auto *addSphereButton = new QPushButton("Add sphere");
     auto *addCylinderButton = new QPushButton("Add cylinder");
+    auto *addUnionGroupButton = new QPushButton("Add union group");
+    auto *addDifferenceGroupButton = new QPushButton("Add difference group");
+    auto *addIntersectionGroupButton = new QPushButton("Add intersection group");
     m_deleteShapeButton = new QPushButton("Delete selected");
+    m_deleteGroupButton = new QPushButton("Delete group");
     m_deleteShapeButton->setEnabled(false);
+    m_deleteGroupButton->setEnabled(false);
 
     auto *shapeTree = new SceneTreeWidget;
-    shapeTree->onShapeDroppedOnGroup = [this](int shapeId, ShapeNode::BooleanMode booleanMode) {
-        changeShapeBooleanMode(shapeId, booleanMode);
+    shapeTree->onTreeNodeDroppedOnGroup = [this](int nodeId, int parentGroupId) {
+        moveTreeNodeToGroup(nodeId, parentGroupId);
     };
     m_shapeTree = shapeTree;
     m_shapeTree->setHeaderHidden(true);
@@ -253,7 +252,11 @@ void MainWindow::buildUi()
     leftLayout->addWidget(addCubeButton);
     leftLayout->addWidget(addSphereButton);
     leftLayout->addWidget(addCylinderButton);
+    leftLayout->addWidget(addUnionGroupButton);
+    leftLayout->addWidget(addDifferenceGroupButton);
+    leftLayout->addWidget(addIntersectionGroupButton);
     leftLayout->addWidget(m_deleteShapeButton);
+    leftLayout->addWidget(m_deleteGroupButton);
     leftLayout->addWidget(new QLabel("Scene tree:"));
     leftLayout->addWidget(m_shapeTree);
     m_csgStatusLabel = new QLabel;
@@ -266,7 +269,11 @@ void MainWindow::buildUi()
     connect(addCubeButton, &QPushButton::clicked, this, &MainWindow::addCube);
     connect(addSphereButton, &QPushButton::clicked, this, &MainWindow::addSphere);
     connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
+    connect(addUnionGroupButton, &QPushButton::clicked, this, &MainWindow::addUnionGroup);
+    connect(addDifferenceGroupButton, &QPushButton::clicked, this, &MainWindow::addDifferenceGroup);
+    connect(addIntersectionGroupButton, &QPushButton::clicked, this, &MainWindow::addIntersectionGroup);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
+    connect(m_deleteGroupButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedGroup);
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
     connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
@@ -390,9 +397,44 @@ void MainWindow::addCylinder()
     }));
 }
 
+void MainWindow::addUnionGroup()
+{
+    addGroup(SceneDocument::TreeNode::Union);
+}
+
+void MainWindow::addDifferenceGroup()
+{
+    addGroup(SceneDocument::TreeNode::Difference);
+}
+
+void MainWindow::addIntersectionGroup()
+{
+    addGroup(SceneDocument::TreeNode::Intersection);
+}
+
 void MainWindow::deleteSelectedShape()
 {
     auto *command = new DeleteShapeCommand(&m_scene, m_scene.selectedShapeId(), [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::deleteSelectedGroup()
+{
+    if (!m_shapeTree || !m_shapeTree->currentItem()
+        || !m_shapeTree->currentItem()->data(0, GroupOperationRole).isValid()) {
+        return;
+    }
+
+    const int groupId = m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
+    auto *command = new RemoveGroupCommand(&m_scene, groupId, [this]() {
         refreshSceneViews();
     });
 
@@ -586,6 +628,50 @@ void MainWindow::selectShapeInSceneTree(int shapeId)
     m_shapeTree->blockSignals(false);
 }
 
+int MainWindow::selectedTreeGroupId() const
+{
+    if (!m_shapeTree || !m_shapeTree->currentItem())
+        return 0;
+
+    QTreeWidgetItem *item = m_shapeTree->currentItem();
+    if (item->data(0, GroupOperationRole).isValid())
+        return item->data(0, TreeNodeIdRole).toInt();
+
+    item = item->parent();
+    if (!item || !item->data(0, GroupOperationRole).isValid())
+        return 0;
+
+    return item->data(0, TreeNodeIdRole).toInt();
+}
+
+void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
+{
+    auto *command = new AddGroupCommand(&m_scene, operation, selectedTreeGroupId(), -1, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId)
+{
+    auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, -1, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
 void MainWindow::changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode)
 {
     const ShapeNode *shape = m_scene.shapeById(shapeId);
@@ -622,6 +708,11 @@ void MainWindow::refreshProperties()
         box->setEnabled(hasSelection);
 
     m_deleteShapeButton->setEnabled(hasSelection);
+    const int selectedGroupId = (m_shapeTree && m_shapeTree->currentItem()
+                                 && m_shapeTree->currentItem()->data(0, GroupOperationRole).isValid())
+                                    ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
+                                    : 0;
+    m_deleteGroupButton->setEnabled(selectedGroupId > 0 && selectedGroupId != m_scene.treeRoot().id);
     m_booleanMode->setEnabled(hasSelection);
 
     if (!hasSelection)
