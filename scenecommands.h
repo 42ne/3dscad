@@ -136,6 +136,13 @@ public:
                                 const QVector3D &position,
                                 const QVector3D &rotation,
                                 std::function<void()> onChanged);
+    UpdateGroupTransformCommand(SceneDocument *scene,
+                                int groupId,
+                                const QVector3D &newPosition,
+                                const QVector3D &newRotation,
+                                std::function<void()> onChanged,
+                                const QVector3D &oldPosition,
+                                const QVector3D &oldRotation);
 
     bool isValid() const;
     void undo() override;

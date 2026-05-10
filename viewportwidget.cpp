@@ -336,6 +336,16 @@ void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
 void ViewportWidget::setSelectedIndex(int index)
 {
     m_selectedIndex = index;
+    if (index >= 0)
+        m_selectedGroupId = 0;
+    update();
+}
+
+void ViewportWidget::setSelectedGroupId(int groupId)
+{
+    m_selectedGroupId = groupId;
+    if (groupId > 0)
+        m_selectedIndex = -1;
     update();
 }
 
@@ -593,8 +603,10 @@ void ViewportWidget::paintSoftware(QPainter &painter)
             painter.drawLine(line.a, line.b);
         }
 
-        if (m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size()) {
-            const QVector3D origin = m_shapes->at(m_selectedIndex).position;
+        const bool hasSelectedShape = m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size();
+        const bool hasSelectedGroup = m_scene && m_selectedGroupId > 0 && m_scene->treeNodeById(m_selectedGroupId);
+        if (hasSelectedShape || hasSelectedGroup) {
+            const QVector3D origin = selectedTransformOrigin();
             const QVector<QPair<QVector3D, QColor>> axes = {
                 {QVector3D(36.0f, 0.0f, 0.0f), QColor(235, 80, 80)},
                 {QVector3D(0.0f, 36.0f, 0.0f), QColor(80, 210, 120)},
@@ -633,41 +645,105 @@ bool ViewportWidget::canUseOpenGLRenderBackend() const
 #endif
 }
 
+QVector3D ViewportWidget::selectedTransformOrigin() const
+{
+    if (m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size())
+        return m_shapes->at(m_selectedIndex).position;
+
+    if (m_scene && m_selectedGroupId > 0) {
+        if (const SceneDocument::TreeNode *group = m_scene->treeNodeById(m_selectedGroupId))
+            return group->position;
+    }
+
+    return QVector3D();
+}
+
+bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const
+{
+    const bool hasSelectedShape = m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size();
+    const bool hasSelectedGroup = m_scene && m_selectedGroupId > 0 && m_scene->treeNodeById(m_selectedGroupId);
+    if (!hasSelectedShape && !hasSelectedGroup)
+        return false;
+
+    const QVector3D origin = selectedTransformOrigin();
+    const QVector<QPair<DragMode, QVector3D>> axes = {
+        {AxisXDrag, QVector3D(36.0f, 0.0f, 0.0f)},
+        {AxisYDrag, QVector3D(0.0f, 36.0f, 0.0f)},
+        {AxisZDrag, QVector3D(0.0f, 0.0f, 36.0f)}
+    };
+
+    float bestDistance = 9.0f;
+    DragMode pickedAxis = NoDrag;
+    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+
+    for (const auto &axis : axes) {
+        const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+        const float distance = distanceToSegment(position, start, end);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            pickedAxis = axis.first;
+        }
+    }
+
+    if (pickedAxis == NoDrag)
+        return false;
+
+    *dragMode = pickedAxis;
+    return true;
+}
+
+QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) const
+{
+    const QPoint pixelDelta = position - m_dragStartMousePosition;
+    const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
+    QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
+                         -pixelDelta.y() * worldUnitsPerPixel,
+                         0.0f);
+
+    if (m_dragMode == PlaneDrag)
+        return worldDelta;
+
+    QVector3D axisVector;
+    if (m_dragMode == AxisXDrag)
+        axisVector = QVector3D(1.0f, 0.0f, 0.0f);
+    else if (m_dragMode == AxisYDrag)
+        axisVector = QVector3D(0.0f, 1.0f, 0.0f);
+    else if (m_dragMode == AxisZDrag)
+        axisVector = QVector3D(0.0f, 0.0f, 1.0f);
+
+    const QVector3D origin = selectedTransformOrigin();
+    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+    const QPointF screenEnd = projectWorldPoint(origin + axisVector * 36.0f, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+    QVector2D screenAxis(screenEnd - screenOrigin);
+
+    if (screenAxis.lengthSquared() <= 0.0001f)
+        return QVector3D();
+
+    screenAxis.normalize();
+    const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
+    return axisVector * screenAmount * worldUnitsPerPixel;
+}
+
 void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
 
-    if (event->button() == Qt::LeftButton
-        && m_shapes
-        && m_selectedIndex >= 0
-        && m_selectedIndex < m_shapes->size()) {
-        const QVector3D origin = m_shapes->at(m_selectedIndex).position;
-        const QVector<QPair<DragMode, QVector3D>> axes = {
-            {AxisXDrag, QVector3D(36.0f, 0.0f, 0.0f)},
-            {AxisYDrag, QVector3D(0.0f, 36.0f, 0.0f)},
-            {AxisZDrag, QVector3D(0.0f, 0.0f, 36.0f)}
-        };
-
-        float bestDistance = 9.0f;
+    if (event->button() == Qt::LeftButton) {
         DragMode pickedAxis = NoDrag;
-        const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-
-        for (const auto &axis : axes) {
-            const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-            const float distance = distanceToSegment(event->pos(), start, end);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                pickedAxis = axis.first;
-            }
-        }
-
-        if (pickedAxis != NoDrag) {
-            m_draggingShape = true;
+        if (pickSelectedTransformAxis(event->pos(), &pickedAxis)) {
             m_dragMode = pickedAxis;
-            m_dragShapeIndex = m_selectedIndex;
             m_dragStartMousePosition = event->pos();
             m_lastDragDelta = QVector3D();
-            emit shapeDragStarted(m_selectedIndex);
+
+            if (m_selectedGroupId > 0) {
+                m_draggingGroup = true;
+                m_dragGroupId = m_selectedGroupId;
+                emit groupDragStarted(m_selectedGroupId);
+            } else {
+                m_draggingShape = true;
+                m_dragShapeIndex = m_selectedIndex;
+                emit shapeDragStarted(m_selectedIndex);
+            }
             return;
         }
     }
@@ -746,35 +822,8 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_draggingShape && (event->buttons() & Qt::LeftButton)) {
-        const QPoint pixelDelta = event->pos() - m_dragStartMousePosition;
-        const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
-        QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
-                             -pixelDelta.y() * worldUnitsPerPixel,
-                             0.0f);
-
-        if (m_shapes && m_dragShapeIndex >= 0 && m_dragShapeIndex < m_shapes->size() && m_dragMode != PlaneDrag) {
-            QVector3D axisVector;
-            if (m_dragMode == AxisXDrag)
-                axisVector = QVector3D(1.0f, 0.0f, 0.0f);
-            else if (m_dragMode == AxisYDrag)
-                axisVector = QVector3D(0.0f, 1.0f, 0.0f);
-            else if (m_dragMode == AxisZDrag)
-                axisVector = QVector3D(0.0f, 0.0f, 1.0f);
-
-            const QVector3D origin = m_shapes->at(m_dragShapeIndex).position;
-            const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-            const QPointF screenEnd = projectWorldPoint(origin + axisVector * 36.0f, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-            QVector2D screenAxis(screenEnd - screenOrigin);
-
-            if (screenAxis.lengthSquared() > 0.0001f) {
-                screenAxis.normalize();
-                const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
-                worldDelta = axisVector * screenAmount * worldUnitsPerPixel;
-            } else {
-                worldDelta = QVector3D();
-            }
-        }
+    if ((m_draggingShape || m_draggingGroup) && (event->buttons() & Qt::LeftButton)) {
+        const QVector3D worldDelta = dragDeltaForMousePosition(event->pos());
 
         if ((worldDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
             m_lastMousePosition = event->pos();
@@ -782,7 +831,10 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
         }
 
         m_lastDragDelta = worldDelta;
-        emit shapeDragged(m_dragShapeIndex, worldDelta);
+        if (m_draggingGroup)
+            emit groupDragged(m_dragGroupId, worldDelta);
+        else
+            emit shapeDragged(m_dragShapeIndex, worldDelta);
         m_lastMousePosition = event->pos();
         return;
     }
@@ -800,12 +852,19 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 
 void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && m_draggingShape) {
+    if (event->button() == Qt::LeftButton && (m_draggingShape || m_draggingGroup)) {
         const int shapeIndex = m_dragShapeIndex;
+        const int groupId = m_dragGroupId;
+        const bool wasDraggingGroup = m_draggingGroup;
         m_draggingShape = false;
+        m_draggingGroup = false;
         m_dragMode = NoDrag;
         m_dragShapeIndex = -1;
-        emit shapeDragFinished(shapeIndex);
+        m_dragGroupId = 0;
+        if (wasDraggingGroup)
+            emit groupDragFinished(groupId);
+        else
+            emit shapeDragFinished(shapeIndex);
     }
 }
 

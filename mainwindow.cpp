@@ -341,6 +341,9 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
     connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
     connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
+    connect(m_viewport, &ViewportWidget::groupDragStarted, this, &MainWindow::onViewportGroupDragStarted);
+    connect(m_viewport, &ViewportWidget::groupDragged, this, &MainWindow::onViewportGroupDragged);
+    connect(m_viewport, &ViewportWidget::groupDragFinished, this, &MainWindow::onViewportGroupDragFinished);
     connect(m_shapeTree, &QTreeWidget::currentItemChanged,
             this, &MainWindow::onSceneTreeSelectionChanged);
     connect(m_shapeTree, &QTreeWidget::customContextMenuRequested,
@@ -549,8 +552,12 @@ void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidg
     Q_UNUSED(previous);
 
     const int shapeId = current ? current->data(0, ShapeIdRole).toInt() : -1;
+    const int groupId = current && current->data(0, GroupOperationRole).isValid()
+                            ? current->data(0, TreeNodeIdRole).toInt()
+                            : 0;
     m_scene.setSelectedShapeId(shapeId);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
+    m_viewport->setSelectedGroupId(groupId);
     refreshProperties();
 }
 
@@ -714,6 +721,62 @@ void MainWindow::onViewportShapeDragFinished(int index)
     m_undoStack->push(command);
 }
 
+void MainWindow::onViewportGroupDragStarted(int groupId)
+{
+    selectTreeNodeInSceneTree(groupId);
+    m_viewport->setSelectedGroupId(groupId);
+
+    const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group)
+        return;
+
+    m_viewportDragGroupId = groupId;
+    m_viewportDragStartGroupPosition = group->position;
+    m_viewportDragStartGroupRotation = group->rotation;
+    m_viewportGroupDragActive = true;
+}
+
+void MainWindow::onViewportGroupDragged(int groupId, const QVector3D &delta)
+{
+    if (!m_viewportGroupDragActive || m_viewportDragGroupId != groupId)
+        return;
+
+    m_scene.updateGroupTransform(groupId, m_viewportDragStartGroupPosition + delta, m_viewportDragStartGroupRotation);
+    m_viewport->invalidateCsgPreview();
+    m_viewport->update();
+}
+
+void MainWindow::onViewportGroupDragFinished(int groupId)
+{
+    if (!m_viewportGroupDragActive || m_viewportDragGroupId != groupId)
+        return;
+
+    m_viewportGroupDragActive = false;
+
+    const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group)
+        return;
+
+    auto *command = new UpdateGroupTransformCommand(
+        &m_scene,
+        groupId,
+        group->position,
+        group->rotation,
+        [this]() {
+            refreshSceneViews();
+        },
+        m_viewportDragStartGroupPosition,
+        m_viewportDragStartGroupRotation);
+
+    if (!command->isValid()) {
+        delete command;
+        refreshProperties();
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
 void MainWindow::refreshShapeList()
 {
     const int selectedShapeId = m_scene.selectedShapeId();
@@ -743,6 +806,7 @@ void MainWindow::refreshSceneViews()
     refreshShapeList();
 
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
+    m_viewport->setSelectedGroupId(selectedDirectGroupId());
     refreshProperties();
     refreshCsgStatus();
 }

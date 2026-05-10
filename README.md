@@ -19,6 +19,7 @@ Implemented:
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
 - The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
+- Selected groups can be moved from the viewport with the same axis gizmo used for primitives.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - OpenSCAD generation and Manifold CSG apply group transforms from the document tree.

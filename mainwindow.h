@@ -42,6 +42,9 @@ private slots:
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
     void onViewportShapeDragFinished(int index);
+    void onViewportGroupDragStarted(int groupId);
+    void onViewportGroupDragged(int groupId, const QVector3D &delta);
+    void onViewportGroupDragFinished(int groupId);
 
 private:
     void buildUi();
@@ -68,6 +71,10 @@ private:
     bool m_updatingProperties = false;
     bool m_viewportDragActive = false;
     ShapeNode m_viewportDragStartShape;
+    bool m_viewportGroupDragActive = false;
+    int m_viewportDragGroupId = 0;
+    QVector3D m_viewportDragStartGroupPosition;
+    QVector3D m_viewportDragStartGroupRotation;
 
     ViewportWidget *m_viewport = nullptr;
     QTreeWidget *m_shapeTree = nullptr;

@@ -28,6 +28,7 @@ public:
     void setScene(const SceneDocument *scene);
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
+    void setSelectedGroupId(int groupId);
     void setRenderBackend(RenderBackend backend);
     RenderBackend renderBackend() const;
     QString renderBackendName() const;
@@ -38,6 +39,9 @@ signals:
     void shapeDragStarted(int index);
     void shapeDragged(int index, const QVector3D &delta);
     void shapeDragFinished(int index);
+    void groupDragStarted(int groupId);
+    void groupDragged(int groupId, const QVector3D &delta);
+    void groupDragFinished(int groupId);
 
 protected:
     void initializeGL() override;
@@ -60,11 +64,15 @@ private:
     void paintSoftware(QPainter &painter);
     void paintOpenGLPreview();
     bool canUseOpenGLRenderBackend() const;
+    QVector3D selectedTransformOrigin() const;
+    bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
+    QVector3D dragDeltaForMousePosition(const QPoint &position) const;
 
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     int m_selectedIndex = -1;
+    int m_selectedGroupId = 0;
     float m_cameraYaw = -35.0f;
     float m_cameraPitch = 28.0f;
     float m_cameraDistance = 220.0f;
@@ -72,8 +80,10 @@ private:
     QPoint m_dragStartMousePosition;
     QVector3D m_lastDragDelta;
     bool m_draggingShape = false;
+    bool m_draggingGroup = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
+    int m_dragGroupId = 0;
     CsgPreview m_cachedCsgPreview;
     uint m_cachedCsgFingerprint = 0;
     bool m_csgPreviewDirty = true;

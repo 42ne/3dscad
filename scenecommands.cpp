@@ -318,6 +318,31 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
+UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
+                                                         int groupId,
+                                                         const QVector3D &newPosition,
+                                                         const QVector3D &newRotation,
+                                                         std::function<void()> onChanged,
+                                                         const QVector3D &oldPosition,
+                                                         const QVector3D &oldRotation)
+    : QUndoCommand("Update group transform")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_scene->updateGroupTransform(groupId, oldPosition, oldRotation);
+    m_oldSnapshot = m_scene->snapshot();
+
+    m_valid = m_scene->updateGroupTransform(groupId, newPosition, newRotation);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
 bool UpdateGroupTransformCommand::isValid() const
 {
     return m_valid;
