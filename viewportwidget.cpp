@@ -376,7 +376,8 @@ void ViewportWidget::paintGL()
 
     if (m_shapes) {
         QVector<Triangle2D> triangles;
-        QVector<Line2D> helperLines;
+        QVector<Line2D> backgroundHelperLines;
+        QVector<Line2D> foregroundHelperLines;
 
         if (m_draggingShape) {
             csgStatus = "CSG preview: paused while dragging";
@@ -422,17 +423,31 @@ void ViewportWidget::paintGL()
                         color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
                 }
 
-                if (item.helper)
-                    appendWireframe(helperLines, item.mesh, color.lighter(115));
-                else
+                if (item.helper) {
+                    if (item.shapeIndex == m_selectedIndex) {
+                        QColor selectedColor = color.lighter(115);
+                        selectedColor.setAlpha(215);
+                        appendWireframe(foregroundHelperLines, item.mesh, selectedColor);
+                    } else {
+                        QColor quietColor = color.lighter(95);
+                        quietColor.setAlpha(75);
+                        appendWireframe(backgroundHelperLines, item.mesh, quietColor);
+                    }
+                } else {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
+                }
             }
+        }
+
+        for (const Line2D &line : backgroundHelperLines) {
+            painter.setPen(QPen(line.color, 1, Qt::DashLine, Qt::RoundCap));
+            painter.drawLine(line.a, line.b);
         }
 
         m_pickBufferSize = size();
         drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
 
-        for (const Line2D &line : helperLines) {
+        for (const Line2D &line : foregroundHelperLines) {
             painter.setPen(QPen(line.color, 2, Qt::DashLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
         }
