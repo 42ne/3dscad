@@ -11,8 +11,22 @@ struct CsgRenderItem
     int shapeIndex = -1;
     ShapeNode::BooleanMode booleanMode = ShapeNode::Add;
     bool computed = false;
+    bool helper = false;
 };
 
-QVector<CsgRenderItem> buildCsgPreviewItems(const QVector<ShapeNode> &shapes, int selectedIndex);
+struct CsgPreview
+{
+    enum Mode {
+        Plain,
+        BoxComputed,
+        Fallback
+    };
+
+    QVector<CsgRenderItem> items;
+    Mode mode = Plain;
+    QString statusText;
+};
+
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int selectedIndex);
 
 #endif

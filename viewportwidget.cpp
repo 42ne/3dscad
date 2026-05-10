@@ -29,6 +29,13 @@ struct Triangle2D
     int shapeIndex = -1;
 };
 
+struct Line2D
+{
+    QPointF a;
+    QPointF b;
+    QColor color;
+};
+
 struct SceneLight
 {
     QVector3D direction;
@@ -207,6 +214,18 @@ static void drawTrianglesWithDepth(QPainter *painter,
     painter->drawImage(0, 0, *image);
 }
 
+static QVector<QPair<QVector3D, QVector3D>> meshEdges(const SceneMesh &mesh)
+{
+    QVector<QPair<QVector3D, QVector3D>> edges;
+    for (const MeshTriangle &triangle : mesh.triangles) {
+        edges.append({triangle.a, triangle.b});
+        edges.append({triangle.b, triangle.c});
+        edges.append({triangle.c, triangle.a});
+    }
+
+    return edges;
+}
+
 ViewportWidget::ViewportWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
@@ -342,13 +361,26 @@ void ViewportWidget::paintGL()
         }
     };
 
+    auto appendWireframe = [&](QVector<Line2D> &lines, const SceneMesh &mesh, const QColor &color) {
+        for (const auto &edge : meshEdges(mesh)) {
+            Line2D line;
+            line.a = project(edge.first).point;
+            line.b = project(edge.second).point;
+            line.color = color;
+            lines.append(line);
+        }
+    };
+
     drawGrid();
+    QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
         QVector<Triangle2D> triangles;
+        QVector<Line2D> helperLines;
 
-        const QVector<CsgRenderItem> renderItems = buildCsgPreviewItems(*m_shapes, m_selectedIndex);
-        for (const CsgRenderItem &item : renderItems) {
+        const CsgPreview preview = buildCsgPreview(*m_shapes, m_selectedIndex);
+        csgStatus = preview.statusText;
+        for (const CsgRenderItem &item : preview.items) {
             QColor color = QColor(80, 160, 255);
             if (item.booleanMode == ShapeNode::Subtract)
                 color = QColor(225, 95, 95);
@@ -367,11 +399,19 @@ void ViewportWidget::paintGL()
                     color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
             }
 
-            appendMesh(triangles, item.mesh, color, item.shapeIndex);
+            if (item.helper)
+                appendWireframe(helperLines, item.mesh, color.lighter(115));
+            else
+                appendMesh(triangles, item.mesh, color, item.shapeIndex);
         }
 
         m_pickBufferSize = size();
         drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
+
+        for (const Line2D &line : helperLines) {
+            painter.setPen(QPen(line.color, 2, Qt::DashLine, Qt::RoundCap));
+            painter.drawLine(line.a, line.b);
+        }
 
         if (m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size()) {
             const QVector3D origin = m_shapes->at(m_selectedIndex).position;
@@ -395,6 +435,7 @@ void ViewportWidget::paintGL()
 
     painter.setPen(QColor(220, 220, 220));
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move");
+    painter.drawText(12, 42, csgStatus);
 
     painter.end();
 }

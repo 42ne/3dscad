@@ -102,8 +102,9 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
-QVector<CsgRenderItem> buildCsgPreviewItems(const QVector<ShapeNode> &shapes, int selectedIndex)
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int selectedIndex)
 {
+    CsgPreview preview;
     bool hasBoolean = false;
     bool canComputeBoxes = true;
     QVector<Box> addBoxes;
@@ -128,12 +129,21 @@ QVector<CsgRenderItem> buildCsgPreviewItems(const QVector<ShapeNode> &shapes, in
             addBoxes.append(boxFromCube(shape, i));
     }
 
-    if (!hasBoolean || !canComputeBoxes || addBoxes.isEmpty()) {
-        QVector<CsgRenderItem> fallbackItems;
-        for (int i = 0; i < shapes.size(); ++i)
-            fallbackItems.append(renderItemFromShape(shapes[i], i));
+    if (!hasBoolean)
+        preview.mode = CsgPreview::Plain;
+    else if (!canComputeBoxes || addBoxes.isEmpty())
+        preview.mode = CsgPreview::Fallback;
+    else
+        preview.mode = CsgPreview::BoxComputed;
 
-        return fallbackItems;
+    if (preview.mode != CsgPreview::BoxComputed) {
+        for (int i = 0; i < shapes.size(); ++i)
+            preview.items.append(renderItemFromShape(shapes[i], i));
+
+        preview.statusText = preview.mode == CsgPreview::Plain
+                                 ? "CSG preview: plain mesh"
+                                 : "CSG preview: fallback (box CSG needs unrotated cubes)";
+        return preview;
     }
 
     QVector<Box> result = addBoxes;
@@ -156,18 +166,21 @@ QVector<CsgRenderItem> buildCsgPreviewItems(const QVector<ShapeNode> &shapes, in
         result = next;
     }
 
-    QVector<CsgRenderItem> items;
     for (const Box &box : result) {
         CsgRenderItem item;
         item.mesh = buildBoxMesh(box.minimum, box.maximum);
         item.shapeIndex = box.shapeIndex;
         item.booleanMode = ShapeNode::Add;
         item.computed = true;
-        items.append(item);
+        preview.items.append(item);
     }
 
-    if (selectedIndex >= 0 && selectedIndex < shapes.size() && shapes[selectedIndex].booleanMode != ShapeNode::Add)
-        items.append(renderItemFromShape(shapes[selectedIndex], selectedIndex));
+    if (selectedIndex >= 0 && selectedIndex < shapes.size() && shapes[selectedIndex].booleanMode != ShapeNode::Add) {
+        CsgRenderItem helper = renderItemFromShape(shapes[selectedIndex], selectedIndex);
+        helper.helper = true;
+        preview.items.append(helper);
+    }
 
-    return items;
+    preview.statusText = "CSG preview: box mode";
+    return preview;
 }
