@@ -865,12 +865,33 @@ static bool treeHasBooleanOperation(const SceneDocument::TreeNode &node)
     return false;
 }
 
+static bool hasVectorValue(const QVector3D &vector)
+{
+    return !qFuzzyIsNull(vector.x()) || !qFuzzyIsNull(vector.y()) || !qFuzzyIsNull(vector.z());
+}
+
+static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::Group
+        && (hasVectorValue(node.position) || hasVectorValue(node.rotation))) {
+        return true;
+    }
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (treeHasGroupTransform(child))
+            return true;
+    }
+
+    return false;
+}
+
 CsgPreview buildCsgPreview(const SceneDocument &scene)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
     const bool hasTreeBoolean = treeHasBooleanOperation(scene.treeRoot());
+    const bool hasGroupTransform = treeHasGroupTransform(scene.treeRoot());
 
-    if (hasTreeBoolean && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -884,7 +905,9 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             preview.mode = CsgPreview::ManifoldComputed;
             preview.items.append(item);
             appendHelpers(&preview, shapes);
-            preview.statusText = "CSG preview: Manifold exact mesh";
+            preview.statusText = hasTreeBoolean
+                                     ? "CSG preview: Manifold exact mesh"
+                                     : "CSG preview: Manifold tree transform mesh";
             return preview;
         }
 

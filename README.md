@@ -24,6 +24,7 @@ Implemented:
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - OpenSCAD generation and Manifold CSG apply group transforms from the document tree.
 - CSG preview detects boolean operations from the explicit tree, not only from legacy per-shape boolean flags.
+- CSG preview also uses the explicit tree when group transforms are present, so transformed plain `union()` groups move as a unit.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
 - OpenSCAD generation for the supported scene subset.

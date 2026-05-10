@@ -45,6 +45,7 @@ The properties panel derives the selected primitive's displayed tree role from `
 `OpenScadGenerator` converts `SceneDocument` to OpenSCAD code.
 
 `SceneDocument::TreeNode` is the editable document tree used by OpenSCAD generation, Manifold CSG evaluation, CSG preview mode detection, and scene-tree UI projection. It is still initialized from flat per-shape boolean modes, but it is updated as document state instead of being rebuilt on every shape edit.
+CSG preview routes through tree-based Manifold evaluation whenever the tree contains boolean operations or group transforms; the flat shape fallback is only for untransformed plain primitive previews.
 
 Node kinds:
 
