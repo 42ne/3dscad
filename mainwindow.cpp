@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "csgevaluator.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
 #include "scenecommands.h"
@@ -29,6 +30,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     buildUi();
     refreshOpenScadCode();
+    refreshCsgStatus();
     refreshProperties();
 }
 
@@ -98,6 +100,9 @@ void MainWindow::buildUi()
     leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(new QLabel("Scene tree:"));
     leftLayout->addWidget(m_shapeList);
+    m_csgStatusLabel = new QLabel;
+    m_csgStatusLabel->setWordWrap(true);
+    leftLayout->addWidget(m_csgStatusLabel);
 
     leftDock->setWidget(leftPanel);
     addDockWidget(Qt::LeftDockWidgetArea, leftDock);
@@ -375,6 +380,7 @@ void MainWindow::refreshShapeList()
 
     refreshOpenScadCode();
     m_viewport->update();
+    refreshCsgStatus();
 }
 
 void MainWindow::refreshSceneViews()
@@ -387,6 +393,7 @@ void MainWindow::refreshSceneViews()
 
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
+    refreshCsgStatus();
 }
 
 void MainWindow::refreshProperties()
@@ -457,4 +464,13 @@ void MainWindow::refreshProperties()
 void MainWindow::refreshOpenScadCode()
 {
     m_codeEditor->setPlainText(OpenScadGenerator::generate(m_scene));
+}
+
+void MainWindow::refreshCsgStatus()
+{
+    if (!m_csgStatusLabel)
+        return;
+
+    const CsgPreview preview = buildCsgPreview(m_scene.shapes());
+    m_csgStatusLabel->setText(preview.statusText);
 }

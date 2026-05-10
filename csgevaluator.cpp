@@ -19,6 +19,56 @@ static bool isAxisAlignedCube(const ShapeNode &shape)
            && qFuzzyIsNull(shape.rotation.z());
 }
 
+static QVector3D inverseRotatePoint(const QVector3D &point, const QVector3D &degrees)
+{
+    const float rx = qDegreesToRadians(-degrees.x());
+    const float ry = qDegreesToRadians(-degrees.y());
+    const float rz = qDegreesToRadians(-degrees.z());
+
+    QVector3D p = point;
+
+    p = QVector3D(
+        p.x() * qCos(rz) - p.y() * qSin(rz),
+        p.x() * qSin(rz) + p.y() * qCos(rz),
+        p.z());
+
+    p = QVector3D(
+        p.x() * qCos(ry) + p.z() * qSin(ry),
+        p.y(),
+        -p.x() * qSin(ry) + p.z() * qCos(ry));
+
+    p = QVector3D(
+        p.x(),
+        p.y() * qCos(rx) - p.z() * qSin(rx),
+        p.y() * qSin(rx) + p.z() * qCos(rx));
+
+    return p;
+}
+
+static QVector3D toShapeLocal(const ShapeNode &shape, const QVector3D &worldPoint)
+{
+    return inverseRotatePoint(worldPoint - shape.position, shape.rotation);
+}
+
+static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
+{
+    const QVector3D local = toShapeLocal(shape, worldPoint);
+
+    if (shape.type == ShapeNode::Sphere)
+        return local.lengthSquared() <= shape.radius * shape.radius;
+
+    if (shape.type == ShapeNode::Cylinder) {
+        const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
+        return radialDistanceSquared <= shape.radius * shape.radius
+               && qAbs(local.z()) <= shape.height * 0.5f;
+    }
+
+    const QVector3D half = shape.size * 0.5f;
+    return qAbs(local.x()) <= half.x()
+           && qAbs(local.y()) <= half.y()
+           && qAbs(local.z()) <= half.z();
+}
+
 static Box boxFromCube(const ShapeNode &shape, int shapeIndex)
 {
     const QVector3D half = shape.size * 0.5f;
@@ -380,10 +430,91 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
+static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes)
+{
+    for (int i = 0; i < shapes.size(); ++i) {
+        if (shapes[i].booleanMode == ShapeNode::Add)
+            continue;
+
+        CsgRenderItem helper = renderItemFromShape(shapes[i], i);
+        helper.helper = true;
+        preview->items.append(helper);
+    }
+}
+
+static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes)
+{
+    CsgPreview preview;
+    preview.mode = CsgPreview::MeshApproximate;
+
+    QVector<ShapeNode> subtractShapes;
+    QVector<ShapeNode> intersectShapes;
+
+    for (const ShapeNode &shape : shapes) {
+        if (shape.booleanMode == ShapeNode::Subtract)
+            subtractShapes.append(shape);
+        else if (shape.booleanMode == ShapeNode::Intersect)
+            intersectShapes.append(shape);
+    }
+
+    for (int i = 0; i < shapes.size(); ++i) {
+        const ShapeNode &shape = shapes[i];
+        if (shape.booleanMode != ShapeNode::Add)
+            continue;
+
+        const SceneMesh sourceMesh = buildShapeMesh(shape);
+        CsgRenderItem item;
+        item.shapeIndex = i;
+        item.booleanMode = ShapeNode::Add;
+        item.computed = true;
+
+        for (const MeshTriangle &triangle : sourceMesh.triangles) {
+            const QVector3D centroid = (triangle.a + triangle.b + triangle.c) / 3.0f;
+            bool removed = false;
+
+            for (const ShapeNode &subtractShape : subtractShapes) {
+                if (containsPoint(subtractShape, centroid)) {
+                    removed = true;
+                    break;
+                }
+            }
+
+            if (removed)
+                continue;
+
+            if (!intersectShapes.isEmpty()) {
+                bool insideIntersection = false;
+                for (const ShapeNode &intersectShape : intersectShapes) {
+                    if (containsPoint(intersectShape, centroid)) {
+                        insideIntersection = true;
+                        break;
+                    }
+                }
+
+                if (!insideIntersection)
+                    continue;
+            }
+
+            item.mesh.triangles.append(triangle);
+            item.mesh.shadowPoints.append(triangle.a);
+            item.mesh.shadowPoints.append(triangle.b);
+            item.mesh.shadowPoints.append(triangle.c);
+        }
+
+        if (!item.mesh.triangles.isEmpty())
+            preview.items.append(item);
+    }
+
+    appendHelpers(&preview, shapes);
+    preview.statusText = "CSG preview: mesh approximate (no cut faces yet)";
+    return preview;
+}
+
 CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 {
     CsgPreview preview;
     bool hasBoolean = false;
+    bool hasAddShape = false;
     bool canComputeBoxes = true;
     QVector<Box> addBoxes;
     QVector<Box> subtractBoxes;
@@ -393,6 +524,8 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
         const ShapeNode &shape = shapes[i];
         if (shape.booleanMode != ShapeNode::Add)
             hasBoolean = true;
+        else
+            hasAddShape = true;
 
         if (!isAxisAlignedCube(shape)) {
             canComputeBoxes = false;
@@ -409,10 +542,15 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
     if (!hasBoolean)
         preview.mode = CsgPreview::Plain;
-    else if (!canComputeBoxes || addBoxes.isEmpty())
+    else if (!hasAddShape)
         preview.mode = CsgPreview::Fallback;
+    else if (!canComputeBoxes)
+        preview.mode = CsgPreview::MeshApproximate;
     else
         preview.mode = CsgPreview::BoxComputed;
+
+    if (preview.mode == CsgPreview::MeshApproximate)
+        return buildMeshApproximationPreview(shapes);
 
     if (preview.mode != CsgPreview::BoxComputed) {
         for (int i = 0; i < shapes.size(); ++i)
@@ -420,7 +558,7 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
         preview.statusText = preview.mode == CsgPreview::Plain
                                  ? "CSG preview: plain mesh"
-                                 : "CSG preview: fallback (box CSG needs unrotated cubes)";
+                                 : "CSG preview: fallback (add a solid base shape)";
         return preview;
     }
 
@@ -446,14 +584,7 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
     preview.items = buildSurfaceItems(result, shapes.size());
 
-    for (int i = 0; i < shapes.size(); ++i) {
-        if (shapes[i].booleanMode == ShapeNode::Add)
-            continue;
-
-        CsgRenderItem helper = renderItemFromShape(shapes[i], i);
-        helper.helper = true;
-        preview.items.append(helper);
-    }
+    appendHelpers(&preview, shapes);
 
     preview.statusText = "CSG preview: box mode";
     return preview;

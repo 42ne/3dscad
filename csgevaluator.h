@@ -3,6 +3,7 @@
 
 #include "scenemesh.h"
 
+#include <QString>
 #include <QVector>
 
 struct CsgRenderItem
@@ -19,6 +20,7 @@ struct CsgPreview
     enum Mode {
         Plain,
         BoxComputed,
+        MeshApproximate,
         Fallback
     };
 

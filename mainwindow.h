@@ -7,6 +7,7 @@
 
 class QTextEdit;
 class QListWidget;
+class QLabel;
 class QDoubleSpinBox;
 class QComboBox;
 class QPushButton;
@@ -39,6 +40,7 @@ private:
     void refreshShapeList();
     void refreshProperties();
     void refreshOpenScadCode();
+    void refreshCsgStatus();
     void refreshSceneViews();
 
 private:
@@ -55,6 +57,7 @@ private:
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_deleteShapeButton = nullptr;
+    QLabel *m_csgStatusLabel = nullptr;
 
     QDoubleSpinBox *m_posX = nullptr;
     QDoubleSpinBox *m_posY = nullptr;
