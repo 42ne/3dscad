@@ -9,6 +9,7 @@ The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport 
 Implemented:
 
 - Scene tree with cube, sphere, and cylinder primitives.
+- Scene tree displays the generated boolean structure as `union`, `difference`, and `intersection` groups.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
 - OpenSCAD generation for the supported scene subset.
@@ -93,11 +94,12 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
 - No node graph or operation tree UI yet.
+- Boolean tree UI is currently read-only; shapes still use the flat per-shape boolean mode.
 
 ## Next Good Steps
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
-2. Add a real operation tree UI for `union`, `difference`, and `intersection`.
+2. Make the boolean tree editable with explicit groups and drag/drop shape placement.
 3. Move viewport rendering toward real OpenGL vertex/index buffers.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.

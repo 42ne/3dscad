@@ -6,13 +6,14 @@
 #include <QMainWindow>
 
 class QTextEdit;
-class QListWidget;
 class QLabel;
 class QDoubleSpinBox;
 class QComboBox;
 class QPushButton;
 class QAction;
 class QUndoStack;
+class QTreeWidget;
+class QTreeWidgetItem;
 class ViewportWidget;
 
 class MainWindow : public QMainWindow
@@ -30,7 +31,7 @@ private slots:
     void applyOpenScadCode();
     void sendToOpenScad();
 
-    void onSelectionChanged(int row);
+    void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
     void onPropertyChanged();
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
@@ -43,6 +44,7 @@ private:
     void refreshOpenScadCode();
     void refreshCsgStatus();
     void refreshSceneViews();
+    void selectShapeInSceneTree(int shapeId);
     QString previewScadPath() const;
     bool writeOpenScadPreview(bool notify);
 
@@ -56,7 +58,7 @@ private:
     ShapeNode m_viewportDragStartShape;
 
     ViewportWidget *m_viewport = nullptr;
-    QListWidget *m_shapeList = nullptr;
+    QTreeWidget *m_shapeTree = nullptr;
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_sendToOpenScadButton = nullptr;

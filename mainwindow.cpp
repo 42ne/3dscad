@@ -2,6 +2,7 @@
 #include "csgevaluator.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
+#include "scenebooleantree.h"
 #include "scenecommands.h"
 #include "viewportwidget.h"
 
@@ -17,8 +18,6 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
-#include <QListWidget>
-#include <QListWidgetItem>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -26,6 +25,9 @@
 #include <QSaveFile>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
 #include <QUndoStack>
 #include <QVBoxLayout>
 
@@ -47,6 +49,53 @@ static QDoubleSpinBox *makeSpinBox()
     box->setDecimals(2);
     box->setSingleStep(1.0);
     return box;
+}
+
+static QString booleanGroupLabel(SceneBooleanNode::Type type)
+{
+    if (type == SceneBooleanNode::Difference)
+        return "difference()";
+    if (type == SceneBooleanNode::Intersection)
+        return "intersection()";
+    return "union()";
+}
+
+static void markGroupItem(QTreeWidgetItem *item)
+{
+    QFont font = item->font(0);
+    font.setBold(true);
+    item->setFont(0, font);
+    item->setData(0, Qt::UserRole, -1);
+    item->setForeground(0, QColor(82, 82, 82));
+    item->setFlags(Qt::ItemIsEnabled);
+}
+
+static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
+                                              const SceneBooleanNode &node,
+                                              const SceneDocument &scene)
+{
+    if (node.type == SceneBooleanNode::Empty)
+        return nullptr;
+
+    if (node.type == SceneBooleanNode::Primitive) {
+        const ShapeNode *shape = scene.shapeAt(node.shapeIndex);
+        if (!shape)
+            return nullptr;
+
+        auto *item = new QTreeWidgetItem(parent);
+        item->setText(0, shape->name);
+        item->setData(0, Qt::UserRole, shape->id);
+        return item;
+    }
+
+    auto *groupItem = new QTreeWidgetItem(parent);
+    groupItem->setText(0, booleanGroupLabel(node.type));
+    markGroupItem(groupItem);
+
+    for (const SceneBooleanNode &child : node.children)
+        appendBooleanTreeItem(groupItem, child, scene);
+
+    return groupItem;
 }
 
 void MainWindow::buildUi()
@@ -105,14 +154,15 @@ void MainWindow::buildUi()
     m_deleteShapeButton = new QPushButton("Delete selected");
     m_deleteShapeButton->setEnabled(false);
 
-    m_shapeList = new QListWidget;
+    m_shapeTree = new QTreeWidget;
+    m_shapeTree->setHeaderHidden(true);
 
     leftLayout->addWidget(addCubeButton);
     leftLayout->addWidget(addSphereButton);
     leftLayout->addWidget(addCylinderButton);
     leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(new QLabel("Scene tree:"));
-    leftLayout->addWidget(m_shapeList);
+    leftLayout->addWidget(m_shapeTree);
     m_csgStatusLabel = new QLabel;
     m_csgStatusLabel->setWordWrap(true);
     leftLayout->addWidget(m_csgStatusLabel);
@@ -127,12 +177,14 @@ void MainWindow::buildUi()
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
     connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
-        m_shapeList->setCurrentRow(index);
+        const ShapeNode *shape = m_scene.shapeAt(index);
+        selectShapeInSceneTree(shape ? shape->id : -1);
     });
     connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
     connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
     connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
-    connect(m_shapeList, &QListWidget::currentRowChanged, this, &MainWindow::onSelectionChanged);
+    connect(m_shapeTree, &QTreeWidget::currentItemChanged,
+            this, &MainWindow::onSceneTreeSelectionChanged);
 
     // Right dock: properties
     auto *rightDock = new QDockWidget("Properties", this);
@@ -297,10 +349,12 @@ void MainWindow::sendToOpenScad()
             .arg(nativePath));
 }
 
-void MainWindow::onSelectionChanged(int row)
+void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous)
 {
-    QListWidgetItem *item = m_shapeList->item(row);
-    m_scene.setSelectedShapeId(item ? item->data(Qt::UserRole).toInt() : -1);
+    Q_UNUSED(previous);
+
+    const int shapeId = current ? current->data(0, Qt::UserRole).toInt() : -1;
+    m_scene.setSelectedShapeId(shapeId);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
 }
@@ -338,9 +392,7 @@ void MainWindow::onPropertyChanged()
 void MainWindow::onViewportShapeDragStarted(int index)
 {
     m_scene.setSelectedIndex(index);
-    m_shapeList->blockSignals(true);
-    m_shapeList->setCurrentRow(m_scene.selectedIndex());
-    m_shapeList->blockSignals(false);
+    selectShapeInSceneTree(m_scene.selectedShapeId());
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
 
     const ShapeNode *shape = m_scene.selectedShape();
@@ -392,21 +444,17 @@ void MainWindow::onViewportShapeDragFinished(int index)
 
 void MainWindow::refreshShapeList()
 {
-    m_shapeList->blockSignals(true);
-    m_shapeList->clear();
+    const int selectedShapeId = m_scene.selectedShapeId();
 
-    for (const ShapeNode &s : m_scene.shapes()) {
-        QString label = s.name;
-        if (s.booleanMode == ShapeNode::Subtract)
-            label = QString("%1 (subtract)").arg(s.name);
-        else if (s.booleanMode == ShapeNode::Intersect)
-            label = QString("%1 (intersect)").arg(s.name);
+    m_shapeTree->blockSignals(true);
+    m_shapeTree->clear();
 
-        auto *item = new QListWidgetItem(label);
-        item->setData(Qt::UserRole, s.id);
-        m_shapeList->addItem(item);
-    }
-    m_shapeList->blockSignals(false);
+    const SceneBooleanNode root = buildSceneBooleanTree(m_scene.shapes());
+    appendBooleanTreeItem(m_shapeTree->invisibleRootItem(), root, m_scene);
+    m_shapeTree->expandAll();
+
+    m_shapeTree->blockSignals(false);
+    selectShapeInSceneTree(selectedShapeId);
 
     refreshOpenScadCode();
     m_viewport->update();
@@ -416,14 +464,34 @@ void MainWindow::refreshShapeList()
 void MainWindow::refreshSceneViews()
 {
     refreshShapeList();
-
-    m_shapeList->blockSignals(true);
-    m_shapeList->setCurrentRow(m_scene.selectedIndex());
-    m_shapeList->blockSignals(false);
+    selectShapeInSceneTree(m_scene.selectedShapeId());
 
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
     refreshCsgStatus();
+}
+
+void MainWindow::selectShapeInSceneTree(int shapeId)
+{
+    if (!m_shapeTree)
+        return;
+
+    m_shapeTree->blockSignals(true);
+
+    QTreeWidgetItem *selectedItem = nullptr;
+    if (shapeId >= 0) {
+        QTreeWidgetItemIterator it(m_shapeTree);
+        while (*it) {
+            if ((*it)->data(0, Qt::UserRole).toInt() == shapeId) {
+                selectedItem = *it;
+                break;
+            }
+            ++it;
+        }
+    }
+
+    m_shapeTree->setCurrentItem(selectedItem);
+    m_shapeTree->blockSignals(false);
 }
 
 void MainWindow::refreshProperties()
