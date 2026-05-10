@@ -68,9 +68,14 @@ public:
 
 private:
     bool isValidIndex(int index) const;
+    bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
+    bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
+    bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
+    void pruneEmptyGroups(TreeNode *node);
     void rebuildTreeFromShapes();
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
+    TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
 
 private:
     QVector<ShapeNode> m_shapes;

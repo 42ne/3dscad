@@ -111,7 +111,11 @@ int SceneDocument::insertShape(int index, const ShapeNode &shape)
     const int insertIndex = qBound(0, index, m_shapes.size());
     m_shapes.insert(insertIndex, shapeWithId);
     m_selectedShapeId = shapeWithId.id;
-    rebuildTreeFromShapes();
+
+    if (m_treeRoot.id <= 0)
+        rebuildTreeFromShapes();
+    else
+        appendPrimitiveToOperation(operationForBooleanMode(shapeWithId.booleanMode), makePrimitiveNode(shapeWithId.id));
 
     return shapeWithId.id;
 }
@@ -158,9 +162,13 @@ bool SceneDocument::updateShape(const ShapeNode &shape)
     if (!existingShape)
         return false;
 
+    const ShapeNode::BooleanMode oldBooleanMode = existingShape->booleanMode;
     *existingShape = shape;
     m_selectedShapeId = shape.id;
-    rebuildTreeFromShapes();
+
+    if (oldBooleanMode != shape.booleanMode)
+        movePrimitiveToOperation(shape.id, operationForBooleanMode(shape.booleanMode));
+
     return true;
 }
 
@@ -178,7 +186,8 @@ bool SceneDocument::takeShapeById(int id, ShapeNode *removedShape, int *removedI
 
     const bool wasSelected = m_shapes[index].id == m_selectedShapeId;
     m_shapes.removeAt(index);
-    rebuildTreeFromShapes();
+    removePrimitiveFromTree(&m_treeRoot, id);
+    pruneEmptyGroups(&m_treeRoot);
 
     if (wasSelected) {
         if (m_shapes.isEmpty()) {
@@ -207,6 +216,103 @@ bool SceneDocument::isValidIndex(int index) const
     return index >= 0 && index < m_shapes.size();
 }
 
+bool SceneDocument::removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode)
+{
+    if (!node)
+        return false;
+
+    for (int i = 0; i < node->children.size(); ++i) {
+        TreeNode &child = node->children[i];
+        if (child.type == TreeNode::Primitive && child.shapeId == shapeId) {
+            if (removedNode)
+                *removedNode = child;
+
+            node->children.removeAt(i);
+            return true;
+        }
+
+        if (child.type == TreeNode::Group && removePrimitiveFromTree(&child, shapeId, removedNode))
+            return true;
+    }
+
+    return false;
+}
+
+bool SceneDocument::appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode)
+{
+    if (primitiveNode.type != TreeNode::Primitive)
+        return false;
+
+    if (m_treeRoot.id <= 0 || m_treeRoot.type != TreeNode::Group) {
+        m_treeRoot = makeGroupNode(operation);
+        m_treeRoot.children.append(primitiveNode);
+        return true;
+    }
+
+    if (m_treeRoot.operation == operation) {
+        m_treeRoot.children.append(primitiveNode);
+        return true;
+    }
+
+    for (TreeNode &child : m_treeRoot.children) {
+        if (child.type == TreeNode::Group && child.operation == operation) {
+            child.children.append(primitiveNode);
+            return true;
+        }
+    }
+
+    TreeNode group = makeGroupNode(operation);
+    group.children.append(primitiveNode);
+
+    if (operation == TreeNode::Intersection) {
+        TreeNode intersectionRoot = makeGroupNode(TreeNode::Intersection);
+        intersectionRoot.children.append(m_treeRoot);
+        intersectionRoot.children.append(group);
+        m_treeRoot = intersectionRoot;
+        return true;
+    }
+
+    if (m_treeRoot.operation == TreeNode::Difference) {
+        m_treeRoot.children.append(primitiveNode);
+        return true;
+    }
+
+    TreeNode differenceRoot = makeGroupNode(TreeNode::Difference);
+    differenceRoot.children.append(m_treeRoot);
+    differenceRoot.children.append(primitiveNode);
+    m_treeRoot = differenceRoot;
+    return true;
+}
+
+bool SceneDocument::movePrimitiveToOperation(int shapeId, TreeNode::Operation operation)
+{
+    TreeNode primitive;
+    if (!removePrimitiveFromTree(&m_treeRoot, shapeId, &primitive))
+        primitive = makePrimitiveNode(shapeId);
+
+    pruneEmptyGroups(&m_treeRoot);
+    return appendPrimitiveToOperation(operation, primitive);
+}
+
+void SceneDocument::pruneEmptyGroups(TreeNode *node)
+{
+    if (!node || node->type != TreeNode::Group)
+        return;
+
+    for (int i = node->children.size() - 1; i >= 0; --i) {
+        TreeNode &child = node->children[i];
+        if (child.type != TreeNode::Group)
+            continue;
+
+        pruneEmptyGroups(&child);
+        if (child.children.isEmpty())
+            node->children.removeAt(i);
+    }
+
+    if (node == &m_treeRoot && node->children.size() == 1 && node->children.first().type == TreeNode::Group)
+        *node = node->children.first();
+}
+
 SceneDocument::TreeNode SceneDocument::makeGroupNode(TreeNode::Operation operation)
 {
     TreeNode node;
@@ -223,6 +329,15 @@ SceneDocument::TreeNode SceneDocument::makePrimitiveNode(int shapeId)
     node.type = TreeNode::Primitive;
     node.shapeId = shapeId;
     return node;
+}
+
+SceneDocument::TreeNode::Operation SceneDocument::operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const
+{
+    if (booleanMode == ShapeNode::Subtract)
+        return TreeNode::Difference;
+    if (booleanMode == ShapeNode::Intersect)
+        return TreeNode::Intersection;
+    return TreeNode::Union;
 }
 
 void SceneDocument::rebuildTreeFromShapes()

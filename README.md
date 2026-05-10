@@ -10,7 +10,7 @@ Implemented:
 
 - Scene tree with cube, sphere, and cylinder primitives.
 - Scene tree displays the generated boolean structure as `union`, `difference`, and `intersection` groups.
-- `SceneDocument` has an explicit tree-node hierarchy that currently mirrors the flat boolean model as a migration bridge.
+- `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
@@ -96,7 +96,7 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
 - No node graph or operation tree UI yet.
-- Boolean tree UI supports moving shapes between the generated `union`, `difference`, and `intersection` groups by drag/drop. Shape movement still edits the flat per-shape boolean mode, and the document tree is synchronized from it.
+- Boolean tree UI supports moving shapes between the generated `union`, `difference`, and `intersection` groups by drag/drop. Shape movement still edits the flat per-shape boolean mode, and the document tree is updated from that operation.
 
 ## Next Good Steps
 
