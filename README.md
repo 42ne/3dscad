@@ -17,6 +17,7 @@ Implemented:
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
 - The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
+- Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - CSG preview detects boolean operations from the explicit tree, not only from legacy per-shape boolean flags.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.

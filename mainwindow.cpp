@@ -26,6 +26,7 @@
 #include <QSaveFile>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
@@ -50,18 +51,26 @@ public:
         setAcceptDrops(true);
         setDropIndicatorShown(true);
         setDragDropMode(QAbstractItemView::DragDrop);
-        setDefaultDropAction(Qt::MoveAction);
+        setDefaultDropAction(Qt::CopyAction);
     }
 
     std::function<void(int, int)> onTreeNodeDroppedOnGroup;
 
 protected:
+    void dragEnterEvent(QDragEnterEvent *event) override
+    {
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
+    }
+
     void dragMoveEvent(QDragMoveEvent *event) override
     {
-        if (dropTarget(event->pos()).nodeId > 0)
-            event->acceptProposedAction();
-        else
+        if (dropTarget(event->pos()).nodeId > 0) {
+            event->setDropAction(Qt::CopyAction);
+            event->accept();
+        } else {
             event->ignore();
+        }
     }
 
     void dropEvent(QDropEvent *event) override
@@ -72,10 +81,13 @@ protected:
             return;
         }
 
-        if (onTreeNodeDroppedOnGroup)
-            onTreeNodeDroppedOnGroup(target.nodeId, target.parentGroupId);
+        event->setDropAction(Qt::CopyAction);
+        event->accept();
 
-        event->acceptProposedAction();
+        QTimer::singleShot(0, this, [this, target]() {
+            if (onTreeNodeDroppedOnGroup)
+                onTreeNodeDroppedOnGroup(target.nodeId, target.parentGroupId);
+        });
     }
 
 private:
