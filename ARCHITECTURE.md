@@ -159,6 +159,7 @@ Dragging:
 - `Shift + drag` supports plane dragging.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.
+- Moving a node between groups adjusts the moved node's local position to preserve its world position for translation-only group transforms.
 - Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.

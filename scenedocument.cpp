@@ -266,6 +266,14 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     if (!node || treeContainsNodeId(*node, parentGroupId))
         return false;
 
+    QVector3D sourceParentWorldPosition;
+    QVector3D targetParentWorldPosition;
+    if (!parentWorldPositionForNode(m_treeRoot, nodeId, QVector3D(), &sourceParentWorldPosition))
+        return false;
+
+    parentWorldPositionForNode(m_treeRoot, targetParent->id, QVector3D(), &targetParentWorldPosition);
+    targetParentWorldPosition += targetParent->position;
+
     TreeNode movedNode;
     if (!detachTreeNodeById(&m_treeRoot, nodeId, &movedNode))
         return false;
@@ -281,6 +289,7 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     const int boundedIndex = insertIndex < 0
                                  ? targetParent->children.size()
                                  : qBound(0, insertIndex, targetParent->children.size());
+    offsetMovedTreeNode(&movedNode, sourceParentWorldPosition - targetParentWorldPosition);
     targetParent->children.insert(boundedIndex, movedNode);
     pruneEmptyGroups(&m_treeRoot);
     ensureTreeContainsAllShapes();
@@ -350,6 +359,43 @@ bool SceneDocument::treeContainsNodeId(const TreeNode &node, int id) const
     }
 
     return false;
+}
+
+bool SceneDocument::parentWorldPositionForNode(const TreeNode &node,
+                                               int id,
+                                               const QVector3D &worldPosition,
+                                               QVector3D *parentWorldPosition) const
+{
+    if (node.id == id) {
+        if (parentWorldPosition)
+            *parentWorldPosition = worldPosition;
+        return true;
+    }
+
+    const QVector3D childWorldPosition = node.type == TreeNode::Group
+                                             ? worldPosition + node.position
+                                             : worldPosition;
+
+    for (const TreeNode &child : node.children) {
+        if (parentWorldPositionForNode(child, id, childWorldPosition, parentWorldPosition))
+            return true;
+    }
+
+    return false;
+}
+
+void SceneDocument::offsetMovedTreeNode(TreeNode *node, const QVector3D &offset)
+{
+    if (!node)
+        return;
+
+    if (node->type == TreeNode::Group) {
+        node->position += offset;
+        return;
+    }
+
+    if (ShapeNode *shape = shapeById(node->shapeId))
+        shape->position += offset;
 }
 
 bool SceneDocument::detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode)

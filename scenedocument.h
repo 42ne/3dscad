@@ -79,6 +79,8 @@ private:
     TreeNode *treeNodeById(TreeNode *node, int id);
     const TreeNode *treeNodeById(const TreeNode *node, int id) const;
     bool treeContainsNodeId(const TreeNode &node, int id) const;
+    bool parentWorldPositionForNode(const TreeNode &node, int id, const QVector3D &worldPosition, QVector3D *parentWorldPosition) const;
+    void offsetMovedTreeNode(TreeNode *node, const QVector3D &offset);
     bool detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
     bool treeContainsPrimitiveShapeId(const TreeNode &node, int shapeId) const;

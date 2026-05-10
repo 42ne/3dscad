@@ -21,6 +21,7 @@ Implemented:
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
 - Selected groups can be moved from the viewport with the same axis gizmo used for primitives.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
+- Moving nodes between groups preserves their world position for translation-only group transforms.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - OpenSCAD generation and Manifold CSG apply group transforms from the document tree.
 - CSG preview detects boolean operations from the explicit tree, not only from legacy per-shape boolean flags.
