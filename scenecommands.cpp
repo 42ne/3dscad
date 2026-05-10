@@ -343,6 +343,19 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
+UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
+                                                         const SceneDocument::Snapshot &oldSnapshot,
+                                                         const SceneDocument::Snapshot &newSnapshot,
+                                                         std::function<void()> onChanged)
+    : QUndoCommand("Update group transform")
+    , m_scene(scene)
+    , m_oldSnapshot(oldSnapshot)
+    , m_newSnapshot(newSnapshot)
+    , m_valid(true)
+    , m_onChanged(onChanged)
+{
+}
+
 bool UpdateGroupTransformCommand::isValid() const
 {
     return m_valid;

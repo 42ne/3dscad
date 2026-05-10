@@ -757,16 +757,21 @@ void MainWindow::onViewportGroupDragFinished(int groupId)
     if (!group || group->type != SceneDocument::TreeNode::Group)
         return;
 
-    auto *command = new UpdateGroupTransformCommand(
-        &m_scene,
-        groupId,
-        group->position,
-        group->rotation,
-        [this]() {
-            refreshSceneViews();
-        },
-        m_viewportDragStartGroupPosition,
-        m_viewportDragStartGroupRotation);
+    const QVector3D finalPosition = group->position;
+    const QVector3D finalRotation = group->rotation;
+    if (finalPosition == m_viewportDragStartGroupPosition && finalRotation == m_viewportDragStartGroupRotation) {
+        refreshProperties();
+        return;
+    }
+
+    const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+    m_scene.updateGroupTransform(groupId, m_viewportDragStartGroupPosition, m_viewportDragStartGroupRotation);
+    const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+    m_scene.restoreSnapshot(newSnapshot);
+
+    auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot, [this]() {
+        refreshSceneViews();
+    });
 
     if (!command->isValid()) {
         delete command;
