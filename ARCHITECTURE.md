@@ -19,7 +19,7 @@ It stores:
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
-The scene tree is a `QTreeWidget` projection of the internal boolean tree. Group rows are read-only; primitive rows select the corresponding `ShapeNode`.
+The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; dragging a primitive row onto a boolean group changes its flat `ShapeNode::booleanMode`.
 
 `ViewportWidget` owns interactive viewing and picking:
 
@@ -167,7 +167,7 @@ Short term:
 
 Medium term:
 
-- Make the boolean tree editable and store explicit operation groups in `SceneDocument`.
+- Store explicit operation groups in `SceneDocument` instead of deriving the tree only from flat per-shape boolean modes.
 - Move rasterization to OpenGL buffers.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 

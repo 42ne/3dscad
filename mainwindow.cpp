@@ -14,6 +14,7 @@
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QDir>
+#include <QDropEvent>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -31,7 +32,88 @@
 #include <QUndoStack>
 #include <QVBoxLayout>
 
+#include <functional>
+
 // ---------------- MainWindow ----------------
+
+static constexpr int ShapeIdRole = Qt::UserRole;
+static constexpr int GroupBooleanModeRole = Qt::UserRole + 1;
+
+class SceneTreeWidget : public QTreeWidget
+{
+public:
+    explicit SceneTreeWidget(QWidget *parent = nullptr)
+        : QTreeWidget(parent)
+    {
+        setDragEnabled(true);
+        setAcceptDrops(true);
+        setDropIndicatorShown(true);
+        setDragDropMode(QAbstractItemView::DragDrop);
+        setDefaultDropAction(Qt::MoveAction);
+    }
+
+    std::function<void(int, ShapeNode::BooleanMode)> onShapeDroppedOnGroup;
+
+protected:
+    void dragMoveEvent(QDragMoveEvent *event) override
+    {
+        if (dropTarget(event->pos()).shapeId >= 0)
+            event->acceptProposedAction();
+        else
+            event->ignore();
+    }
+
+    void dropEvent(QDropEvent *event) override
+    {
+        const DropTarget target = dropTarget(event->pos());
+        if (target.shapeId < 0) {
+            event->ignore();
+            return;
+        }
+
+        if (onShapeDroppedOnGroup)
+            onShapeDroppedOnGroup(target.shapeId, target.booleanMode);
+
+        event->acceptProposedAction();
+    }
+
+private:
+    struct DropTarget
+    {
+        int shapeId = -1;
+        ShapeNode::BooleanMode booleanMode = ShapeNode::Add;
+    };
+
+    DropTarget dropTarget(const QPoint &position) const
+    {
+        DropTarget target;
+        const QList<QTreeWidgetItem *> selected = selectedItems();
+        if (selected.size() != 1)
+            return target;
+
+        const int shapeId = selected.first()->data(0, ShapeIdRole).toInt();
+        if (shapeId < 0)
+            return target;
+
+        QTreeWidgetItem *targetItem = itemAt(position);
+        if (!targetItem)
+            return target;
+
+        if (targetItem->data(0, ShapeIdRole).toInt() >= 0)
+            targetItem = targetItem->parent();
+
+        if (!targetItem)
+            return target;
+
+        const QVariant modeData = targetItem->data(0, GroupBooleanModeRole);
+        if (!modeData.isValid())
+            return target;
+
+        target.shapeId = shapeId;
+        target.booleanMode = static_cast<ShapeNode::BooleanMode>(modeData.toInt());
+        return target;
+    }
+};
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -60,14 +142,24 @@ static QString booleanGroupLabel(SceneBooleanNode::Type type)
     return "union()";
 }
 
-static void markGroupItem(QTreeWidgetItem *item)
+static ShapeNode::BooleanMode booleanModeForGroup(SceneBooleanNode::Type type)
+{
+    if (type == SceneBooleanNode::Difference)
+        return ShapeNode::Subtract;
+    if (type == SceneBooleanNode::Intersection)
+        return ShapeNode::Intersect;
+    return ShapeNode::Add;
+}
+
+static void markGroupItem(QTreeWidgetItem *item, SceneBooleanNode::Type type)
 {
     QFont font = item->font(0);
     font.setBold(true);
     item->setFont(0, font);
-    item->setData(0, Qt::UserRole, -1);
+    item->setData(0, ShapeIdRole, -1);
+    item->setData(0, GroupBooleanModeRole, booleanModeForGroup(type));
     item->setForeground(0, QColor(82, 82, 82));
-    item->setFlags(Qt::ItemIsEnabled);
+    item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsDropEnabled);
 }
 
 static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
@@ -84,13 +176,14 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
 
         auto *item = new QTreeWidgetItem(parent);
         item->setText(0, shape->name);
-        item->setData(0, Qt::UserRole, shape->id);
+        item->setData(0, ShapeIdRole, shape->id);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         return item;
     }
 
     auto *groupItem = new QTreeWidgetItem(parent);
     groupItem->setText(0, booleanGroupLabel(node.type));
-    markGroupItem(groupItem);
+    markGroupItem(groupItem, node.type);
 
     for (const SceneBooleanNode &child : node.children)
         appendBooleanTreeItem(groupItem, child, scene);
@@ -154,7 +247,11 @@ void MainWindow::buildUi()
     m_deleteShapeButton = new QPushButton("Delete selected");
     m_deleteShapeButton->setEnabled(false);
 
-    m_shapeTree = new QTreeWidget;
+    auto *shapeTree = new SceneTreeWidget;
+    shapeTree->onShapeDroppedOnGroup = [this](int shapeId, ShapeNode::BooleanMode booleanMode) {
+        changeShapeBooleanMode(shapeId, booleanMode);
+    };
+    m_shapeTree = shapeTree;
     m_shapeTree->setHeaderHidden(true);
 
     leftLayout->addWidget(addCubeButton);
@@ -353,7 +450,7 @@ void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidg
 {
     Q_UNUSED(previous);
 
-    const int shapeId = current ? current->data(0, Qt::UserRole).toInt() : -1;
+    const int shapeId = current ? current->data(0, ShapeIdRole).toInt() : -1;
     m_scene.setSelectedShapeId(shapeId);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
@@ -482,7 +579,7 @@ void MainWindow::selectShapeInSceneTree(int shapeId)
     if (shapeId >= 0) {
         QTreeWidgetItemIterator it(m_shapeTree);
         while (*it) {
-            if ((*it)->data(0, Qt::UserRole).toInt() == shapeId) {
+        if ((*it)->data(0, ShapeIdRole).toInt() == shapeId) {
                 selectedItem = *it;
                 break;
             }
@@ -492,6 +589,27 @@ void MainWindow::selectShapeInSceneTree(int shapeId)
 
     m_shapeTree->setCurrentItem(selectedItem);
     m_shapeTree->blockSignals(false);
+}
+
+void MainWindow::changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode)
+{
+    const ShapeNode *shape = m_scene.shapeById(shapeId);
+    if (!shape || shape->booleanMode == booleanMode)
+        return;
+
+    ShapeNode updatedShape = *shape;
+    updatedShape.booleanMode = booleanMode;
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::refreshProperties()

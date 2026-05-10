@@ -45,6 +45,7 @@ private:
     void refreshCsgStatus();
     void refreshSceneViews();
     void selectShapeInSceneTree(int shapeId);
+    void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);
     QString previewScadPath() const;
     bool writeOpenScadPreview(bool notify);
 

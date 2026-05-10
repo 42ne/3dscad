@@ -94,12 +94,12 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
 - No node graph or operation tree UI yet.
-- Boolean tree UI is currently read-only; shapes still use the flat per-shape boolean mode.
+- Boolean tree UI supports moving shapes between the generated `union`, `difference`, and `intersection` groups by drag/drop. Shapes still use the flat per-shape boolean mode internally.
 
 ## Next Good Steps
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
-2. Make the boolean tree editable with explicit groups and drag/drop shape placement.
+2. Store explicit boolean groups in `SceneDocument` instead of deriving the tree from flat per-shape modes.
 3. Move viewport rendering toward real OpenGL vertex/index buffers.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.
