@@ -49,6 +49,7 @@ private:
     void refreshCsgStatus();
     void refreshSceneViews();
     void selectShapeInSceneTree(int shapeId);
+    void selectTreeNodeInSceneTree(int treeNodeId);
     int selectedTreeGroupId() const;
     void addGroup(SceneDocument::TreeNode::Operation operation);
     void moveTreeNodeToGroup(int nodeId, int parentGroupId);

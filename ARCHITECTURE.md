@@ -159,7 +159,7 @@ Dragging:
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
-- Group selection is still UI-only; preserving selected group ids across refreshes is a future polish step.
+- Group selection is UI-only, but tree refreshes preserve selected group ids when no primitive is selected.
 - Parser and generator are coupled to a narrow generated subset.
 
 ## Recommended Next Work

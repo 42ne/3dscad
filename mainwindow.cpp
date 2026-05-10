@@ -580,6 +580,9 @@ void MainWindow::onViewportShapeDragFinished(int index)
 void MainWindow::refreshShapeList()
 {
     const int selectedShapeId = m_scene.selectedShapeId();
+    const int selectedTreeNodeId = (selectedShapeId < 0 && m_shapeTree && m_shapeTree->currentItem())
+                                       ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
+                                       : 0;
 
     m_shapeTree->blockSignals(true);
     m_shapeTree->clear();
@@ -588,7 +591,10 @@ void MainWindow::refreshShapeList()
     m_shapeTree->expandAll();
 
     m_shapeTree->blockSignals(false);
-    selectShapeInSceneTree(selectedShapeId);
+    if (selectedShapeId >= 0)
+        selectShapeInSceneTree(selectedShapeId);
+    else
+        selectTreeNodeInSceneTree(selectedTreeNodeId);
 
     refreshOpenScadCode();
     m_viewport->update();
@@ -598,7 +604,6 @@ void MainWindow::refreshShapeList()
 void MainWindow::refreshSceneViews()
 {
     refreshShapeList();
-    selectShapeInSceneTree(m_scene.selectedShapeId());
 
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
@@ -616,7 +621,30 @@ void MainWindow::selectShapeInSceneTree(int shapeId)
     if (shapeId >= 0) {
         QTreeWidgetItemIterator it(m_shapeTree);
         while (*it) {
-        if ((*it)->data(0, ShapeIdRole).toInt() == shapeId) {
+            if ((*it)->data(0, ShapeIdRole).toInt() == shapeId) {
+                selectedItem = *it;
+                break;
+            }
+            ++it;
+        }
+    }
+
+    m_shapeTree->setCurrentItem(selectedItem);
+    m_shapeTree->blockSignals(false);
+}
+
+void MainWindow::selectTreeNodeInSceneTree(int treeNodeId)
+{
+    if (!m_shapeTree)
+        return;
+
+    m_shapeTree->blockSignals(true);
+
+    QTreeWidgetItem *selectedItem = nullptr;
+    if (treeNodeId > 0) {
+        QTreeWidgetItemIterator it(m_shapeTree);
+        while (*it) {
+            if ((*it)->data(0, TreeNodeIdRole).toInt() == treeNodeId) {
                 selectedItem = *it;
                 break;
             }
