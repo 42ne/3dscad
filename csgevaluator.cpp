@@ -1,6 +1,7 @@
 #include "csgevaluator.h"
 
 #include <algorithm>
+#include <functional>
 #include <QtMath>
 
 struct Box
@@ -91,6 +92,49 @@ static int cellIndex(int x, int y, int z, int yCount, int zCount)
     return (x * yCount + y) * zCount + z;
 }
 
+static void appendMergedFaceRects(const QVector<QVector<bool>> &filled,
+                                  std::function<void(int, int, int, int)> appendRect)
+{
+    if (filled.isEmpty() || filled.first().isEmpty())
+        return;
+
+    const int uCount = filled.size();
+    const int vCount = filled.first().size();
+    QVector<QVector<bool>> visited(uCount, QVector<bool>(vCount, false));
+
+    for (int u = 0; u < uCount; ++u) {
+        for (int v = 0; v < vCount; ++v) {
+            if (!filled[u][v] || visited[u][v])
+                continue;
+
+            int width = 1;
+            while (u + width < uCount && filled[u + width][v] && !visited[u + width][v])
+                ++width;
+
+            int height = 1;
+            bool canGrow = true;
+            while (v + height < vCount && canGrow) {
+                for (int offset = 0; offset < width; ++offset) {
+                    if (!filled[u + offset][v + height] || visited[u + offset][v + height]) {
+                        canGrow = false;
+                        break;
+                    }
+                }
+
+                if (canGrow)
+                    ++height;
+            }
+
+            for (int du = 0; du < width; ++du) {
+                for (int dv = 0; dv < height; ++dv)
+                    visited[u + du][v + dv] = true;
+            }
+
+            appendRect(u, v, u + width, v + height);
+        }
+    }
+}
+
 static QVector<CsgRenderItem> buildSurfaceItems(const QVector<Box> &boxes, int shapeCount)
 {
     QVector<CsgRenderItem> items;
@@ -149,34 +193,109 @@ static QVector<CsgRenderItem> buildSurfaceItems(const QVector<Box> &boxes, int s
         return cellShapes[cellIndex(x, y, z, yCount, zCount)] >= 0;
     };
 
-    for (int x = 0; x < xCount; ++x) {
-        for (int y = 0; y < yCount; ++y) {
-            for (int z = 0; z < zCount; ++z) {
-                const int shapeIndex = cellShapes[cellIndex(x, y, z, yCount, zCount)];
-                if (shapeIndex < 0 || shapeIndex >= shapeCount)
-                    continue;
+    for (int shapeIndex = 0; shapeIndex < shapeCount; ++shapeIndex) {
+        SceneMesh &mesh = meshes[shapeIndex];
 
-                const float x0 = xCoordinates[x];
-                const float x1 = xCoordinates[x + 1];
-                const float y0 = yCoordinates[y];
-                const float y1 = yCoordinates[y + 1];
-                const float z0 = zCoordinates[z];
-                const float z1 = zCoordinates[z + 1];
-                SceneMesh &mesh = meshes[shapeIndex];
+        for (int x = 0; x < xCount; ++x) {
+            QVector<QVector<bool>> negativeX(yCount, QVector<bool>(zCount, false));
+            QVector<QVector<bool>> positiveX(yCount, QVector<bool>(zCount, false));
 
-                if (!isFilled(x - 1, y, z))
-                    appendQuad(&mesh, {x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, 92);
-                if (!isFilled(x + 1, y, z))
-                    appendQuad(&mesh, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {x1, y0, z1}, 105);
-                if (!isFilled(x, y - 1, z))
-                    appendQuad(&mesh, {x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, 96);
-                if (!isFilled(x, y + 1, z))
-                    appendQuad(&mesh, {x0, y1, z0}, {x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, 122);
-                if (!isFilled(x, y, z - 1))
-                    appendQuad(&mesh, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {x1, y0, z0}, 82);
-                if (!isFilled(x, y, z + 1))
-                    appendQuad(&mesh, {x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, 116);
+            for (int y = 0; y < yCount; ++y) {
+                for (int z = 0; z < zCount; ++z) {
+                    if (cellShapes[cellIndex(x, y, z, yCount, zCount)] != shapeIndex)
+                        continue;
+
+                    negativeX[y][z] = !isFilled(x - 1, y, z);
+                    positiveX[y][z] = !isFilled(x + 1, y, z);
+                }
             }
+
+            appendMergedFaceRects(negativeX, [&](int y0, int z0, int y1, int z1) {
+                const float px = xCoordinates[x];
+                appendQuad(&mesh,
+                           {px, yCoordinates[y0], zCoordinates[z0]},
+                           {px, yCoordinates[y0], zCoordinates[z1]},
+                           {px, yCoordinates[y1], zCoordinates[z1]},
+                           {px, yCoordinates[y1], zCoordinates[z0]},
+                           92);
+            });
+            appendMergedFaceRects(positiveX, [&](int y0, int z0, int y1, int z1) {
+                const float px = xCoordinates[x + 1];
+                appendQuad(&mesh,
+                           {px, yCoordinates[y0], zCoordinates[z0]},
+                           {px, yCoordinates[y1], zCoordinates[z0]},
+                           {px, yCoordinates[y1], zCoordinates[z1]},
+                           {px, yCoordinates[y0], zCoordinates[z1]},
+                           105);
+            });
+        }
+
+        for (int y = 0; y < yCount; ++y) {
+            QVector<QVector<bool>> negativeY(xCount, QVector<bool>(zCount, false));
+            QVector<QVector<bool>> positiveY(xCount, QVector<bool>(zCount, false));
+
+            for (int x = 0; x < xCount; ++x) {
+                for (int z = 0; z < zCount; ++z) {
+                    if (cellShapes[cellIndex(x, y, z, yCount, zCount)] != shapeIndex)
+                        continue;
+
+                    negativeY[x][z] = !isFilled(x, y - 1, z);
+                    positiveY[x][z] = !isFilled(x, y + 1, z);
+                }
+            }
+
+            appendMergedFaceRects(negativeY, [&](int x0, int z0, int x1, int z1) {
+                const float py = yCoordinates[y];
+                appendQuad(&mesh,
+                           {xCoordinates[x0], py, zCoordinates[z0]},
+                           {xCoordinates[x1], py, zCoordinates[z0]},
+                           {xCoordinates[x1], py, zCoordinates[z1]},
+                           {xCoordinates[x0], py, zCoordinates[z1]},
+                           96);
+            });
+            appendMergedFaceRects(positiveY, [&](int x0, int z0, int x1, int z1) {
+                const float py = yCoordinates[y + 1];
+                appendQuad(&mesh,
+                           {xCoordinates[x0], py, zCoordinates[z0]},
+                           {xCoordinates[x0], py, zCoordinates[z1]},
+                           {xCoordinates[x1], py, zCoordinates[z1]},
+                           {xCoordinates[x1], py, zCoordinates[z0]},
+                           122);
+            });
+        }
+
+        for (int z = 0; z < zCount; ++z) {
+            QVector<QVector<bool>> negativeZ(xCount, QVector<bool>(yCount, false));
+            QVector<QVector<bool>> positiveZ(xCount, QVector<bool>(yCount, false));
+
+            for (int x = 0; x < xCount; ++x) {
+                for (int y = 0; y < yCount; ++y) {
+                    if (cellShapes[cellIndex(x, y, z, yCount, zCount)] != shapeIndex)
+                        continue;
+
+                    negativeZ[x][y] = !isFilled(x, y, z - 1);
+                    positiveZ[x][y] = !isFilled(x, y, z + 1);
+                }
+            }
+
+            appendMergedFaceRects(negativeZ, [&](int x0, int y0, int x1, int y1) {
+                const float pz = zCoordinates[z];
+                appendQuad(&mesh,
+                           {xCoordinates[x0], yCoordinates[y0], pz},
+                           {xCoordinates[x0], yCoordinates[y1], pz},
+                           {xCoordinates[x1], yCoordinates[y1], pz},
+                           {xCoordinates[x1], yCoordinates[y0], pz},
+                           82);
+            });
+            appendMergedFaceRects(positiveZ, [&](int x0, int y0, int x1, int y1) {
+                const float pz = zCoordinates[z + 1];
+                appendQuad(&mesh,
+                           {xCoordinates[x0], yCoordinates[y0], pz},
+                           {xCoordinates[x1], yCoordinates[y0], pz},
+                           {xCoordinates[x1], yCoordinates[y1], pz},
+                           {xCoordinates[x0], yCoordinates[y1], pz},
+                           116);
+            });
         }
     }
 

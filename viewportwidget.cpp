@@ -502,6 +502,14 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 
         if (helperShapeIndex >= 0) {
             emit shapeClicked(helperShapeIndex);
+            if (event->modifiers() & Qt::ShiftModifier) {
+                m_draggingShape = true;
+                m_dragMode = PlaneDrag;
+                m_dragShapeIndex = helperShapeIndex;
+                m_dragStartMousePosition = event->pos();
+                m_lastDragDelta = QVector3D();
+                emit shapeDragStarted(helperShapeIndex);
+            }
             return;
         }
     }
