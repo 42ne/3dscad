@@ -163,3 +163,137 @@ void ReplaceSceneCommand::redo()
     if (m_onChanged)
         m_onChanged();
 }
+
+AddGroupCommand::AddGroupCommand(SceneDocument *scene,
+                                 SceneDocument::TreeNode::Operation operation,
+                                 int parentGroupId,
+                                 int insertIndex,
+                                 std::function<void()> onChanged)
+    : QUndoCommand("Add group")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    const int groupId = m_scene->addGroup(operation, parentGroupId, insertIndex);
+    m_valid = groupId > 0;
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool AddGroupCommand::isValid() const
+{
+    return m_valid;
+}
+
+void AddGroupCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void AddGroupCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+RemoveGroupCommand::RemoveGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged)
+    : QUndoCommand("Remove group")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->removeGroupById(groupId);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool RemoveGroupCommand::isValid() const
+{
+    return m_valid;
+}
+
+void RemoveGroupCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void RemoveGroupCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged)
+    : QUndoCommand("Move tree node")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->moveTreeNode(nodeId, parentGroupId, insertIndex);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool MoveTreeNodeCommand::isValid() const
+{
+    return m_valid;
+}
+
+void MoveTreeNodeCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void MoveTreeNodeCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}

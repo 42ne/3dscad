@@ -73,4 +73,59 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class AddGroupCommand : public QUndoCommand
+{
+public:
+    AddGroupCommand(SceneDocument *scene,
+                    SceneDocument::TreeNode::Operation operation,
+                    int parentGroupId,
+                    int insertIndex,
+                    std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class RemoveGroupCommand : public QUndoCommand
+{
+public:
+    RemoveGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class MoveTreeNodeCommand : public QUndoCommand
+{
+public:
+    MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 #endif
