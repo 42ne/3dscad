@@ -8,14 +8,37 @@
 class SceneDocument
 {
 public:
+    struct TreeNode
+    {
+        enum Type {
+            Primitive,
+            Group
+        };
+
+        enum Operation {
+            Union,
+            Difference,
+            Intersection
+        };
+
+        int id = 0;
+        Type type = Group;
+        Operation operation = Union;
+        int shapeId = -1;
+        QVector<TreeNode> children;
+    };
+
     struct Snapshot
     {
         QVector<ShapeNode> shapes;
+        TreeNode treeRoot;
         int selectedShapeId = -1;
         int nextShapeId = 1;
+        int nextTreeNodeId = 1;
     };
 
     const QVector<ShapeNode> &shapes() const;
+    const TreeNode &treeRoot() const;
     int shapeCount() const;
     bool isEmpty() const;
 
@@ -45,11 +68,16 @@ public:
 
 private:
     bool isValidIndex(int index) const;
+    void rebuildTreeFromShapes();
+    TreeNode makeGroupNode(TreeNode::Operation operation);
+    TreeNode makePrimitiveNode(int shapeId);
 
 private:
     QVector<ShapeNode> m_shapes;
+    TreeNode m_treeRoot;
     int m_selectedShapeId = -1;
     int m_nextShapeId = 1;
+    int m_nextTreeNodeId = 1;
 };
 
 #endif

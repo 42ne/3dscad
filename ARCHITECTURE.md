@@ -17,6 +17,8 @@ It stores:
 
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
+It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. At this stage the hierarchy is synchronized from the flat shape list and boolean modes, so it is a compatibility bridge rather than the only source of truth.
+
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
 The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; dragging a primitive row onto a boolean group changes its flat `ShapeNode::booleanMode`.
@@ -41,6 +43,8 @@ The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primi
 - `Difference`
 - `Intersection`
 - `Primitive`
+
+`SceneDocument::TreeNode` is the longer-term editable document tree. Generator and CSG code still use the compatibility boolean tree while the document tree is being introduced.
 
 Generated boolean structure:
 
@@ -155,6 +159,7 @@ Dragging:
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - The flat boolean mode per shape is simple, but a real OpenSCAD model needs an operation tree.
+- The explicit document tree currently mirrors flat boolean modes instead of owning arbitrary nested structure.
 - Parser and generator are coupled to a narrow generated subset.
 
 ## Recommended Next Work
@@ -168,6 +173,7 @@ Short term:
 Medium term:
 
 - Store explicit operation groups in `SceneDocument` instead of deriving the tree only from flat per-shape boolean modes.
+- Move OpenSCAD generation and Manifold evaluation from the compatibility tree to `SceneDocument::TreeNode`.
 - Move rasterization to OpenGL buffers.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 

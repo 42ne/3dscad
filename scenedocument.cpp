@@ -5,6 +5,11 @@ const QVector<ShapeNode> &SceneDocument::shapes() const
     return m_shapes;
 }
 
+const SceneDocument::TreeNode &SceneDocument::treeRoot() const
+{
+    return m_treeRoot;
+}
+
 int SceneDocument::shapeCount() const
 {
     return m_shapes.size();
@@ -106,6 +111,7 @@ int SceneDocument::insertShape(int index, const ShapeNode &shape)
     const int insertIndex = qBound(0, index, m_shapes.size());
     m_shapes.insert(insertIndex, shapeWithId);
     m_selectedShapeId = shapeWithId.id;
+    rebuildTreeFromShapes();
 
     return shapeWithId.id;
 }
@@ -114,27 +120,35 @@ void SceneDocument::replaceShapes(const QVector<ShapeNode> &shapes)
 {
     m_shapes.clear();
     m_selectedShapeId = -1;
+    m_treeRoot = {};
+    m_nextTreeNodeId = 1;
 
     for (const ShapeNode &shape : shapes)
         addShape(shape);
 
     if (!m_shapes.isEmpty())
         m_selectedShapeId = m_shapes.first().id;
+
+    rebuildTreeFromShapes();
 }
 
 SceneDocument::Snapshot SceneDocument::snapshot() const
 {
     Snapshot snapshot;
     snapshot.shapes = m_shapes;
+    snapshot.treeRoot = m_treeRoot;
     snapshot.selectedShapeId = m_selectedShapeId;
     snapshot.nextShapeId = m_nextShapeId;
+    snapshot.nextTreeNodeId = m_nextTreeNodeId;
     return snapshot;
 }
 
 void SceneDocument::restoreSnapshot(const Snapshot &snapshot)
 {
     m_shapes = snapshot.shapes;
+    m_treeRoot = snapshot.treeRoot;
     m_nextShapeId = snapshot.nextShapeId;
+    m_nextTreeNodeId = snapshot.nextTreeNodeId;
     setSelectedShapeId(snapshot.selectedShapeId);
 }
 
@@ -146,6 +160,7 @@ bool SceneDocument::updateShape(const ShapeNode &shape)
 
     *existingShape = shape;
     m_selectedShapeId = shape.id;
+    rebuildTreeFromShapes();
     return true;
 }
 
@@ -163,6 +178,7 @@ bool SceneDocument::takeShapeById(int id, ShapeNode *removedShape, int *removedI
 
     const bool wasSelected = m_shapes[index].id == m_selectedShapeId;
     m_shapes.removeAt(index);
+    rebuildTreeFromShapes();
 
     if (wasSelected) {
         if (m_shapes.isEmpty()) {
@@ -189,4 +205,61 @@ bool SceneDocument::removeSelectedShape()
 bool SceneDocument::isValidIndex(int index) const
 {
     return index >= 0 && index < m_shapes.size();
+}
+
+SceneDocument::TreeNode SceneDocument::makeGroupNode(TreeNode::Operation operation)
+{
+    TreeNode node;
+    node.id = m_nextTreeNodeId++;
+    node.type = TreeNode::Group;
+    node.operation = operation;
+    return node;
+}
+
+SceneDocument::TreeNode SceneDocument::makePrimitiveNode(int shapeId)
+{
+    TreeNode node;
+    node.id = m_nextTreeNodeId++;
+    node.type = TreeNode::Primitive;
+    node.shapeId = shapeId;
+    return node;
+}
+
+void SceneDocument::rebuildTreeFromShapes()
+{
+    m_nextTreeNodeId = 1;
+
+    TreeNode unionGroup = makeGroupNode(TreeNode::Union);
+    TreeNode differenceGroup = makeGroupNode(TreeNode::Difference);
+    TreeNode intersectionGroup = makeGroupNode(TreeNode::Intersection);
+
+    for (const ShapeNode &shape : m_shapes) {
+        if (shape.booleanMode == ShapeNode::Subtract)
+            differenceGroup.children.append(makePrimitiveNode(shape.id));
+        else if (shape.booleanMode == ShapeNode::Intersect)
+            intersectionGroup.children.append(makePrimitiveNode(shape.id));
+        else
+            unionGroup.children.append(makePrimitiveNode(shape.id));
+    }
+
+    if (m_shapes.isEmpty()) {
+        m_treeRoot = makeGroupNode(TreeNode::Union);
+        return;
+    }
+
+    if (!differenceGroup.children.isEmpty()) {
+        TreeNode differenceRoot = makeGroupNode(TreeNode::Difference);
+        differenceRoot.children.append(unionGroup);
+        differenceRoot.children += differenceGroup.children;
+        m_treeRoot = differenceRoot;
+    } else {
+        m_treeRoot = unionGroup;
+    }
+
+    if (!intersectionGroup.children.isEmpty()) {
+        TreeNode intersectionRoot = makeGroupNode(TreeNode::Intersection);
+        intersectionRoot.children.append(m_treeRoot);
+        intersectionRoot.children.append(intersectionGroup);
+        m_treeRoot = intersectionRoot;
+    }
 }
