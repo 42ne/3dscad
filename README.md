@@ -23,14 +23,23 @@ Implemented:
   - `Subtract hole`
   - `Intersect mask`
 - CSG preview status in the viewport and the left panel.
+- Optional Manifold-backed exact mesh CSG preview when a local Manifold build is available.
+- OpenSCAD preview bridge that writes `openscad_preview.scad` for live reload in OpenSCAD.
 
 ## CSG Preview
 
-There are currently three preview modes:
+There are currently four preview modes:
 
 - `plain mesh`: no boolean operation is active.
+- `Manifold exact mesh`: real mesh boolean evaluation through the optional Manifold backend.
 - `box mode`: real computed CSG for unrotated cubes.
 - `mesh approximate`: approximate CSG for spheres, cylinders, and rotated cubes.
+
+Manifold mode:
+
+- Is used first when `build/manifold-build/src/libmanifold.a` exists at qmake time.
+- Evaluates the scene boolean tree as mesh booleans.
+- Falls back to the internal box/mesh preview if Manifold is not built or returns an invalid result.
 
 Box mode:
 
@@ -44,7 +53,7 @@ Mesh approximate mode:
 
 - Works as a first preview for non-box shapes.
 - Filters triangles by centroid against subtract/intersect helper volumes.
-- Does not create new cut faces yet.
+- Adds approximate subtract cut faces for some helper shapes, but is not a robust boolean solver.
 
 During drag, CSG evaluation is paused and the viewport shows a lightweight interaction preview. Full CSG preview recomputes after the drag is finished.
 
@@ -65,20 +74,30 @@ qmake ..\..\3DScad.pro -spec win32-g++ "CONFIG+=debug" "CONFIG+=qml_debug"
 mingw32-make -f Makefile.Debug
 ```
 
+Optional Manifold CSG backend:
+
+```powershell
+.\scripts\build-manifold.ps1
+qmake 3DScad.pro
+mingw32-make
+```
+
+With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
+
 ## Limitations
 
 - The viewport renderer is still a software rasterizer inside `QOpenGLWidget`, not a full OpenGL mesh pipeline.
 - OpenSCAD parser supports only the generated subset.
-- Mesh approximate CSG is not exact and does not generate cut faces.
+- Manifold is currently an optional local build, not a vendored/submodule dependency.
+- Mesh approximate fallback is not exact.
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
 - No node graph or operation tree UI yet.
 
 ## Next Good Steps
 
-1. Add exact mesh clipping for approximate CSG so cut faces are generated.
-2. Add a real operation tree for `union`, `difference`, and `intersection` instead of flat per-shape boolean modes.
+1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
+2. Add a real operation tree UI for `union`, `difference`, and `intersection`.
 3. Move viewport rendering toward real OpenGL vertex/index buffers.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.
-

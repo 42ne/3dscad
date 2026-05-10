@@ -1,6 +1,7 @@
 #ifndef VIEWPORTWIDGET_H
 #define VIEWPORTWIDGET_H
 
+#include "csgevaluator.h"
 #include "shapenode.h"
 
 #include <QImage>
@@ -19,6 +20,7 @@ public:
     explicit ViewportWidget(QWidget *parent = nullptr);
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
+    void invalidateCsgPreview();
 
 signals:
     void shapeClicked(int index);
@@ -55,6 +57,9 @@ private:
     bool m_draggingShape = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
+    CsgPreview m_cachedCsgPreview;
+    uint m_cachedCsgFingerprint = 0;
+    bool m_csgPreviewDirty = true;
     QVector<int> m_pickBuffer;
     QVector<float> m_depthBuffer;
     QImage m_renderImage;

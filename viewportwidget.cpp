@@ -1,8 +1,8 @@
 #include "viewportwidget.h"
 
-#include "csgevaluator.h"
 #include "scenemesh.h"
 
+#include <QHash>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
@@ -226,6 +226,50 @@ static QVector<QPair<QVector3D, QVector3D>> meshEdges(const SceneMesh &mesh)
     return edges;
 }
 
+static uint shapeFingerprint(const ShapeNode &shape, uint seed)
+{
+    seed = qHash(shape.id, seed);
+    seed = qHash(static_cast<int>(shape.type), seed);
+    seed = qHash(static_cast<int>(shape.booleanMode), seed);
+    seed = qHash(shape.name, seed);
+    seed = qHash(shape.position.x(), seed);
+    seed = qHash(shape.position.y(), seed);
+    seed = qHash(shape.position.z(), seed);
+    seed = qHash(shape.rotation.x(), seed);
+    seed = qHash(shape.rotation.y(), seed);
+    seed = qHash(shape.rotation.z(), seed);
+    seed = qHash(shape.size.x(), seed);
+    seed = qHash(shape.size.y(), seed);
+    seed = qHash(shape.size.z(), seed);
+    seed = qHash(shape.radius, seed);
+    seed = qHash(shape.height, seed);
+    return seed;
+}
+
+static uint shapesFingerprint(const QVector<ShapeNode> &shapes)
+{
+    uint seed = qHash(shapes.size());
+    for (const ShapeNode &shape : shapes)
+        seed = shapeFingerprint(shape, seed);
+
+    return seed;
+}
+
+static const CsgPreview &cachedCsgPreview(const QVector<ShapeNode> &shapes,
+                                          CsgPreview *cache,
+                                          uint *cachedFingerprint,
+                                          bool *dirty)
+{
+    const uint fingerprint = shapesFingerprint(shapes);
+    if (*dirty || fingerprint != *cachedFingerprint) {
+        *cache = buildCsgPreview(shapes);
+        *cachedFingerprint = fingerprint;
+        *dirty = false;
+    }
+
+    return *cache;
+}
+
 ViewportWidget::ViewportWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
@@ -236,6 +280,7 @@ ViewportWidget::ViewportWidget(QWidget *parent)
 void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
 {
     m_shapes = shapes;
+    invalidateCsgPreview();
     update();
 }
 
@@ -243,6 +288,11 @@ void ViewportWidget::setSelectedIndex(int index)
 {
     m_selectedIndex = index;
     update();
+}
+
+void ViewportWidget::invalidateCsgPreview()
+{
+    m_csgPreviewDirty = true;
 }
 
 void ViewportWidget::initializeGL()
@@ -402,7 +452,10 @@ void ViewportWidget::paintGL()
                 appendMesh(triangles, buildShapeMesh(shape), color, i);
             }
         } else {
-            const CsgPreview preview = buildCsgPreview(*m_shapes);
+            const CsgPreview &preview = cachedCsgPreview(*m_shapes,
+                                                         &m_cachedCsgPreview,
+                                                         &m_cachedCsgFingerprint,
+                                                         &m_csgPreviewDirty);
             csgStatus = preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
                 QColor color = QColor(80, 160, 255);
@@ -519,7 +572,10 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton && m_shapes) {
-        const CsgPreview preview = buildCsgPreview(*m_shapes);
+        const CsgPreview &preview = cachedCsgPreview(*m_shapes,
+                                                     &m_cachedCsgPreview,
+                                                     &m_cachedCsgFingerprint,
+                                                     &m_csgPreviewDirty);
         int helperShapeIndex = -1;
         float bestDistance = 8.0f;
 

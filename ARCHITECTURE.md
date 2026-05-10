@@ -27,10 +27,18 @@ It stores:
 - viewport rasterization
 - move gizmo
 - helper wireframe picking
+- cached CSG preview reuse between repaints
 
 ## Code Generation And Parsing
 
 `OpenScadGenerator` converts `SceneDocument` to OpenSCAD code.
+
+`scenebooleantree.*` converts the current flat shape list into an internal boolean tree:
+
+- `Union`
+- `Difference`
+- `Intersection`
+- `Primitive`
 
 Generated boolean structure:
 
@@ -76,9 +84,29 @@ Returned data:
 Modes:
 
 - `Plain`: no active boolean operations.
+- `ManifoldComputed`: exact mesh boolean result from the optional Manifold backend.
 - `BoxComputed`: exact-ish box CSG for unrotated cubes.
 - `MeshApproximate`: centroid-based triangle filtering for non-box shapes.
 - `Fallback`: cannot compute because there is no add/base shape.
+
+### Manifold CSG
+
+`manifoldcsg.*` is an optional adapter around the open-source Manifold library.
+
+Build activation:
+
+- qmake checks for `build/manifold-build/src/libmanifold.a`.
+- If the library exists, `HAVE_MANIFOLD_CSG` is defined.
+- If not, the adapter compiles as a no-op and `csgevaluator` falls back to internal modes.
+
+Runtime flow:
+
+1. Convert each `ShapeNode` to a Manifold primitive.
+2. Evaluate the `SceneBooleanNode` tree with union, difference, and intersection operators.
+3. Convert Manifold `MeshGL` output back to `SceneMesh`.
+4. Render helper shapes as wireframes for editing.
+
+The current local Manifold build lives under `build/` and is not part of the repository. With Qt's MinGW GCC 8, Manifold needed local sequential fallbacks for unavailable standard parallel numeric functions.
 
 ### Box CSG
 
@@ -117,11 +145,13 @@ Dragging:
 - Axis gizmo drag emits shape drag signals.
 - `Shift + drag` supports plane dragging.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
+- Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
 
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
-- Mesh approximate CSG can visually leave holes without cap faces.
+- Optional Manifold integration currently depends on a local build artifact under `build/`.
+- Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - The flat boolean mode per shape is simple, but a real OpenSCAD model needs an operation tree.
 - Parser and generator are coupled to a narrow generated subset.
 
@@ -129,9 +159,9 @@ Dragging:
 
 Short term:
 
-- Add simple cap-face generation for mesh approximate subtract cuts.
-- Cache CSG previews and invalidate only when shape data changes.
-- Add visible reason text for why mesh approximate or fallback is active.
+- Formalize Manifold setup as a submodule, bootstrap script, or CMake migration.
+- Add visible reason text when Manifold is unavailable and fallback preview is active.
+- Add smoke tests for generator/parser roundtrip and CSG backend availability.
 
 Medium term:
 
@@ -143,4 +173,3 @@ Long term:
 
 - Integrate OpenSCAD CLI for exact render/export validation.
 - Replace approximate mesh filtering with real triangle clipping or a dedicated CSG library.
-
