@@ -1,7 +1,9 @@
 #include "csgevaluator.h"
+#include "manifoldcsg.h"
 
 #include <algorithm>
 #include <functional>
+#include <numeric>
 #include <QtMath>
 
 struct Box
@@ -41,6 +43,32 @@ static QVector3D inverseRotatePoint(const QVector3D &point, const QVector3D &deg
         p.x(),
         p.y() * qCos(rx) - p.z() * qSin(rx),
         p.y() * qSin(rx) + p.z() * qCos(rx));
+
+    return p;
+}
+
+static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
+{
+    const float rx = qDegreesToRadians(degrees.x());
+    const float ry = qDegreesToRadians(degrees.y());
+    const float rz = qDegreesToRadians(degrees.z());
+
+    QVector3D p = point;
+
+    p = QVector3D(
+        p.x(),
+        p.y() * qCos(rx) - p.z() * qSin(rx),
+        p.y() * qSin(rx) + p.z() * qCos(rx));
+
+    p = QVector3D(
+        p.x() * qCos(ry) + p.z() * qSin(ry),
+        p.y(),
+        -p.x() * qSin(ry) + p.z() * qCos(ry));
+
+    p = QVector3D(
+        p.x() * qCos(rz) - p.y() * qSin(rz),
+        p.x() * qSin(rz) + p.y() * qCos(rz),
+        p.z());
 
     return p;
 }
@@ -114,6 +142,92 @@ static MeshTriangle makeTriangle(const QVector3D &a, const QVector3D &b, const Q
     triangle.normal = faceNormal(a, b, c);
     triangle.shade = shade;
     return triangle;
+}
+
+static MeshTriangle reversedTriangle(const MeshTriangle &triangle, int shade = 104)
+{
+    MeshTriangle reversed;
+    reversed.a = triangle.a;
+    reversed.b = triangle.c;
+    reversed.c = triangle.b;
+    reversed.normal = -triangle.normal;
+    reversed.shade = shade;
+    return reversed;
+}
+
+static bool clipInside(float value, float limit, bool keepGreater)
+{
+    return keepGreater ? value >= limit - 0.0001f : value <= limit + 0.0001f;
+}
+
+static float axisValue(const QVector3D &point, int axis)
+{
+    if (axis == 0)
+        return point.x();
+    if (axis == 1)
+        return point.y();
+    return point.z();
+}
+
+static QVector<QVector3D> clipPolygonByAxisPlane(const QVector<QVector3D> &polygon,
+                                                 int axis,
+                                                 float limit,
+                                                 bool keepGreater)
+{
+    QVector<QVector3D> clipped;
+    if (polygon.isEmpty())
+        return clipped;
+
+    QVector3D previous = polygon.last();
+    bool previousInside = clipInside(axisValue(previous, axis), limit, keepGreater);
+
+    for (const QVector3D &current : polygon) {
+        const bool currentInside = clipInside(axisValue(current, axis), limit, keepGreater);
+
+        if (currentInside != previousInside) {
+            const float previousValue = axisValue(previous, axis);
+            const float currentValue = axisValue(current, axis);
+            const float denominator = currentValue - previousValue;
+            if (qAbs(denominator) > 0.0001f) {
+                const float t = (limit - previousValue) / denominator;
+                clipped.append(previous + (current - previous) * t);
+            }
+        }
+
+        if (currentInside)
+            clipped.append(current);
+
+        previous = current;
+        previousInside = currentInside;
+    }
+
+    return clipped;
+}
+
+static QVector<QVector3D> clipPolygonByBox(const QVector<QVector3D> &polygon, const Box &box)
+{
+    QVector<QVector3D> clipped = polygon;
+    clipped = clipPolygonByAxisPlane(clipped, 0, box.minimum.x(), true);
+    clipped = clipPolygonByAxisPlane(clipped, 0, box.maximum.x(), false);
+    clipped = clipPolygonByAxisPlane(clipped, 1, box.minimum.y(), true);
+    clipped = clipPolygonByAxisPlane(clipped, 1, box.maximum.y(), false);
+    clipped = clipPolygonByAxisPlane(clipped, 2, box.minimum.z(), true);
+    clipped = clipPolygonByAxisPlane(clipped, 2, box.maximum.z(), false);
+    return clipped;
+}
+
+static void appendReversedPolygon(SceneMesh *mesh, const QVector<QVector3D> &vertices, int shade = 104)
+{
+    if (vertices.size() < 3)
+        return;
+
+    for (int i = 1; i + 1 < vertices.size(); ++i) {
+        MeshTriangle triangle = makeTriangle(vertices[0], vertices[i + 1], vertices[i], shade);
+        mesh->triangles.append(triangle);
+        mesh->shadowPoints.append(triangle.a);
+        mesh->shadowPoints.append(triangle.b);
+        mesh->shadowPoints.append(triangle.c);
+    }
 }
 
 static void appendQuad(SceneMesh *mesh,
@@ -430,6 +544,153 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
+static bool isInsideAnyAddShape(const QVector<ShapeNode> &shapes, const QVector3D &point)
+{
+    for (const ShapeNode &shape : shapes) {
+        if (shape.booleanMode == ShapeNode::Add && containsPoint(shape, point))
+            return true;
+    }
+
+    return false;
+}
+
+static bool isInsideIntersectionMask(const QVector<ShapeNode> &shapes, const QVector3D &point)
+{
+    bool hasIntersectionMask = false;
+
+    for (const ShapeNode &shape : shapes) {
+        if (shape.booleanMode != ShapeNode::Intersect)
+            continue;
+
+        hasIntersectionMask = true;
+        if (containsPoint(shape, point))
+            return true;
+    }
+
+    return !hasIntersectionMask;
+}
+
+static bool isInsideOtherSubtractShape(const QVector<ShapeNode> &shapes, int currentShapeIndex, const QVector3D &point)
+{
+    for (int i = 0; i < shapes.size(); ++i) {
+        if (i == currentShapeIndex || shapes[i].booleanMode != ShapeNode::Subtract)
+            continue;
+
+        if (containsPoint(shapes[i], point))
+            return true;
+    }
+
+    return false;
+}
+
+static QVector<QVector3D> cubeFacePolygon(const ShapeNode &shape, const QVector<int> &indices)
+{
+    const QVector3D half = shape.size * 0.5f;
+    const QVector<QVector3D> localVertices = {
+        {-half.x(), -half.y(), -half.z()}, { half.x(), -half.y(), -half.z()},
+        { half.x(),  half.y(), -half.z()}, {-half.x(),  half.y(), -half.z()},
+        {-half.x(), -half.y(),  half.z()}, { half.x(), -half.y(),  half.z()},
+        { half.x(),  half.y(),  half.z()}, {-half.x(),  half.y(),  half.z()}
+    };
+
+    QVector<QVector3D> polygon;
+    for (int index : indices)
+        polygon.append(rotatePoint(localVertices[index], shape.rotation) + shape.position);
+
+    return polygon;
+}
+
+static bool appendClippedCubeSubtractCutFaces(CsgRenderItem *item,
+                                              const QVector<ShapeNode> &shapes,
+                                              int subtractShapeIndex)
+{
+    const ShapeNode &subtractShape = shapes[subtractShapeIndex];
+    if (subtractShape.type != ShapeNode::Cube)
+        return false;
+
+    QVector<Box> clippingBoxes;
+    for (int i = 0; i < shapes.size(); ++i) {
+        const ShapeNode &shape = shapes[i];
+        if (shape.booleanMode == ShapeNode::Add && isAxisAlignedCube(shape))
+            clippingBoxes.append(boxFromCube(shape, i));
+    }
+
+    if (clippingBoxes.isEmpty())
+        return false;
+
+    const QVector<QVector<int>> faceIndices = {
+        {0, 1, 2, 3}, {4, 7, 6, 5}, {0, 4, 5, 1},
+        {1, 5, 6, 2}, {2, 6, 7, 3}, {3, 7, 4, 0}
+    };
+    const QVector<int> shades = {88, 118, 98, 108, 124, 102};
+    const int originalTriangleCount = item->mesh.triangles.size();
+
+    for (int faceIndex = 0; faceIndex < faceIndices.size(); ++faceIndex) {
+        const QVector<QVector3D> face = cubeFacePolygon(subtractShape, faceIndices[faceIndex]);
+
+        for (const Box &box : clippingBoxes) {
+            QVector<QVector3D> clipped = clipPolygonByBox(face, box);
+            if (clipped.size() < 3)
+                continue;
+
+            const QVector3D centroid = std::accumulate(clipped.cbegin(), clipped.cend(), QVector3D()) / clipped.size();
+            if (!containsPoint(subtractShape, centroid))
+                continue;
+
+            if (!isInsideIntersectionMask(shapes, centroid))
+                continue;
+
+            if (isInsideOtherSubtractShape(shapes, subtractShapeIndex, centroid))
+                continue;
+
+            appendReversedPolygon(&item->mesh, clipped, shades[faceIndex]);
+        }
+    }
+
+    return item->mesh.triangles.size() > originalTriangleCount;
+}
+
+static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeNode> &shapes)
+{
+    for (int i = 0; i < shapes.size(); ++i) {
+        const ShapeNode &shape = shapes[i];
+        if (shape.booleanMode != ShapeNode::Subtract)
+            continue;
+
+        const SceneMesh cutterMesh = buildShapeMesh(shape);
+        CsgRenderItem item;
+        item.shapeIndex = i;
+        item.booleanMode = ShapeNode::Subtract;
+        item.computed = true;
+
+        if (appendClippedCubeSubtractCutFaces(&item, shapes, i)) {
+            preview->items.append(item);
+            continue;
+        }
+
+        for (const MeshTriangle &triangle : cutterMesh.triangles) {
+            const QVector3D centroid = (triangle.a + triangle.b + triangle.c) / 3.0f;
+            if (!isInsideAnyAddShape(shapes, centroid))
+                continue;
+
+            if (!isInsideIntersectionMask(shapes, centroid))
+                continue;
+
+            if (isInsideOtherSubtractShape(shapes, i, centroid))
+                continue;
+
+            const MeshTriangle cutTriangle = reversedTriangle(triangle);
+            item.mesh.triangles.append(cutTriangle);
+            item.mesh.shadowPoints.append(cutTriangle.a);
+            item.mesh.shadowPoints.append(cutTriangle.b);
+            item.mesh.shadowPoints.append(cutTriangle.c);
+        }
+
+        if (!item.mesh.triangles.isEmpty())
+            preview->items.append(item);
+    }
+}
+
 static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes)
 {
     for (int i = 0; i < shapes.size(); ++i) {
@@ -505,8 +766,9 @@ static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes
             preview.items.append(item);
     }
 
+    appendSubtractCutFaceItems(&preview, shapes);
     appendHelpers(&preview, shapes);
-    preview.statusText = "CSG preview: mesh approximate (no cut faces yet)";
+    preview.statusText = "CSG preview: mesh approximate with subtract cut faces";
     return preview;
 }
 
@@ -548,6 +810,24 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
         preview.mode = CsgPreview::MeshApproximate;
     else
         preview.mode = CsgPreview::BoxComputed;
+
+    if (hasBoolean && hasAddShape) {
+        SceneMesh manifoldMesh;
+        QString manifoldError;
+        if (buildManifoldCsgMesh(shapes, &manifoldMesh, &manifoldError)) {
+            CsgRenderItem item;
+            item.mesh = manifoldMesh;
+            item.shapeIndex = -1;
+            item.booleanMode = ShapeNode::Add;
+            item.computed = true;
+
+            preview.mode = CsgPreview::ManifoldComputed;
+            preview.items.append(item);
+            appendHelpers(&preview, shapes);
+            preview.statusText = "CSG preview: Manifold exact mesh";
+            return preview;
+        }
+    }
 
     if (preview.mode == CsgPreview::MeshApproximate)
         return buildMeshApproximationPreview(shapes);

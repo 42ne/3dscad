@@ -14,9 +14,11 @@ SOURCES += \
     csgevaluator.cpp \
     main.cpp \
     mainwindow.cpp \
+    manifoldcsg.cpp \
     openscadgenerator.cpp \
     openscadparser.cpp \
     scenecommands.cpp \
+    scenebooleantree.cpp \
     scenemesh.cpp \
     scenedocument.cpp \
     viewportwidget.cpp
@@ -24,9 +26,11 @@ SOURCES += \
 HEADERS += \
     csgevaluator.h \
     mainwindow.h \
+    manifoldcsg.h \
     openscadgenerator.h \
     openscadparser.h \
     scenecommands.h \
+    scenebooleantree.h \
     scenemesh.h \
     scenedocument.h \
     shapenode.h \
@@ -34,6 +38,12 @@ HEADERS += \
 
 FORMS += \
     mainwindow.ui
+
+exists(build/manifold-build/src/libmanifold.a) {
+    DEFINES += HAVE_MANIFOLD_CSG
+    INCLUDEPATH += $$PWD/build/manifold-src/include
+    LIBS += $$PWD/build/manifold-build/src/libmanifold.a
+}
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

@@ -6,9 +6,14 @@
 #include "viewportwidget.h"
 
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
+#include <QClipboard>
+#include <QCoreApplication>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QDir>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
@@ -18,6 +23,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSplitter>
 #include <QTextEdit>
 #include <QUndoStack>
@@ -66,12 +72,19 @@ void MainWindow::buildUi()
     m_codeEditor->setFontFamily("Consolas");
 
     m_applyCodeButton = new QPushButton("Apply code");
+    m_sendToOpenScadButton = new QPushButton("Send to OpenSCAD");
+    m_openScadPreviewLabel = new QLabel;
+    m_openScadPreviewLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_openScadPreviewLabel->setWordWrap(true);
+    m_openScadPreviewLabel->setText(QString("Preview file: %1").arg(QDir::toNativeSeparators(previewScadPath())));
 
     auto *codePanel = new QWidget;
     auto *codeLayout = new QVBoxLayout(codePanel);
     codeLayout->setContentsMargins(0, 0, 0, 0);
     codeLayout->addWidget(m_codeEditor);
     codeLayout->addWidget(m_applyCodeButton);
+    codeLayout->addWidget(m_sendToOpenScadButton);
+    codeLayout->addWidget(m_openScadPreviewLabel);
 
     auto *mainSplitter = new QSplitter(Qt::Vertical);
     mainSplitter->addWidget(m_viewport);
@@ -112,6 +125,7 @@ void MainWindow::buildUi()
     connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
+    connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
         m_shapeList->setCurrentRow(index);
     });
@@ -265,6 +279,22 @@ void MainWindow::applyOpenScadCode()
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::sendToOpenScad()
+{
+    if (!writeOpenScadPreview(true))
+        return;
+
+    const QString nativePath = QDir::toNativeSeparators(previewScadPath());
+    QApplication::clipboard()->setText(nativePath);
+
+    QMessageBox::information(
+        this,
+        "OpenSCAD preview file",
+        QString("Saved the current model to:\n\n%1\n\n"
+                "The path was copied to the clipboard. Open this file in OpenSCAD and enable automatic reload/preview there.")
+            .arg(nativePath));
 }
 
 void MainWindow::onSelectionChanged(int row)
@@ -463,7 +493,9 @@ void MainWindow::refreshProperties()
 
 void MainWindow::refreshOpenScadCode()
 {
-    m_codeEditor->setPlainText(OpenScadGenerator::generate(m_scene));
+    const QString code = OpenScadGenerator::generate(m_scene);
+    m_codeEditor->setPlainText(code);
+    writeOpenScadPreview(false);
 }
 
 void MainWindow::refreshCsgStatus()
@@ -473,4 +505,39 @@ void MainWindow::refreshCsgStatus()
 
     const CsgPreview preview = buildCsgPreview(m_scene.shapes());
     m_csgStatusLabel->setText(preview.statusText);
+}
+
+QString MainWindow::previewScadPath() const
+{
+    return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("openscad_preview.scad");
+}
+
+bool MainWindow::writeOpenScadPreview(bool notify)
+{
+    const QString path = previewScadPath();
+    const QString directoryPath = QFileInfo(path).absolutePath();
+    QDir().mkpath(directoryPath);
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (notify) {
+            QMessageBox::warning(this, "OpenSCAD preview error",
+                                 QString("Cannot write preview file:\n%1").arg(path));
+        }
+        return false;
+    }
+
+    const QByteArray data = m_codeEditor->toPlainText().toUtf8();
+    if (file.write(data) != data.size() || !file.commit()) {
+        if (notify) {
+            QMessageBox::warning(this, "OpenSCAD preview error",
+                                 QString("Cannot finish writing preview file:\n%1").arg(path));
+        }
+        return false;
+    }
+
+    if (m_openScadPreviewLabel)
+        m_openScadPreviewLabel->setText(QString("Preview file: %1").arg(QDir::toNativeSeparators(path)));
+
+    return true;
 }

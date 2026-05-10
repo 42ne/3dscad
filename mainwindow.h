@@ -28,6 +28,7 @@ private slots:
     void addCylinder();
     void deleteSelectedShape();
     void applyOpenScadCode();
+    void sendToOpenScad();
 
     void onSelectionChanged(int row);
     void onPropertyChanged();
@@ -42,6 +43,8 @@ private:
     void refreshOpenScadCode();
     void refreshCsgStatus();
     void refreshSceneViews();
+    QString previewScadPath() const;
+    bool writeOpenScadPreview(bool notify);
 
 private:
     SceneDocument m_scene;
@@ -56,8 +59,10 @@ private:
     QListWidget *m_shapeList = nullptr;
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
+    QPushButton *m_sendToOpenScadButton = nullptr;
     QPushButton *m_deleteShapeButton = nullptr;
     QLabel *m_csgStatusLabel = nullptr;
+    QLabel *m_openScadPreviewLabel = nullptr;
 
     QDoubleSpinBox *m_posX = nullptr;
     QDoubleSpinBox *m_posY = nullptr;

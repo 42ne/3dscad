@@ -20,6 +20,7 @@ struct CsgPreview
     enum Mode {
         Plain,
         BoxComputed,
+        ManifoldComputed,
         MeshApproximate,
         Fallback
     };

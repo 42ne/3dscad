@@ -25,66 +25,44 @@ QString OpenScadGenerator::generate(const SceneDocument &scene)
         return code;
     }
 
-    bool hasAddShapes = false;
-    bool hasSubtractShapes = false;
-    bool hasIntersectShapes = false;
-    for (const ShapeNode &shape : scene.shapes()) {
-        if (shape.booleanMode == ShapeNode::Subtract)
-            hasSubtractShapes = true;
-        else if (shape.booleanMode == ShapeNode::Intersect)
-            hasIntersectShapes = true;
-        else
-            hasAddShapes = true;
-    }
-
-    hasSubtractShapes = hasAddShapes && hasSubtractShapes;
-    hasIntersectShapes = hasAddShapes && hasIntersectShapes;
-
-    if (hasIntersectShapes)
-        code += "intersection() {\n";
-
-    code += hasSubtractShapes
-                ? QString("%1difference() {\n%2union() {\n").arg(hasIntersectShapes ? "    " : "").arg(hasIntersectShapes ? "        " : "    ")
-                : QString("%1union() {\n").arg(hasIntersectShapes ? "    " : "");
-
-    for (const ShapeNode &shape : scene.shapes()) {
-        if (hasAddShapes && shape.booleanMode != ShapeNode::Add)
-            continue;
-
-        appendShape(&code, shape, hasIntersectShapes ? (hasSubtractShapes ? "            " : "        ")
-                                                     : (hasSubtractShapes ? "        " : "    "));
-    }
-
-    if (hasSubtractShapes) {
-        code += hasIntersectShapes ? "        }\n" : "    }\n";
-
-        for (const ShapeNode &shape : scene.shapes()) {
-            if (shape.booleanMode != ShapeNode::Subtract)
-                continue;
-
-            appendShape(&code, shape, hasIntersectShapes ? "        " : "    ");
-        }
-    }
-
-    code += hasIntersectShapes ? "    }\n" : "}\n";
-
-    if (hasIntersectShapes) {
-        code += "    union() {\n";
-
-        for (const ShapeNode &shape : scene.shapes()) {
-            if (shape.booleanMode != ShapeNode::Intersect)
-                continue;
-
-            appendShape(&code, shape, "        ");
-        }
-
-        code += "    }\n";
-    }
-
-    if (hasIntersectShapes)
-        code += "}\n";
-
+    const SceneBooleanNode root = buildSceneBooleanTree(scene.shapes());
+    appendBooleanNode(&code, root, scene, "");
     return code;
+}
+
+void OpenScadGenerator::appendBooleanNode(QString *code, const SceneBooleanNode &node, const SceneDocument &scene, const QString &indent)
+{
+    switch (node.type) {
+    case SceneBooleanNode::Primitive:
+        if (const ShapeNode *shape = scene.shapeAt(node.shapeIndex))
+            appendShape(code, *shape, indent);
+        break;
+    case SceneBooleanNode::Union:
+        appendBooleanGroup(code, "union", node, scene, indent);
+        break;
+    case SceneBooleanNode::Difference:
+        appendBooleanGroup(code, "difference", node, scene, indent);
+        break;
+    case SceneBooleanNode::Intersection:
+        appendBooleanGroup(code, "intersection", node, scene, indent);
+        break;
+    case SceneBooleanNode::Empty:
+        break;
+    }
+}
+
+void OpenScadGenerator::appendBooleanGroup(QString *code,
+                                           const QString &name,
+                                           const SceneBooleanNode &node,
+                                           const SceneDocument &scene,
+                                           const QString &indent)
+{
+    *code += QString("%1%2() {\n").arg(indent, name);
+
+    for (const SceneBooleanNode &child : node.children)
+        appendBooleanNode(code, child, scene, indent + "    ");
+
+    *code += indent + "}\n";
 }
 
 QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
