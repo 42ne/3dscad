@@ -11,6 +11,7 @@ Implemented:
 - Scene tree with cube, sphere, and cylinder primitives.
 - Scene tree displays the generated boolean structure as `union`, `difference`, and `intersection` groups.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
+- `SceneDocument` exposes group operations for add/remove/move; UI and undo commands are still next.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
@@ -101,7 +102,7 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 ## Next Good Steps
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
-2. Move parser and fallback CSG paths to `SceneDocument::TreeNode`.
+2. Add undo/redo commands and UI buttons for explicit group operations.
 3. Move viewport rendering toward real OpenGL vertex/index buffers.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.

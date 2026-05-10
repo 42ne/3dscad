@@ -211,9 +211,147 @@ bool SceneDocument::removeSelectedShape()
     return removeShapeById(m_selectedShapeId);
 }
 
+int SceneDocument::addGroup(TreeNode::Operation operation, int parentGroupId, int insertIndex)
+{
+    if (m_treeRoot.id <= 0)
+        m_treeRoot = makeGroupNode(TreeNode::Union);
+
+    TreeNode *parent = parentGroupId > 0 ? treeNodeById(&m_treeRoot, parentGroupId) : &m_treeRoot;
+    if (!parent || parent->type != TreeNode::Group)
+        return 0;
+
+    TreeNode group = makeGroupNode(operation);
+    const int groupId = group.id;
+    const int boundedIndex = insertIndex < 0
+                                 ? parent->children.size()
+                                 : qBound(0, insertIndex, parent->children.size());
+    parent->children.insert(boundedIndex, group);
+    return groupId;
+}
+
+bool SceneDocument::removeGroupById(int groupId)
+{
+    if (groupId <= 0 || m_treeRoot.id == groupId)
+        return false;
+
+    const bool removed = detachTreeNodeById(&m_treeRoot, groupId);
+    if (removed)
+        pruneEmptyGroups(&m_treeRoot);
+
+    return removed;
+}
+
+bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
+{
+    if (nodeId <= 0 || m_treeRoot.id == nodeId)
+        return false;
+
+    TreeNode *targetParent = parentGroupId > 0 ? treeNodeById(&m_treeRoot, parentGroupId) : &m_treeRoot;
+    if (!targetParent || targetParent->type != TreeNode::Group)
+        return false;
+
+    const TreeNode *node = treeNodeById(&m_treeRoot, nodeId);
+    if (!node || treeContainsNodeId(*node, parentGroupId))
+        return false;
+
+    TreeNode movedNode;
+    if (!detachTreeNodeById(&m_treeRoot, nodeId, &movedNode))
+        return false;
+
+    targetParent = parentGroupId > 0 ? treeNodeById(&m_treeRoot, parentGroupId) : &m_treeRoot;
+    if (!targetParent || targetParent->type != TreeNode::Group) {
+        if (m_treeRoot.id <= 0)
+            m_treeRoot = makeGroupNode(TreeNode::Union);
+        m_treeRoot.children.append(movedNode);
+        return false;
+    }
+
+    const int boundedIndex = insertIndex < 0
+                                 ? targetParent->children.size()
+                                 : qBound(0, insertIndex, targetParent->children.size());
+    targetParent->children.insert(boundedIndex, movedNode);
+    pruneEmptyGroups(&m_treeRoot);
+    return true;
+}
+
 bool SceneDocument::isValidIndex(int index) const
 {
     return index >= 0 && index < m_shapes.size();
+}
+
+SceneDocument::TreeNode *SceneDocument::treeNodeById(TreeNode *node, int id)
+{
+    if (!node)
+        return nullptr;
+
+    if (node->id == id)
+        return node;
+
+    for (TreeNode &child : node->children) {
+        if (TreeNode *found = treeNodeById(&child, id))
+            return found;
+    }
+
+    return nullptr;
+}
+
+const SceneDocument::TreeNode *SceneDocument::treeNodeById(const TreeNode *node, int id) const
+{
+    if (!node)
+        return nullptr;
+
+    if (node->id == id)
+        return node;
+
+    for (const TreeNode &child : node->children) {
+        if (const TreeNode *found = treeNodeById(&child, id))
+            return found;
+    }
+
+    return nullptr;
+}
+
+bool SceneDocument::treeContainsNodeId(const TreeNode &node, int id) const
+{
+    if (node.id == id)
+        return true;
+
+    for (const TreeNode &child : node.children) {
+        if (treeContainsNodeId(child, id))
+            return true;
+    }
+
+    return false;
+}
+
+bool SceneDocument::detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode)
+{
+    if (!node)
+        return false;
+
+    for (int i = 0; i < node->children.size(); ++i) {
+        TreeNode &child = node->children[i];
+        if (child.id == id) {
+            if (detachedNode) {
+                *detachedNode = child;
+                node->children.removeAt(i);
+            } else {
+                const QVector<TreeNode> promotedChildren = child.children;
+                node->children.removeAt(i);
+
+                int insertIndex = i;
+                for (const TreeNode &promotedChild : promotedChildren)
+                    node->children.insert(insertIndex++, promotedChild);
+            }
+
+            return true;
+        }
+
+        if (child.type == TreeNode::Group && detachTreeNodeById(&child, id, detachedNode))
+            return true;
+    }
+
+    return false;
 }
 
 bool SceneDocument::removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode)

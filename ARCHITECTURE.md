@@ -18,6 +18,7 @@ It stores:
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
 It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
+The document model now exposes group operations for the upcoming UI layer: add group, remove group by promoting children, and move a tree node to another group.
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
@@ -164,6 +165,7 @@ Dragging:
 
 Short term:
 
+- Add undo/redo commands and UI buttons for the `SceneDocument` group operations.
 - Formalize Manifold setup as a submodule, bootstrap script, or CMake migration.
 - Add visible reason text when Manifold is unavailable and fallback preview is active.
 - Add smoke tests for generator/parser roundtrip and CSG backend availability.

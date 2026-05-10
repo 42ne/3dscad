@@ -65,9 +65,16 @@ public:
     bool removeShapeById(int id);
     bool removeSelectedShape();
     bool takeShapeById(int id, ShapeNode *removedShape, int *removedIndex);
+    int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
+    bool removeGroupById(int groupId);
+    bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
 
 private:
     bool isValidIndex(int index) const;
+    TreeNode *treeNodeById(TreeNode *node, int id);
+    const TreeNode *treeNodeById(const TreeNode *node, int id) const;
+    bool treeContainsNodeId(const TreeNode &node, int id) const;
+    bool detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
     bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
     bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
