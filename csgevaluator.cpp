@@ -102,7 +102,7 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
-CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int selectedIndex)
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 {
     CsgPreview preview;
     bool hasBoolean = false;
@@ -175,8 +175,11 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int selectedIndex)
         preview.items.append(item);
     }
 
-    if (selectedIndex >= 0 && selectedIndex < shapes.size() && shapes[selectedIndex].booleanMode != ShapeNode::Add) {
-        CsgRenderItem helper = renderItemFromShape(shapes[selectedIndex], selectedIndex);
+    for (int i = 0; i < shapes.size(); ++i) {
+        if (shapes[i].booleanMode == ShapeNode::Add)
+            continue;
+
+        CsgRenderItem helper = renderItemFromShape(shapes[i], i);
         helper.helper = true;
         preview.items.append(helper);
     }

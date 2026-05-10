@@ -27,6 +27,6 @@ struct CsgPreview
     QString statusText;
 };
 
-CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int selectedIndex);
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes);
 
 #endif

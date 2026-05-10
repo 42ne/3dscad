@@ -378,7 +378,7 @@ void ViewportWidget::paintGL()
         QVector<Triangle2D> triangles;
         QVector<Line2D> helperLines;
 
-        const CsgPreview preview = buildCsgPreview(*m_shapes, m_selectedIndex);
+        const CsgPreview preview = buildCsgPreview(*m_shapes);
         csgStatus = preview.statusText;
         for (const CsgRenderItem &item : preview.items) {
             QColor color = QColor(80, 160, 255);
@@ -475,6 +475,33 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
             m_dragStartMousePosition = event->pos();
             m_lastDragDelta = QVector3D();
             emit shapeDragStarted(m_selectedIndex);
+            return;
+        }
+    }
+
+    if (event->button() == Qt::LeftButton && m_shapes) {
+        const CsgPreview preview = buildCsgPreview(*m_shapes);
+        int helperShapeIndex = -1;
+        float bestDistance = 8.0f;
+
+        for (const CsgRenderItem &item : preview.items) {
+            if (!item.helper)
+                continue;
+
+            for (const auto &edge : meshEdges(item.mesh)) {
+                const QPointF a = projectWorldPoint(edge.first, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+                const QPointF b = projectWorldPoint(edge.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+                const float distance = distanceToSegment(event->pos(), a, b);
+
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    helperShapeIndex = item.shapeIndex;
+                }
+            }
+        }
+
+        if (helperShapeIndex >= 0) {
+            emit shapeClicked(helperShapeIndex);
             return;
         }
     }
