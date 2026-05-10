@@ -271,6 +271,7 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
                                  : qBound(0, insertIndex, targetParent->children.size());
     targetParent->children.insert(boundedIndex, movedNode);
     pruneEmptyGroups(&m_treeRoot);
+    ensureTreeContainsAllShapes();
     return true;
 }
 
@@ -374,6 +375,30 @@ bool SceneDocument::removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNod
     }
 
     return false;
+}
+
+bool SceneDocument::treeContainsPrimitiveShapeId(const TreeNode &node, int shapeId) const
+{
+    if (node.type == TreeNode::Primitive && node.shapeId == shapeId)
+        return true;
+
+    for (const TreeNode &child : node.children) {
+        if (treeContainsPrimitiveShapeId(child, shapeId))
+            return true;
+    }
+
+    return false;
+}
+
+void SceneDocument::ensureTreeContainsAllShapes()
+{
+    if (m_treeRoot.id <= 0 || m_treeRoot.type != TreeNode::Group)
+        m_treeRoot = makeGroupNode(TreeNode::Union);
+
+    for (const ShapeNode &shape : m_shapes) {
+        if (!treeContainsPrimitiveShapeId(m_treeRoot, shape.id))
+            m_treeRoot.children.append(makePrimitiveNode(shape.id));
+    }
 }
 
 bool SceneDocument::appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode)

@@ -15,6 +15,7 @@ Implemented:
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
+- `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.

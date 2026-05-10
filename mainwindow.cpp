@@ -157,27 +157,43 @@ static void markGroupItem(QTreeWidgetItem *item, const SceneDocument::TreeNode &
 
 static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
                                               const SceneDocument::TreeNode &node,
-                                              const SceneDocument &scene)
+                                              const SceneDocument &scene,
+                                              SceneDocument::TreeNode::Operation parentOperation = SceneDocument::TreeNode::Union,
+                                              int childIndex = 0)
 {
+    QString roleSuffix;
+    QColor roleColor;
+    if (parentOperation == SceneDocument::TreeNode::Difference) {
+        roleSuffix = childIndex == 0 ? " (base)" : " (cut)";
+        roleColor = childIndex == 0 ? QColor(45, 90, 145) : QColor(145, 80, 45);
+    } else if (parentOperation == SceneDocument::TreeNode::Intersection) {
+        roleSuffix = " (mask)";
+        roleColor = QColor(85, 95, 145);
+    }
+
     if (node.type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = scene.shapeById(node.shapeId);
         if (!shape)
             return nullptr;
 
         auto *item = new QTreeWidgetItem(parent);
-        item->setText(0, shape->name);
+        item->setText(0, shape->name + roleSuffix);
         item->setData(0, ShapeIdRole, shape->id);
         item->setData(0, TreeNodeIdRole, node.id);
+        if (roleColor.isValid())
+            item->setForeground(0, roleColor);
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         return item;
     }
 
     auto *groupItem = new QTreeWidgetItem(parent);
-    groupItem->setText(0, booleanGroupLabel(node.operation));
+    groupItem->setText(0, booleanGroupLabel(node.operation) + roleSuffix);
     markGroupItem(groupItem, node);
+    if (roleColor.isValid())
+        groupItem->setForeground(0, roleColor);
 
-    for (const SceneDocument::TreeNode &child : node.children)
-        appendBooleanTreeItem(groupItem, child, scene);
+    for (int i = 0; i < node.children.size(); ++i)
+        appendBooleanTreeItem(groupItem, node.children[i], scene, node.operation, i);
 
     return groupItem;
 }

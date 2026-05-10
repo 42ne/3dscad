@@ -23,6 +23,7 @@ The document model exposes group operations used by the UI layer: add group, rem
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
 The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups. A context menu exposes the same core group actions near the selected node.
+For clarity, children of `difference()` groups are labeled as `base` or `cut`, and children of `intersection()` groups are labeled as `mask`.
 
 `ViewportWidget` owns interactive viewing and picking:
 
@@ -151,6 +152,7 @@ Dragging:
 - `Shift + drag` supports plane dragging.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
+- After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
 - Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
 

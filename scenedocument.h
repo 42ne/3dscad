@@ -76,6 +76,8 @@ private:
     bool treeContainsNodeId(const TreeNode &node, int id) const;
     bool detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
+    bool treeContainsPrimitiveShapeId(const TreeNode &node, int shapeId) const;
+    void ensureTreeContainsAllShapes();
     bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
     bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
     void pruneEmptyGroups(TreeNode *node);
