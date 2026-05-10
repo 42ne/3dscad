@@ -297,3 +297,50 @@ void MoveTreeNodeCommand::redo()
     if (m_onChanged)
         m_onChanged();
 }
+
+UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
+                                                         int groupId,
+                                                         const QVector3D &position,
+                                                         const QVector3D &rotation,
+                                                         std::function<void()> onChanged)
+    : QUndoCommand("Update group transform")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateGroupTransform(groupId, position, rotation);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool UpdateGroupTransformCommand::isValid() const
+{
+    return m_valid;
+}
+
+void UpdateGroupTransformCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void UpdateGroupTransformCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}

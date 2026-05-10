@@ -57,6 +57,8 @@ public:
     const ShapeNode *shapeById(int id) const;
     ShapeNode *shapeById(int id);
     int indexOfShapeId(int id) const;
+    const TreeNode *treeNodeById(int id) const;
+    TreeNode *treeNodeById(int id);
 
     int addShape(const ShapeNode &shape);
     int insertShape(int index, const ShapeNode &shape);
@@ -70,6 +72,7 @@ public:
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
+    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation);
 
 private:
     bool isValidIndex(int index) const;

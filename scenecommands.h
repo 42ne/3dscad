@@ -128,4 +128,25 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class UpdateGroupTransformCommand : public QUndoCommand
+{
+public:
+    UpdateGroupTransformCommand(SceneDocument *scene,
+                                int groupId,
+                                const QVector3D &position,
+                                const QVector3D &rotation,
+                                std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 #endif

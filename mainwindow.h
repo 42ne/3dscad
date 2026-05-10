@@ -53,6 +53,7 @@ private:
     void selectShapeInSceneTree(int shapeId);
     void selectTreeNodeInSceneTree(int treeNodeId);
     int selectedTreeGroupId() const;
+    int selectedDirectGroupId() const;
     void addGroup(SceneDocument::TreeNode::Operation operation);
     void moveTreeNodeToGroup(int nodeId, int parentGroupId);
     void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);

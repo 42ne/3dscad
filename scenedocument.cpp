@@ -94,6 +94,16 @@ int SceneDocument::indexOfShapeId(int id) const
     return -1;
 }
 
+const SceneDocument::TreeNode *SceneDocument::treeNodeById(int id) const
+{
+    return treeNodeById(&m_treeRoot, id);
+}
+
+SceneDocument::TreeNode *SceneDocument::treeNodeById(int id)
+{
+    return treeNodeById(&m_treeRoot, id);
+}
+
 int SceneDocument::addShape(const ShapeNode &shape)
 {
     return insertShape(m_shapes.size(), shape);
@@ -275,6 +285,20 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     pruneEmptyGroups(&m_treeRoot);
     ensureTreeContainsAllShapes();
     synchronizeBooleanModesFromTree();
+    return true;
+}
+
+bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation)
+{
+    TreeNode *node = treeNodeById(groupId);
+    if (!node || node->type != TreeNode::Group)
+        return false;
+
+    if (node->position == position && node->rotation == rotation)
+        return false;
+
+    node->position = position;
+    node->rotation = rotation;
     return true;
 }
 

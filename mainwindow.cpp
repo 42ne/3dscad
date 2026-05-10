@@ -606,8 +606,28 @@ void MainWindow::onPropertyChanged()
         return;
 
     const ShapeNode *selectedShape = m_scene.selectedShape();
-    if (!selectedShape)
+    if (!selectedShape) {
+        const int groupId = selectedDirectGroupId();
+        if (groupId <= 0)
+            return;
+
+        auto *command = new UpdateGroupTransformCommand(
+            &m_scene,
+            groupId,
+            QVector3D(m_posX->value(), m_posY->value(), m_posZ->value()),
+            QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value()),
+            [this]() {
+                refreshSceneViews();
+            });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
         return;
+    }
 
     ShapeNode updatedShape = *selectedShape;
     updatedShape.position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
@@ -789,6 +809,18 @@ int MainWindow::selectedTreeGroupId() const
     return item->data(0, TreeNodeIdRole).toInt();
 }
 
+int MainWindow::selectedDirectGroupId() const
+{
+    if (!m_shapeTree || !m_shapeTree->currentItem())
+        return 0;
+
+    QTreeWidgetItem *item = m_shapeTree->currentItem();
+    if (!item->data(0, GroupOperationRole).isValid())
+        return 0;
+
+    return item->data(0, TreeNodeIdRole).toInt();
+}
+
 void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
 {
     auto *command = new AddGroupCommand(&m_scene, operation, selectedTreeGroupId(), -1, [this]() {
@@ -845,39 +877,73 @@ void MainWindow::changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode bool
 
 void MainWindow::refreshProperties()
 {
-    bool hasSelection = m_scene.hasSelection();
+    const bool hasShapeSelection = m_scene.hasSelection();
+    const int selectedGroupId = selectedDirectGroupId();
+    const SceneDocument::TreeNode *selectedGroup = selectedGroupId > 0 ? m_scene.treeNodeById(selectedGroupId) : nullptr;
+    const bool hasGroupSelection = selectedGroup && selectedGroup->type == SceneDocument::TreeNode::Group;
+    const bool hasTransformSelection = hasShapeSelection || hasGroupSelection;
 
-    QList<QDoubleSpinBox *> boxes = {
+    QList<QDoubleSpinBox *> transformBoxes = {
         m_posX, m_posY, m_posZ,
-        m_rotX, m_rotY, m_rotZ,
+        m_rotX, m_rotY, m_rotZ
+    };
+    QList<QDoubleSpinBox *> shapeBoxes = {
         m_sizeX, m_sizeY, m_sizeZ,
         m_radius, m_height
     };
 
-    for (QDoubleSpinBox *box : boxes)
-        box->setEnabled(hasSelection);
+    for (QDoubleSpinBox *box : transformBoxes)
+        box->setEnabled(hasTransformSelection);
 
-    m_deleteShapeButton->setEnabled(hasSelection);
-    const int selectedGroupId = (m_shapeTree && m_shapeTree->currentItem()
-                                 && m_shapeTree->currentItem()->data(0, GroupOperationRole).isValid())
-                                    ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
-                                    : 0;
+    for (QDoubleSpinBox *box : shapeBoxes)
+        box->setEnabled(hasShapeSelection);
+
+    m_deleteShapeButton->setEnabled(hasShapeSelection);
     m_deleteGroupButton->setEnabled(selectedGroupId > 0 && selectedGroupId != m_scene.treeRoot().id);
-    m_booleanMode->setEnabled(hasSelection);
+    m_booleanMode->setEnabled(hasShapeSelection);
 
-    if (!hasSelection)
-        return;
-
-    const ShapeNode *s = m_scene.selectedShape();
-    if (!s)
+    if (!hasTransformSelection)
         return;
 
     m_updatingProperties = true;
 
-    QList<QDoubleSpinBox *> allBoxes = boxes;
+    QList<QDoubleSpinBox *> allBoxes = transformBoxes + shapeBoxes;
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(true);
     m_booleanMode->blockSignals(true);
+
+    if (hasGroupSelection) {
+        m_posX->setValue(selectedGroup->position.x());
+        m_posY->setValue(selectedGroup->position.y());
+        m_posZ->setValue(selectedGroup->position.z());
+
+        m_rotX->setValue(selectedGroup->rotation.x());
+        m_rotY->setValue(selectedGroup->rotation.y());
+        m_rotZ->setValue(selectedGroup->rotation.z());
+
+        m_sizeX->setValue(0.0);
+        m_sizeY->setValue(0.0);
+        m_sizeZ->setValue(0.0);
+        m_radius->setValue(0.1);
+        m_height->setValue(0.1);
+        m_booleanMode->setCurrentIndex(-1);
+
+        for (QDoubleSpinBox *box : allBoxes)
+            box->blockSignals(false);
+        m_booleanMode->blockSignals(false);
+
+        m_updatingProperties = false;
+        return;
+    }
+
+    const ShapeNode *s = m_scene.selectedShape();
+    if (!s) {
+        for (QDoubleSpinBox *box : allBoxes)
+            box->blockSignals(false);
+        m_booleanMode->blockSignals(false);
+        m_updatingProperties = false;
+        return;
+    }
 
     m_posX->setValue(s->position.x());
     m_posY->setValue(s->position.y());
