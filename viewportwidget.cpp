@@ -1,5 +1,6 @@
 #include "viewportwidget.h"
 
+#include "csgevaluator.h"
 #include "scenemesh.h"
 
 #include <QMouseEvent>
@@ -346,24 +347,27 @@ void ViewportWidget::paintGL()
     if (m_shapes) {
         QVector<Triangle2D> triangles;
 
-        for (int i = 0; i < m_shapes->size(); ++i) {
-            const ShapeNode &s = m_shapes->at(i);
+        const QVector<CsgRenderItem> renderItems = buildCsgPreviewItems(*m_shapes, m_selectedIndex);
+        for (const CsgRenderItem &item : renderItems) {
             QColor color = QColor(80, 160, 255);
-            if (s.booleanMode == ShapeNode::Subtract)
+            if (item.booleanMode == ShapeNode::Subtract)
                 color = QColor(225, 95, 95);
-            else if (s.booleanMode == ShapeNode::Intersect)
+            else if (item.booleanMode == ShapeNode::Intersect)
                 color = QColor(150, 115, 240);
 
-            if (i == m_selectedIndex) {
-                if (s.booleanMode == ShapeNode::Subtract)
+            if (item.computed)
+                color = QColor(95, 185, 155);
+
+            if (item.shapeIndex == m_selectedIndex) {
+                if (item.booleanMode == ShapeNode::Subtract)
                     color = QColor(255, 125, 80);
-                else if (s.booleanMode == ShapeNode::Intersect)
+                else if (item.booleanMode == ShapeNode::Intersect)
                     color = QColor(185, 145, 255);
                 else
-                    color = QColor(255, 180, 60);
+                    color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
             }
 
-            appendMesh(triangles, buildShapeMesh(s), color, i);
+            appendMesh(triangles, item.mesh, color, item.shapeIndex);
         }
 
         m_pickBufferSize = size();

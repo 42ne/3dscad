@@ -11,6 +11,7 @@ win32:LIBS += -lopengl32
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    csgevaluator.cpp \
     main.cpp \
     mainwindow.cpp \
     openscadgenerator.cpp \
@@ -21,6 +22,7 @@ SOURCES += \
     viewportwidget.cpp
 
 HEADERS += \
+    csgevaluator.h \
     mainwindow.h \
     openscadgenerator.h \
     openscadparser.h \

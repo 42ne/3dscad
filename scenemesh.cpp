@@ -61,17 +61,31 @@ static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVecto
 
 static SceneMesh buildCubeMesh(const ShapeNode &shape)
 {
-    SceneMesh mesh;
     const QVector3D half = shape.size * 0.5f;
-    QVector<QVector3D> vertices = {
-        {-half.x(), -half.y(), -half.z()}, {half.x(), -half.y(), -half.z()},
-        {half.x(), half.y(), -half.z()}, {-half.x(), half.y(), -half.z()},
-        {-half.x(), -half.y(), half.z()}, {half.x(), -half.y(), half.z()},
-        {half.x(), half.y(), half.z()}, {-half.x(), half.y(), half.z()}
-    };
+    SceneMesh mesh = buildBoxMesh(-half, half);
 
-    for (QVector3D &vertex : vertices)
-        vertex = rotatePoint(vertex, shape.rotation) + shape.position;
+    for (MeshTriangle &triangle : mesh.triangles) {
+        triangle.a = rotatePoint(triangle.a, shape.rotation) + shape.position;
+        triangle.b = rotatePoint(triangle.b, shape.rotation) + shape.position;
+        triangle.c = rotatePoint(triangle.c, shape.rotation) + shape.position;
+        triangle.normal = faceNormal(triangle.a, triangle.b, triangle.c);
+    }
+
+    for (QVector3D &point : mesh.shadowPoints)
+        point = rotatePoint(point, shape.rotation) + shape.position;
+
+    return mesh;
+}
+
+SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum)
+{
+    SceneMesh mesh;
+    QVector<QVector3D> vertices = {
+        {minimum.x(), minimum.y(), minimum.z()}, {maximum.x(), minimum.y(), minimum.z()},
+        {maximum.x(), maximum.y(), minimum.z()}, {minimum.x(), maximum.y(), minimum.z()},
+        {minimum.x(), minimum.y(), maximum.z()}, {maximum.x(), minimum.y(), maximum.z()},
+        {maximum.x(), maximum.y(), maximum.z()}, {minimum.x(), maximum.y(), maximum.z()}
+    };
 
     mesh.shadowPoints = vertices;
 

@@ -22,5 +22,6 @@ struct SceneMesh
 };
 
 SceneMesh buildShapeMesh(const ShapeNode &shape);
+SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum);
 
 #endif
