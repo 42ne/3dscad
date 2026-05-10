@@ -811,24 +811,6 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
     else
         preview.mode = CsgPreview::BoxComputed;
 
-    if (hasBoolean && hasAddShape) {
-        SceneMesh manifoldMesh;
-        QString manifoldError;
-        if (buildManifoldCsgMesh(shapes, &manifoldMesh, &manifoldError)) {
-            CsgRenderItem item;
-            item.mesh = manifoldMesh;
-            item.shapeIndex = -1;
-            item.booleanMode = ShapeNode::Add;
-            item.computed = true;
-
-            preview.mode = CsgPreview::ManifoldComputed;
-            preview.items.append(item);
-            appendHelpers(&preview, shapes);
-            preview.statusText = "CSG preview: Manifold exact mesh";
-            return preview;
-        }
-    }
-
     if (preview.mode == CsgPreview::MeshApproximate)
         return buildMeshApproximationPreview(shapes);
 
@@ -868,4 +850,39 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
     preview.statusText = "CSG preview: box mode";
     return preview;
+}
+
+CsgPreview buildCsgPreview(const SceneDocument &scene)
+{
+    const QVector<ShapeNode> &shapes = scene.shapes();
+    bool hasBoolean = false;
+    bool hasAddShape = false;
+
+    for (const ShapeNode &shape : shapes) {
+        if (shape.booleanMode == ShapeNode::Add)
+            hasAddShape = true;
+        else
+            hasBoolean = true;
+    }
+
+    if (hasBoolean && hasAddShape) {
+        SceneMesh manifoldMesh;
+        QString manifoldError;
+        if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
+            CsgPreview preview;
+            CsgRenderItem item;
+            item.mesh = manifoldMesh;
+            item.shapeIndex = -1;
+            item.booleanMode = ShapeNode::Add;
+            item.computed = true;
+
+            preview.mode = CsgPreview::ManifoldComputed;
+            preview.items.append(item);
+            appendHelpers(&preview, shapes);
+            preview.statusText = "CSG preview: Manifold exact mesh";
+            return preview;
+        }
+    }
+
+    return buildCsgPreview(shapes);
 }

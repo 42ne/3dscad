@@ -1,8 +1,6 @@
 #include "manifoldcsg.h"
 
 #ifdef HAVE_MANIFOLD_CSG
-#include "scenebooleantree.h"
-
 #include <manifold/manifold.h>
 
 #include <QtMath>
@@ -48,28 +46,29 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
 }
 
-static Manifold evaluateNode(const SceneBooleanNode &node, const QVector<ShapeNode> &shapes)
+static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDocument &scene)
 {
-    if (node.type == SceneBooleanNode::Primitive) {
-        if (node.shapeIndex < 0 || node.shapeIndex >= shapes.size())
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = scene.shapeById(node.shapeId);
+        if (!shape)
             return {};
 
-        return manifoldFromShape(shapes[node.shapeIndex]);
+        return manifoldFromShape(*shape);
     }
 
     if (node.children.isEmpty())
         return {};
 
-    Manifold result = evaluateNode(node.children.first(), shapes);
+    Manifold result = evaluateNode(node.children.first(), scene);
 
     for (int i = 1; i < node.children.size(); ++i) {
-        const Manifold child = evaluateNode(node.children[i], shapes);
+        const Manifold child = evaluateNode(node.children[i], scene);
 
-        if (node.type == SceneBooleanNode::Union)
+        if (node.operation == SceneDocument::TreeNode::Union)
             result += child;
-        else if (node.type == SceneBooleanNode::Difference)
+        else if (node.operation == SceneDocument::TreeNode::Difference)
             result -= child;
-        else if (node.type == SceneBooleanNode::Intersection)
+        else if (node.operation == SceneDocument::TreeNode::Intersection)
             result ^= child;
     }
 
@@ -109,12 +108,18 @@ static SceneMesh sceneMeshFromManifold(const Manifold &manifold)
 
 bool buildManifoldCsgMesh(const QVector<ShapeNode> &shapes, SceneMesh *mesh, QString *errorMessage)
 {
+    SceneDocument scene;
+    scene.replaceShapes(shapes);
+    return buildManifoldCsgMesh(scene, mesh, errorMessage);
+}
+
+bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *errorMessage)
+{
 #ifdef HAVE_MANIFOLD_CSG
     if (!mesh)
         return false;
 
-    const SceneBooleanNode root = buildSceneBooleanTree(shapes);
-    const Manifold result = evaluateNode(root, shapes);
+    const Manifold result = evaluateNode(scene.treeRoot(), scene);
 
     if (result.Status() != Manifold::Error::NoError) {
         if (errorMessage)
@@ -131,7 +136,7 @@ bool buildManifoldCsgMesh(const QVector<ShapeNode> &shapes, SceneMesh *mesh, QSt
     *mesh = sceneMeshFromManifold(result);
     return !mesh->triangles.isEmpty();
 #else
-    Q_UNUSED(shapes);
+    Q_UNUSED(scene);
     Q_UNUSED(mesh);
     if (errorMessage)
         *errorMessage = "Manifold CSG is not built.";

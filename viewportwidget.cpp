@@ -255,6 +255,25 @@ static uint shapesFingerprint(const QVector<ShapeNode> &shapes)
     return seed;
 }
 
+static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
+{
+    seed = qHash(node.id, seed);
+    seed = qHash(static_cast<int>(node.type), seed);
+    seed = qHash(static_cast<int>(node.operation), seed);
+    seed = qHash(node.shapeId, seed);
+    seed = qHash(node.children.size(), seed);
+
+    for (const SceneDocument::TreeNode &child : node.children)
+        seed = treeFingerprint(child, seed);
+
+    return seed;
+}
+
+static uint sceneFingerprint(const SceneDocument &scene)
+{
+    return treeFingerprint(scene.treeRoot(), shapesFingerprint(scene.shapes()));
+}
+
 static const CsgPreview &cachedCsgPreview(const QVector<ShapeNode> &shapes,
                                           CsgPreview *cache,
                                           uint *cachedFingerprint,
@@ -270,6 +289,21 @@ static const CsgPreview &cachedCsgPreview(const QVector<ShapeNode> &shapes,
     return *cache;
 }
 
+static const CsgPreview &cachedCsgPreview(const SceneDocument &scene,
+                                          CsgPreview *cache,
+                                          uint *cachedFingerprint,
+                                          bool *dirty)
+{
+    const uint fingerprint = sceneFingerprint(scene);
+    if (*dirty || fingerprint != *cachedFingerprint) {
+        *cache = buildCsgPreview(scene);
+        *cachedFingerprint = fingerprint;
+        *dirty = false;
+    }
+
+    return *cache;
+}
+
 ViewportWidget::ViewportWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
@@ -277,8 +311,17 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
 }
 
+void ViewportWidget::setScene(const SceneDocument *scene)
+{
+    m_scene = scene;
+    m_shapes = scene ? &scene->shapes() : nullptr;
+    invalidateCsgPreview();
+    update();
+}
+
 void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
 {
+    m_scene = nullptr;
     m_shapes = shapes;
     invalidateCsgPreview();
     update();
@@ -452,10 +495,15 @@ void ViewportWidget::paintGL()
                 appendMesh(triangles, buildShapeMesh(shape), color, i);
             }
         } else {
-            const CsgPreview &preview = cachedCsgPreview(*m_shapes,
-                                                         &m_cachedCsgPreview,
-                                                         &m_cachedCsgFingerprint,
-                                                         &m_csgPreviewDirty);
+            const CsgPreview &preview = m_scene
+                                            ? cachedCsgPreview(*m_scene,
+                                                               &m_cachedCsgPreview,
+                                                               &m_cachedCsgFingerprint,
+                                                               &m_csgPreviewDirty)
+                                            : cachedCsgPreview(*m_shapes,
+                                                               &m_cachedCsgPreview,
+                                                               &m_cachedCsgFingerprint,
+                                                               &m_csgPreviewDirty);
             csgStatus = preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
                 QColor color = QColor(80, 160, 255);
@@ -572,10 +620,15 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton && m_shapes) {
-        const CsgPreview &preview = cachedCsgPreview(*m_shapes,
-                                                     &m_cachedCsgPreview,
-                                                     &m_cachedCsgFingerprint,
-                                                     &m_csgPreviewDirty);
+        const CsgPreview &preview = m_scene
+                                        ? cachedCsgPreview(*m_scene,
+                                                           &m_cachedCsgPreview,
+                                                           &m_cachedCsgFingerprint,
+                                                           &m_csgPreviewDirty)
+                                        : cachedCsgPreview(*m_shapes,
+                                                           &m_cachedCsgPreview,
+                                                           &m_cachedCsgFingerprint,
+                                                           &m_csgPreviewDirty);
         int helperShapeIndex = -1;
         float bestDistance = 8.0f;
 

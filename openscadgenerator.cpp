@@ -25,42 +25,40 @@ QString OpenScadGenerator::generate(const SceneDocument &scene)
         return code;
     }
 
-    const SceneBooleanNode root = buildSceneBooleanTree(scene.shapes());
-    appendBooleanNode(&code, root, scene, "");
+    appendTreeNode(&code, scene.treeRoot(), scene, "");
     return code;
 }
 
-void OpenScadGenerator::appendBooleanNode(QString *code, const SceneBooleanNode &node, const SceneDocument &scene, const QString &indent)
+static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
 {
-    switch (node.type) {
-    case SceneBooleanNode::Primitive:
-        if (const ShapeNode *shape = scene.shapeAt(node.shapeIndex))
-            appendShape(code, *shape, indent);
-        break;
-    case SceneBooleanNode::Union:
-        appendBooleanGroup(code, "union", node, scene, indent);
-        break;
-    case SceneBooleanNode::Difference:
-        appendBooleanGroup(code, "difference", node, scene, indent);
-        break;
-    case SceneBooleanNode::Intersection:
-        appendBooleanGroup(code, "intersection", node, scene, indent);
-        break;
-    case SceneBooleanNode::Empty:
-        break;
-    }
+    if (operation == SceneDocument::TreeNode::Difference)
+        return "difference";
+    if (operation == SceneDocument::TreeNode::Intersection)
+        return "intersection";
+    return "union";
 }
 
-void OpenScadGenerator::appendBooleanGroup(QString *code,
-                                           const QString &name,
-                                           const SceneBooleanNode &node,
-                                           const SceneDocument &scene,
-                                           const QString &indent)
+void OpenScadGenerator::appendTreeNode(QString *code, const SceneDocument::TreeNode &node, const SceneDocument &scene, const QString &indent)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        if (const ShapeNode *shape = scene.shapeById(node.shapeId))
+            appendShape(code, *shape, indent);
+        return;
+    }
+
+    appendTreeGroup(code, treeOperationName(node.operation), node, scene, indent);
+}
+
+void OpenScadGenerator::appendTreeGroup(QString *code,
+                                        const QString &name,
+                                        const SceneDocument::TreeNode &node,
+                                        const SceneDocument &scene,
+                                        const QString &indent)
 {
     *code += QString("%1%2() {\n").arg(indent, name);
 
-    for (const SceneBooleanNode &child : node.children)
-        appendBooleanNode(code, child, scene, indent + "    ");
+    for (const SceneDocument::TreeNode &child : node.children)
+        appendTreeNode(code, child, scene, indent + "    ");
 
     *code += indent + "}\n";
 }

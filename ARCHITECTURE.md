@@ -37,14 +37,12 @@ The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primi
 
 `OpenScadGenerator` converts `SceneDocument` to OpenSCAD code.
 
-`scenebooleantree.*` converts the current flat shape list into an internal boolean tree:
+`SceneDocument::TreeNode` is the editable document tree used by OpenSCAD generation, Manifold CSG evaluation, and scene-tree UI projection. It currently mirrors the flat per-shape boolean modes, but it is now the structural API that the rest of the app reads.
 
-- `Union`
-- `Difference`
-- `Intersection`
-- `Primitive`
+Node kinds:
 
-`SceneDocument::TreeNode` is the longer-term editable document tree. Generator and CSG code still use the compatibility boolean tree while the document tree is being introduced.
+- group: `Union`, `Difference`, `Intersection`
+- primitive: shape reference by stable `shapeId`
 
 Generated boolean structure:
 
@@ -108,7 +106,7 @@ Build activation:
 Runtime flow:
 
 1. Convert each `ShapeNode` to a Manifold primitive.
-2. Evaluate the `SceneBooleanNode` tree with union, difference, and intersection operators.
+2. Evaluate the `SceneDocument::TreeNode` tree with union, difference, and intersection operators.
 3. Convert Manifold `MeshGL` output back to `SceneMesh`.
 4. Render helper shapes as wireframes for editing.
 
@@ -173,7 +171,7 @@ Short term:
 Medium term:
 
 - Store explicit operation groups in `SceneDocument` instead of deriving the tree only from flat per-shape boolean modes.
-- Move OpenSCAD generation and Manifold evaluation from the compatibility tree to `SceneDocument::TreeNode`.
+- Move fallback CSG paths from flat shape modes to `SceneDocument::TreeNode`.
 - Move rasterization to OpenGL buffers.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 

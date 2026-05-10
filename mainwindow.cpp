@@ -2,7 +2,6 @@
 #include "csgevaluator.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
-#include "scenebooleantree.h"
 #include "scenecommands.h"
 #include "viewportwidget.h"
 
@@ -133,44 +132,41 @@ static QDoubleSpinBox *makeSpinBox()
     return box;
 }
 
-static QString booleanGroupLabel(SceneBooleanNode::Type type)
+static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
 {
-    if (type == SceneBooleanNode::Difference)
+    if (operation == SceneDocument::TreeNode::Difference)
         return "difference()";
-    if (type == SceneBooleanNode::Intersection)
+    if (operation == SceneDocument::TreeNode::Intersection)
         return "intersection()";
     return "union()";
 }
 
-static ShapeNode::BooleanMode booleanModeForGroup(SceneBooleanNode::Type type)
+static ShapeNode::BooleanMode booleanModeForGroup(SceneDocument::TreeNode::Operation operation)
 {
-    if (type == SceneBooleanNode::Difference)
+    if (operation == SceneDocument::TreeNode::Difference)
         return ShapeNode::Subtract;
-    if (type == SceneBooleanNode::Intersection)
+    if (operation == SceneDocument::TreeNode::Intersection)
         return ShapeNode::Intersect;
     return ShapeNode::Add;
 }
 
-static void markGroupItem(QTreeWidgetItem *item, SceneBooleanNode::Type type)
+static void markGroupItem(QTreeWidgetItem *item, SceneDocument::TreeNode::Operation operation)
 {
     QFont font = item->font(0);
     font.setBold(true);
     item->setFont(0, font);
     item->setData(0, ShapeIdRole, -1);
-    item->setData(0, GroupBooleanModeRole, booleanModeForGroup(type));
+    item->setData(0, GroupBooleanModeRole, booleanModeForGroup(operation));
     item->setForeground(0, QColor(82, 82, 82));
     item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsDropEnabled);
 }
 
 static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
-                                              const SceneBooleanNode &node,
+                                              const SceneDocument::TreeNode &node,
                                               const SceneDocument &scene)
 {
-    if (node.type == SceneBooleanNode::Empty)
-        return nullptr;
-
-    if (node.type == SceneBooleanNode::Primitive) {
-        const ShapeNode *shape = scene.shapeAt(node.shapeIndex);
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = scene.shapeById(node.shapeId);
         if (!shape)
             return nullptr;
 
@@ -182,10 +178,10 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
     }
 
     auto *groupItem = new QTreeWidgetItem(parent);
-    groupItem->setText(0, booleanGroupLabel(node.type));
-    markGroupItem(groupItem, node.type);
+    groupItem->setText(0, booleanGroupLabel(node.operation));
+    markGroupItem(groupItem, node.operation);
 
-    for (const SceneBooleanNode &child : node.children)
+    for (const SceneDocument::TreeNode &child : node.children)
         appendBooleanTreeItem(groupItem, child, scene);
 
     return groupItem;
@@ -206,7 +202,7 @@ void MainWindow::buildUi()
     editMenu->addAction(m_redoAction);
 
     m_viewport = new ViewportWidget;
-    m_viewport->setShapes(&m_scene.shapes());
+    m_viewport->setScene(&m_scene);
 
     m_codeEditor = new QTextEdit;
     m_codeEditor->setReadOnly(false);
@@ -546,8 +542,7 @@ void MainWindow::refreshShapeList()
     m_shapeTree->blockSignals(true);
     m_shapeTree->clear();
 
-    const SceneBooleanNode root = buildSceneBooleanTree(m_scene.shapes());
-    appendBooleanTreeItem(m_shapeTree->invisibleRootItem(), root, m_scene);
+    appendBooleanTreeItem(m_shapeTree->invisibleRootItem(), m_scene.treeRoot(), m_scene);
     m_shapeTree->expandAll();
 
     m_shapeTree->blockSignals(false);
@@ -689,7 +684,7 @@ void MainWindow::refreshCsgStatus()
     if (!m_csgStatusLabel)
         return;
 
-    const CsgPreview preview = buildCsgPreview(m_scene.shapes());
+    const CsgPreview preview = buildCsgPreview(m_scene);
     m_csgStatusLabel->setText(preview.statusText);
 }
 

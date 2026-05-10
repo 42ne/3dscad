@@ -1,6 +1,7 @@
 #ifndef CSGEVALUATOR_H
 #define CSGEVALUATOR_H
 
+#include "scenedocument.h"
 #include "scenemesh.h"
 
 #include <QString>
@@ -31,5 +32,6 @@ struct CsgPreview
 };
 
 CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes);
+CsgPreview buildCsgPreview(const SceneDocument &scene);
 
 #endif

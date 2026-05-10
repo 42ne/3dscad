@@ -18,7 +18,6 @@ SOURCES += \
     openscadgenerator.cpp \
     openscadparser.cpp \
     scenecommands.cpp \
-    scenebooleantree.cpp \
     scenemesh.cpp \
     scenedocument.cpp \
     viewportwidget.cpp
@@ -30,7 +29,6 @@ HEADERS += \
     openscadgenerator.h \
     openscadparser.h \
     scenecommands.h \
-    scenebooleantree.h \
     scenemesh.h \
     scenedocument.h \
     shapenode.h \

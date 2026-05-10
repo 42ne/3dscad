@@ -18,6 +18,7 @@ class ViewportWidget : public QOpenGLWidget
 
 public:
     explicit ViewportWidget(QWidget *parent = nullptr);
+    void setScene(const SceneDocument *scene);
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
     void invalidateCsgPreview();
@@ -46,6 +47,7 @@ private:
         AxisZDrag
     };
 
+    const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
     int m_selectedIndex = -1;
     float m_cameraYaw = -35.0f;
