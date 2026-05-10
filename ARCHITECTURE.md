@@ -34,6 +34,7 @@ The properties panel derives the selected primitive's displayed tree role from `
 - projection
 - software depth buffer
 - viewport rasterization
+- explicit render backend selection, currently using the software backend by default
 - move gizmo
 - helper wireframe picking
 - cached CSG preview reuse between repaints
@@ -163,6 +164,7 @@ Dragging:
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
+- `CONFIG+=opengl_renderer` enables the placeholder OpenGL backend branch, but GPU buffers and picking are not implemented yet.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
@@ -182,7 +184,7 @@ Medium term:
 
 - Store explicit operation groups in `SceneDocument` instead of deriving the tree only from flat per-shape boolean modes.
 - Move fallback CSG paths from flat shape modes to `SceneDocument::TreeNode`.
-- Move rasterization to OpenGL buffers.
+- Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 
 Long term:

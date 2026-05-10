@@ -339,6 +339,31 @@ void ViewportWidget::setSelectedIndex(int index)
     update();
 }
 
+void ViewportWidget::setRenderBackend(RenderBackend backend)
+{
+    if (backend == OpenGLRenderBackend && !canUseOpenGLRenderBackend())
+        backend = SoftwareRenderBackend;
+
+    if (m_renderBackend == backend)
+        return;
+
+    m_renderBackend = backend;
+    update();
+}
+
+ViewportWidget::RenderBackend ViewportWidget::renderBackend() const
+{
+    return m_renderBackend;
+}
+
+QString ViewportWidget::renderBackendName() const
+{
+    if (m_renderBackend == OpenGLRenderBackend)
+        return "OpenGL";
+
+    return "Software";
+}
+
 void ViewportWidget::invalidateCsgPreview()
 {
     m_csgPreviewDirty = true;
@@ -358,9 +383,18 @@ void ViewportWidget::paintGL()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    if (m_renderBackend == OpenGLRenderBackend && canUseOpenGLRenderBackend())
+        paintOpenGLPreview();
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
+    paintSoftware(painter);
 
+    painter.end();
+}
+
+void ViewportWidget::paintSoftware(QPainter &painter)
+{
     painter.fillRect(rect(), QColor(30, 32, 36));
 
     const QVector<SceneLight> lights = {
@@ -581,9 +615,22 @@ void ViewportWidget::paintGL()
 
     painter.setPen(QColor(220, 220, 220));
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move");
-    painter.drawText(12, 42, csgStatus);
+    painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
+}
 
-    painter.end();
+void ViewportWidget::paintOpenGLPreview()
+{
+    // Reserved for the future GPU mesh path. The software renderer remains the
+    // source of truth until GL buffers and GPU picking are implemented.
+}
+
+bool ViewportWidget::canUseOpenGLRenderBackend() const
+{
+#ifdef ENABLE_OPENGL_RENDER_BACKEND
+    return true;
+#else
+    return false;
+#endif
 }
 
 void ViewportWidget::mousePressEvent(QMouseEvent *event)

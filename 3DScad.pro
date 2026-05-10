@@ -5,6 +5,10 @@ CONFIG += c++17
 
 win32:LIBS += -lopengl32
 
+contains(CONFIG, opengl_renderer) {
+    DEFINES += ENABLE_OPENGL_RENDER_BACKEND
+}
+
 
 # You can make your code fail to compile if it uses deprecated APIs.
 # In order to do so, uncomment the following line.

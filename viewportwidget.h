@@ -7,9 +7,11 @@
 #include <QImage>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QString>
 #include <QVector>
 
 class QMouseEvent;
+class QPainter;
 class QWheelEvent;
 
 class ViewportWidget : public QOpenGLWidget
@@ -17,10 +19,18 @@ class ViewportWidget : public QOpenGLWidget
     Q_OBJECT
 
 public:
+    enum RenderBackend {
+        SoftwareRenderBackend,
+        OpenGLRenderBackend
+    };
+
     explicit ViewportWidget(QWidget *parent = nullptr);
     void setScene(const SceneDocument *scene);
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
+    void setRenderBackend(RenderBackend backend);
+    RenderBackend renderBackend() const;
+    QString renderBackendName() const;
     void invalidateCsgPreview();
 
 signals:
@@ -47,8 +57,13 @@ private:
         AxisZDrag
     };
 
+    void paintSoftware(QPainter &painter);
+    void paintOpenGLPreview();
+    bool canUseOpenGLRenderBackend() const;
+
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
+    RenderBackend m_renderBackend = SoftwareRenderBackend;
     int m_selectedIndex = -1;
     float m_cameraYaw = -35.0f;
     float m_cameraPitch = 28.0f;

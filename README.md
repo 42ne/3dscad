@@ -4,7 +4,7 @@ Prototype of a visual editor for OpenSCAD-style modeling. The goal is a Tinkerca
 
 ## Current State
 
-The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport with software rasterization through `QPainter`.
+The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering currently uses a software rasterizer through `QPainter`, with an explicit backend switch prepared for an optional OpenGL path.
 
 Implemented:
 
@@ -29,6 +29,7 @@ Implemented:
 - Parser for the generated OpenSCAD subset.
 - Interactive viewport orbit/zoom.
 - Depth-tested triangle rendering.
+- Explicit viewport render backend plumbing; software is the active backend, while `CONFIG+=opengl_renderer` enables the placeholder OpenGL backend path for future work.
 - Simple lights and shadows.
 - Shape picking in the viewport.
 - Move gizmo with X/Y/Z axes.
@@ -113,6 +114,6 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
 2. Refine scene-tree editing: rename groups, reorder nodes, and improve visual distinction between service root and user groups.
-3. Move viewport rendering toward real OpenGL vertex/index buffers.
+3. Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.
