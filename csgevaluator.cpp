@@ -852,20 +852,25 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
     return preview;
 }
 
+static bool treeHasBooleanOperation(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::Group && node.operation != SceneDocument::TreeNode::Union)
+        return true;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (treeHasBooleanOperation(child))
+            return true;
+    }
+
+    return false;
+}
+
 CsgPreview buildCsgPreview(const SceneDocument &scene)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
-    bool hasBoolean = false;
-    bool hasAddShape = false;
+    const bool hasTreeBoolean = treeHasBooleanOperation(scene.treeRoot());
 
-    for (const ShapeNode &shape : shapes) {
-        if (shape.booleanMode == ShapeNode::Add)
-            hasAddShape = true;
-        else
-            hasBoolean = true;
-    }
-
-    if (hasBoolean && hasAddShape) {
+    if (hasTreeBoolean && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -882,6 +887,10 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             preview.statusText = "CSG preview: Manifold exact mesh";
             return preview;
         }
+
+        CsgPreview preview = buildCsgPreview(shapes);
+        preview.statusText = QString("CSG preview: plain mesh (Manifold CSG unavailable: %1)").arg(manifoldError);
+        return preview;
     }
 
     return buildCsgPreview(shapes);

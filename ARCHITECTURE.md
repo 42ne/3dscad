@@ -39,7 +39,7 @@ For clarity, children of `difference()` groups are labeled as `base` or `cut`, a
 
 `OpenScadGenerator` converts `SceneDocument` to OpenSCAD code.
 
-`SceneDocument::TreeNode` is the editable document tree used by OpenSCAD generation, Manifold CSG evaluation, and scene-tree UI projection. It is still initialized from flat per-shape boolean modes, but it is updated as document state instead of being rebuilt on every shape edit.
+`SceneDocument::TreeNode` is the editable document tree used by OpenSCAD generation, Manifold CSG evaluation, CSG preview mode detection, and scene-tree UI projection. It is still initialized from flat per-shape boolean modes, but it is updated as document state instead of being rebuilt on every shape edit.
 
 Node kinds:
 
