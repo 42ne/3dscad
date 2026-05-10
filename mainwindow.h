@@ -36,6 +36,7 @@ private slots:
     void sendToOpenScad();
 
     void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
+    void showSceneTreeContextMenu(const QPoint &position);
     void onPropertyChanged();
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);

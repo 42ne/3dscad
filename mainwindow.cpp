@@ -21,6 +21,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPoint>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSplitter>
@@ -248,6 +249,7 @@ void MainWindow::buildUi()
     };
     m_shapeTree = shapeTree;
     m_shapeTree->setHeaderHidden(true);
+    m_shapeTree->setContextMenuPolicy(Qt::CustomContextMenu);
 
     leftLayout->addWidget(addCubeButton);
     leftLayout->addWidget(addSphereButton);
@@ -285,6 +287,8 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
     connect(m_shapeTree, &QTreeWidget::currentItemChanged,
             this, &MainWindow::onSceneTreeSelectionChanged);
+    connect(m_shapeTree, &QTreeWidget::customContextMenuRequested,
+            this, &MainWindow::showSceneTreeContextMenu);
 
     // Right dock: properties
     auto *rightDock = new QDockWidget("Properties", this);
@@ -492,6 +496,52 @@ void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidg
     m_scene.setSelectedShapeId(shapeId);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     refreshProperties();
+}
+
+void MainWindow::showSceneTreeContextMenu(const QPoint &position)
+{
+    if (!m_shapeTree)
+        return;
+
+    QTreeWidgetItem *item = m_shapeTree->itemAt(position);
+    if (item)
+        m_shapeTree->setCurrentItem(item);
+
+    const bool hasItem = item != nullptr;
+    const bool isShape = hasItem && item->data(0, ShapeIdRole).toInt() >= 0;
+    const int groupId = hasItem && item->data(0, GroupOperationRole).isValid()
+                            ? item->data(0, TreeNodeIdRole).toInt()
+                            : selectedTreeGroupId();
+    const bool canDeleteGroup = hasItem
+                                && item->data(0, GroupOperationRole).isValid()
+                                && groupId > 0
+                                && groupId != m_scene.treeRoot().id;
+
+    QMenu menu(this);
+    QAction *addUnionAction = menu.addAction("Add union group");
+    QAction *addDifferenceAction = menu.addAction("Add difference group");
+    QAction *addIntersectionAction = menu.addAction("Add intersection group");
+    menu.addSeparator();
+    QAction *deleteShapeAction = menu.addAction("Delete shape");
+    QAction *deleteGroupAction = menu.addAction("Delete group");
+
+    deleteShapeAction->setEnabled(isShape);
+    deleteGroupAction->setEnabled(canDeleteGroup);
+
+    QAction *selectedAction = menu.exec(m_shapeTree->viewport()->mapToGlobal(position));
+    if (!selectedAction)
+        return;
+
+    if (selectedAction == addUnionAction)
+        addGroup(SceneDocument::TreeNode::Union);
+    else if (selectedAction == addDifferenceAction)
+        addGroup(SceneDocument::TreeNode::Difference);
+    else if (selectedAction == addIntersectionAction)
+        addGroup(SceneDocument::TreeNode::Intersection);
+    else if (selectedAction == deleteShapeAction)
+        deleteSelectedShape();
+    else if (selectedAction == deleteGroupAction)
+        deleteSelectedGroup();
 }
 
 void MainWindow::onPropertyChanged()

@@ -22,7 +22,7 @@ The document model exposes group operations used by the UI layer: add group, rem
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
 
-The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups.
+The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups. A context menu exposes the same core group actions near the selected node.
 
 `ViewportWidget` owns interactive viewing and picking:
 
@@ -150,6 +150,7 @@ Dragging:
 - Axis gizmo drag emits shape drag signals.
 - `Shift + drag` supports plane dragging.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
+- Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
 - Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
 
@@ -166,7 +167,7 @@ Dragging:
 
 Short term:
 
-- Add context menus and better selection persistence for the `SceneDocument` group operations.
+- Refine scene-tree editing: rename groups, reorder nodes, and improve visual distinction between service root and user groups.
 - Formalize Manifold setup as a submodule, bootstrap script, or CMake migration.
 - Add visible reason text when Manifold is unavailable and fallback preview is active.
 - Add smoke tests for generator/parser roundtrip and CSG backend availability.
