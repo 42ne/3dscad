@@ -5,16 +5,18 @@
 #include "shapenode.h"
 
 #include <QImage>
+#include <QOpenGLFunctions>
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QString>
 #include <QVector>
 
 class QMouseEvent;
+class QOpenGLShaderProgram;
 class QPainter;
 class QWheelEvent;
 
-class ViewportWidget : public QOpenGLWidget
+class ViewportWidget : public QOpenGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
 
@@ -32,6 +34,7 @@ public:
     void setRenderBackend(RenderBackend backend);
     RenderBackend renderBackend() const;
     QString renderBackendName() const;
+    bool isOpenGLRenderBackendAvailable() const;
     void invalidateCsgPreview();
 
 signals:
@@ -61,7 +64,7 @@ private:
         AxisZDrag
     };
 
-    void paintSoftware(QPainter &painter);
+    void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
     void paintOpenGLPreview();
     bool canUseOpenGLRenderBackend() const;
     QVector3D selectedTransformOrigin() const;
@@ -91,6 +94,7 @@ private:
     QVector<float> m_depthBuffer;
     QImage m_renderImage;
     QSize m_pickBufferSize;
+    QOpenGLShaderProgram *m_glMeshProgram = nullptr;
 };
 
 #endif

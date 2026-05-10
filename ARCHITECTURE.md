@@ -164,11 +164,12 @@ Dragging:
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
 - Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
+- The Shapes dock exposes a `Use OpenGL` checkbox. When enabled, solid scene meshes are drawn by the OpenGL shader path while grid, helper wireframes, gizmo, text, CPU-side projection, and picking still reuse the software path.
 
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
-- `CONFIG+=opengl_renderer` enables the placeholder OpenGL backend branch, but GPU buffers and picking are not implemented yet.
+- The experimental OpenGL mesh backend does not yet use persistent GPU buffers, GPU-side projection, or GPU picking.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.

@@ -7,6 +7,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QClipboard>
 #include <QCoreApplication>
@@ -296,8 +297,14 @@ void MainWindow::buildUi()
     auto *addIntersectionGroupButton = new QPushButton("Add intersection group");
     m_deleteShapeButton = new QPushButton("Delete selected");
     m_deleteGroupButton = new QPushButton("Delete group");
+    m_useOpenGLCheckBox = new QCheckBox("Use OpenGL");
     m_deleteShapeButton->setEnabled(false);
     m_deleteGroupButton->setEnabled(false);
+    m_useOpenGLCheckBox->setChecked(m_viewport->renderBackend() == ViewportWidget::OpenGLRenderBackend);
+    m_useOpenGLCheckBox->setEnabled(m_viewport->isOpenGLRenderBackendAvailable());
+    m_useOpenGLCheckBox->setToolTip(m_useOpenGLCheckBox->isEnabled()
+                                        ? "Use the experimental OpenGL viewport backend."
+                                        : "The experimental OpenGL backend is not available in this build.");
 
     auto *shapeTree = new SceneTreeWidget;
     shapeTree->onTreeNodeDroppedOnGroup = [this](int nodeId, int parentGroupId) {
@@ -315,6 +322,7 @@ void MainWindow::buildUi()
     leftLayout->addWidget(addIntersectionGroupButton);
     leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(m_deleteGroupButton);
+    leftLayout->addWidget(m_useOpenGLCheckBox);
     leftLayout->addWidget(new QLabel("Scene tree:"));
     leftLayout->addWidget(m_shapeTree);
     m_csgStatusLabel = new QLabel;
@@ -332,6 +340,7 @@ void MainWindow::buildUi()
     connect(addIntersectionGroupButton, &QPushButton::clicked, this, &MainWindow::addIntersectionGroup);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
     connect(m_deleteGroupButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedGroup);
+    connect(m_useOpenGLCheckBox, &QCheckBox::toggled, this, &MainWindow::onUseOpenGLToggled);
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
     connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
@@ -780,6 +789,22 @@ void MainWindow::onViewportGroupDragFinished(int groupId)
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::onUseOpenGLToggled(bool checked)
+{
+    m_viewport->setRenderBackend(checked
+                                     ? ViewportWidget::OpenGLRenderBackend
+                                     : ViewportWidget::SoftwareRenderBackend);
+
+    const bool usingOpenGL = m_viewport->renderBackend() == ViewportWidget::OpenGLRenderBackend;
+    if (m_useOpenGLCheckBox->isChecked() != usingOpenGL) {
+        m_useOpenGLCheckBox->blockSignals(true);
+        m_useOpenGLCheckBox->setChecked(usingOpenGL);
+        m_useOpenGLCheckBox->blockSignals(false);
+    }
+
+    m_viewport->update();
 }
 
 void MainWindow::refreshShapeList()

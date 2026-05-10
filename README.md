@@ -29,10 +29,10 @@ Implemented:
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
 - OpenSCAD generation for the supported scene subset.
-- Parser for the generated OpenSCAD subset.
+- Parser for the generated OpenSCAD subset, including the no-parameter module wrapper and call.
 - Interactive viewport orbit/zoom.
 - Depth-tested triangle rendering.
-- Explicit viewport render backend plumbing; software is the active backend, while `CONFIG+=opengl_renderer` enables the placeholder OpenGL backend path for future work.
+- Explicit viewport render backend plumbing with a `Use OpenGL` checkbox; software is the active backend by default, and the checkbox enables an experimental OpenGL mesh path.
 - Simple lights and shadows.
 - Shape picking in the viewport.
 - Move gizmo with X/Y/Z axes.
@@ -102,9 +102,11 @@ mingw32-make
 
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 
+The `Use OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes are drawn through an OpenGL shader path with depth testing. Grid, gizmos, helper wireframes, text overlay, CPU-side projection, and the pick buffer still use the existing software path, so large performance gains are not expected yet.
+
 ## Limitations
 
-- The viewport renderer is still a software rasterizer inside `QOpenGLWidget`, not a full OpenGL mesh pipeline.
+- The OpenGL viewport path is still experimental and mixed with QPainter overlays; it does not yet use persistent VBO/index buffers or GPU picking.
 - OpenSCAD parser supports only the generated subset.
 - Manifold is currently an optional local build, not a vendored/submodule dependency.
 - Mesh approximate fallback is not exact.

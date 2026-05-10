@@ -544,6 +544,74 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
+static QVector3D transformPoint(const QVector3D &point, const QVector3D &position, const QVector3D &rotation)
+{
+    return rotatePoint(point, rotation) + position;
+}
+
+static SceneMesh transformedMesh(const SceneMesh &source, const QVector<SceneDocument::TreeNode> &groupStack)
+{
+    SceneMesh mesh = source;
+
+    auto transformPosition = [&](QVector3D point) {
+        for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
+            point = transformPoint(point, it->position, it->rotation);
+        return point;
+    };
+
+    auto transformNormal = [&](QVector3D normal) {
+        for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
+            normal = rotatePoint(normal, it->rotation);
+        return normal.normalized();
+    };
+
+    for (MeshTriangle &triangle : mesh.triangles) {
+        triangle.a = transformPosition(triangle.a);
+        triangle.b = transformPosition(triangle.b);
+        triangle.c = transformPosition(triangle.c);
+        triangle.normal = transformNormal(triangle.normal);
+    }
+
+    for (QVector3D &point : mesh.shadowPoints)
+        point = transformPosition(point);
+
+    return mesh;
+}
+
+static void appendTreeHelpers(CsgPreview *preview,
+                              const SceneDocument &scene,
+                              const SceneDocument::TreeNode &node,
+                              ShapeNode::BooleanMode inheritedMode,
+                              QVector<SceneDocument::TreeNode> groupStack = {})
+{
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        if (inheritedMode == ShapeNode::Add)
+            return;
+
+        const ShapeNode *shape = scene.shapeById(node.shapeId);
+        if (!shape)
+            return;
+
+        CsgRenderItem helper = renderItemFromShape(*shape, scene.indexOfShapeId(shape->id));
+        helper.mesh = transformedMesh(helper.mesh, groupStack);
+        helper.booleanMode = inheritedMode;
+        helper.helper = true;
+        preview->items.append(helper);
+        return;
+    }
+
+    groupStack.append(node);
+    for (int i = 0; i < node.children.size(); ++i) {
+        ShapeNode::BooleanMode childMode = inheritedMode;
+        if (node.operation == SceneDocument::TreeNode::Difference && i > 0)
+            childMode = ShapeNode::Subtract;
+        else if (node.operation == SceneDocument::TreeNode::Intersection)
+            childMode = ShapeNode::Intersect;
+
+        appendTreeHelpers(preview, scene, node.children[i], childMode, groupStack);
+    }
+}
+
 static bool isInsideAnyAddShape(const QVector<ShapeNode> &shapes, const QVector3D &point)
 {
     for (const ShapeNode &shape : shapes) {
@@ -854,8 +922,11 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
 static bool treeHasBooleanOperation(const SceneDocument::TreeNode &node)
 {
-    if (node.type == SceneDocument::TreeNode::Group && node.operation != SceneDocument::TreeNode::Union)
+    if (node.type == SceneDocument::TreeNode::Group
+        && (node.operation == SceneDocument::TreeNode::Difference
+            || node.operation == SceneDocument::TreeNode::Intersection)) {
         return true;
+    }
 
     for (const SceneDocument::TreeNode &child : node.children) {
         if (treeHasBooleanOperation(child))
@@ -904,7 +975,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
 
             preview.mode = CsgPreview::ManifoldComputed;
             preview.items.append(item);
-            appendHelpers(&preview, shapes);
+            appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add);
             preview.statusText = hasTreeBoolean
                                      ? "CSG preview: Manifold exact mesh"
                                      : "CSG preview: Manifold tree transform mesh";
