@@ -11,6 +11,7 @@ Implemented:
 - Scene tree with cube, sphere, and cylinder primitives.
 - Scene tree displays the generated boolean structure as `union`, `difference`, and `intersection` groups.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
+- Group tree nodes store position and rotation transforms for upcoming group editing.
 - `SceneDocument` exposes group operations for add/remove/move, with undo/redo commands ready for UI wiring.
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
@@ -19,6 +20,7 @@ Implemented:
 - The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
+- OpenSCAD generation and Manifold CSG apply group transforms from the document tree.
 - CSG preview detects boolean operations from the explicit tree, not only from legacy per-shape boolean flags.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.

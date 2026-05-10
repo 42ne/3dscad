@@ -261,6 +261,12 @@ static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
     seed = qHash(static_cast<int>(node.type), seed);
     seed = qHash(static_cast<int>(node.operation), seed);
     seed = qHash(node.shapeId, seed);
+    seed = qHash(node.position.x(), seed);
+    seed = qHash(node.position.y(), seed);
+    seed = qHash(node.position.z(), seed);
+    seed = qHash(node.rotation.x(), seed);
+    seed = qHash(node.rotation.y(), seed);
+    seed = qHash(node.rotation.z(), seed);
     seed = qHash(node.children.size(), seed);
 
     for (const SceneDocument::TreeNode &child : node.children)

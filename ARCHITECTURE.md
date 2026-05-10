@@ -18,6 +18,7 @@ It stores:
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
 It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
+Group `TreeNode` entries store position and rotation transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`, and Manifold CSG applies the same transform after evaluating the group operation.
 The document model exposes group operations used by the UI layer: add group, remove group by promoting children, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.

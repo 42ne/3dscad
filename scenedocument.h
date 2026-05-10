@@ -25,6 +25,8 @@ public:
         Type type = Group;
         Operation operation = Union;
         int shapeId = -1;
+        QVector3D position = QVector3D(0, 0, 0);
+        QVector3D rotation = QVector3D(0, 0, 0);
         QVector<TreeNode> children;
     };
 

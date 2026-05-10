@@ -46,6 +46,12 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
 }
 
+static Manifold applyTransform(const Manifold &source, const QVector3D &position, const QVector3D &rotation)
+{
+    return source.Rotate(rotation.x(), rotation.y(), rotation.z())
+        .Translate(vec3(position.x(), position.y(), position.z()));
+}
+
 static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDocument &scene)
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
@@ -72,7 +78,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
             result ^= child;
     }
 
-    return result;
+    return applyTransform(result, node.position, node.rotation);
 }
 
 static SceneMesh sceneMeshFromManifold(const Manifold &manifold)
