@@ -378,31 +378,55 @@ void ViewportWidget::paintGL()
         QVector<Triangle2D> triangles;
         QVector<Line2D> helperLines;
 
-        const CsgPreview preview = buildCsgPreview(*m_shapes);
-        csgStatus = preview.statusText;
-        for (const CsgRenderItem &item : preview.items) {
-            QColor color = QColor(80, 160, 255);
-            if (item.booleanMode == ShapeNode::Subtract)
-                color = QColor(225, 95, 95);
-            else if (item.booleanMode == ShapeNode::Intersect)
-                color = QColor(150, 115, 240);
+        if (m_draggingShape) {
+            csgStatus = "CSG preview: paused while dragging";
 
-            if (item.computed)
-                color = QColor(95, 185, 155);
+            for (int i = 0; i < m_shapes->size(); ++i) {
+                const ShapeNode &shape = m_shapes->at(i);
+                QColor color = QColor(80, 160, 255);
+                if (shape.booleanMode == ShapeNode::Subtract)
+                    color = QColor(225, 95, 95);
+                else if (shape.booleanMode == ShapeNode::Intersect)
+                    color = QColor(150, 115, 240);
 
-            if (item.shapeIndex == m_selectedIndex) {
-                if (item.booleanMode == ShapeNode::Subtract)
-                    color = QColor(255, 125, 80);
-                else if (item.booleanMode == ShapeNode::Intersect)
-                    color = QColor(185, 145, 255);
-                else
-                    color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
+                if (i == m_selectedIndex) {
+                    if (shape.booleanMode == ShapeNode::Subtract)
+                        color = QColor(255, 125, 80);
+                    else if (shape.booleanMode == ShapeNode::Intersect)
+                        color = QColor(185, 145, 255);
+                    else
+                        color = QColor(255, 180, 60);
+                }
+
+                appendMesh(triangles, buildShapeMesh(shape), color, i);
             }
+        } else {
+            const CsgPreview preview = buildCsgPreview(*m_shapes);
+            csgStatus = preview.statusText;
+            for (const CsgRenderItem &item : preview.items) {
+                QColor color = QColor(80, 160, 255);
+                if (item.booleanMode == ShapeNode::Subtract)
+                    color = QColor(225, 95, 95);
+                else if (item.booleanMode == ShapeNode::Intersect)
+                    color = QColor(150, 115, 240);
 
-            if (item.helper)
-                appendWireframe(helperLines, item.mesh, color.lighter(115));
-            else
-                appendMesh(triangles, item.mesh, color, item.shapeIndex);
+                if (item.computed)
+                    color = QColor(95, 185, 155);
+
+                if (item.shapeIndex == m_selectedIndex) {
+                    if (item.booleanMode == ShapeNode::Subtract)
+                        color = QColor(255, 125, 80);
+                    else if (item.booleanMode == ShapeNode::Intersect)
+                        color = QColor(185, 145, 255);
+                    else
+                        color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
+                }
+
+                if (item.helper)
+                    appendWireframe(helperLines, item.mesh, color.lighter(115));
+                else
+                    appendMesh(triangles, item.mesh, color, item.shapeIndex);
+            }
         }
 
         m_pickBufferSize = size();
