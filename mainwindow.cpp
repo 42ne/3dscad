@@ -198,6 +198,34 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
     return groupItem;
 }
 
+static bool findEffectiveBooleanMode(const SceneDocument::TreeNode &node,
+                                     int shapeId,
+                                     ShapeNode::BooleanMode inheritedMode,
+                                     ShapeNode::BooleanMode *mode)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        if (node.shapeId == shapeId) {
+            *mode = inheritedMode;
+            return true;
+        }
+
+        return false;
+    }
+
+    for (int i = 0; i < node.children.size(); ++i) {
+        ShapeNode::BooleanMode childMode = inheritedMode;
+        if (node.operation == SceneDocument::TreeNode::Difference && i > 0)
+            childMode = ShapeNode::Subtract;
+        else if (node.operation == SceneDocument::TreeNode::Intersection)
+            childMode = ShapeNode::Intersect;
+
+        if (findEffectiveBooleanMode(node.children[i], shapeId, childMode, mode))
+            return true;
+    }
+
+    return false;
+}
+
 void MainWindow::buildUi()
 {
     setWindowTitle("OpenSCAD Visual Editor Prototype");
@@ -355,7 +383,7 @@ void MainWindow::buildUi()
     shapeLayout->addRow("Size Z", m_sizeZ);
     shapeLayout->addRow("Radius", m_radius);
     shapeLayout->addRow("Height", m_height);
-    shapeLayout->addRow("Boolean mode", m_booleanMode);
+    shapeLayout->addRow("Tree role", m_booleanMode);
 
     rightLayout->addWidget(transformBox);
     rightLayout->addWidget(shapeBox);
@@ -377,7 +405,7 @@ void MainWindow::buildUi()
     }
 
     connect(m_booleanMode, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onPropertyChanged);
+            this, &MainWindow::onBooleanModeChanged);
 }
 
 void MainWindow::addCube()
@@ -576,7 +604,6 @@ void MainWindow::onPropertyChanged()
 
     updatedShape.radius = m_radius->value();
     updatedShape.height = m_height->value();
-    updatedShape.booleanMode = static_cast<ShapeNode::BooleanMode>(m_booleanMode->currentData().toInt());
 
     auto *command = new UpdateShapeCommand(&m_scene, *selectedShape, updatedShape, [this]() {
         refreshSceneViews();
@@ -588,6 +615,18 @@ void MainWindow::onPropertyChanged()
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::onBooleanModeChanged(int index)
+{
+    if (m_updatingProperties || index < 0)
+        return;
+
+    const ShapeNode *selectedShape = m_scene.selectedShape();
+    if (!selectedShape)
+        return;
+
+    changeShapeBooleanMode(selectedShape->id, static_cast<ShapeNode::BooleanMode>(m_booleanMode->itemData(index).toInt()));
 }
 
 void MainWindow::onViewportShapeDragStarted(int index)
@@ -769,7 +808,12 @@ void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId)
 void MainWindow::changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode)
 {
     const ShapeNode *shape = m_scene.shapeById(shapeId);
-    if (!shape || shape->booleanMode == booleanMode)
+    if (!shape)
+        return;
+
+    ShapeNode::BooleanMode effectiveMode = shape->booleanMode;
+    findEffectiveBooleanMode(m_scene.treeRoot(), shapeId, ShapeNode::Add, &effectiveMode);
+    if (effectiveMode == booleanMode && shape->booleanMode == booleanMode)
         return;
 
     ShapeNode updatedShape = *shape;
@@ -837,7 +881,9 @@ void MainWindow::refreshProperties()
 
     m_radius->setValue(s->radius);
     m_height->setValue(s->height);
-    m_booleanMode->setCurrentIndex(m_booleanMode->findData(s->booleanMode));
+    ShapeNode::BooleanMode effectiveMode = s->booleanMode;
+    findEffectiveBooleanMode(m_scene.treeRoot(), s->id, ShapeNode::Add, &effectiveMode);
+    m_booleanMode->setCurrentIndex(m_booleanMode->findData(effectiveMode));
 
     for (QDoubleSpinBox *box : allBoxes)
         box->blockSignals(false);

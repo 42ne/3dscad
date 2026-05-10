@@ -24,6 +24,7 @@ The document model exposes group operations used by the UI layer: add group, rem
 
 The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups. A context menu exposes the same core group actions near the selected node.
 For clarity, children of `difference()` groups are labeled as `base` or `cut`, and children of `intersection()` groups are labeled as `mask`.
+The properties panel derives the selected primitive's displayed tree role from `SceneDocument::TreeNode`; the legacy `ShapeNode::booleanMode` is synchronized after tree moves and is no longer rewritten by unrelated parameter edits.
 
 `ViewportWidget` owns interactive viewing and picking:
 

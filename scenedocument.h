@@ -78,6 +78,8 @@ private:
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
     bool treeContainsPrimitiveShapeId(const TreeNode &node, int shapeId) const;
     void ensureTreeContainsAllShapes();
+    void synchronizeBooleanModesFromTree();
+    void applyTreeBooleanModes(const TreeNode &node, ShapeNode::BooleanMode inheritedMode);
     bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
     bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
     void pruneEmptyGroups(TreeNode *node);

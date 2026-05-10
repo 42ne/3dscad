@@ -38,6 +38,7 @@ private slots:
     void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
     void showSceneTreeContextMenu(const QPoint &position);
     void onPropertyChanged();
+    void onBooleanModeChanged(int index);
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
     void onViewportShapeDragFinished(int index);

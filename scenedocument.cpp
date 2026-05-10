@@ -235,8 +235,10 @@ bool SceneDocument::removeGroupById(int groupId)
         return false;
 
     const bool removed = detachTreeNodeById(&m_treeRoot, groupId);
-    if (removed)
+    if (removed) {
         pruneEmptyGroups(&m_treeRoot);
+        synchronizeBooleanModesFromTree();
+    }
 
     return removed;
 }
@@ -272,6 +274,7 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     targetParent->children.insert(boundedIndex, movedNode);
     pruneEmptyGroups(&m_treeRoot);
     ensureTreeContainsAllShapes();
+    synchronizeBooleanModesFromTree();
     return true;
 }
 
@@ -398,6 +401,31 @@ void SceneDocument::ensureTreeContainsAllShapes()
     for (const ShapeNode &shape : m_shapes) {
         if (!treeContainsPrimitiveShapeId(m_treeRoot, shape.id))
             m_treeRoot.children.append(makePrimitiveNode(shape.id));
+    }
+}
+
+void SceneDocument::synchronizeBooleanModesFromTree()
+{
+    applyTreeBooleanModes(m_treeRoot, ShapeNode::Add);
+}
+
+void SceneDocument::applyTreeBooleanModes(const TreeNode &node, ShapeNode::BooleanMode inheritedMode)
+{
+    if (node.type == TreeNode::Primitive) {
+        if (ShapeNode *shape = shapeById(node.shapeId))
+            shape->booleanMode = inheritedMode;
+
+        return;
+    }
+
+    for (int i = 0; i < node.children.size(); ++i) {
+        ShapeNode::BooleanMode childMode = inheritedMode;
+        if (node.operation == TreeNode::Difference && i > 0)
+            childMode = ShapeNode::Subtract;
+        else if (node.operation == TreeNode::Intersection)
+            childMode = ShapeNode::Intersect;
+
+        applyTreeBooleanModes(node.children[i], childMode);
     }
 }
 
