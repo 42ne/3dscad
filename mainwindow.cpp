@@ -35,12 +35,29 @@
 #include <QVBoxLayout>
 
 #include <functional>
+#include <cmath>
 
 // ---------------- MainWindow ----------------
 
 static constexpr int ShapeIdRole = Qt::UserRole;
 static constexpr int TreeNodeIdRole = Qt::UserRole + 1;
 static constexpr int GroupOperationRole = Qt::UserRole + 2;
+
+static float normalizedRotationDegrees(float value)
+{
+    while (value > 180.0f)
+        value -= 360.0f;
+    while (value < -180.0f)
+        value += 360.0f;
+    return value;
+}
+
+static QVector3D normalizedRotation(const QVector3D &rotation)
+{
+    return QVector3D(normalizedRotationDegrees(rotation.x()),
+                     normalizedRotationDegrees(rotation.y()),
+                     normalizedRotationDegrees(rotation.z()));
+}
 
 class SceneTreeWidget : public QTreeWidget
 {
@@ -350,9 +367,15 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
     connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
     connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
+    connect(m_viewport, &ViewportWidget::shapeRotationDragStarted, this, &MainWindow::onViewportShapeRotationDragStarted);
+    connect(m_viewport, &ViewportWidget::shapeRotated, this, &MainWindow::onViewportShapeRotated);
+    connect(m_viewport, &ViewportWidget::shapeRotationDragFinished, this, &MainWindow::onViewportShapeRotationDragFinished);
     connect(m_viewport, &ViewportWidget::groupDragStarted, this, &MainWindow::onViewportGroupDragStarted);
     connect(m_viewport, &ViewportWidget::groupDragged, this, &MainWindow::onViewportGroupDragged);
     connect(m_viewport, &ViewportWidget::groupDragFinished, this, &MainWindow::onViewportGroupDragFinished);
+    connect(m_viewport, &ViewportWidget::groupRotationDragStarted, this, &MainWindow::onViewportGroupRotationDragStarted);
+    connect(m_viewport, &ViewportWidget::groupRotated, this, &MainWindow::onViewportGroupRotated);
+    connect(m_viewport, &ViewportWidget::groupRotationDragFinished, this, &MainWindow::onViewportGroupRotationDragFinished);
     connect(m_shapeTree, &QTreeWidget::currentItemChanged,
             this, &MainWindow::onSceneTreeSelectionChanged);
     connect(m_shapeTree, &QTreeWidget::customContextMenuRequested,
@@ -730,6 +753,33 @@ void MainWindow::onViewportShapeDragFinished(int index)
     m_undoStack->push(command);
 }
 
+void MainWindow::onViewportShapeRotationDragStarted(int index)
+{
+    onViewportShapeDragStarted(index);
+}
+
+void MainWindow::onViewportShapeRotated(int index, const QVector3D &deltaDegrees)
+{
+    if (!m_viewportDragActive || m_scene.selectedIndex() != index)
+        return;
+
+    ShapeNode *shape = m_scene.selectedShape();
+    if (!shape)
+        return;
+
+    *shape = m_viewportDragStartShape;
+    shape->rotation = normalizedRotation(m_viewportDragStartShape.rotation + deltaDegrees);
+
+    m_viewport->invalidateCsgPreview();
+    m_viewport->update();
+    refreshProperties();
+}
+
+void MainWindow::onViewportShapeRotationDragFinished(int index)
+{
+    onViewportShapeDragFinished(index);
+}
+
 void MainWindow::onViewportGroupDragStarted(int groupId)
 {
     selectTreeNodeInSceneTree(groupId);
@@ -789,6 +839,29 @@ void MainWindow::onViewportGroupDragFinished(int groupId)
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::onViewportGroupRotationDragStarted(int groupId)
+{
+    onViewportGroupDragStarted(groupId);
+}
+
+void MainWindow::onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees)
+{
+    if (!m_viewportGroupDragActive || m_viewportDragGroupId != groupId)
+        return;
+
+    m_scene.updateGroupTransform(groupId,
+                                 m_viewportDragStartGroupPosition,
+                                 normalizedRotation(m_viewportDragStartGroupRotation + deltaDegrees));
+    m_viewport->invalidateCsgPreview();
+    m_viewport->update();
+    refreshProperties();
+}
+
+void MainWindow::onViewportGroupRotationDragFinished(int groupId)
+{
+    onViewportGroupDragFinished(groupId);
 }
 
 void MainWindow::onUseOpenGLToggled(bool checked)

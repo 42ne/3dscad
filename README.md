@@ -19,7 +19,7 @@ Implemented:
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
 - The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
-- Selected groups can be moved from the viewport with the same axis gizmo used for primitives.
+- Selected primitives and groups can be moved from the viewport with axis gizmo arrows and rotated with the gizmo rings.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - Moving nodes between groups preserves their world position for translation-only group transforms.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
@@ -35,7 +35,7 @@ Implemented:
 - Explicit viewport render backend plumbing with a `Use OpenGL` checkbox; software is the active backend by default, and the checkbox enables an experimental OpenGL mesh path.
 - Simple lights and shadows.
 - Shape picking in the viewport.
-- Move gizmo with X/Y/Z axes.
+- Transform gizmo with X/Y/Z move axes and rotation rings.
 - Boolean modes:
   - `Add solid`
   - `Subtract hole`
@@ -55,7 +55,9 @@ There are currently four preview modes:
 
 Manifold mode:
 
-- Is used first when `build/manifold-build/src/libmanifold.a` exists at qmake time.
+- Is used first when the matching local Manifold library exists at qmake time:
+  `build/manifold-build-32/src/libmanifold.a` for 32-bit kits or
+  `build/manifold-build-64/src/libmanifold.a` for 64-bit kits.
 - Evaluates the scene boolean tree as mesh booleans.
 - Falls back to the internal box/mesh preview if Manifold is not built or returns an invalid result.
 
@@ -82,7 +84,7 @@ This is a Qt `.pro` project.
 Known working setup:
 
 - Qt 5.15.2
-- MinGW 32-bit
+- MinGW 32-bit or 64-bit
 - qmake project: `3DScad.pro`
 
 Typical build from Qt Creator should work. From the existing debug build directory, the project has been verified with:
@@ -99,6 +101,9 @@ Optional Manifold CSG backend:
 qmake 3DScad.pro
 mingw32-make
 ```
+
+Use `.\scripts\build-manifold.ps1 -Arch 32` for a 32-bit Qt kit or
+`.\scripts\build-manifold.ps1 -Arch 64` for a 64-bit Qt kit. The default is 64-bit.
 
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 

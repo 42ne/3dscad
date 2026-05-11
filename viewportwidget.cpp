@@ -141,6 +141,32 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
     painter->drawPolygon(darkFace);
 }
 
+static QVector3D rotationRingPoint(const QVector3D &origin, ViewportWidget::DragMode dragMode, float radius, float degrees)
+{
+    const float angle = qDegreesToRadians(degrees);
+    const float c = qCos(angle) * radius;
+    const float s = qSin(angle) * radius;
+
+    if (dragMode == ViewportWidget::RotateXDrag)
+        return origin + QVector3D(0.0f, c, s);
+    if (dragMode == ViewportWidget::RotateYDrag)
+        return origin + QVector3D(c, 0.0f, s);
+
+    return origin + QVector3D(c, s, 0.0f);
+}
+
+static QVector3D rotationVectorForMode(ViewportWidget::DragMode dragMode, float degrees)
+{
+    if (dragMode == ViewportWidget::RotateXDrag)
+        return QVector3D(degrees, 0.0f, 0.0f);
+    if (dragMode == ViewportWidget::RotateYDrag)
+        return QVector3D(0.0f, degrees, 0.0f);
+    if (dragMode == ViewportWidget::RotateZDrag)
+        return QVector3D(0.0f, 0.0f, degrees);
+
+    return QVector3D();
+}
+
 static QColor litColor(const QColor &baseColor, const QVector3D &normal, const QVector<SceneLight> &lights)
 {
     float red = baseColor.redF() * 0.22f;
@@ -716,11 +742,29 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 painter.drawLine(start, end);
                 drawArrowHead(&painter, start, end, axis.second);
             }
+
+            const QVector<QPair<DragMode, QColor>> rings = {
+                {RotateXDrag, QColor(235, 80, 80, 185)},
+                {RotateYDrag, QColor(80, 210, 120, 185)},
+                {RotateZDrag, QColor(90, 155, 245, 185)}
+            };
+
+            for (const auto &ring : rings) {
+                QPolygonF ringPath;
+                for (int step = 0; step <= 72; ++step) {
+                    const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
+                    ringPath << project(worldPoint).point;
+                }
+
+                painter.setPen(QPen(ring.second, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawPolyline(ringPath);
+            }
         }
     }
 
     painter.setPen(QColor(220, 220, 220));
-    painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move");
+    painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
     painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
 }
 
@@ -852,15 +896,15 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
         return false;
 
     const QVector3D origin = selectedTransformOrigin();
+    float bestDistance = 9.0f;
+    DragMode pickedAxis = NoDrag;
+    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+
     const QVector<QPair<DragMode, QVector3D>> axes = {
         {AxisXDrag, QVector3D(36.0f, 0.0f, 0.0f)},
         {AxisYDrag, QVector3D(0.0f, 36.0f, 0.0f)},
         {AxisZDrag, QVector3D(0.0f, 0.0f, 36.0f)}
     };
-
-    float bestDistance = 9.0f;
-    DragMode pickedAxis = NoDrag;
-    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
 
     for (const auto &axis : axes) {
         const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
@@ -868,6 +912,27 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
         if (distance < bestDistance) {
             bestDistance = distance;
             pickedAxis = axis.first;
+        }
+    }
+
+    const QVector<DragMode> rings = {RotateXDrag, RotateYDrag, RotateZDrag};
+    for (DragMode ring : rings) {
+        QPointF previous;
+        bool hasPrevious = false;
+
+        for (int step = 0; step <= 72; ++step) {
+            const QVector3D worldPoint = rotationRingPoint(origin, ring, 48.0f, step * 5.0f);
+            const QPointF current = projectWorldPoint(worldPoint, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+            if (hasPrevious) {
+                const float distance = distanceToSegment(position, previous, current);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    pickedAxis = ring;
+                }
+            }
+
+            previous = current;
+            hasPrevious = true;
         }
     }
 
@@ -910,6 +975,28 @@ QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) cons
     return axisVector * screenAmount * worldUnitsPerPixel;
 }
 
+QVector3D ViewportWidget::rotationDeltaForMousePosition(const QPoint &position) const
+{
+    if (!isRotationDragMode(m_dragMode))
+        return QVector3D();
+
+    QVector2D tangent = m_rotationDragScreenTangent;
+    if (tangent.lengthSquared() <= 0.0001f) {
+        tangent = QVector2D(1.0f, 0.0f);
+    } else {
+        tangent.normalize();
+    }
+
+    const QPoint pixelDelta = position - m_dragStartMousePosition;
+    const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), tangent);
+    return rotationVectorForMode(m_dragMode, screenAmount * 0.75f);
+}
+
+bool ViewportWidget::isRotationDragMode(DragMode dragMode) const
+{
+    return dragMode == RotateXDrag || dragMode == RotateYDrag || dragMode == RotateZDrag;
+}
+
 void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
@@ -920,15 +1007,30 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
             m_dragMode = pickedAxis;
             m_dragStartMousePosition = event->pos();
             m_lastDragDelta = QVector3D();
+            m_lastRotationDelta = QVector3D();
+
+            const QPointF screenOrigin = projectWorldPoint(selectedTransformOrigin(),
+                                                           size(),
+                                                           m_cameraYaw,
+                                                           m_cameraPitch,
+                                                           m_cameraDistance).point;
+            QVector2D radiusVector(QPointF(event->pos()) - screenOrigin);
+            m_rotationDragScreenTangent = QVector2D(-radiusVector.y(), radiusVector.x());
 
             if (m_selectedGroupId > 0) {
                 m_draggingGroup = true;
                 m_dragGroupId = m_selectedGroupId;
-                emit groupDragStarted(m_selectedGroupId);
+                if (isRotationDragMode(m_dragMode))
+                    emit groupRotationDragStarted(m_selectedGroupId);
+                else
+                    emit groupDragStarted(m_selectedGroupId);
             } else {
                 m_draggingShape = true;
                 m_dragShapeIndex = m_selectedIndex;
-                emit shapeDragStarted(m_selectedIndex);
+                if (isRotationDragMode(m_dragMode))
+                    emit shapeRotationDragStarted(m_selectedIndex);
+                else
+                    emit shapeDragStarted(m_selectedIndex);
             }
             return;
         }
@@ -1009,6 +1111,23 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 {
     if ((m_draggingShape || m_draggingGroup) && (event->buttons() & Qt::LeftButton)) {
+        if (isRotationDragMode(m_dragMode)) {
+            const QVector3D rotationDelta = rotationDeltaForMousePosition(event->pos());
+
+            if ((rotationDelta - m_lastRotationDelta).lengthSquared() < 0.0001f) {
+                m_lastMousePosition = event->pos();
+                return;
+            }
+
+            m_lastRotationDelta = rotationDelta;
+            if (m_draggingGroup)
+                emit groupRotated(m_dragGroupId, rotationDelta);
+            else
+                emit shapeRotated(m_dragShapeIndex, rotationDelta);
+            m_lastMousePosition = event->pos();
+            return;
+        }
+
         const QVector3D worldDelta = dragDeltaForMousePosition(event->pos());
 
         if ((worldDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
@@ -1042,15 +1161,24 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
         const int shapeIndex = m_dragShapeIndex;
         const int groupId = m_dragGroupId;
         const bool wasDraggingGroup = m_draggingGroup;
+        const bool wasRotating = isRotationDragMode(m_dragMode);
         m_draggingShape = false;
         m_draggingGroup = false;
         m_dragMode = NoDrag;
         m_dragShapeIndex = -1;
         m_dragGroupId = 0;
-        if (wasDraggingGroup)
-            emit groupDragFinished(groupId);
-        else
-            emit shapeDragFinished(shapeIndex);
+        m_rotationDragScreenTangent = QVector2D();
+        if (wasDraggingGroup) {
+            if (wasRotating)
+                emit groupRotationDragFinished(groupId);
+            else
+                emit groupDragFinished(groupId);
+        } else {
+            if (wasRotating)
+                emit shapeRotationDragFinished(shapeIndex);
+            else
+                emit shapeDragFinished(shapeIndex);
+        }
     }
 }
 

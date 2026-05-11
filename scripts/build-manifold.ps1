@@ -1,5 +1,7 @@
 param(
-    [string]$QtRoot = "E:\Qt",
+    [string]$QtRoot = "C:\Qt",
+    [ValidateSet("32", "64")]
+    [string]$Arch = "64",
     [string]$Generator = "MinGW Makefiles"
 )
 
@@ -7,9 +9,9 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $manifoldSource = Join-Path $repoRoot "build\manifold-src"
-$manifoldBuild = Join-Path $repoRoot "build\manifold-build"
+$manifoldBuild = Join-Path $repoRoot "build\manifold-build-$Arch"
 $cmake = Join-Path $QtRoot "Tools\CMake_64\bin\cmake.exe"
-$mingwBin = Join-Path $QtRoot "Tools\mingw810_32\bin"
+$mingwBin = Join-Path $QtRoot "Tools\mingw810_$Arch\bin"
 $compiler = Join-Path $mingwBin "g++.exe"
 $make = Join-Path $mingwBin "mingw32-make.exe"
 

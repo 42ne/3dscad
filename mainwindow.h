@@ -43,9 +43,15 @@ private slots:
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
     void onViewportShapeDragFinished(int index);
+    void onViewportShapeRotationDragStarted(int index);
+    void onViewportShapeRotated(int index, const QVector3D &deltaDegrees);
+    void onViewportShapeRotationDragFinished(int index);
     void onViewportGroupDragStarted(int groupId);
     void onViewportGroupDragged(int groupId, const QVector3D &delta);
     void onViewportGroupDragFinished(int groupId);
+    void onViewportGroupRotationDragStarted(int groupId);
+    void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
+    void onViewportGroupRotationDragFinished(int groupId);
     void onUseOpenGLToggled(bool checked);
 
 private:

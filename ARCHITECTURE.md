@@ -20,7 +20,7 @@ It stores:
 It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
 Group `TreeNode` entries store position and rotation transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`, and Manifold CSG applies the same transform after evaluating the group operation.
 Group transforms can be edited from the Properties dock when a group row is selected; edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
-Selected groups can also be moved from the viewport axis gizmo. Viewport group dragging updates the group transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
+Selected groups can also be moved from the viewport axis gizmo and rotated from the viewport rotation rings. Viewport group dragging updates the group transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
 The document model exposes group operations used by the UI layer: add group, remove group by promoting children, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
 `MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
@@ -36,7 +36,7 @@ The properties panel derives the selected primitive's displayed tree role from `
 - software depth buffer
 - viewport rasterization
 - explicit render backend selection, currently using the software backend by default
-- move gizmo
+- transform gizmo with move axes and rotation rings
 - helper wireframe picking
 - cached CSG preview reuse between repaints
 
@@ -107,7 +107,8 @@ Modes:
 
 Build activation:
 
-- qmake checks for `build/manifold-build/src/libmanifold.a`.
+- qmake checks for the Manifold library matching the active Qt kit:
+  `build/manifold-build-32/src/libmanifold.a` or `build/manifold-build-64/src/libmanifold.a`.
 - If the library exists, `HAVE_MANIFOLD_CSG` is defined.
 - If not, the adapter compiles as a no-op and `csgevaluator` falls back to internal modes.
 
@@ -118,7 +119,7 @@ Runtime flow:
 3. Convert Manifold `MeshGL` output back to `SceneMesh`.
 4. Render helper shapes as wireframes for editing.
 
-The current local Manifold build lives under `build/` and is not part of the repository. With Qt's MinGW GCC 8, Manifold needed local sequential fallbacks for unavailable standard parallel numeric functions.
+The current local Manifold builds live under `build/` and are not part of the repository. With Qt's MinGW GCC 8, Manifold needed local sequential fallbacks for unavailable standard parallel numeric functions.
 
 ### Box CSG
 
@@ -154,8 +155,9 @@ Selection:
 
 Dragging:
 
-- Axis gizmo drag emits shape drag signals.
-- If a group row is selected, the same gizmo emits group drag signals and moves the group transform.
+- Axis gizmo drag emits shape drag signals and moves the selected primitive.
+- Rotation ring drag emits shape rotation signals and rotates the selected primitive.
+- If a group row is selected, the same gizmo emits group drag/rotation signals and updates the group transform.
 - `Shift + drag` supports plane dragging.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.

@@ -10,6 +10,7 @@
 #include <QPoint>
 #include <QString>
 #include <QVector>
+#include <QVector2D>
 
 class QMouseEvent;
 class QOpenGLShaderProgram;
@@ -42,9 +43,15 @@ signals:
     void shapeDragStarted(int index);
     void shapeDragged(int index, const QVector3D &delta);
     void shapeDragFinished(int index);
+    void shapeRotationDragStarted(int index);
+    void shapeRotated(int index, const QVector3D &deltaDegrees);
+    void shapeRotationDragFinished(int index);
     void groupDragStarted(int groupId);
     void groupDragged(int groupId, const QVector3D &delta);
     void groupDragFinished(int groupId);
+    void groupRotationDragStarted(int groupId);
+    void groupRotated(int groupId, const QVector3D &deltaDegrees);
+    void groupRotationDragFinished(int groupId);
 
 protected:
     void initializeGL() override;
@@ -55,21 +62,27 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
-private:
+public:
     enum DragMode {
         NoDrag,
         PlaneDrag,
         AxisXDrag,
         AxisYDrag,
-        AxisZDrag
+        AxisZDrag,
+        RotateXDrag,
+        RotateYDrag,
+        RotateZDrag
     };
 
+private:
     void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
     void paintOpenGLPreview();
     bool canUseOpenGLRenderBackend() const;
     QVector3D selectedTransformOrigin() const;
     bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
     QVector3D dragDeltaForMousePosition(const QPoint &position) const;
+    QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
+    bool isRotationDragMode(DragMode dragMode) const;
 
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
@@ -82,6 +95,8 @@ private:
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
     QVector3D m_lastDragDelta;
+    QVector3D m_lastRotationDelta;
+    QVector2D m_rotationDragScreenTangent;
     bool m_draggingShape = false;
     bool m_draggingGroup = false;
     DragMode m_dragMode = NoDrag;

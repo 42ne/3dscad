@@ -41,10 +41,18 @@ HEADERS += \
 FORMS += \
     mainwindow.ui
 
-exists(build/manifold-build/src/libmanifold.a) {
+win32:contains(QT_ARCH, x86_64) {
+    MANIFOLD_BUILD_DIR = $$PWD/build/manifold-build-64
+} else:win32 {
+    MANIFOLD_BUILD_DIR = $$PWD/build/manifold-build-32
+} else {
+    MANIFOLD_BUILD_DIR = $$PWD/build/manifold-build
+}
+
+exists($$MANIFOLD_BUILD_DIR/src/libmanifold.a) {
     DEFINES += HAVE_MANIFOLD_CSG
     INCLUDEPATH += $$PWD/build/manifold-src/include
-    LIBS += $$PWD/build/manifold-build/src/libmanifold.a
+    LIBS += $$MANIFOLD_BUILD_DIR/src/libmanifold.a
 }
 
 # Default rules for deployment.
