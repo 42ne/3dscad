@@ -639,3 +639,9 @@ void SceneDocument::rebuildTreeFromShapes()
         m_treeRoot = intersectionRoot;
     }
 }
+
+void SceneDocument::syncTreeRootFromSceneTree()
+{
+    // Placeholder: will sync m_tree -> m_treeRoot when SceneTree is fully integrated
+    // For now, m_tree is kept in sync by manual updates as we migrate operations
+}

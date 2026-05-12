@@ -2,6 +2,7 @@
 #define SCENEDOCUMENT_H
 
 #include "shapenode.h"
+#include "scenetree.h"
 
 #include <QVector>
 
@@ -94,10 +95,12 @@ private:
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
     TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
+    void syncTreeRootFromSceneTree();
 
 private:
     QVector<ShapeNode> m_shapes;
     TreeNode m_treeRoot;
+    SceneTree m_tree;
     int m_selectedShapeId = -1;
     int m_nextShapeId = 1;
     int m_nextTreeNodeId = 1;
