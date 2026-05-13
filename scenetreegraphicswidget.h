@@ -9,6 +9,7 @@
 
 class QGraphicsScene;
 class QMouseEvent;
+class QPainter;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -23,6 +24,7 @@ public:
     void refresh();
 
 protected:
+    void drawBackground(QPainter *painter, const QRectF &rect) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -38,6 +40,7 @@ private:
     void handleTreeNodeSelected(int nodeId);
     int groupIdAt(const QPointF &scenePosition) const;
     QString labelForPrimitive(int shapeId) const;
+    ShapeNode::Type typeForPrimitive(int shapeId) const;
     QString labelForGroup(SceneDocument::TreeNode::Operation operation) const;
     QColor colorForGroup(SceneDocument::TreeNode::Operation operation) const;
 

@@ -7,7 +7,9 @@
 #include <QGraphicsSimpleTextItem>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPen>
+#include <QPolygonF>
 #include <QScrollBar>
 #include <QVarLengthArray>
 #include <QWheelEvent>
@@ -28,6 +30,29 @@ constexpr qreal GroupHeaderHeight = 28.0;
 constexpr qreal GroupPadding = 12.0;
 constexpr qreal ChildGap = 10.0;
 constexpr qreal CanvasMargin = 2000.0;
+const QColor CanvasBackground(31, 41, 55);
+const QColor MinorGridColor(96, 106, 121);
+const QColor MajorGridColor(139, 150, 166);
+
+void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width)
+{
+    QVarLengthArray<QLineF, 128> lines;
+
+    const qreal left = std::floor(rect.left() / gridSize) * gridSize;
+    const qreal top = std::floor(rect.top() / gridSize) * gridSize;
+
+    for (qreal x = left; x < rect.right(); x += gridSize)
+        lines.append(QLineF(x, rect.top(), x, rect.bottom()));
+
+    for (qreal y = top; y < rect.bottom(); y += gridSize)
+        lines.append(QLineF(rect.left(), y, rect.right(), y));
+
+    QPen gridPen(color);
+    gridPen.setWidth(width);
+    gridPen.setCosmetic(true);
+    painter->setPen(gridPen);
+    painter->drawLines(lines.constData(), lines.size());
+}
 
 class TreeGraphicsScene : public QGraphicsScene
 {
@@ -35,35 +60,15 @@ public:
     explicit TreeGraphicsScene(QObject *parent = nullptr)
         : QGraphicsScene(parent)
     {
-        setBackgroundBrush(QColor(31, 41, 55));
+        setBackgroundBrush(CanvasBackground);
     }
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override
     {
         QGraphicsScene::drawBackground(painter, rect);
-        drawGrid(painter, rect, 24.0, QColor(75, 85, 99), 1);
-        drawGrid(painter, rect, 96.0, QColor(107, 114, 128), 1);
-    }
-
-private:
-    static void drawGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width)
-    {
-        QVarLengthArray<QLineF, 128> lines;
-
-        const qreal left = std::floor(rect.left() / gridSize) * gridSize;
-        const qreal top = std::floor(rect.top() / gridSize) * gridSize;
-
-        for (qreal x = left; x < rect.right(); x += gridSize)
-            lines.append(QLineF(x, rect.top(), x, rect.bottom()));
-
-        for (qreal y = top; y < rect.bottom(); y += gridSize)
-            lines.append(QLineF(rect.left(), y, rect.right(), y));
-
-        QPen gridPen(color);
-        gridPen.setWidth(width);
-        painter->setPen(gridPen);
-        painter->drawLines(lines.constData(), lines.size());
+        drawCanvasGrid(painter, rect, 24.0, MinorGridColor, 1);
+        drawCanvasGrid(painter, rect, 96.0, MajorGridColor, 1);
     }
 };
 
@@ -72,6 +77,72 @@ void addLabel(QGraphicsScene *scene, const QString &text, const QPointF &positio
     auto *label = scene->addSimpleText(text);
     label->setBrush(color);
     label->setPos(position);
+}
+
+void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF &rect)
+{
+    const QColor outline(59, 95, 134);
+    const QColor face(178, 207, 238);
+    const QColor faceLight(221, 235, 248);
+    const QColor faceDark(139, 176, 214);
+
+    if (type == ShapeNode::Sphere) {
+        auto *sphere = scene->addEllipse(rect, QPen(outline, 1), QBrush(face));
+        auto *latitude = scene->addEllipse(rect.adjusted(3.0, 9.0, -3.0, -9.0), QPen(QColor(93, 127, 166), 1), Qt::NoBrush);
+        auto *highlight = scene->addEllipse(QRectF(rect.left() + rect.width() * 0.25,
+                                                   rect.top() + rect.height() * 0.18,
+                                                   rect.width() * 0.22,
+                                                   rect.height() * 0.16),
+                                            Qt::NoPen,
+                                            QBrush(QColor(255, 255, 255, 165)));
+        sphere->setZValue(5.0);
+        latitude->setZValue(6.0);
+        highlight->setZValue(7.0);
+        return;
+    }
+
+    if (type == ShapeNode::Cylinder) {
+        const QRectF top(rect.left() + 3.0, rect.top() + 3.0, rect.width() - 6.0, rect.height() * 0.34);
+        const QRectF bottom(top.left(), rect.bottom() - top.height() - 3.0, top.width(), top.height());
+        auto *body = scene->addRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()),
+                                    Qt::NoPen,
+                                    QBrush(face));
+        auto *left = scene->addLine(top.left(), top.center().y(), bottom.left(), bottom.center().y(), QPen(outline, 1));
+        auto *right = scene->addLine(top.right(), top.center().y(), bottom.right(), bottom.center().y(), QPen(outline, 1));
+        auto *bottomEllipse = scene->addEllipse(bottom, QPen(outline, 1), QBrush(faceDark));
+        auto *topEllipse = scene->addEllipse(top, QPen(outline, 1), QBrush(faceLight));
+        body->setZValue(5.0);
+        left->setZValue(6.0);
+        right->setZValue(6.0);
+        bottomEllipse->setZValue(7.0);
+        topEllipse->setZValue(8.0);
+        return;
+    }
+
+    QPolygonF topFace;
+    topFace << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.34)
+            << QPointF(rect.left() + rect.width() * 0.48, rect.top() + rect.height() * 0.12)
+            << QPointF(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.28)
+            << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.50);
+
+    QPolygonF leftFace;
+    leftFace << topFace[0]
+             << topFace[3]
+             << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.86)
+             << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.70);
+
+    QPolygonF rightFace;
+    rightFace << topFace[3]
+              << topFace[2]
+              << QPointF(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.64)
+              << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.86);
+
+    auto *leftItem = scene->addPolygon(leftFace, QPen(outline, 1), QBrush(face));
+    auto *rightItem = scene->addPolygon(rightFace, QPen(outline, 1), QBrush(faceDark));
+    auto *topItem = scene->addPolygon(topFace, QPen(outline, 1), QBrush(faceLight));
+    leftItem->setZValue(5.0);
+    rightItem->setZValue(6.0);
+    topItem->setZValue(7.0);
 }
 
 class ToolInstanceItem : public QGraphicsRectItem
@@ -294,7 +365,8 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     setDragMode(QGraphicsView::NoDrag);
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
-    setBackgroundBrush(QColor(31, 41, 55));
+    setBackgroundBrush(CanvasBackground);
+    setCacheMode(QGraphicsView::CacheNone);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setCursor(Qt::OpenHandCursor);
@@ -352,6 +424,13 @@ void SceneTreeGraphicsWidget::refresh()
     if (bounds.height() < 260.0)
         bounds.setHeight(260.0);
     m_graphicsScene->setSceneRect(bounds);
+}
+
+void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &rect)
+{
+    painter->fillRect(rect, CanvasBackground);
+    drawCanvasGrid(painter, rect, 24.0, MinorGridColor, 1);
+    drawCanvasGrid(painter, rect, 96.0, MajorGridColor, 1);
 }
 
 void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
@@ -445,8 +524,8 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
     m_graphicsScene->addRect(rect,
                              QPen(selected ? QColor(255, 203, 87) : QColor(92, 116, 150), selected ? 3 : 1),
                              QBrush(QColor(219, 231, 246)));
-    addLabel(m_graphicsScene, label, rect.topLeft() + QPointF(8.0, 12.0), QColor(33, 60, 94));
-    m_graphicsScene->addItem(new TreeNodeDragHandleItem(
+    addPrimitiveIcon(m_graphicsScene, typeForPrimitive(node.shapeId), QRectF(rect.left() + 28.0, rect.top() + 7.0, 32.0, 28.0));
+    auto *handle = new TreeNodeDragHandleItem(
         node.id,
         label,
         rect,
@@ -456,7 +535,9 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
         },
         [this](int nodeId, const QPointF &position) {
             handleTreeNodeDrop(nodeId, position);
-        }));
+        });
+    handle->setToolTip(label);
+    m_graphicsScene->addItem(handle);
     return rect;
 }
 
@@ -515,12 +596,17 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         addLabel(m_graphicsScene, "empty", QPointF(rect.left() + GroupPadding, rect.top() + GroupHeaderHeight + GroupPadding + 10.0), QColor(95, 98, 105));
 
     if (node.operation == SceneDocument::TreeNode::Difference) {
-        const qreal separatorY = rect.top() + GroupHeaderHeight + GroupPadding + PrimitiveHeight + ChildGap * 0.5;
-        m_graphicsScene->addLine(rect.left() + GroupPadding,
-                                 separatorY,
-                                 rect.right() - GroupPadding,
-                                 separatorY,
-                                 QPen(QColor(130, 92, 70), 1, Qt::DashLine));
+        qreal separatorY = rect.top() + GroupHeaderHeight + GroupPadding + PrimitiveHeight + ChildGap * 0.5;
+        if (!childRects.isEmpty())
+            separatorY = childRects.first().bottom() + ChildGap * 0.5;
+
+        auto *separator = m_graphicsScene->addLine(rect.left() + GroupPadding,
+                                                   separatorY,
+                                                   rect.right() - GroupPadding,
+                                                   separatorY,
+                                                   QPen(QColor(130, 92, 70), 1, Qt::DashLine));
+        separator->setZValue(depth * 10.0 - 70.0);
+
         addLabel(m_graphicsScene, "base", QPointF(rect.right() - 54.0, rect.top() + GroupHeaderHeight + 8.0), QColor(92, 72, 58));
         addLabel(m_graphicsScene, "cut", QPointF(rect.right() - 44.0, separatorY + 6.0), QColor(128, 74, 48));
     }
@@ -581,6 +667,15 @@ QString SceneTreeGraphicsWidget::labelForPrimitive(int shapeId) const
     if (shape->type == ShapeNode::Cylinder)
         return "cylinder";
     return "cube";
+}
+
+ShapeNode::Type SceneTreeGraphicsWidget::typeForPrimitive(int shapeId) const
+{
+    if (!m_scene)
+        return ShapeNode::Cube;
+
+    const ShapeNode *shape = m_scene->shapeById(shapeId);
+    return shape ? shape->type : ShapeNode::Cube;
 }
 
 QString SceneTreeGraphicsWidget::labelForGroup(SceneDocument::TreeNode::Operation operation) const
