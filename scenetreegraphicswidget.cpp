@@ -145,6 +145,35 @@ void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF 
     topItem->setZValue(7.0);
 }
 
+QString primitiveNumberText(const QString &label, int fallbackId)
+{
+    int end = label.size() - 1;
+    while (end >= 0 && label[end].isSpace())
+        --end;
+
+    int start = end;
+    while (start >= 0 && label[start].isDigit())
+        --start;
+
+    if (start < end)
+        return label.mid(start + 1, end - start);
+
+    return fallbackId > 0 ? QString::number(fallbackId) : QStringLiteral("?");
+}
+
+void addPrimitiveNumberBadge(QGraphicsScene *scene, const QString &number, const QRectF &rect)
+{
+    const QRectF badgeRect(rect.right() - 25.0, rect.top() + 9.0, 18.0, 18.0);
+    auto *badge = scene->addEllipse(badgeRect, QPen(QColor(82, 111, 146), 1), QBrush(QColor(244, 248, 252)));
+    badge->setZValue(9.0);
+
+    auto *text = scene->addSimpleText(number);
+    text->setBrush(QColor(30, 58, 90));
+    const QRectF textRect = text->boundingRect();
+    text->setPos(badgeRect.center() - QPointF(textRect.width() * 0.5, textRect.height() * 0.5 + 1.0));
+    text->setZValue(10.0);
+}
+
 class ToolInstanceItem : public QGraphicsRectItem
 {
 public:
@@ -524,7 +553,8 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
     m_graphicsScene->addRect(rect,
                              QPen(selected ? QColor(255, 203, 87) : QColor(92, 116, 150), selected ? 3 : 1),
                              QBrush(QColor(219, 231, 246)));
-    addPrimitiveIcon(m_graphicsScene, typeForPrimitive(node.shapeId), QRectF(rect.left() + 28.0, rect.top() + 7.0, 32.0, 28.0));
+    addPrimitiveIcon(m_graphicsScene, typeForPrimitive(node.shapeId), QRectF(rect.left() + 18.0, rect.top() + 7.0, 32.0, 28.0));
+    addPrimitiveNumberBadge(m_graphicsScene, primitiveNumberText(label, node.shapeId), rect);
     auto *handle = new TreeNodeDragHandleItem(
         node.id,
         label,
