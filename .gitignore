@@ -20,3 +20,4 @@ qrc_*.cpp
 .qtc_clangd/
 debug/
 release/
+temp/

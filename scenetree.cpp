@@ -1,5 +1,6 @@
 #include "scenetree.h"
-#include "shapenode.h"
+
+#include <functional>
 
 SceneTree::SceneTree()
 {
@@ -71,8 +72,11 @@ bool SceneTree::removeGroupById(int groupId)
     return removed;
 }
 
-bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
+bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, MoveInfo *moveInfo)
 {
+    if (moveInfo)
+        *moveInfo = {};
+
     if (nodeId <= 0 || m_root.id == nodeId)
         return false;
 
@@ -107,7 +111,13 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
     const int boundedIndex = insertIndex < 0
                                  ? targetParent->children.size()
                                  : qBound(0, insertIndex, targetParent->children.size());
-    offsetMovedNode(&movedNode, sourceParentWorldPosition - targetParentWorldPosition);
+    const QVector3D offset = sourceParentWorldPosition - targetParentWorldPosition;
+    if (moveInfo && movedNode.type == TreeNode::Primitive) {
+        collectPrimitiveShapeIds(movedNode, &moveInfo->movedPrimitiveShapeIds);
+        moveInfo->primitiveOffset = offset;
+    }
+
+    offsetMovedNode(&movedNode, offset);
     targetParent->children.insert(boundedIndex, movedNode);
     pruneEmptyGroups(&m_root);
     return true;
@@ -132,7 +142,10 @@ bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int par
     if (m_root.id <= 0)
         m_root = makeGroupNode(TreeNode::Union);
 
-    TreeNode *parent = parentGroupId > 0 ? nodeById(&m_root, parentGroupId) : &m_root;
+    if (parentGroupId <= 0)
+        return appendPrimitiveToOperation(operation, makePrimitiveNode(shapeId));
+
+    TreeNode *parent = nodeById(&m_root, parentGroupId);
     if (!parent || parent->type != TreeNode::Group)
         return false;
 
@@ -146,7 +159,10 @@ bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int par
 
 bool SceneTree::removePrimitive(int shapeId)
 {
-    return removePrimitiveFromTree(&m_root, shapeId);
+    const bool removed = removePrimitiveFromTree(&m_root, shapeId);
+    if (removed)
+        pruneEmptyGroups(&m_root);
+    return removed;
 }
 
 bool SceneTree::movePrimitiveToOperation(int shapeId, TreeNode::Operation operation)
@@ -159,30 +175,28 @@ bool SceneTree::movePrimitiveToOperation(int shapeId, TreeNode::Operation operat
     if (!removePrimitiveFromTree(&m_root, shapeId, &removedNode))
         return false;
 
-    // Find or create operation group
-    TreeNode *opGroup = nullptr;
-    for (TreeNode &child : m_root.children) {
-        if (child.type == TreeNode::Group && child.operation == operation) {
-            opGroup = &child;
-            break;
-        }
-    }
+    pruneEmptyGroups(&m_root);
+    return appendPrimitiveToOperation(operation, removedNode);
+}
 
-    if (!opGroup) {
-        TreeNode newGroup = makeGroupNode(operation);
-        opGroup = &m_root.children.last();
-        m_root.children.append(newGroup);
-        opGroup = &m_root.children.last();
-    }
+bool SceneTree::containsPrimitive(int shapeId) const
+{
+    return containsPrimitiveShapeId(m_root, shapeId);
+}
 
-    opGroup->children.append(removedNode);
-    return true;
+QVector<int> SceneTree::primitiveShapeIdsForNode(int nodeId) const
+{
+    QVector<int> shapeIds;
+    const TreeNode *node = nodeById(nodeId);
+    if (node)
+        collectPrimitiveShapeIds(*node, &shapeIds);
+    return shapeIds;
 }
 
 void SceneTree::clear()
 {
-    m_root = makeGroupNode(TreeNode::Union);
     m_nextNodeId = 1;
+    m_root = makeGroupNode(TreeNode::Union);
 }
 
 SceneTree::Snapshot SceneTree::snapshot() const
@@ -257,6 +271,20 @@ bool SceneTree::containsPrimitiveShapeId(const TreeNode &node, int shapeId) cons
     }
 
     return false;
+}
+
+void SceneTree::collectPrimitiveShapeIds(const TreeNode &node, QVector<int> *shapeIds) const
+{
+    if (!shapeIds)
+        return;
+
+    if (node.type == TreeNode::Primitive) {
+        shapeIds->append(node.shapeId);
+        return;
+    }
+
+    for (const TreeNode &child : node.children)
+        collectPrimitiveShapeIds(child, shapeIds);
 }
 
 bool SceneTree::parentWorldPositionForNode(const TreeNode &node,
@@ -344,6 +372,55 @@ bool SceneTree::removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *r
     return false;
 }
 
+bool SceneTree::appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode)
+{
+    if (primitiveNode.type != TreeNode::Primitive)
+        return false;
+
+    if (containsPrimitiveShapeId(m_root, primitiveNode.shapeId))
+        return false;
+
+    if (m_root.id <= 0 || m_root.type != TreeNode::Group) {
+        m_root = makeGroupNode(operation);
+        m_root.children.append(primitiveNode);
+        return true;
+    }
+
+    if (m_root.operation == operation) {
+        m_root.children.append(primitiveNode);
+        return true;
+    }
+
+    for (TreeNode &child : m_root.children) {
+        if (child.type == TreeNode::Group && child.operation == operation) {
+            child.children.append(primitiveNode);
+            return true;
+        }
+    }
+
+    TreeNode group = makeGroupNode(operation);
+    group.children.append(primitiveNode);
+
+    if (operation == TreeNode::Intersection) {
+        TreeNode intersectionRoot = makeGroupNode(TreeNode::Intersection);
+        intersectionRoot.children.append(m_root);
+        intersectionRoot.children.append(group);
+        m_root = intersectionRoot;
+        return true;
+    }
+
+    if (m_root.operation == TreeNode::Difference) {
+        m_root.children.append(primitiveNode);
+        return true;
+    }
+
+    TreeNode differenceRoot = makeGroupNode(TreeNode::Difference);
+    differenceRoot.children.append(m_root);
+    differenceRoot.children.append(primitiveNode);
+    m_root = differenceRoot;
+    return true;
+}
+
 void SceneTree::pruneEmptyGroups(TreeNode *node)
 {
     if (!node || node->type != TreeNode::Group)
@@ -353,11 +430,14 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
         TreeNode &child = node->children[i];
         if (child.type == TreeNode::Group) {
             pruneEmptyGroups(&child);
-            if (child.children.isEmpty() && node->id != 0) {
+            if (child.children.isEmpty()) {
                 node->children.removeAt(i);
             }
         }
     }
+
+    if (node == &m_root && node->children.size() == 1 && node->children.first().type == TreeNode::Group)
+        *node = node->children.first();
 }
 
 SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)

@@ -4,9 +4,6 @@
 #include <QVector>
 #include <QVector3D>
 
-class ShapeNode;
-class SceneDocument;
-
 /**
  * @brief Scene tree model for boolean operations
  *
@@ -40,6 +37,12 @@ public:
         QVector<TreeNode> children;
     };
 
+    struct MoveInfo
+    {
+        QVector<int> movedPrimitiveShapeIds;
+        QVector3D primitiveOffset = QVector3D(0, 0, 0);
+    };
+
     SceneTree();
 
     const TreeNode &root() const;
@@ -51,13 +54,15 @@ public:
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
-    bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1);
+    bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, MoveInfo *moveInfo = nullptr);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation);
 
     // Primitive management
     bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0);
     bool removePrimitive(int shapeId);
     bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
+    bool containsPrimitive(int shapeId) const;
+    QVector<int> primitiveShapeIdsForNode(int nodeId) const;
 
     // Tree reconstruction
     void clear();
@@ -71,17 +76,17 @@ public:
     void restoreSnapshot(const Snapshot &snapshot);
 
 private:
-    friend class SceneDocument;
-
     // Helper methods
     TreeNode *nodeById(TreeNode *node, int id);
     const TreeNode *nodeById(const TreeNode *node, int id) const;
     bool containsNodeId(const TreeNode &node, int id) const;
     bool containsPrimitiveShapeId(const TreeNode &node, int shapeId) const;
+    void collectPrimitiveShapeIds(const TreeNode &node, QVector<int> *shapeIds) const;
     bool parentWorldPositionForNode(const TreeNode &node, int id, const QVector3D &worldPosition, QVector3D *parentWorldPosition) const;
     void offsetMovedNode(TreeNode *node, const QVector3D &offset);
     bool detachNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
+    bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
     void pruneEmptyGroups(TreeNode *node);
 
     TreeNode makeGroupNode(TreeNode::Operation operation);

@@ -9,32 +9,13 @@
 class SceneDocument
 {
 public:
-    struct TreeNode
-    {
-        enum Type {
-            Primitive,
-            Group
-        };
-
-        enum Operation {
-            Union,
-            Difference,
-            Intersection
-        };
-
-        int id = 0;
-        Type type = Group;
-        Operation operation = Union;
-        int shapeId = -1;
-        QVector3D position = QVector3D(0, 0, 0);
-        QVector3D rotation = QVector3D(0, 0, 0);
-        QVector<TreeNode> children;
-    };
+    using TreeNode = SceneTree::TreeNode;
 
     struct Snapshot
     {
         QVector<ShapeNode> shapes;
         TreeNode treeRoot;
+        SceneTree::Snapshot treeSnapshot;
         int selectedShapeId = -1;
         int nextShapeId = 1;
         int nextTreeNodeId = 1;
@@ -77,33 +58,17 @@ public:
 
 private:
     bool isValidIndex(int index) const;
-    TreeNode *treeNodeById(TreeNode *node, int id);
-    const TreeNode *treeNodeById(const TreeNode *node, int id) const;
-    bool treeContainsNodeId(const TreeNode &node, int id) const;
-    bool parentWorldPositionForNode(const TreeNode &node, int id, const QVector3D &worldPosition, QVector3D *parentWorldPosition) const;
-    void offsetMovedTreeNode(TreeNode *node, const QVector3D &offset);
-    bool detachTreeNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
-    bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
-    bool treeContainsPrimitiveShapeId(const TreeNode &node, int shapeId) const;
     void ensureTreeContainsAllShapes();
     void synchronizeBooleanModesFromTree();
     void applyTreeBooleanModes(const TreeNode &node, ShapeNode::BooleanMode inheritedMode);
-    bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
-    bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
-    void pruneEmptyGroups(TreeNode *node);
     void rebuildTreeFromShapes();
-    TreeNode makeGroupNode(TreeNode::Operation operation);
-    TreeNode makePrimitiveNode(int shapeId);
     TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
-    void syncTreeRootFromSceneTree();
 
 private:
     QVector<ShapeNode> m_shapes;
-    TreeNode m_treeRoot;
     SceneTree m_tree;
     int m_selectedShapeId = -1;
     int m_nextShapeId = 1;
-    int m_nextTreeNodeId = 1;
 };
 
 #endif
