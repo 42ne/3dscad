@@ -4,7 +4,7 @@
 
 SceneTree::SceneTree()
 {
-    m_root = makeGroupNode(TreeNode::Union);
+    m_root = makeGroupNode(TreeNode::Module);
 }
 
 const SceneTree::TreeNode &SceneTree::root() const
@@ -44,7 +44,7 @@ SceneTree::TreeNode *SceneTree::nodeById(int id)
 int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int insertIndex)
 {
     if (m_root.id <= 0)
-        m_root = makeGroupNode(TreeNode::Union);
+        m_root = makeGroupNode(TreeNode::Module);
 
     TreeNode *parent = parentNodeId > 0 ? nodeById(&m_root, parentNodeId) : &m_root;
     if (!parent || parent->type != TreeNode::Group)
@@ -103,7 +103,7 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, MoveInf
     targetParent = parentGroupId > 0 ? nodeById(&m_root, parentGroupId) : &m_root;
     if (!targetParent || targetParent->type != TreeNode::Group) {
         if (m_root.id <= 0)
-            m_root = makeGroupNode(TreeNode::Union);
+            m_root = makeGroupNode(TreeNode::Module);
         m_root.children.append(movedNode);
         return false;
     }
@@ -140,7 +140,7 @@ bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, con
 bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId)
 {
     if (m_root.id <= 0)
-        m_root = makeGroupNode(TreeNode::Union);
+        m_root = makeGroupNode(TreeNode::Module);
 
     if (parentGroupId <= 0)
         return appendPrimitiveToOperation(operation, makePrimitiveNode(shapeId));
@@ -196,7 +196,7 @@ QVector<int> SceneTree::primitiveShapeIdsForNode(int nodeId) const
 void SceneTree::clear()
 {
     m_nextNodeId = 1;
-    m_root = makeGroupNode(TreeNode::Union);
+    m_root = makeGroupNode(TreeNode::Module);
 }
 
 SceneTree::Snapshot SceneTree::snapshot() const
@@ -381,8 +381,27 @@ bool SceneTree::appendPrimitiveToOperation(TreeNode::Operation operation, const 
         return false;
 
     if (m_root.id <= 0 || m_root.type != TreeNode::Group) {
-        m_root = makeGroupNode(operation);
+        m_root = makeGroupNode(TreeNode::Module);
         m_root.children.append(primitiveNode);
+        return true;
+    }
+
+    if (m_root.operation == TreeNode::Module) {
+        if (operation == TreeNode::Union) {
+            m_root.children.append(primitiveNode);
+            return true;
+        }
+
+        for (TreeNode &child : m_root.children) {
+            if (child.type == TreeNode::Group && child.operation == operation) {
+                child.children.append(primitiveNode);
+                return true;
+            }
+        }
+
+        TreeNode group = makeGroupNode(operation);
+        group.children.append(primitiveNode);
+        m_root.children.append(group);
         return true;
     }
 
@@ -436,8 +455,12 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
         }
     }
 
-    if (node == &m_root && node->children.size() == 1 && node->children.first().type == TreeNode::Group)
+    if (node == &m_root
+        && node->operation != TreeNode::Module
+        && node->children.size() == 1
+        && node->children.first().type == TreeNode::Group) {
         *node = node->children.first();
+    }
 }
 
 SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)

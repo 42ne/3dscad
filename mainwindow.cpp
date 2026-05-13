@@ -3,6 +3,7 @@
 #include "openscadgenerator.h"
 #include "openscadparser.h"
 #include "scenecommands.h"
+#include "scenetreegraphicswidget.h"
 #include "viewportwidget.h"
 
 #include <QAction>
@@ -27,6 +28,8 @@
 #include <QSaveFile>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTextCharFormat>
+#include <QTextCursor>
 #include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -57,6 +60,54 @@ static QVector3D normalizedRotation(const QVector3D &rotation)
     return QVector3D(normalizedRotationDegrees(rotation.x()),
                      normalizedRotationDegrees(rotation.y()),
                      normalizedRotationDegrees(rotation.z()));
+}
+
+static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
+{
+    ShapeNode shape;
+    shape.name = QString("%1 %2").arg(toolName.left(1).toUpper() + toolName.mid(1)).arg(shapeNumber);
+
+    if (toolName == "sphere") {
+        shape.type = ShapeNode::Sphere;
+        shape.radius = 10.0f;
+    } else if (toolName == "cylinder") {
+        shape.type = ShapeNode::Cylinder;
+        shape.radius = 10.0f;
+        shape.height = 30.0f;
+    } else {
+        shape.type = ShapeNode::Cube;
+        shape.size = QVector3D(20, 20, 20);
+    }
+
+    return shape;
+}
+
+static bool operationForTool(const QString &toolName, SceneDocument::TreeNode::Operation *operation)
+{
+    if (!operation)
+        return false;
+
+    if (toolName == "module") {
+        *operation = SceneDocument::TreeNode::Module;
+        return true;
+    }
+
+    if (toolName == "union") {
+        *operation = SceneDocument::TreeNode::Union;
+        return true;
+    }
+
+    if (toolName == "difference") {
+        *operation = SceneDocument::TreeNode::Difference;
+        return true;
+    }
+
+    if (toolName == "intersection") {
+        *operation = SceneDocument::TreeNode::Intersection;
+        return true;
+    }
+
+    return false;
 }
 
 class SceneTreeWidget : public QTreeWidget
@@ -166,6 +217,8 @@ static QDoubleSpinBox *makeSpinBox()
 
 static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
 {
+    if (operation == SceneDocument::TreeNode::Module)
+        return "module scene_model";
     if (operation == SceneDocument::TreeNode::Difference)
         return "difference()";
     if (operation == SceneDocument::TreeNode::Intersection)
@@ -331,6 +384,37 @@ void MainWindow::buildUi()
     m_shapeTree->setHeaderHidden(true);
     m_shapeTree->setContextMenuPolicy(Qt::CustomContextMenu);
 
+    m_sceneTreeGraphics = new SceneTreeGraphicsWidget;
+    m_sceneTreeGraphics->setSceneDocument(&m_scene);
+    m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId) {
+        onGraphicsTreeToolDropped(toolName, parentGroupId);
+    });
+    m_sceneTreeGraphics->setTreeNodeDroppedCallback([this](int nodeId, int parentGroupId) {
+        moveTreeNodeToGroup(nodeId, parentGroupId);
+    });
+    m_sceneTreeGraphics->setTreeNodeSelectedCallback([this](int nodeId) {
+        onGraphicsTreeNodeSelected(nodeId);
+    });
+
+    auto *legacyTreePanel = new QWidget;
+    auto *legacyTreeLayout = new QVBoxLayout(legacyTreePanel);
+    legacyTreeLayout->setContentsMargins(0, 0, 0, 0);
+    legacyTreeLayout->addWidget(new QLabel("Scene tree:"));
+    legacyTreeLayout->addWidget(m_shapeTree);
+
+    auto *graphicsTreePanel = new QWidget;
+    auto *graphicsTreeLayout = new QVBoxLayout(graphicsTreePanel);
+    graphicsTreeLayout->setContentsMargins(0, 0, 0, 0);
+    graphicsTreeLayout->addWidget(new QLabel("Graphics tree preview:"));
+    graphicsTreeLayout->addWidget(m_sceneTreeGraphics);
+
+    auto *treeSplitter = new QSplitter(Qt::Vertical);
+    treeSplitter->addWidget(legacyTreePanel);
+    treeSplitter->addWidget(graphicsTreePanel);
+    treeSplitter->setStretchFactor(0, 1);
+    treeSplitter->setStretchFactor(1, 3);
+    treeSplitter->setSizes({170, 430});
+
     leftLayout->addWidget(addCubeButton);
     leftLayout->addWidget(addSphereButton);
     leftLayout->addWidget(addCylinderButton);
@@ -340,8 +424,7 @@ void MainWindow::buildUi()
     leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(m_deleteGroupButton);
     leftLayout->addWidget(m_useOpenGLCheckBox);
-    leftLayout->addWidget(new QLabel("Scene tree:"));
-    leftLayout->addWidget(m_shapeTree);
+    leftLayout->addWidget(treeSplitter, 1);
     m_csgStatusLabel = new QLabel;
     m_csgStatusLabel->setWordWrap(true);
     leftLayout->addWidget(m_csgStatusLabel);
@@ -362,7 +445,11 @@ void MainWindow::buildUi()
     connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
         const ShapeNode *shape = m_scene.shapeAt(index);
+        m_scene.setSelectedIndex(index);
         selectShapeInSceneTree(shape ? shape->id : -1);
+        m_viewport->setSelectedIndex(m_scene.selectedIndex());
+        m_viewport->setSelectedGroupId(0);
+        refreshProperties();
     });
     connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
     connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
@@ -587,9 +674,13 @@ void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidg
     const int groupId = current && current->data(0, GroupOperationRole).isValid()
                             ? current->data(0, TreeNodeIdRole).toInt()
                             : 0;
+    const int treeNodeId = current ? current->data(0, TreeNodeIdRole).toInt() : 0;
     m_scene.setSelectedShapeId(shapeId);
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     m_viewport->setSelectedGroupId(groupId);
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->setSelectedTreeNodeId(treeNodeId);
+    highlightOpenScadSelection();
     refreshProperties();
 }
 
@@ -880,6 +971,61 @@ void MainWindow::onUseOpenGLToggled(bool checked)
     m_viewport->update();
 }
 
+void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId)
+{
+    SceneDocument::TreeNode::Operation operation;
+    if (operationForTool(toolName, &operation)) {
+        if (operation == SceneDocument::TreeNode::Module && parentGroupId == 0)
+            return;
+
+        auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, -1, [this]() {
+            refreshSceneViews();
+        });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
+        return;
+    }
+
+    if (toolName != "cube" && toolName != "sphere" && toolName != "cylinder")
+        return;
+
+    ShapeNode shape = makeShapeForTool(toolName, m_scene.shapeCount() + 1);
+    auto *command = new AddShapeCommand(&m_scene, shape, parentGroupId, [this]() {
+        refreshSceneViews();
+    });
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
+{
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node)
+        return;
+
+    if (node->type == SceneDocument::TreeNode::Primitive) {
+        m_scene.setSelectedShapeId(node->shapeId);
+        selectShapeInSceneTree(node->shapeId);
+        m_viewport->setSelectedIndex(m_scene.selectedIndex());
+        m_viewport->setSelectedGroupId(0);
+    } else {
+        m_scene.setSelectedShapeId(-1);
+        selectTreeNodeInSceneTree(node->id);
+        m_viewport->setSelectedGroupId(node->id);
+    }
+
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->setSelectedTreeNodeId(nodeId);
+
+    refreshProperties();
+    m_viewport->update();
+}
+
 void MainWindow::refreshShapeList()
 {
     const int selectedShapeId = m_scene.selectedShapeId();
@@ -892,6 +1038,8 @@ void MainWindow::refreshShapeList()
 
     appendBooleanTreeItem(m_shapeTree->invisibleRootItem(), m_scene.treeRoot(), m_scene);
     m_shapeTree->expandAll();
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->refresh();
 
     m_shapeTree->blockSignals(false);
     if (selectedShapeId >= 0)
@@ -935,6 +1083,10 @@ void MainWindow::selectShapeInSceneTree(int shapeId)
 
     m_shapeTree->setCurrentItem(selectedItem);
     m_shapeTree->blockSignals(false);
+
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->setSelectedTreeNodeId(selectedItem ? selectedItem->data(0, TreeNodeIdRole).toInt() : 0);
+    highlightOpenScadSelection();
 }
 
 void MainWindow::selectTreeNodeInSceneTree(int treeNodeId)
@@ -958,6 +1110,18 @@ void MainWindow::selectTreeNodeInSceneTree(int treeNodeId)
 
     m_shapeTree->setCurrentItem(selectedItem);
     m_shapeTree->blockSignals(false);
+
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->setSelectedTreeNodeId(selectedItem ? selectedItem->data(0, TreeNodeIdRole).toInt() : 0);
+    highlightOpenScadSelection();
+}
+
+int MainWindow::selectedTreeNodeIdForCodeHighlight() const
+{
+    if (!m_shapeTree || !m_shapeTree->currentItem())
+        return 0;
+
+    return m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
 }
 
 int MainWindow::selectedTreeGroupId() const
@@ -1150,9 +1314,40 @@ void MainWindow::refreshProperties()
 
 void MainWindow::refreshOpenScadCode()
 {
-    const QString code = OpenScadGenerator::generate(m_scene);
+    const QString code = OpenScadGenerator::generateWithSourceMap(m_scene, &m_openScadSourceRanges);
     m_codeEditor->setPlainText(code);
+    highlightOpenScadSelection();
     writeOpenScadPreview(false);
+}
+
+void MainWindow::highlightOpenScadSelection()
+{
+    if (!m_codeEditor)
+        return;
+
+    const int selectedTreeNodeId = selectedTreeNodeIdForCodeHighlight();
+    QTextEdit::ExtraSelection selection;
+    bool hasSelection = false;
+
+    for (const OpenScadGenerator::SourceRange &range : m_openScadSourceRanges) {
+        if (range.treeNodeId != selectedTreeNodeId || range.length <= 0)
+            continue;
+
+        QTextCursor cursor(m_codeEditor->document());
+        cursor.setPosition(range.start);
+        cursor.setPosition(range.start + range.length, QTextCursor::KeepAnchor);
+
+        QTextCharFormat format;
+        format.setBackground(QColor(255, 203, 87, 95));
+
+        selection.cursor = cursor;
+        selection.format = format;
+        hasSelection = true;
+        break;
+    }
+
+    m_codeEditor->setExtraSelections(hasSelection ? QList<QTextEdit::ExtraSelection>{selection}
+                                                  : QList<QTextEdit::ExtraSelection>{});
 }
 
 void MainWindow::refreshCsgStatus()

@@ -1,9 +1,11 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "openscadgenerator.h"
 #include "scenedocument.h"
 
 #include <QMainWindow>
+#include <QVector>
 
 class QTextEdit;
 class QLabel;
@@ -16,6 +18,7 @@ class QUndoStack;
 class QTreeWidget;
 class QTreeWidgetItem;
 class ViewportWidget;
+class SceneTreeGraphicsWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -53,6 +56,8 @@ private slots:
     void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
     void onViewportGroupRotationDragFinished(int groupId);
     void onUseOpenGLToggled(bool checked);
+    void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId);
+    void onGraphicsTreeNodeSelected(int nodeId);
 
 private:
     void buildUi();
@@ -61,8 +66,10 @@ private:
     void refreshOpenScadCode();
     void refreshCsgStatus();
     void refreshSceneViews();
+    void highlightOpenScadSelection();
     void selectShapeInSceneTree(int shapeId);
     void selectTreeNodeInSceneTree(int treeNodeId);
+    int selectedTreeNodeIdForCodeHighlight() const;
     int selectedTreeGroupId() const;
     int selectedDirectGroupId() const;
     void addGroup(SceneDocument::TreeNode::Operation operation);
@@ -83,9 +90,11 @@ private:
     int m_viewportDragGroupId = 0;
     QVector3D m_viewportDragStartGroupPosition;
     QVector3D m_viewportDragStartGroupRotation;
+    QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
 
     ViewportWidget *m_viewport = nullptr;
     QTreeWidget *m_shapeTree = nullptr;
+    SceneTreeGraphicsWidget *m_sceneTreeGraphics = nullptr;
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_sendToOpenScadButton = nullptr;

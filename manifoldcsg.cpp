@@ -70,7 +70,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
     for (int i = 1; i < node.children.size(); ++i) {
         const Manifold child = evaluateNode(node.children[i], scene);
 
-        if (node.operation == SceneDocument::TreeNode::Union)
+        if (node.operation == SceneDocument::TreeNode::Union
+            || node.operation == SceneDocument::TreeNode::Module)
             result += child;
         else if (node.operation == SceneDocument::TreeNode::Difference)
             result -= child;

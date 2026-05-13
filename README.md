@@ -9,11 +9,16 @@ The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport.
 Implemented:
 
 - Scene tree with cube, sphere, and cylinder primitives.
-- Scene tree displays the generated boolean structure as `union`, `difference`, and `intersection` groups.
+- Scene tree displays the generated boolean structure as a root `module scene_model` with `union`, `difference`, and `intersection` groups.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
 - Group tree nodes store position and rotation transforms for upcoming group editing.
 - `SceneDocument` exposes group operations for add/remove/move, with undo/redo commands ready for UI wiring.
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
+- Experimental graphics tree preview based on `QGraphicsScene`, shown beside the classic tree.
+- The graphics tree has an in-scene palette for cube, sphere, cylinder, union, difference, intersection, and module tools.
+- Graphics-tree drag/drop can add new primitives/groups and move existing tree nodes between groups.
+- Graphics-tree selection is synchronized with the classic tree, 3D viewport selection, Properties dock, and generated OpenSCAD code highlight.
+- The graphics tree uses a dark grid canvas with mouse panning and hidden scroll bars.
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
@@ -28,7 +33,8 @@ Implemented:
 - CSG preview also uses the explicit tree when group transforms are present, so transformed plain `union()` groups move as a unit.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
-- OpenSCAD generation for the supported scene subset.
+- OpenSCAD generation for the supported scene subset, wrapped as `module scene_model()` plus a call.
+- OpenSCAD source mapping highlights the currently selected tree node in the code editor.
 - Parser for the generated OpenSCAD subset, including the no-parameter module wrapper and call.
 - Interactive viewport orbit/zoom.
 - Depth-tested triangle rendering.
@@ -117,13 +123,13 @@ The `Use OpenGL` checkbox enables the optional experimental viewport backend. In
 - Mesh approximate fallback is not exact.
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
-- No node graph or operation tree UI yet.
-- Boolean tree UI supports moving shapes between the generated `union`, `difference`, and `intersection` groups by drag/drop. Shape movement still edits the flat per-shape boolean mode, and the document tree is updated from that operation.
+- The graphics tree is still a prototype: it coexists with the classic tree, has no node reordering UI yet, and its toolbar is intentionally embedded in the scene for experimentation.
+- Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
 
 ## Next Good Steps
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
-2. Refine scene-tree editing: rename groups, reorder nodes, and improve visual distinction between service root and user groups.
+2. Refine graphics-tree editing: rename groups, reorder nodes, improve difference base/cut editing, and decide when the classic tree can be hidden.
 3. Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.

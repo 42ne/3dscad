@@ -23,6 +23,7 @@ public:
         };
 
         enum Operation {
+            Module,
             Union,
             Difference,
             Intersection

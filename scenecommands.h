@@ -10,6 +10,7 @@ class AddShapeCommand : public QUndoCommand
 {
 public:
     AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, std::function<void()> onChanged);
+    AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, int parentGroupId, std::function<void()> onChanged);
 
     void undo() override;
     void redo() override;
@@ -18,6 +19,7 @@ private:
     SceneDocument *m_scene = nullptr;
     ShapeNode m_shape;
     int m_index = -1;
+    int m_parentGroupId = 0;
     bool m_firstRedo = true;
     std::function<void()> m_onChanged;
 };
