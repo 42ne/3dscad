@@ -104,12 +104,12 @@ SceneDocument::TreeNode *SceneDocument::treeNodeById(int id)
     return m_tree.nodeById(id);
 }
 
-int SceneDocument::addShape(const ShapeNode &shape, int parentGroupId)
+int SceneDocument::addShape(const ShapeNode &shape, int parentGroupId, int treeInsertIndex)
 {
-    return insertShape(m_shapes.size(), shape, parentGroupId);
+    return insertShape(m_shapes.size(), shape, parentGroupId, treeInsertIndex);
 }
 
-int SceneDocument::insertShape(int index, const ShapeNode &shape, int parentGroupId)
+int SceneDocument::insertShape(int index, const ShapeNode &shape, int parentGroupId, int treeInsertIndex)
 {
     ShapeNode shapeWithId = shape;
 
@@ -122,7 +122,7 @@ int SceneDocument::insertShape(int index, const ShapeNode &shape, int parentGrou
     m_shapes.insert(insertIndex, shapeWithId);
     m_selectedShapeId = shapeWithId.id;
 
-    if (!m_tree.addPrimitive(shapeWithId.id, operationForBooleanMode(shapeWithId.booleanMode), parentGroupId))
+    if (!m_tree.addPrimitive(shapeWithId.id, operationForBooleanMode(shapeWithId.booleanMode), parentGroupId, treeInsertIndex))
         rebuildTreeFromShapes();
     else if (parentGroupId > 0)
         synchronizeBooleanModesFromTree();

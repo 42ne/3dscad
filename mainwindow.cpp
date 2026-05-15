@@ -386,14 +386,17 @@ void MainWindow::buildUi()
 
     m_sceneTreeGraphics = new SceneTreeGraphicsWidget;
     m_sceneTreeGraphics->setSceneDocument(&m_scene);
-    m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId) {
-        onGraphicsTreeToolDropped(toolName, parentGroupId);
+    m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId, int insertIndex) {
+        onGraphicsTreeToolDropped(toolName, parentGroupId, insertIndex);
     });
-    m_sceneTreeGraphics->setTreeNodeDroppedCallback([this](int nodeId, int parentGroupId) {
-        moveTreeNodeToGroup(nodeId, parentGroupId);
+    m_sceneTreeGraphics->setTreeNodeDroppedCallback([this](int nodeId, int parentGroupId, int insertIndex) {
+        moveTreeNodeToGroup(nodeId, parentGroupId, insertIndex);
     });
     m_sceneTreeGraphics->setTreeNodeSelectedCallback([this](int nodeId) {
         onGraphicsTreeNodeSelected(nodeId);
+    });
+    m_sceneTreeGraphics->setTreeNodeDeleteRequestedCallback([this](int nodeId) {
+        onGraphicsTreeNodeDeleteRequested(nodeId);
     });
 
     auto *legacyTreePanel = new QWidget;
@@ -971,14 +974,14 @@ void MainWindow::onUseOpenGLToggled(bool checked)
     m_viewport->update();
 }
 
-void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId)
+void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex)
 {
     SceneDocument::TreeNode::Operation operation;
     if (operationForTool(toolName, &operation)) {
         if (operation == SceneDocument::TreeNode::Module && parentGroupId == 0)
             return;
 
-        auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, -1, [this]() {
+        auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, insertIndex, [this]() {
             refreshSceneViews();
         });
 
@@ -995,7 +998,7 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
         return;
 
     ShapeNode shape = makeShapeForTool(toolName, m_scene.shapeCount() + 1);
-    auto *command = new AddShapeCommand(&m_scene, shape, parentGroupId, [this]() {
+    auto *command = new AddShapeCommand(&m_scene, shape, parentGroupId, insertIndex, [this]() {
         refreshSceneViews();
     });
 
@@ -1024,6 +1027,41 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
 
     refreshProperties();
     m_viewport->update();
+}
+
+void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
+{
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node)
+        return;
+
+    if (node->type == SceneDocument::TreeNode::Primitive) {
+        auto *command = new DeleteShapeCommand(&m_scene, node->shapeId, [this]() {
+            refreshSceneViews();
+        });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
+        return;
+    }
+
+    if (node->id == m_scene.treeRoot().id)
+        return;
+
+    auto *command = new RemoveGroupCommand(&m_scene, node->id, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::refreshShapeList()
@@ -1166,9 +1204,9 @@ void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
     m_undoStack->push(command);
 }
 
-void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId)
+void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex)
 {
-    auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, -1, [this]() {
+    auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, insertIndex, [this]() {
         refreshSceneViews();
     });
 

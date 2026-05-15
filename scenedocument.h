@@ -42,8 +42,8 @@ public:
     const TreeNode *treeNodeById(int id) const;
     TreeNode *treeNodeById(int id);
 
-    int addShape(const ShapeNode &shape, int parentGroupId = 0);
-    int insertShape(int index, const ShapeNode &shape, int parentGroupId = 0);
+    int addShape(const ShapeNode &shape, int parentGroupId = 0, int treeInsertIndex = -1);
+    int insertShape(int index, const ShapeNode &shape, int parentGroupId = 0, int treeInsertIndex = -1);
     void replaceShapes(const QVector<ShapeNode> &shapes);
     Snapshot snapshot() const;
     void restoreSnapshot(const Snapshot &snapshot);

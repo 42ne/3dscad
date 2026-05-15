@@ -6,10 +6,16 @@ AddShapeCommand::AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, s
 }
 
 AddShapeCommand::AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, int parentGroupId, std::function<void()> onChanged)
+    : AddShapeCommand(scene, shape, parentGroupId, -1, onChanged)
+{
+}
+
+AddShapeCommand::AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, int parentGroupId, int treeInsertIndex, std::function<void()> onChanged)
     : QUndoCommand("Add shape")
     , m_scene(scene)
     , m_shape(shape)
     , m_parentGroupId(parentGroupId)
+    , m_treeInsertIndex(treeInsertIndex)
     , m_onChanged(onChanged)
 {
 }
@@ -31,7 +37,7 @@ void AddShapeCommand::redo()
         return;
 
     if (m_firstRedo) {
-        const int id = m_scene->addShape(m_shape, m_parentGroupId);
+        const int id = m_scene->addShape(m_shape, m_parentGroupId, m_treeInsertIndex);
         const ShapeNode *insertedShape = m_scene->shapeById(id);
         if (insertedShape)
             m_shape = *insertedShape;
@@ -39,7 +45,7 @@ void AddShapeCommand::redo()
         m_index = m_scene->indexOfShapeId(id);
         m_firstRedo = false;
     } else {
-        m_scene->insertShape(m_index, m_shape, m_parentGroupId);
+        m_scene->insertShape(m_index, m_shape, m_parentGroupId, m_treeInsertIndex);
     }
 
     m_scene->setSelectedShapeId(m_shape.id);

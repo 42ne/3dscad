@@ -59,7 +59,7 @@ public:
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation);
 
     // Primitive management
-    bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0);
+    bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removePrimitive(int shapeId);
     bool movePrimitiveToOperation(int shapeId, TreeNode::Operation operation);
     bool containsPrimitive(int shapeId) const;

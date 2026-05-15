@@ -10,14 +10,20 @@ Implemented:
 
 - Scene tree with cube, sphere, and cylinder primitives.
 - Scene tree displays the generated boolean structure as a root `module scene_model` with `union`, `difference`, and `intersection` groups.
+- The document root is a non-deletable `module scene_model` group, so dropping a top-level group no longer creates an accidental implicit wrapper.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
 - Group tree nodes store position and rotation transforms for upcoming group editing.
 - `SceneDocument` exposes group operations for add/remove/move, with undo/redo commands ready for UI wiring.
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
 - Experimental graphics tree preview based on `QGraphicsScene`, shown beside the classic tree.
 - The graphics tree has an in-scene palette for cube, sphere, cylinder, union, difference, intersection, and module tools.
-- Graphics-tree drag/drop can add new primitives/groups and move existing tree nodes between groups.
+- Graphics-tree drag/drop can add new primitives/groups and move existing tree nodes between groups with explicit insertion positions.
 - Graphics-tree selection is synchronized with the classic tree, 3D viewport selection, Properties dock, and generated OpenSCAD code highlight.
+- Graphics-tree primitives use shape icons plus stable object numbers instead of text-only cards.
+- Graphics-tree groups use operation icons, nested panels, and dedicated `difference` base/cut regions with reserved cut-space even when empty.
+- Graphics-tree live drag preview now shows future container expansion, source/target reserved slots, and a snapshot of the moved node instead of a second temporary document node.
+- Graphics-tree move preview suppresses self-drop and removes the moved node from its source container preview while dragging.
+- Graphics-tree supports `Delete`/`Backspace` for the selected tree node through the same undoable commands as the classic tree.
 - The graphics tree uses a dark grid canvas with mouse panning and hidden scroll bars.
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
@@ -123,13 +129,13 @@ The `Use OpenGL` checkbox enables the optional experimental viewport backend. In
 - Mesh approximate fallback is not exact.
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
-- The graphics tree is still a prototype: it coexists with the classic tree, has no node reordering UI yet, and its toolbar is intentionally embedded in the scene for experimentation.
+- The graphics tree is still a prototype: it coexists with the classic tree, its drag preview is still being refined, and its toolbar is intentionally embedded in the scene for experimentation.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
 
 ## Next Good Steps
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
-2. Refine graphics-tree editing: rename groups, reorder nodes, improve difference base/cut editing, and decide when the classic tree can be hidden.
+2. Refine graphics-tree editing: rename groups, add explicit reorder affordances, keep improving difference base/cut behavior, and decide when the classic tree can be hidden.
 3. Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.

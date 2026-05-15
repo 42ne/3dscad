@@ -11,6 +11,7 @@ class AddShapeCommand : public QUndoCommand
 public:
     AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, std::function<void()> onChanged);
     AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, int parentGroupId, std::function<void()> onChanged);
+    AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, int parentGroupId, int treeInsertIndex, std::function<void()> onChanged);
 
     void undo() override;
     void redo() override;
@@ -20,6 +21,7 @@ private:
     ShapeNode m_shape;
     int m_index = -1;
     int m_parentGroupId = 0;
+    int m_treeInsertIndex = -1;
     bool m_firstRedo = true;
     std::function<void()> m_onChanged;
 };

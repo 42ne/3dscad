@@ -30,7 +30,8 @@ The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primi
 For clarity, children of `difference()` groups are labeled as `base` or `cut`, and children of `intersection()` groups are labeled as `mask`.
 The properties panel derives the selected primitive's displayed tree role from `SceneDocument::TreeNode`; the legacy `ShapeNode::booleanMode` is synchronized after tree moves and is no longer rewritten by unrelated parameter edits.
 
-`SceneTreeGraphicsWidget` is the experimental graphical tree editor. It is a `QGraphicsView`/`QGraphicsScene` projection of the same `SceneDocument::TreeNode` hierarchy, not a second document model. It draws an embedded palette for primitives and operation groups, nested rectangles for the tree, dedicated base/cut regions for `difference`, and a dark grid canvas. Palette drag/drop creates new tree nodes; dragging existing nodes moves them to a target group. Right-click selection is used for now so selection does not conflict with left-button drag/move.
+`SceneTreeGraphicsWidget` is the experimental graphical tree editor. It is a `QGraphicsView`/`QGraphicsScene` projection of the same `SceneDocument::TreeNode` hierarchy, not a second document model. It draws an embedded palette for primitives and operation groups, nested rectangles for the tree, dedicated base/cut regions for `difference`, object icons plus stable numbers for primitives, and a dark grid canvas. Palette drag/drop creates new tree nodes; dragging existing nodes moves them to a target group with an explicit insert index. Right-click selection is used for now so selection does not conflict with left-button drag/move.
+The graphics widget maintains transient hit-area metadata for each drawn group so drag preview can compute source and target containers, future child order, container expansion, `difference` base/cut placement, and self-drop suppression without mutating the document during mouse move. For moved nodes, the widget renders a snapshot of the source node under the cursor, shows a reserved slot at the source location, and separately previews the target container after insertion.
 Graphics-tree selection flows back through `MainWindow`, which updates the classic tree, viewport selection, Properties dock, and OpenSCAD code highlight. The widget intentionally avoids `Q_OBJECT`; callbacks are plain `std::function` hooks to keep it easy to isolate while the graphics tree is being developed.
 
 `ViewportWidget` owns interactive viewing and picking:
@@ -169,8 +170,11 @@ Dragging:
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.
 - Graphics-tree palette dragging creates primitives or operation groups through the same undoable commands used by the classic tree/buttons.
 - Graphics-tree existing-node dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
+- Graphics-tree drops include an insert index so new and moved nodes can land before, between, or after siblings instead of always appending.
 - Graphics-tree right-click selection keeps selection separate from drag/move and updates the viewport, Properties dock, classic tree, and generated-code highlight.
+- Graphics-tree keyboard handling maps `Delete` and `Backspace` to the same delete commands used elsewhere in the UI.
 - Graphics-tree background dragging pans a bounded virtual canvas; scroll bars are hidden but still used internally by `QGraphicsView`.
+- Graphics-tree drag preview is visual-only: it reserves source and target slots, previews container growth, removes the moved node from the source-container preview, and prevents a group from being previewed as dropped into itself.
 - Moving a node between groups adjusts the moved node's local position to preserve its world position for translation-only group transforms.
 - Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
@@ -185,14 +189,14 @@ Dragging:
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
-- The graphics tree is still a preview/editor prototype; classic tree remains available until insertion, reordering, group deletion, and difference base/cut editing feel complete there.
+- The graphics tree is still a preview/editor prototype; classic tree remains available until insertion, explicit reordering affordances, group deletion ergonomics, and difference base/cut editing feel complete there.
 - Parser and generator are coupled to a narrow generated subset.
 
 ## Recommended Next Work
 
 Short term:
 
-- Refine graphics-tree editing: rename groups, reorder nodes, improve difference base/cut editing, and decide when the classic tree can be hidden.
+- Refine graphics-tree editing: rename groups, add clearer reorder affordances, improve difference base/cut editing, and decide when the classic tree can be hidden.
 - Formalize Manifold setup as a submodule, bootstrap script, or CMake migration.
 - Add visible reason text when Manifold is unavailable and fallback preview is active.
 - Add smoke tests for generator/parser roundtrip and CSG backend availability.

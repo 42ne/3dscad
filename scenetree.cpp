@@ -137,7 +137,7 @@ bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, con
     return true;
 }
 
-bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId)
+bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId, int insertIndex)
 {
     if (m_root.id <= 0)
         m_root = makeGroupNode(TreeNode::Module);
@@ -153,7 +153,10 @@ bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int par
         return false;
 
     TreeNode primitiveNode = makePrimitiveNode(shapeId);
-    parent->children.append(primitiveNode);
+    const int boundedIndex = insertIndex < 0
+                                 ? parent->children.size()
+                                 : qBound(0, insertIndex, parent->children.size());
+    parent->children.insert(boundedIndex, primitiveNode);
     return true;
 }
 

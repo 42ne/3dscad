@@ -56,8 +56,9 @@ private slots:
     void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
     void onViewportGroupRotationDragFinished(int groupId);
     void onUseOpenGLToggled(bool checked);
-    void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId);
+    void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex);
     void onGraphicsTreeNodeSelected(int nodeId);
+    void onGraphicsTreeNodeDeleteRequested(int nodeId);
 
 private:
     void buildUi();
@@ -73,7 +74,7 @@ private:
     int selectedTreeGroupId() const;
     int selectedDirectGroupId() const;
     void addGroup(SceneDocument::TreeNode::Operation operation);
-    void moveTreeNodeToGroup(int nodeId, int parentGroupId);
+    void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
     void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);
     QString previewScadPath() const;
     bool writeOpenScadPreview(bool notify);
