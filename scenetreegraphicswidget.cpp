@@ -1,925 +1,20 @@
 #include "scenetreegraphicswidget.h"
+#include "scenetreegraphicshelpers.h"
 
 #include <QBrush>
-#include <QGraphicsPixmapItem>
-#include <QGraphicsPathItem>
-#include <QGraphicsRectItem>
 #include <QGraphicsScene>
-#include <QGraphicsSceneMouseEvent>
-#include <QGraphicsSimpleTextItem>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPen>
-#include <QPixmap>
-#include <QPolygonF>
 #include <QScrollBar>
-#include <QVarLengthArray>
 #include <QWheelEvent>
-#include <functional>
-#include <cmath>
 
-namespace {
-constexpr qreal ToolbarX = 12.0;
-constexpr qreal ToolbarY = 12.0;
-constexpr qreal ToolSize = 54.0;
-constexpr qreal ToolGap = 8.0;
-constexpr qreal TreeX = 12.0;
-constexpr qreal TreeY = 92.0;
-constexpr qreal PrimitiveWidth = 88.0;
-constexpr qreal PrimitiveHeight = 42.0;
-constexpr qreal PrimitiveIconSize = 34.0;
-constexpr qreal GroupMinWidth = 128.0;
-constexpr qreal GroupModuleMinWidth = 136.0;
-constexpr qreal GroupWideMinWidth = 164.0;
-constexpr qreal GroupHeaderHeight = 28.0;
-constexpr qreal GroupPadding = 12.0;
-constexpr qreal ChildGap = 10.0;
-constexpr qreal CornerRadius = 5.0;
-constexpr qreal DifferenceMinContentHeight = PrimitiveHeight * 2.0 + ChildGap;
-constexpr qreal DragPreviewStartDistance = 6.0;
-constexpr qreal CanvasMargin = 2000.0;
-const QColor CanvasBackground(31, 41, 55);
-const QColor MinorGridColor(96, 106, 121);
-const QColor MajorGridColor(139, 150, 166);
-
-void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width)
-{
-    QVarLengthArray<QLineF, 128> lines;
-
-    const qreal left = std::floor(rect.left() / gridSize) * gridSize;
-    const qreal top = std::floor(rect.top() / gridSize) * gridSize;
-
-    for (qreal x = left; x < rect.right(); x += gridSize)
-        lines.append(QLineF(x, rect.top(), x, rect.bottom()));
-
-    for (qreal y = top; y < rect.bottom(); y += gridSize)
-        lines.append(QLineF(rect.left(), y, rect.right(), y));
-
-    QPen gridPen(color);
-    gridPen.setWidth(width);
-    gridPen.setCosmetic(true);
-    painter->setPen(gridPen);
-    painter->drawLines(lines.constData(), lines.size());
-}
-
-class TreeGraphicsScene : public QGraphicsScene
-{
-public:
-    explicit TreeGraphicsScene(QObject *parent = nullptr)
-        : QGraphicsScene(parent)
-    {
-        setBackgroundBrush(CanvasBackground);
-    }
-
-protected:
-    void drawBackground(QPainter *painter, const QRectF &rect) override
-    {
-        QGraphicsScene::drawBackground(painter, rect);
-        drawCanvasGrid(painter, rect, 24.0, MinorGridColor, 1);
-        drawCanvasGrid(painter, rect, 96.0, MajorGridColor, 1);
-    }
-};
-
-void addLabel(QGraphicsScene *scene, const QString &text, const QPointF &position, const QColor &color = QColor(35, 35, 35))
-{
-    auto *label = scene->addSimpleText(text);
-    label->setBrush(color);
-    label->setPos(position);
-}
-
-QGraphicsRectItem *addSoftShadow(QGraphicsScene *scene, const QRectF &rect, qreal zValue)
-{
-    auto *shadow = scene->addRect(rect.translated(2.0, 2.0), Qt::NoPen, QBrush(QColor(0, 0, 0, 38)));
-    shadow->setZValue(zValue);
-    return shadow;
-}
-
-QGraphicsPathItem *addRoundedPanel(QGraphicsScene *scene,
-                                   const QRectF &rect,
-                                   qreal radius,
-                                   const QPen &pen,
-                                   const QBrush &brush,
-                                   qreal zValue)
-{
-    QPainterPath path;
-    path.addRoundedRect(rect, radius, radius);
-    auto *panel = scene->addPath(path, pen, brush);
-    panel->setZValue(zValue);
-    return panel;
-}
-
-void addCenteredLabel(QGraphicsScene *scene, const QString &text, const QRectF &rect, const QColor &color)
-{
-    auto *label = scene->addSimpleText(text);
-    label->setBrush(color);
-    const QRectF labelRect = label->boundingRect();
-    label->setPos(rect.center() - QPointF(labelRect.width() * 0.5, labelRect.height() * 0.5 + 1.0));
-    label->setZValue(12.0);
-}
-
-void addPillLabel(QGraphicsScene *scene, const QString &text, const QPointF &position, const QColor &accent)
-{
-    auto *label = scene->addSimpleText(text);
-    label->setBrush(accent.darker(135));
-    const QRectF textRect = label->boundingRect();
-    const QRectF pillRect(position, QSizeF(textRect.width() + 12.0, textRect.height() + 4.0));
-    auto *pill = addRoundedPanel(scene, pillRect, 6.0, QPen(accent, 1), QBrush(QColor(255, 255, 255, 115)), 8.0);
-    pill->setZValue(8.0);
-    label->setPos(pillRect.left() + 6.0, pillRect.top() + 1.0);
-    label->setZValue(9.0);
-}
-
-void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF &rect)
-{
-    const QColor outline(59, 95, 134);
-    const QColor face(178, 207, 238);
-    const QColor faceLight(221, 235, 248);
-    const QColor faceDark(139, 176, 214);
-
-    if (type == ShapeNode::Sphere) {
-        auto *sphere = scene->addEllipse(rect, QPen(outline, 1), QBrush(face));
-        auto *latitude = scene->addEllipse(rect.adjusted(3.0, 9.0, -3.0, -9.0), QPen(QColor(93, 127, 166), 1), Qt::NoBrush);
-        auto *highlight = scene->addEllipse(QRectF(rect.left() + rect.width() * 0.25,
-                                                   rect.top() + rect.height() * 0.18,
-                                                   rect.width() * 0.22,
-                                                   rect.height() * 0.16),
-                                            Qt::NoPen,
-                                            QBrush(QColor(255, 255, 255, 165)));
-        sphere->setZValue(5.0);
-        latitude->setZValue(6.0);
-        highlight->setZValue(7.0);
-        return;
-    }
-
-    if (type == ShapeNode::Cylinder) {
-        const QRectF top(rect.left() + 3.0, rect.top() + 3.0, rect.width() - 6.0, rect.height() * 0.34);
-        const QRectF bottom(top.left(), rect.bottom() - top.height() - 3.0, top.width(), top.height());
-        auto *body = scene->addRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()),
-                                    Qt::NoPen,
-                                    QBrush(face));
-        auto *left = scene->addLine(top.left(), top.center().y(), bottom.left(), bottom.center().y(), QPen(outline, 1));
-        auto *right = scene->addLine(top.right(), top.center().y(), bottom.right(), bottom.center().y(), QPen(outline, 1));
-        auto *bottomEllipse = scene->addEllipse(bottom, QPen(outline, 1), QBrush(faceDark));
-        auto *topEllipse = scene->addEllipse(top, QPen(outline, 1), QBrush(faceLight));
-        body->setZValue(5.0);
-        left->setZValue(6.0);
-        right->setZValue(6.0);
-        bottomEllipse->setZValue(7.0);
-        topEllipse->setZValue(8.0);
-        return;
-    }
-
-    QPolygonF topFace;
-    topFace << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.34)
-            << QPointF(rect.left() + rect.width() * 0.48, rect.top() + rect.height() * 0.12)
-            << QPointF(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.28)
-            << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.50);
-
-    QPolygonF leftFace;
-    leftFace << topFace[0]
-             << topFace[3]
-             << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.86)
-             << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.70);
-
-    QPolygonF rightFace;
-    rightFace << topFace[3]
-              << topFace[2]
-              << QPointF(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.64)
-              << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.86);
-
-    auto *leftItem = scene->addPolygon(leftFace, QPen(outline, 1), QBrush(face));
-    auto *rightItem = scene->addPolygon(rightFace, QPen(outline, 1), QBrush(faceDark));
-    auto *topItem = scene->addPolygon(topFace, QPen(outline, 1), QBrush(faceLight));
-    leftItem->setZValue(5.0);
-    rightItem->setZValue(6.0);
-    topItem->setZValue(7.0);
-}
-
-QString primitiveNumberText(const QString &label, int fallbackId)
-{
-    int end = label.size() - 1;
-    while (end >= 0 && label[end].isSpace())
-        --end;
-
-    int start = end;
-    while (start >= 0 && label[start].isDigit())
-        --start;
-
-    if (start < end)
-        return label.mid(start + 1, end - start);
-
-    return fallbackId > 0 ? QString::number(fallbackId) : QStringLiteral("?");
-}
-
-void addPrimitiveNumberBadge(QGraphicsScene *scene, const QString &number, const QRectF &rect)
-{
-    const QRectF badgeRect(rect.center().x() + 12.0, rect.top() + 5.0, 18.0, 18.0);
-    auto *badge = scene->addEllipse(badgeRect, QPen(QColor(82, 111, 146), 1), QBrush(QColor(244, 248, 252)));
-    badge->setZValue(9.0);
-
-    auto *text = scene->addSimpleText(number);
-    text->setBrush(QColor(30, 58, 90));
-    const QRectF textRect = text->boundingRect();
-    text->setPos(badgeRect.center() - QPointF(textRect.width() * 0.5, textRect.height() * 0.5 + 1.0));
-    text->setZValue(10.0);
-}
-
-void addPrimitiveSelectionHalo(QGraphicsScene *scene, const QRectF &iconRect)
-{
-    auto *halo = scene->addEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0),
-                                   QPen(QColor(255, 203, 87), 2, Qt::DashLine),
-                                   QBrush(QColor(255, 203, 87, 32)));
-    halo->setZValue(4.0);
-}
-
-void addOperationIcon(QGraphicsScene *scene,
-                      SceneDocument::TreeNode::Operation operation,
-                      const QRectF &rect,
-                      const QColor &accent)
-{
-    auto *frame = addRoundedPanel(scene, rect, 3.0, QPen(accent.darker(135), 1), QBrush(QColor(255, 255, 255, 135)), 9.0);
-    frame->setZValue(9.0);
-
-    const QPointF center = rect.center();
-    const QRectF symbolRect = rect.adjusted(4.0, 4.0, -4.0, -4.0);
-    QPen pen(accent.darker(160), 2);
-    pen.setCapStyle(Qt::RoundCap);
-
-    if (operation == SceneDocument::TreeNode::Union) {
-        auto *h = scene->addLine(symbolRect.left(), center.y(), symbolRect.right(), center.y(), pen);
-        auto *v = scene->addLine(center.x(), symbolRect.top(), center.x(), symbolRect.bottom(), pen);
-        h->setZValue(10.0);
-        v->setZValue(10.0);
-        return;
-    }
-
-    if (operation == SceneDocument::TreeNode::Difference) {
-        auto *minus = scene->addLine(symbolRect.left(), center.y(), symbolRect.right(), center.y(), pen);
-        minus->setZValue(10.0);
-        return;
-    }
-
-    if (operation == SceneDocument::TreeNode::Intersection) {
-        auto *left = scene->addEllipse(QRectF(symbolRect.left(), symbolRect.top() + 1.0, symbolRect.width() * 0.62, symbolRect.height() - 2.0),
-                                       QPen(accent.darker(150), 1),
-                                       QBrush(QColor(255, 255, 255, 60)));
-        auto *right = scene->addEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
-                                               symbolRect.top() + 1.0,
-                                               symbolRect.width() * 0.62,
-                                               symbolRect.height() - 2.0),
-                                        QPen(accent.darker(150), 1),
-                                        QBrush(QColor(255, 255, 255, 60)));
-        left->setZValue(10.0);
-        right->setZValue(10.0);
-        return;
-    }
-
-    addCenteredLabel(scene, "M", rect, accent.darker(160));
-}
-
-int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex = 0)
-{
-    int insertIndex = childRects.size();
-    for (int i = minimumIndex; i < childRects.size(); ++i) {
-        if (y < childRects[i].center().y()) {
-            insertIndex = i;
-            break;
-        }
-    }
-
-    return qMax(minimumIndex, insertIndex);
-}
-
-QSizeF defaultPreviewSize()
-{
-    return QSizeF(PrimitiveWidth, PrimitiveHeight);
-}
-
-QSizeF groupPreviewSize()
-{
-    return QSizeF(GroupMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
-}
-
-QSizeF differencePreviewSize()
-{
-    return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + DifferenceMinContentHeight);
-}
-
-QSizeF previewSizeForTool(const QString &tool)
-{
-    if (tool == "cube" || tool == "sphere" || tool == "cylinder")
-        return defaultPreviewSize();
-    if (tool == "difference")
-        return differencePreviewSize();
-    if (tool == "intersection")
-        return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
-    if (tool == "module")
-        return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
-
-    return groupPreviewSize();
-}
-
-ShapeNode::Type primitiveTypeForTool(const QString &tool)
-{
-    const QString normalized = tool.toLower();
-    if (normalized.contains("sphere"))
-        return ShapeNode::Sphere;
-    if (normalized.contains("cylinder"))
-        return ShapeNode::Cylinder;
-    return ShapeNode::Cube;
-}
-
-bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation)
-{
-    if (!operation)
-        return false;
-
-    const QString normalized = tool.toLower();
-    if (normalized.contains("union")) {
-        *operation = SceneDocument::TreeNode::Union;
-        return true;
-    }
-    if (normalized.contains("difference")) {
-        *operation = SceneDocument::TreeNode::Difference;
-        return true;
-    }
-    if (normalized.contains("intersection")) {
-        *operation = SceneDocument::TreeNode::Intersection;
-        return true;
-    }
-    if (normalized.contains("module")) {
-        *operation = SceneDocument::TreeNode::Module;
-        return true;
-    }
-    return false;
-}
-
-qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation)
-{
-    if (operation == SceneDocument::TreeNode::Module)
-        return GroupModuleMinWidth;
-    if (operation == SceneDocument::TreeNode::Difference || operation == SceneDocument::TreeNode::Intersection)
-        return GroupWideMinWidth;
-    return GroupMinWidth;
-}
-
-QString labelForOperation(SceneDocument::TreeNode::Operation operation)
-{
-    if (operation == SceneDocument::TreeNode::Module)
-        return "module";
-    if (operation == SceneDocument::TreeNode::Difference)
-        return "difference";
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return "intersection";
-    return "union";
-}
-
-QColor fillForTool(const QString &tool);
-
-QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
-{
-    if (childRects.isEmpty())
-        return QRectF(contentRect.left(), contentRect.top(), previewSize.width(), previewSize.height());
-
-    if (insertIndex <= 0)
-        return QRectF(contentRect.left(), contentRect.top(), previewSize.width(), previewSize.height());
-
-    if (insertIndex >= childRects.size())
-        return QRectF(contentRect.left(), childRects.last().bottom() + ChildGap, previewSize.width(), previewSize.height());
-
-    return QRectF(contentRect.left(), childRects[insertIndex].top(), previewSize.width(), previewSize.height());
-}
-
-QRectF expandedGroupRectForPreview(const QRectF &groupRect, const QRectF &placeholderRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
-{
-    QRectF expanded = groupRect;
-    QRectF futureContent = placeholderRect;
-    const qreal shift = previewSize.height() + ChildGap;
-
-    for (int i = 0; i < childRects.size(); ++i) {
-        const QRectF childRect = i >= insertIndex ? childRects[i].translated(0.0, shift) : childRects[i];
-        futureContent = futureContent.united(childRect);
-    }
-
-    expanded.setRight(qMax(expanded.right(), futureContent.right() + GroupPadding));
-    expanded.setBottom(qMax(expanded.bottom(), futureContent.bottom() + GroupPadding));
-    return expanded;
-}
-
-QRectF expandedGroupRectForChangedChild(const QRectF &groupRect, const QVector<QRectF> &childRects, const QRectF &oldChildRect, const QRectF &newChildRect)
-{
-    QRectF futureContent = newChildRect;
-    const qreal shift = qMax<qreal>(0.0, newChildRect.height() - oldChildRect.height());
-    bool passedChangedChild = false;
-
-    for (const QRectF &childRect : childRects) {
-        if (childRect == oldChildRect) {
-            passedChangedChild = true;
-            continue;
-        }
-
-        futureContent = futureContent.united(passedChangedChild ? childRect.translated(0.0, shift) : childRect);
-    }
-
-    QRectF expanded = groupRect;
-    expanded.setRight(qMax(expanded.right(), futureContent.right() + GroupPadding));
-    expanded.setBottom(qMax(expanded.bottom(), futureContent.bottom() + GroupPadding));
-    return expanded;
-}
-
-class ToolGlyphItem : public QGraphicsItem
-{
-public:
-    ToolGlyphItem(const QString &tool, const QRectF &rect, QGraphicsItem *parent = nullptr)
-        : QGraphicsItem(parent)
-        , m_tool(tool)
-        , m_rect(rect)
-    {
-    }
-
-    QRectF boundingRect() const override
-    {
-        return m_rect;
-    }
-
-    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
-    {
-        painter->setRenderHint(QPainter::Antialiasing, true);
-
-        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        if (operationForToolName(m_tool, &operation)) {
-            const QColor accent = fillForTool(m_tool).darker(125);
-            painter->setPen(QPen(accent.darker(135), 1));
-            painter->setBrush(QColor(255, 255, 255, 150));
-            painter->drawRoundedRect(m_rect, 3.0, 3.0);
-
-            const QPointF center = m_rect.center();
-            const QRectF symbolRect = m_rect.adjusted(7.0, 7.0, -7.0, -7.0);
-            QPen pen(accent.darker(160), 2);
-            pen.setCapStyle(Qt::RoundCap);
-            painter->setPen(pen);
-            painter->setBrush(QColor(255, 255, 255, 70));
-
-            if (operation == SceneDocument::TreeNode::Union) {
-                painter->drawLine(QPointF(symbolRect.left(), center.y()), QPointF(symbolRect.right(), center.y()));
-                painter->drawLine(QPointF(center.x(), symbolRect.top()), QPointF(center.x(), symbolRect.bottom()));
-            } else if (operation == SceneDocument::TreeNode::Difference) {
-                painter->drawLine(QPointF(symbolRect.left(), center.y()), QPointF(symbolRect.right(), center.y()));
-            } else if (operation == SceneDocument::TreeNode::Intersection) {
-                painter->drawEllipse(QRectF(symbolRect.left(), symbolRect.top() + 2.0, symbolRect.width() * 0.62, symbolRect.height() - 4.0));
-                painter->drawEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
-                                            symbolRect.top() + 2.0,
-                                            symbolRect.width() * 0.62,
-                                            symbolRect.height() - 4.0));
-            } else {
-                painter->drawText(m_rect, Qt::AlignCenter, "M");
-            }
-            return;
-        }
-
-        const QColor outline(59, 95, 134);
-        const QColor face(178, 207, 238);
-        const QColor faceLight(221, 235, 248);
-        const QColor faceDark(139, 176, 214);
-        const ShapeNode::Type type = primitiveTypeForTool(m_tool);
-
-        painter->setPen(QPen(outline, 1));
-        if (type == ShapeNode::Sphere) {
-            painter->setBrush(face);
-            painter->drawEllipse(m_rect.adjusted(3.0, 3.0, -3.0, -3.0));
-            painter->setBrush(Qt::NoBrush);
-            painter->setPen(QPen(QColor(93, 127, 166), 1));
-            painter->drawEllipse(m_rect.adjusted(6.0, 13.0, -6.0, -13.0));
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(255, 255, 255, 165));
-            painter->drawEllipse(QRectF(m_rect.left() + m_rect.width() * 0.28,
-                                        m_rect.top() + m_rect.height() * 0.22,
-                                        m_rect.width() * 0.18,
-                                        m_rect.height() * 0.14));
-            return;
-        }
-
-        if (type == ShapeNode::Cylinder) {
-            const QRectF top(m_rect.left() + 5.0, m_rect.top() + 5.0, m_rect.width() - 10.0, m_rect.height() * 0.28);
-            const QRectF bottom(top.left(), m_rect.bottom() - top.height() - 5.0, top.width(), top.height());
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(face);
-            painter->drawRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()));
-            painter->setPen(QPen(outline, 1));
-            painter->drawLine(top.left(), top.center().y(), bottom.left(), bottom.center().y());
-            painter->drawLine(top.right(), top.center().y(), bottom.right(), bottom.center().y());
-            painter->setBrush(faceDark);
-            painter->drawEllipse(bottom);
-            painter->setBrush(faceLight);
-            painter->drawEllipse(top);
-            return;
-        }
-
-        QPolygonF topFace;
-        topFace << QPointF(m_rect.left() + m_rect.width() * 0.22, m_rect.top() + m_rect.height() * 0.34)
-                << QPointF(m_rect.left() + m_rect.width() * 0.48, m_rect.top() + m_rect.height() * 0.12)
-                << QPointF(m_rect.left() + m_rect.width() * 0.82, m_rect.top() + m_rect.height() * 0.28)
-                << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.50);
-        QPolygonF leftFace;
-        leftFace << topFace[0] << topFace[3]
-                 << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.86)
-                 << QPointF(m_rect.left() + m_rect.width() * 0.22, m_rect.top() + m_rect.height() * 0.70);
-        QPolygonF rightFace;
-        rightFace << topFace[3] << topFace[2]
-                  << QPointF(m_rect.left() + m_rect.width() * 0.82, m_rect.top() + m_rect.height() * 0.64)
-                  << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.86);
-        painter->setPen(QPen(outline, 1));
-        painter->setBrush(face);
-        painter->drawPolygon(leftFace);
-        painter->setBrush(faceDark);
-        painter->drawPolygon(rightFace);
-        painter->setBrush(faceLight);
-        painter->drawPolygon(topFace);
-    }
-
-private:
-    QString m_tool;
-    QRectF m_rect;
-};
-
-void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
-{
-    if (!items || !item)
-        return;
-    items->append(item);
-}
-
-void addPreviewGlyph(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect)
-{
-    auto *glyph = new ToolGlyphItem(tool, rect);
-    glyph->setZValue(58.0);
-    scene->addItem(glyph);
-    appendPreviewItem(items, glyph);
-}
-
-void addPreviewBlock(QGraphicsScene *scene,
-                     QVector<QGraphicsItem *> *items,
-                     const QString &previewTool,
-                     const QRectF &rect,
-                     const QColor &fill)
-{
-    SceneDocument::TreeNode::Operation operation;
-    if (operationForToolName(previewTool, &operation)) {
-        auto *panel = addRoundedPanel(scene,
-                                      rect,
-                                      CornerRadius,
-                                      QPen(fill.darker(145), 2),
-                                      QBrush(QColor(fill.red(), fill.green(), fill.blue(), 205)),
-                                      56.0);
-        appendPreviewItem(items, panel);
-
-        const QRectF headerRect(rect.left() + 1.5, rect.top() + 1.5, rect.width() - 3.0, GroupHeaderHeight - 2.0);
-        auto *header = addRoundedPanel(scene,
-                                       headerRect,
-                                       CornerRadius - 1.0,
-                                       Qt::NoPen,
-                                       QBrush(QColor(fill.lighter(112).red(), fill.lighter(112).green(), fill.lighter(112).blue(), 210)),
-                                       57.0);
-        appendPreviewItem(items, header);
-
-        addPreviewGlyph(scene, items, previewTool, QRectF(rect.left() + 8.0, rect.top() + 6.0, 18.0, 18.0));
-
-        auto *label = scene->addSimpleText(labelForOperation(operation));
-        label->setBrush(QColor(24, 34, 44));
-        label->setPos(rect.topLeft() + QPointF(32.0, 7.0));
-        label->setZValue(58.0);
-        appendPreviewItem(items, label);
-        return;
-    }
-
-    const QRectF iconRect(rect.left() + 20.0,
-                          rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
-                          PrimitiveIconSize,
-                          PrimitiveIconSize);
-    addPreviewGlyph(scene, items, previewTool, iconRect);
-}
-
-void addPreviewGroupFrame(QGraphicsScene *scene,
-                          QVector<QGraphicsItem *> *items,
-                          const QRectF &rect,
-                          SceneDocument::TreeNode::Operation operation,
-                          qreal cutSeparatorY,
-                          const QColor &fill)
-{
-    auto *panel = addRoundedPanel(scene,
-                                  rect,
-                                  CornerRadius,
-                                  QPen(fill.darker(145), 2),
-                                  QBrush(fill),
-                                  52.0);
-    appendPreviewItem(items, panel);
-
-    const QRectF headerRect(rect.left() + 1.5, rect.top() + 1.5, rect.width() - 3.0, GroupHeaderHeight - 2.0);
-    auto *header = addRoundedPanel(scene,
-                                   headerRect,
-                                   CornerRadius - 1.0,
-                                   Qt::NoPen,
-                                   QBrush(fill.lighter(112)),
-                                   53.0);
-    appendPreviewItem(items, header);
-
-    addPreviewGlyph(scene, items, labelForOperation(operation), QRectF(rect.left() + 8.0, rect.top() + 6.0, 18.0, 18.0));
-
-    auto *label = scene->addSimpleText(labelForOperation(operation));
-    label->setBrush(QColor(24, 34, 44));
-    label->setPos(rect.topLeft() + QPointF(32.0, 7.0));
-    label->setZValue(54.0);
-    appendPreviewItem(items, label);
-
-    if (operation == SceneDocument::TreeNode::Difference && cutSeparatorY > 0.0) {
-        auto *separator = scene->addLine(rect.left() + GroupPadding,
-                                         cutSeparatorY,
-                                         rect.right() - GroupPadding,
-                                         cutSeparatorY,
-                                         QPen(QColor(130, 92, 70), 1, Qt::DashLine));
-        separator->setZValue(54.0);
-        appendPreviewItem(items, separator);
-    }
-}
-
-void addSourceRemovalMask(QGraphicsScene *scene,
-                          QVector<QGraphicsItem *> *items,
-                          const QRectF &rect,
-                          const QColor &fill)
-{
-    auto *mask = scene->addRect(rect.adjusted(-2.0, -2.0, 2.0, 2.0),
-                               Qt::NoPen,
-                               QBrush(fill));
-    mask->setZValue(55.0);
-    appendPreviewItem(items, mask);
-}
-
-QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
-{
-    QPainterPath path;
-    SceneDocument::TreeNode::Operation operation;
-    if (operationForToolName(tool, &operation)) {
-        path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
-        return path;
-    }
-
-    const QRectF iconRect(rect.left() + 20.0,
-                          rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
-                          PrimitiveIconSize,
-                          PrimitiveIconSize);
-    path.addEllipse(iconRect.adjusted(-6.0, -6.0, 6.0, 6.0));
-    return path;
-}
-
-QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene,
-                                       QVector<QGraphicsItem *> *items,
-                                       const QString &tool,
-                                       const QRectF &rect,
-                                       qreal zValue)
-{
-    auto *outline = scene->addPath(dragFocusOutlinePath(tool, rect),
-                                   QPen(QColor(74, 190, 116), 2, Qt::DashLine),
-                                   Qt::NoBrush);
-    outline->setZValue(zValue);
-    appendPreviewItem(items, outline);
-    return outline;
-}
-
-class TreeNodeDragHandleItem : public QGraphicsRectItem
-{
-public:
-    TreeNodeDragHandleItem(int nodeId,
-                           const QString &label,
-                           const QRectF &rect,
-                           const QRectF &sourceRect,
-                           std::function<void(int)> onSelected,
-                           const QSizeF &previewSize,
-                           std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved,
-                           std::function<void()> onPreviewFinished,
-                           std::function<void(int, const QPointF &)> onDropped)
-        : QGraphicsRectItem(rect)
-        , m_nodeId(nodeId)
-        , m_label(label)
-        , m_sourceRect(sourceRect)
-        , m_previewSize(previewSize)
-        , m_onSelected(onSelected)
-        , m_onPreviewMoved(onPreviewMoved)
-        , m_onPreviewFinished(onPreviewFinished)
-        , m_onDropped(onDropped)
-    {
-        setPen(Qt::NoPen);
-        setBrush(QColor(0, 0, 0, 1));
-        setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
-        setZValue(70.0);
-    }
-
-protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (event->button() == Qt::RightButton) {
-            if (m_onSelected)
-                m_onSelected(m_nodeId);
-            event->accept();
-            return;
-        }
-
-        if (event->button() != Qt::LeftButton) {
-            event->ignore();
-            return;
-        }
-
-        m_pressScenePos = event->scenePos();
-        m_previewActive = false;
-        createDragSnapshot(m_pressScenePos);
-        event->accept();
-    }
-
-    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        moveDragSnapshot(event->scenePos());
-        if (!m_previewActive) {
-            const QPointF delta = event->scenePos() - m_pressScenePos;
-            if (delta.x() * delta.x() + delta.y() * delta.y() < DragPreviewStartDistance * DragPreviewStartDistance) {
-                event->accept();
-                return;
-            }
-            m_previewActive = true;
-        }
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), m_previewSize, m_label);
-        event->accept();
-    }
-
-    void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        const QPointF dropPosition = event->scenePos();
-        moveDragSnapshot(dropPosition);
-        delete m_dragSnapshot;
-        m_dragSnapshot = nullptr;
-        delete m_dragOutline;
-        m_dragOutline = nullptr;
-        if (m_previewActive && m_onPreviewFinished)
-            m_onPreviewFinished();
-        if (m_previewActive && m_onDropped)
-            m_onDropped(m_nodeId, dropPosition);
-        m_previewActive = false;
-        event->accept();
-    }
-
-private:
-    void createDragSnapshot(const QPointF &scenePosition)
-    {
-        if (!scene() || !m_sourceRect.isValid())
-            return;
-
-        QPixmap pixmap(m_sourceRect.size().toSize());
-        pixmap.fill(Qt::transparent);
-
-        QPainter painter(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        scene()->render(&painter, QRectF(QPointF(0.0, 0.0), m_sourceRect.size()), m_sourceRect);
-
-        m_dragOffset = scenePosition - m_sourceRect.topLeft();
-        m_dragSnapshot = scene()->addPixmap(pixmap);
-        m_dragSnapshot->setOpacity(0.88);
-        m_dragSnapshot->setZValue(120.0);
-        m_dragOutline = scene()->addPath(dragFocusOutlinePath(m_label, QRectF(QPointF(0.0, 0.0), m_sourceRect.size())),
-                                         QPen(QColor(74, 190, 116), 2, Qt::DashLine),
-                                         Qt::NoBrush);
-        m_dragOutline->setZValue(121.0);
-        moveDragSnapshot(scenePosition);
-    }
-
-    void moveDragSnapshot(const QPointF &scenePosition)
-    {
-        const QPointF dragPos = scenePosition - m_dragOffset;
-        if (m_dragSnapshot)
-            m_dragSnapshot->setPos(dragPos);
-        if (m_dragOutline)
-            m_dragOutline->setPos(dragPos);
-    }
-
-    int m_nodeId = 0;
-    QString m_label;
-    QRectF m_sourceRect;
-    QPointF m_pressScenePos;
-    QPointF m_dragOffset;
-    QSizeF m_previewSize;
-    bool m_previewActive = false;
-    std::function<void(int)> m_onSelected;
-    std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
-    std::function<void()> m_onPreviewFinished;
-    std::function<void(int, const QPointF &)> m_onDropped;
-    QGraphicsPixmapItem *m_dragSnapshot = nullptr;
-    QGraphicsPathItem *m_dragOutline = nullptr;
-};
-
-class TreeNodeSelectionItem : public QGraphicsRectItem
-{
-public:
-    TreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal zValue, std::function<void(int)> onSelected)
-        : QGraphicsRectItem(rect)
-        , m_nodeId(nodeId)
-        , m_onSelected(onSelected)
-    {
-        setPen(Qt::NoPen);
-        setBrush(QColor(0, 0, 0, 1));
-        setAcceptedMouseButtons(Qt::RightButton);
-        setZValue(zValue);
-    }
-
-protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (event->button() != Qt::RightButton) {
-            event->ignore();
-            return;
-        }
-
-        if (m_onSelected)
-            m_onSelected(m_nodeId);
-        event->accept();
-    }
-
-private:
-    int m_nodeId = 0;
-    std::function<void(int)> m_onSelected;
-};
-
-class PaletteToolItem : public QGraphicsRectItem
-{
-public:
-    PaletteToolItem(const QString &label,
-                    const QColor &fill,
-                    std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved,
-                    std::function<void()> onPreviewFinished,
-                    std::function<void(const QString &, const QPointF &)> onDropped)
-        : QGraphicsRectItem(QRectF(0.0, 0.0, ToolSize, ToolSize))
-        , m_label(label)
-        , m_onPreviewMoved(onPreviewMoved)
-        , m_onPreviewFinished(onPreviewFinished)
-        , m_onDropped(onDropped)
-    {
-        setPen(QPen(fill.darker(145)));
-        setBrush(QColor(255, 255, 255));
-        setAcceptedMouseButtons(Qt::LeftButton);
-        setToolTip(label);
-        setZValue(100.0);
-
-        auto *glyph = new ToolGlyphItem(label, QRectF(10.0, 8.0, 34.0, 34.0), this);
-        glyph->setZValue(1.0);
-    }
-
-protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), previewSizeForTool(m_label), m_label);
-        event->accept();
-    }
-
-    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), previewSizeForTool(m_label), m_label);
-        event->accept();
-    }
-
-    void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        const QPointF dropPosition = event->scenePos();
-        if (m_onPreviewFinished)
-            m_onPreviewFinished();
-        if (m_onDropped)
-            m_onDropped(m_label, dropPosition);
-        event->accept();
-    }
-
-    QString m_label;
-    std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
-    std::function<void()> m_onPreviewFinished;
-    std::function<void(const QString &, const QPointF &)> m_onDropped;
-};
-
-QColor fillForTool(const QString &tool)
-{
-    if (tool == "difference")
-        return QColor(247, 224, 204);
-    if (tool == "intersection")
-        return QColor(226, 220, 247);
-    if (tool == "union")
-        return QColor(216, 237, 226);
-    if (tool == "module")
-        return QColor(230, 232, 236);
-    return QColor(219, 231, 246);
-}
-}
+using namespace SceneTreeGraphics;
 
 SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
-    , m_graphicsScene(new TreeGraphicsScene(this))
+    , m_graphicsScene(createTreeGraphicsScene(this))
 {
     setScene(m_graphicsScene);
     setMinimumHeight(280);
@@ -1089,7 +184,7 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
     addRoundedPanel(m_graphicsScene, toolbarRect, CornerRadius, QPen(QColor(166, 174, 186)), QBrush(QColor(232, 235, 239)), -3.0);
 
     for (int i = 0; i < tools.size(); ++i) {
-        auto *tool = new PaletteToolItem(
+        auto *tool = createPaletteToolItem(
             tools[i],
             fillForTool(tools[i]),
             [this](const QPointF &position, const QSizeF &previewSize, const QString &previewTool) {
@@ -1129,7 +224,7 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
         addPrimitiveSelectionHalo(m_graphicsScene, iconRect);
     addPrimitiveIcon(m_graphicsScene, typeForPrimitive(node.shapeId), iconRect);
     addPrimitiveNumberBadge(m_graphicsScene, primitiveNumberText(label, node.shapeId), rect);
-    auto *handle = new TreeNodeDragHandleItem(
+    auto *handle = createTreeNodeDragHandleItem(
         node.id,
         label,
         rect,
@@ -1204,7 +299,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                    QBrush(fill.lighter(112)),
                                    depth * 10.0 - 95.0);
     header->setZValue(depth * 10.0 - 95.0);
-    m_graphicsScene->addItem(new TreeNodeSelectionItem(
+    m_graphicsScene->addItem(createTreeNodeSelectionItem(
         node.id,
         rect,
         depth * 10.0 - 80.0,
@@ -1216,7 +311,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     addOperationIcon(m_graphicsScene, node.operation, iconRect, fill.darker(125));
     const QString groupLabel = labelForGroup(node.operation);
     addLabel(m_graphicsScene, groupLabel, rect.topLeft() + QPointF(32.0, 7.0), QColor(24, 34, 44));
-    m_graphicsScene->addItem(new TreeNodeDragHandleItem(
+    m_graphicsScene->addItem(createTreeNodeDragHandleItem(
         node.id,
         groupLabel,
         QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight)),
@@ -1312,6 +407,13 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                                 || !target.expandedGroupRects.isEmpty();
     setTreeItemsVisible(!hasTreePreview);
 
+    addExpandedGroupPreviews(target);
+    addSourceGroupPreview(target, movingNodeId);
+    addTargetGroupPreview(target, previewTool);
+}
+
+void SceneTreeGraphicsWidget::addExpandedGroupPreviews(const DropTarget &target)
+{
     for (int i = 0; i < target.expandedGroupRects.size(); ++i) {
         const QRectF expandedRect = target.expandedGroupRects[i];
         if ((target.previewGroupRect.isValid() && expandedRect == target.previewGroupRect)
@@ -1337,28 +439,12 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
         const QVector<int> childNodeIds = i < target.expandedGroupChildNodeIds.size()
                                               ? target.expandedGroupChildNodeIds[i]
                                               : QVector<int>();
-        for (int childIndex = 0; childIndex < childRects.size(); ++childIndex) {
-            const QRectF childRect = childRects[childIndex];
-            if (target.previewGroupRect.isValid() && childRect.contains(target.previewGroupRect.center()))
-                continue;
-
-            const int childNodeId = childIndex < childNodeIds.size() ? childNodeIds[childIndex] : 0;
-            if (childNodeId > 0) {
-                addPreviewExistingNode(childNodeId, childRect);
-                continue;
-            }
-
-            const QString childTool = childIndex < childTools.size()
-                                          ? childTools[childIndex]
-                                          : QStringLiteral("cube");
-            addPreviewBlock(m_graphicsScene,
-                            &m_dropPreviewItems,
-                            childTool,
-                            childRect,
-                            fillForTool(childTool));
-        }
+        addPreviewChildren(childRects, childTools, childNodeIds, target.previewGroupRect);
     }
+}
 
+void SceneTreeGraphicsWidget::addSourceGroupPreview(const DropTarget &target, int movingNodeId)
+{
     const bool sourceGroupCoveredByTarget = target.sourceGroupRect.isValid()
                                             && target.previewGroupRect.isValid()
                                             && target.previewGroupRect.contains(target.sourceGroupRect.center());
@@ -1375,18 +461,12 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                                  target.sourceRect,
                                  colorForGroup(target.sourceGroupOperation));
         }
-        for (int i = 0; i < target.sourceChildRects.size(); ++i) {
-            const QString childTool = i < target.sourceChildTools.size()
-                                          ? target.sourceChildTools[i]
-                                          : QStringLiteral("cube");
-            addPreviewBlock(m_graphicsScene,
-                            &m_dropPreviewItems,
-                            childTool,
-                            target.sourceChildRects[i],
-                            fillForTool(childTool));
-        }
+        addPreviewChildren(target.sourceChildRects, target.sourceChildTools, {});
     }
+}
 
+void SceneTreeGraphicsWidget::addTargetGroupPreview(const DropTarget &target, const QString &previewTool)
+{
     if (target.previewGroupRect.isValid()) {
         addPreviewGroupFrame(m_graphicsScene,
                              &m_dropPreviewItems,
@@ -1396,21 +476,7 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                              colorForGroup(target.previewGroupOperation));
     }
 
-    for (int i = 0; i < target.previewChildRects.size(); ++i) {
-        const QString childTool = i < target.previewChildTools.size()
-                                      ? target.previewChildTools[i]
-                                      : QStringLiteral("cube");
-        const int childNodeId = i < target.previewChildNodeIds.size() ? target.previewChildNodeIds[i] : 0;
-        if (childNodeId > 0) {
-            addPreviewExistingNode(childNodeId, target.previewChildRects[i]);
-        } else {
-            addPreviewBlock(m_graphicsScene,
-                            &m_dropPreviewItems,
-                            childTool,
-                            target.previewChildRects[i],
-                            fillForTool(childTool));
-        }
-    }
+    addPreviewChildren(target.previewChildRects, target.previewChildTools, target.previewChildNodeIds);
 
     if (target.hasTarget) {
         addPreviewBlock(m_graphicsScene,
@@ -1487,6 +553,38 @@ void SceneTreeGraphicsWidget::addPreviewExistingNode(int nodeId, const QRectF &r
     for (int i = 0; i < area->childRects.size(); ++i) {
         const int childNodeId = i < area->childNodeIds.size() ? area->childNodeIds[i] : 0;
         addPreviewExistingNode(childNodeId, area->childRects[i].translated(offset));
+    }
+}
+
+void SceneTreeGraphicsWidget::addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect)
+{
+    if (nodeId > 0) {
+        addPreviewExistingNode(nodeId, rect);
+        return;
+    }
+
+    addPreviewBlock(m_graphicsScene,
+                    &m_dropPreviewItems,
+                    tool,
+                    rect,
+                    fillForTool(tool));
+}
+
+void SceneTreeGraphicsWidget::addPreviewChildren(const QVector<QRectF> &rects,
+                                                 const QVector<QString> &tools,
+                                                 const QVector<int> &nodeIds,
+                                                 const QRectF &excludedRect)
+{
+    for (int i = 0; i < rects.size(); ++i) {
+        const QRectF childRect = rects[i];
+        if (excludedRect.isValid() && childRect.contains(excludedRect.center()))
+            continue;
+
+        const QString childTool = i < tools.size()
+                                      ? tools[i]
+                                      : QStringLiteral("cube");
+        const int childNodeId = i < nodeIds.size() ? nodeIds[i] : 0;
+        addPreviewTreeItem(childTool, childNodeId, childRect);
     }
 }
 

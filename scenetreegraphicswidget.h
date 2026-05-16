@@ -35,6 +35,8 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
+    struct DropTarget;
+
     QRectF drawToolbar();
     QRectF drawNode(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
@@ -44,10 +46,17 @@ private:
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
+    void addExpandedGroupPreviews(const DropTarget &target);
+    void addSourceGroupPreview(const DropTarget &target, int movingNodeId);
+    void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);
     void clearDropPreview();
     void setTreeItemsVisible(bool visible);
     void addPreviewExistingNode(int nodeId, const QRectF &rect);
-    struct DropTarget;
+    void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);
+    void addPreviewChildren(const QVector<QRectF> &rects,
+                            const QVector<QString> &tools,
+                            const QVector<int> &nodeIds,
+                            const QRectF &excludedRect = QRectF());
     DropTarget dropTargetAt(const QPointF &scenePosition, const QSizeF &previewSize = QSizeF(), int movingNodeId = 0) const;
     QString labelForPrimitive(int shapeId) const;
     ShapeNode::Type typeForPrimitive(int shapeId) const;

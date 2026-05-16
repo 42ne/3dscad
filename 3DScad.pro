@@ -22,6 +22,7 @@ SOURCES += \
     openscadgenerator.cpp \
     openscadparser.cpp \
     scenecommands.cpp \
+    scenetreegraphicshelpers.cpp \
     scenetreegraphicswidget.cpp \
     scenetree.cpp \
     scenemesh.cpp \
@@ -35,6 +36,7 @@ HEADERS += \
     openscadgenerator.h \
     openscadparser.h \
     scenecommands.h \
+    scenetreegraphicshelpers.h \
     scenetreegraphicswidget.h \
     scenetree.h \
     scenemesh.h \
