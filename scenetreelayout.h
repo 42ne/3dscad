@@ -66,6 +66,13 @@ public:
                             int movingNodeId = 0) const;
 
 private:
+    void buildSourcePreview(const GroupHitArea *sourceArea,
+                            int movingNodeId,
+                            int sourceChildIndex,
+                            qreal sourceRemovalShift,
+                            DropTarget *target) const;
+    void buildSourceAncestorPreviews(const GroupHitArea *sourceArea,
+                                     DropTarget *target) const;
     const GroupHitArea *findSourceArea(int movingNodeId,
                                        DropTarget *target,
                                        int *sourceChildIndex,

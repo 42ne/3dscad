@@ -76,6 +76,55 @@ bool expandedParentPreview(const SceneTreeLayout::GroupHitArea &area,
     return true;
 }
 
+void cancelTargetPreview(SceneTreeLayout::DropTarget *target)
+{
+    if (!target)
+        return;
+
+    target->hasTarget = false;
+    target->parentGroupId = 0;
+    target->insertIndex = -1;
+    target->zoneRect = QRectF();
+    target->placeholderRect = QRectF();
+    target->slotMarkerRect = QRectF();
+    target->previewGroupRect = QRectF();
+    target->previewChildren.clear();
+    target->expandedGroups.clear();
+}
+
+QVector<SceneTreeLayout::ChildLayout> childrenShiftedFromIndex(const QVector<SceneTreeLayout::ChildLayout> &children,
+                                                               int startIndex,
+                                                               qreal shift)
+{
+    QVector<SceneTreeLayout::ChildLayout> shiftedChildren;
+    const int boundedStartIndex = qBound(0, startIndex, children.size());
+    for (int i = 0; i < children.size(); ++i) {
+        SceneTreeLayout::ChildLayout child = children[i];
+        if (i >= boundedStartIndex)
+            child.rect.translate(0.0, shift);
+        shiftedChildren.append(child);
+    }
+
+    return shiftedChildren;
+}
+
+void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
+{
+    if (!target || qFuzzyIsNull(dy))
+        return;
+
+    target->previewGroupRect.translate(0.0, dy);
+    target->placeholderRect.translate(0.0, dy);
+    target->slotMarkerRect.translate(0.0, dy);
+    for (SceneTreeLayout::ChildLayout &child : target->previewChildren)
+        child.rect.translate(0.0, dy);
+    for (SceneTreeLayout::GroupPreview &expandedGroup : target->expandedGroups) {
+        expandedGroup.rect.translate(0.0, dy);
+        for (SceneTreeLayout::ChildLayout &child : expandedGroup.children)
+            child.rect.translate(0.0, dy);
+    }
+}
+
 } // namespace
 
 void SceneTreeLayout::clear()
@@ -109,82 +158,16 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                                     sourceArea,
                                                     target.sourceRect);
 
-    auto buildSourcePreview = [&target, sourceArea, movingNodeId, sourceChildIndex, sourceRemovalShift]() {
-        if (!sourceArea)
-            return;
-
-        target.sourceGroupRect = sourceArea->rect;
-        target.sourceGroupOperation = sourceArea->operation;
-        target.sourceCutSeparatorY = sourceArea->cutSeparatorY;
-        target.sourceChildren = childrenWithoutMovingNode(*sourceArea,
-                                                          movingNodeId,
-                                                          sourceChildIndex,
-                                                          sourceRemovalShift,
-                                                          true);
-        QRectF futureContent;
-        bool hasFutureContent = false;
-        for (const ChildLayout &child : target.sourceChildren) {
-            futureContent = hasFutureContent ? futureContent.united(child.rect) : child.rect;
-            hasFutureContent = true;
-        }
-
-        qreal minContentHeight = PrimitiveHeight;
-        if (sourceArea->operation == SceneDocument::TreeNode::Difference)
-            minContentHeight = DifferenceMinContentHeight;
-
-        const qreal minBottom = sourceArea->rect.top() + GroupHeaderHeight + GroupPadding * 2.0 + minContentHeight;
-        const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
-        target.sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
-        if (sourceArea->operation == SceneDocument::TreeNode::Difference && target.sourceCutSeparatorY > 0.0) {
-            target.sourceCutSeparatorY = qMin(target.sourceCutSeparatorY, target.sourceGroupRect.bottom() - GroupPadding - PrimitiveHeight * 0.5);
-        }
-    };
-
-    auto cancelTargetPreview = [&target]() {
-        target.hasTarget = false;
-        target.parentGroupId = 0;
-        target.insertIndex = -1;
-        target.zoneRect = QRectF();
-        target.placeholderRect = QRectF();
-        target.slotMarkerRect = QRectF();
-        target.previewGroupRect = QRectF();
-        target.previewChildren.clear();
-        target.expandedGroups.clear();
-    };
-
-    auto buildSourceAncestorPreviews = [&target, this, sourceArea]() {
-        if (!sourceArea || !target.sourceGroupRect.isValid())
-            return;
-
-        QRectF changedOldRect = sourceArea->rect;
-        QRectF changedNewRect = target.sourceGroupRect;
-        for (const GroupHitArea &area : m_groupHitAreas) {
-            if (area.depth >= sourceArea->depth || !area.rect.contains(sourceArea->rect.center()))
-                continue;
-
-            QVector<ChildLayout> expandedChildren;
-            QRectF expandedRect;
-            if (!expandedParentPreview(area,
-                                       area.children,
-                                       changedOldRect,
-                                       changedNewRect,
-                                       &expandedRect,
-                                       &expandedChildren)) {
-                continue;
-            }
-
-            target.expandedGroups.prepend({expandedRect, area.operation, expandedChildren});
-            changedOldRect = area.rect;
-            changedNewRect = expandedRect;
-        }
-    };
-
     if (sourceArea) {
-        buildSourcePreview();
+        buildSourcePreview(sourceArea,
+                           movingNodeId,
+                           sourceChildIndex,
+                           sourceRemovalShift,
+                           &target);
     }
 
     if (!bestArea) {
-        buildSourceAncestorPreviews();
+        buildSourceAncestorPreviews(sourceArea, &target);
         return target;
     }
 
@@ -214,21 +197,13 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     for (const ChildLayout &child : candidateChildren)
         candidateChildRects.append(child.rect);
 
-    auto setPreviewChildren = [&target, &candidateChildren](qreal shift) {
-        target.previewChildren.clear();
-        const int startIndex = qBound(0, target.insertIndex, candidateChildren.size());
-        for (int i = 0; i < candidateChildren.size(); ++i) {
-            ChildLayout child = candidateChildren[i];
-            if (i >= startIndex)
-                child.rect.translate(0.0, shift);
-            target.previewChildren.append(child);
-        }
-    };
     target.zoneRect = contentRect;
     target.insertIndex = insertionIndexForY(candidateChildRects, scenePosition.y());
     target.placeholderRect = placeholderRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex, effectivePreviewSize);
     target.slotMarkerRect = slotMarkerRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex);
-    setPreviewChildren(effectivePreviewSize.height() + ChildGap);
+    target.previewChildren = childrenShiftedFromIndex(candidateChildren,
+                                                     target.insertIndex,
+                                                     effectivePreviewSize.height() + ChildGap);
 
     if (bestArea->operation == SceneDocument::TreeNode::Difference && bestArea->cutSeparatorY > 0.0) {
         const bool baseZone = scenePosition.y() < bestArea->cutSeparatorY;
@@ -250,15 +225,21 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         target.slotMarkerRect = slotMarkerRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex);
         if (!baseZone && target.slotMarkerRect.top() < bestArea->cutSeparatorY)
             target.slotMarkerRect.moveTop(bestArea->cutSeparatorY + ChildGap * 0.5);
-        setPreviewChildren(effectivePreviewSize.height() + ChildGap);
+        target.previewChildren = childrenShiftedFromIndex(candidateChildren,
+                                                         target.insertIndex,
+                                                         effectivePreviewSize.height() + ChildGap);
         if (baseZone)
             target.previewCutSeparatorY = target.placeholderRect.bottom() + ChildGap * 0.5;
     }
 
     if (sourceArea == bestArea && sourceChildIndex >= 0 && target.insertIndex == sourceChildIndex) {
-        cancelTargetPreview();
-        buildSourcePreview();
-        buildSourceAncestorPreviews();
+        cancelTargetPreview(&target);
+        buildSourcePreview(sourceArea,
+                           movingNodeId,
+                           sourceChildIndex,
+                           sourceRemovalShift,
+                           &target);
+        buildSourceAncestorPreviews(sourceArea, &target);
         return target;
     }
 
@@ -316,20 +297,76 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         changedNewRect = expandedRect;
     }
 
-    if (targetPreviewShift != 0.0) {
-        target.previewGroupRect.translate(0.0, targetPreviewShift);
-        target.placeholderRect.translate(0.0, targetPreviewShift);
-        target.slotMarkerRect.translate(0.0, targetPreviewShift);
-        for (ChildLayout &child : target.previewChildren)
-            child.rect.translate(0.0, targetPreviewShift);
-        for (GroupPreview &expandedGroup : target.expandedGroups) {
-            expandedGroup.rect.translate(0.0, targetPreviewShift);
-            for (ChildLayout &child : expandedGroup.children)
-                child.rect.translate(0.0, targetPreviewShift);
-        }
-    }
+    translatePreview(&target, targetPreviewShift);
 
     return target;
+}
+
+void SceneTreeLayout::buildSourcePreview(const GroupHitArea *sourceArea,
+                                         int movingNodeId,
+                                         int sourceChildIndex,
+                                         qreal sourceRemovalShift,
+                                         DropTarget *target) const
+{
+    if (!sourceArea || !target)
+        return;
+
+    target->sourceGroupRect = sourceArea->rect;
+    target->sourceGroupOperation = sourceArea->operation;
+    target->sourceCutSeparatorY = sourceArea->cutSeparatorY;
+    target->sourceChildren = childrenWithoutMovingNode(*sourceArea,
+                                                       movingNodeId,
+                                                       sourceChildIndex,
+                                                       sourceRemovalShift,
+                                                       true);
+
+    QRectF futureContent;
+    bool hasFutureContent = false;
+    for (const ChildLayout &child : target->sourceChildren) {
+        futureContent = hasFutureContent ? futureContent.united(child.rect) : child.rect;
+        hasFutureContent = true;
+    }
+
+    qreal minContentHeight = PrimitiveHeight;
+    if (sourceArea->operation == SceneDocument::TreeNode::Difference)
+        minContentHeight = DifferenceMinContentHeight;
+
+    const qreal minBottom = sourceArea->rect.top() + GroupHeaderHeight + GroupPadding * 2.0 + minContentHeight;
+    const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
+    target->sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
+    if (sourceArea->operation == SceneDocument::TreeNode::Difference && target->sourceCutSeparatorY > 0.0) {
+        target->sourceCutSeparatorY = qMin(target->sourceCutSeparatorY,
+                                          target->sourceGroupRect.bottom() - GroupPadding - PrimitiveHeight * 0.5);
+    }
+}
+
+void SceneTreeLayout::buildSourceAncestorPreviews(const GroupHitArea *sourceArea,
+                                                  DropTarget *target) const
+{
+    if (!sourceArea || !target || !target->sourceGroupRect.isValid())
+        return;
+
+    QRectF changedOldRect = sourceArea->rect;
+    QRectF changedNewRect = target->sourceGroupRect;
+    for (const GroupHitArea &area : m_groupHitAreas) {
+        if (area.depth >= sourceArea->depth || !area.rect.contains(sourceArea->rect.center()))
+            continue;
+
+        QVector<ChildLayout> expandedChildren;
+        QRectF expandedRect;
+        if (!expandedParentPreview(area,
+                                   area.children,
+                                   changedOldRect,
+                                   changedNewRect,
+                                   &expandedRect,
+                                   &expandedChildren)) {
+            continue;
+        }
+
+        target->expandedGroups.prepend({expandedRect, area.operation, expandedChildren});
+        changedOldRect = area.rect;
+        changedNewRect = expandedRect;
+    }
 }
 
 const SceneTreeLayout::GroupHitArea *SceneTreeLayout::findSourceArea(int movingNodeId,
