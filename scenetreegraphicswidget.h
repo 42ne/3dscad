@@ -45,6 +45,8 @@ private:
     void handleTreeNodeSelected(int nodeId);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void clearDropPreview();
+    void setTreeItemsVisible(bool visible);
+    void addPreviewExistingNode(int nodeId, const QRectF &rect);
     struct DropTarget;
     DropTarget dropTargetAt(const QPointF &scenePosition, const QSizeF &previewSize = QSizeF(), int movingNodeId = 0) const;
     QString labelForPrimitive(int shapeId) const;
@@ -82,14 +84,19 @@ private:
         SceneDocument::TreeNode::Operation previewGroupOperation = SceneDocument::TreeNode::Union;
         qreal previewCutSeparatorY = 0.0;
         QVector<QRectF> expandedGroupRects;
+        QVector<QVector<QRectF>> expandedGroupChildRects;
+        QVector<QVector<QString>> expandedGroupChildTools;
+        QVector<QVector<int>> expandedGroupChildNodeIds;
         QVector<QRectF> previewChildRects;
         QVector<QString> previewChildTools;
+        QVector<int> previewChildNodeIds;
         QVector<SceneDocument::TreeNode::Operation> expandedGroupOperations;
     };
 
     QGraphicsScene *m_graphicsScene = nullptr;
     const SceneDocument *m_scene = nullptr;
     QVector<GroupHitArea> m_groupHitAreas;
+    QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     std::function<void(const QString &, int, int)> m_toolDroppedCallback;
     std::function<void(int, int, int)> m_treeNodeDroppedCallback;

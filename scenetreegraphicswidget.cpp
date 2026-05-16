@@ -644,6 +644,18 @@ void addPreviewGroupFrame(QGraphicsScene *scene,
     }
 }
 
+void addSourceRemovalMask(QGraphicsScene *scene,
+                          QVector<QGraphicsItem *> *items,
+                          const QRectF &rect,
+                          const QColor &fill)
+{
+    auto *mask = scene->addRect(rect.adjusted(-2.0, -2.0, 2.0, 2.0),
+                               Qt::NoPen,
+                               QBrush(fill));
+    mask->setZValue(55.0);
+    appendPreviewItem(items, mask);
+}
+
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
 {
     QPainterPath path;
@@ -963,11 +975,18 @@ void SceneTreeGraphicsWidget::refresh()
     clearDropPreview();
     m_graphicsScene->clear();
     m_groupHitAreas.clear();
+    m_treeItems.clear();
 
     const QRectF toolbarRect = drawToolbar();
 
     if (m_scene && !m_scene->treeRoot().children.isEmpty()) {
+        const QList<QGraphicsItem *> toolbarItems = m_graphicsScene->items();
         drawNode(m_scene->treeRoot(), QPointF(TreeX, TreeY), 0);
+        const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
+        for (QGraphicsItem *item : allItems) {
+            if (!toolbarItems.contains(item))
+                m_treeItems.append(item);
+        }
     } else {
         addLabel(m_graphicsScene, "Drop tree components here", QPointF(TreeX + 8.0, TreeY + 8.0), QColor(105, 105, 105));
     }
@@ -1288,6 +1307,11 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
         }
     }
 
+    const bool hasTreePreview = target.sourceGroupRect.isValid()
+                                || target.previewGroupRect.isValid()
+                                || !target.expandedGroupRects.isEmpty();
+    setTreeItemsVisible(!hasTreePreview);
+
     for (int i = 0; i < target.expandedGroupRects.size(); ++i) {
         const QRectF expandedRect = target.expandedGroupRects[i];
         if ((target.previewGroupRect.isValid() && expandedRect == target.previewGroupRect)
@@ -1304,6 +1328,35 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                              operation,
                              0.0,
                              colorForGroup(operation));
+        const QVector<QRectF> childRects = i < target.expandedGroupChildRects.size()
+                                               ? target.expandedGroupChildRects[i]
+                                               : QVector<QRectF>();
+        const QVector<QString> childTools = i < target.expandedGroupChildTools.size()
+                                                ? target.expandedGroupChildTools[i]
+                                                : QVector<QString>();
+        const QVector<int> childNodeIds = i < target.expandedGroupChildNodeIds.size()
+                                              ? target.expandedGroupChildNodeIds[i]
+                                              : QVector<int>();
+        for (int childIndex = 0; childIndex < childRects.size(); ++childIndex) {
+            const QRectF childRect = childRects[childIndex];
+            if (target.previewGroupRect.isValid() && childRect.contains(target.previewGroupRect.center()))
+                continue;
+
+            const int childNodeId = childIndex < childNodeIds.size() ? childNodeIds[childIndex] : 0;
+            if (childNodeId > 0) {
+                addPreviewExistingNode(childNodeId, childRect);
+                continue;
+            }
+
+            const QString childTool = childIndex < childTools.size()
+                                          ? childTools[childIndex]
+                                          : QStringLiteral("cube");
+            addPreviewBlock(m_graphicsScene,
+                            &m_dropPreviewItems,
+                            childTool,
+                            childRect,
+                            fillForTool(childTool));
+        }
     }
 
     const bool sourceGroupCoveredByTarget = target.sourceGroupRect.isValid()
@@ -1316,6 +1369,12 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                              target.sourceGroupOperation,
                              target.sourceCutSeparatorY,
                              colorForGroup(target.sourceGroupOperation));
+        if (movingNodeId > 0 && target.sourceRect.isValid()) {
+            addSourceRemovalMask(m_graphicsScene,
+                                 &m_dropPreviewItems,
+                                 target.sourceRect,
+                                 colorForGroup(target.sourceGroupOperation));
+        }
         for (int i = 0; i < target.sourceChildRects.size(); ++i) {
             const QString childTool = i < target.sourceChildTools.size()
                                           ? target.sourceChildTools[i]
@@ -1341,11 +1400,16 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
         const QString childTool = i < target.previewChildTools.size()
                                       ? target.previewChildTools[i]
                                       : QStringLiteral("cube");
-        addPreviewBlock(m_graphicsScene,
-                        &m_dropPreviewItems,
-                        childTool,
-                        target.previewChildRects[i],
-                        fillForTool(childTool));
+        const int childNodeId = i < target.previewChildNodeIds.size() ? target.previewChildNodeIds[i] : 0;
+        if (childNodeId > 0) {
+            addPreviewExistingNode(childNodeId, target.previewChildRects[i]);
+        } else {
+            addPreviewBlock(m_graphicsScene,
+                            &m_dropPreviewItems,
+                            childTool,
+                            target.previewChildRects[i],
+                            fillForTool(childTool));
+        }
     }
 
     if (target.hasTarget) {
@@ -1367,6 +1431,63 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     for (QGraphicsItem *item : m_dropPreviewItems)
         delete item;
     m_dropPreviewItems.clear();
+    setTreeItemsVisible(true);
+}
+
+void SceneTreeGraphicsWidget::setTreeItemsVisible(bool visible)
+{
+    for (QGraphicsItem *item : m_treeItems) {
+        if (item)
+            item->setOpacity(visible ? 1.0 : 0.0);
+    }
+}
+
+void SceneTreeGraphicsWidget::addPreviewExistingNode(int nodeId, const QRectF &rect)
+{
+    if (!m_scene || nodeId <= 0)
+        return;
+
+    const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+    if (!node)
+        return;
+
+    const QString tool = previewToolForNode(*node);
+    if (node->type == SceneDocument::TreeNode::Primitive) {
+        addPreviewBlock(m_graphicsScene,
+                        &m_dropPreviewItems,
+                        tool,
+                        rect,
+                        fillForTool(tool));
+        return;
+    }
+
+    qreal cutSeparatorY = 0.0;
+    const GroupHitArea *area = nullptr;
+    for (const GroupHitArea &candidate : m_groupHitAreas) {
+        if (candidate.groupId == nodeId) {
+            area = &candidate;
+            break;
+        }
+    }
+
+    if (area)
+        cutSeparatorY = area->cutSeparatorY + (rect.top() - area->rect.top());
+
+    addPreviewGroupFrame(m_graphicsScene,
+                         &m_dropPreviewItems,
+                         rect,
+                         node->operation,
+                         cutSeparatorY,
+                         colorForGroup(node->operation));
+
+    if (!area)
+        return;
+
+    const QPointF offset = rect.topLeft() - area->rect.topLeft();
+    for (int i = 0; i < area->childRects.size(); ++i) {
+        const int childNodeId = i < area->childNodeIds.size() ? area->childNodeIds[i] : 0;
+        addPreviewExistingNode(childNodeId, area->childRects[i].translated(offset));
+    }
 }
 
 SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const QPointF &scenePosition, const QSizeF &previewSize, int movingNodeId) const
@@ -1450,12 +1571,29 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
         }
     };
 
+    auto cancelTargetPreview = [&target]() {
+        target.hasTarget = false;
+        target.parentGroupId = 0;
+        target.insertIndex = -1;
+        target.zoneRect = QRectF();
+        target.placeholderRect = QRectF();
+        target.previewGroupRect = QRectF();
+        target.previewChildRects.clear();
+        target.previewChildTools.clear();
+        target.previewChildNodeIds.clear();
+        target.expandedGroupRects.clear();
+        target.expandedGroupChildRects.clear();
+        target.expandedGroupChildTools.clear();
+        target.expandedGroupChildNodeIds.clear();
+        target.expandedGroupOperations.clear();
+    };
+
     if (sourceArea && target.sourceRect.contains(scenePosition)) {
         buildSourcePreview();
         return target;
     }
 
-    if (sourceArea && sourceArea != bestArea) {
+    if (sourceArea) {
         buildSourcePreview();
     }
 
@@ -1482,6 +1620,7 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
                                                        -GroupPadding);
     QVector<QRectF> candidateChildRects;
     QVector<QString> candidateChildTools;
+    QVector<int> candidateChildNodeIds;
     for (int i = 0; i < bestArea->childRects.size(); ++i) {
         const int childNodeId = i < bestArea->childNodeIds.size() ? bestArea->childNodeIds[i] : 0;
         if (movingNodeId > 0 && childNodeId == movingNodeId)
@@ -1491,11 +1630,13 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
         candidateChildTools.append(i < bestArea->childPreviewTools.size()
                                        ? bestArea->childPreviewTools[i]
                                        : QStringLiteral("cube"));
+        candidateChildNodeIds.append(childNodeId);
     }
 
-    auto setPreviewChildren = [&target, &candidateChildRects, &candidateChildTools](qreal shift) {
+    auto setPreviewChildren = [&target, &candidateChildRects, &candidateChildTools, &candidateChildNodeIds](qreal shift) {
         target.previewChildRects.clear();
         target.previewChildTools.clear();
+        target.previewChildNodeIds.clear();
         const int startIndex = qBound(0, target.insertIndex, candidateChildRects.size());
         for (int i = 0; i < candidateChildRects.size(); ++i) {
             target.previewChildRects.append(i >= startIndex ? candidateChildRects[i].translated(0.0, shift)
@@ -1503,6 +1644,7 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
             target.previewChildTools.append(i < candidateChildTools.size()
                                                 ? candidateChildTools[i]
                                                 : QStringLiteral("cube"));
+            target.previewChildNodeIds.append(i < candidateChildNodeIds.size() ? candidateChildNodeIds[i] : 0);
         }
     };
     target.zoneRect = contentRect;
@@ -1532,6 +1674,12 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
             target.previewCutSeparatorY = target.placeholderRect.bottom() + ChildGap * 0.5;
     }
 
+    if (sourceArea == bestArea && sourceChildIndex >= 0 && target.insertIndex == sourceChildIndex) {
+        cancelTargetPreview();
+        buildSourcePreview();
+        return target;
+    }
+
     QRectF changedOldRect = bestArea->rect;
     QRectF changedNewRect = expandedGroupRectForPreview(bestArea->rect,
                                                         target.placeholderRect,
@@ -1549,13 +1697,19 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
     for (int i = containingAreas.size() - 1; i >= 0; --i) {
         const GroupHitArea *area = containingAreas[i];
         QRectF expandedRect;
+        QVector<QRectF> expandedChildRects = area->childRects;
+        QVector<QString> expandedChildTools = area->childPreviewTools;
+        QVector<int> expandedChildNodeIds = area->childNodeIds;
         if (area == bestArea) {
             expandedRect = changedNewRect;
         } else {
             QRectF oldChildRect;
-            for (const QRectF &childRect : area->childRects) {
+            int changedChildIndex = -1;
+            for (int childIndex = 0; childIndex < area->childRects.size(); ++childIndex) {
+                const QRectF childRect = area->childRects[childIndex];
                 if (childRect.contains(changedOldRect.center())) {
                     oldChildRect = childRect;
+                    changedChildIndex = childIndex;
                     break;
                 }
             }
@@ -1564,10 +1718,21 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
                 continue;
 
             expandedRect = expandedGroupRectForChangedChild(area->rect, area->childRects, oldChildRect, changedNewRect);
+            if (changedChildIndex >= 0 && changedChildIndex < expandedChildRects.size()) {
+                const qreal childShift = changedNewRect.height() - oldChildRect.height();
+                expandedChildRects[changedChildIndex] = changedNewRect;
+                if (!qFuzzyIsNull(childShift)) {
+                    for (int childIndex = changedChildIndex + 1; childIndex < expandedChildRects.size(); ++childIndex)
+                        expandedChildRects[childIndex].translate(0.0, childShift);
+                }
+            }
         }
 
         if (expandedRect != area->rect) {
             target.expandedGroupRects.prepend(expandedRect);
+            target.expandedGroupChildRects.prepend(expandedChildRects);
+            target.expandedGroupChildTools.prepend(expandedChildTools);
+            target.expandedGroupChildNodeIds.prepend(expandedChildNodeIds);
             target.expandedGroupOperations.prepend(area->operation);
         }
 
@@ -1582,6 +1747,10 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
             childRect.translate(0.0, targetPreviewShift);
         for (QRectF &expandedRect : target.expandedGroupRects)
             expandedRect.translate(0.0, targetPreviewShift);
+        for (QVector<QRectF> &childRects : target.expandedGroupChildRects) {
+            for (QRectF &childRect : childRects)
+                childRect.translate(0.0, targetPreviewShift);
+        }
     }
 
     return target;
