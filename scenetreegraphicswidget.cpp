@@ -373,7 +373,7 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
 
     const bool hasTreePreview = target.sourceGroupRect.isValid()
                                 || target.previewGroupRect.isValid()
-                                || !target.expandedGroupRects.isEmpty();
+                                || !target.expandedGroups.isEmpty();
     setTreeItemsVisible(!hasTreePreview);
 
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout)

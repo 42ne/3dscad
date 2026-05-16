@@ -35,21 +35,15 @@ void SceneTreePreviewRenderer::clear()
 
 void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target)
 {
-    for (int i = 0; i < target.expandedGroupRects.size(); ++i) {
-        const QRectF expandedRect = target.expandedGroupRects[i];
+    for (const GroupPreview &expandedGroup : target.expandedGroups) {
+        const QRectF expandedRect = expandedGroup.rect;
         if ((target.previewGroupRect.isValid() && expandedRect == target.previewGroupRect)
             || (target.sourceGroupRect.isValid() && expandedRect == target.sourceGroupRect)) {
             continue;
         }
 
-        const SceneDocument::TreeNode::Operation operation = i < target.expandedGroupOperations.size()
-                                                                 ? target.expandedGroupOperations[i]
-                                                                 : SceneDocument::TreeNode::Union;
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, operation, expandedRect, 0.0);
-        const QVector<ChildLayout> children = i < target.expandedGroupChildren.size()
-                                                  ? target.expandedGroupChildren[i]
-                                                  : QVector<ChildLayout>();
-        addPreviewChildren(children, target.previewGroupRect);
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, expandedGroup.operation, expandedRect, 0.0);
+        addPreviewChildren(expandedGroup.children, target.previewGroupRect);
     }
 }
 
@@ -60,8 +54,8 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target)
                                             && target.previewGroupRect.contains(target.sourceGroupRect.center());
     bool sourceGroupCoveredByExpandedGroup = false;
     if (target.sourceGroupRect.isValid()) {
-        for (const QRectF &expandedRect : target.expandedGroupRects) {
-            if (expandedRect.contains(target.sourceGroupRect.center())) {
+        for (const GroupPreview &expandedGroup : target.expandedGroups) {
+            if (expandedGroup.rect.contains(target.sourceGroupRect.center())) {
                 sourceGroupCoveredByExpandedGroup = true;
                 break;
             }

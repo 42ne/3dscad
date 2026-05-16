@@ -37,6 +37,45 @@ QVector<SceneTreeLayout::ChildLayout> childrenWithoutMovingNode(const SceneTreeL
     return children;
 }
 
+bool expandedParentPreview(const SceneTreeLayout::GroupHitArea &area,
+                           const QVector<SceneTreeLayout::ChildLayout> &baseChildren,
+                           const QRectF &changedOldRect,
+                           const QRectF &changedNewRect,
+                           QRectF *expandedRect,
+                           QVector<SceneTreeLayout::ChildLayout> *expandedChildren)
+{
+    QVector<QRectF> childRects;
+    for (const SceneTreeLayout::ChildLayout &child : baseChildren)
+        childRects.append(child.rect);
+
+    QRectF oldChildRect;
+    int changedChildIndex = -1;
+    for (int childIndex = 0; childIndex < baseChildren.size(); ++childIndex) {
+        if (baseChildren[childIndex].rect.contains(changedOldRect.center())) {
+            oldChildRect = baseChildren[childIndex].rect;
+            changedChildIndex = childIndex;
+            break;
+        }
+    }
+
+    if (!oldChildRect.isValid())
+        return false;
+
+    QVector<SceneTreeLayout::ChildLayout> children = baseChildren;
+    const qreal childShift = changedNewRect.height() - oldChildRect.height();
+    children[changedChildIndex].rect = changedNewRect;
+    if (!qFuzzyIsNull(childShift)) {
+        for (int childIndex = changedChildIndex + 1; childIndex < children.size(); ++childIndex)
+            children[childIndex].rect.translate(0.0, childShift);
+    }
+
+    if (expandedRect)
+        *expandedRect = expandedGroupRectForChangedChild(area.rect, childRects, oldChildRect, changedNewRect);
+    if (expandedChildren)
+        *expandedChildren = children;
+    return true;
+}
+
 } // namespace
 
 void SceneTreeLayout::clear()
@@ -110,9 +149,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         target.slotMarkerRect = QRectF();
         target.previewGroupRect = QRectF();
         target.previewChildren.clear();
-        target.expandedGroupRects.clear();
-        target.expandedGroupChildren.clear();
-        target.expandedGroupOperations.clear();
+        target.expandedGroups.clear();
     };
 
     auto buildSourceAncestorPreviews = [&target, this, sourceArea]() {
@@ -125,37 +162,18 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
             if (area.depth >= sourceArea->depth || !area.rect.contains(sourceArea->rect.center()))
                 continue;
 
-            QVector<ChildLayout> expandedChildren = area.children;
-            QVector<QRectF> expandedChildRects;
-            for (const ChildLayout &child : expandedChildren)
-                expandedChildRects.append(child.rect);
-
-            QRectF oldChildRect;
-            int changedChildIndex = -1;
-            for (int childIndex = 0; childIndex < expandedChildren.size(); ++childIndex) {
-                if (expandedChildren[childIndex].rect.contains(changedOldRect.center())) {
-                    oldChildRect = expandedChildren[childIndex].rect;
-                    changedChildIndex = childIndex;
-                    break;
-                }
-            }
-
-            if (!oldChildRect.isValid())
+            QVector<ChildLayout> expandedChildren;
+            QRectF expandedRect;
+            if (!expandedParentPreview(area,
+                                       area.children,
+                                       changedOldRect,
+                                       changedNewRect,
+                                       &expandedRect,
+                                       &expandedChildren)) {
                 continue;
-
-            QRectF expandedRect = expandedGroupRectForChangedChild(area.rect, expandedChildRects, oldChildRect, changedNewRect);
-            if (changedChildIndex >= 0 && changedChildIndex < expandedChildren.size()) {
-                const qreal childShift = changedNewRect.height() - oldChildRect.height();
-                expandedChildren[changedChildIndex].rect = changedNewRect;
-                if (!qFuzzyIsNull(childShift)) {
-                    for (int childIndex = changedChildIndex + 1; childIndex < expandedChildren.size(); ++childIndex)
-                        expandedChildren[childIndex].rect.translate(0.0, childShift);
-                }
             }
 
-            target.expandedGroupRects.prepend(expandedRect);
-            target.expandedGroupChildren.prepend(expandedChildren);
-            target.expandedGroupOperations.prepend(area.operation);
+            target.expandedGroups.prepend({expandedRect, area.operation, expandedChildren});
             changedOldRect = area.rect;
             changedNewRect = expandedRect;
         }
@@ -274,43 +292,24 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                                                                 sourceRemovalShift,
                                                                                 false)
                                                     : area->children;
-        QVector<QRectF> expandedChildRects;
-        for (const ChildLayout &child : expandedChildren)
-            expandedChildRects.append(child.rect);
 
         if (area == bestArea) {
             expandedRect = changedNewRect;
         } else {
-            QRectF oldChildRect;
-            int changedChildIndex = -1;
-            for (int childIndex = 0; childIndex < expandedChildren.size(); ++childIndex) {
-                if (expandedChildren[childIndex].rect.contains(changedOldRect.center())) {
-                    oldChildRect = expandedChildren[childIndex].rect;
-                    changedChildIndex = childIndex;
-                    break;
-                }
-            }
-
-            if (!oldChildRect.isValid())
+            if (!expandedParentPreview(*area,
+                                       expandedChildren,
+                                       changedOldRect,
+                                       changedNewRect,
+                                       &expandedRect,
+                                       &expandedChildren)) {
                 continue;
-
-            containsChangedChild = true;
-            expandedRect = expandedGroupRectForChangedChild(area->rect, expandedChildRects, oldChildRect, changedNewRect);
-            if (changedChildIndex >= 0 && changedChildIndex < expandedChildren.size()) {
-                const qreal childShift = changedNewRect.height() - oldChildRect.height();
-                expandedChildren[changedChildIndex].rect = changedNewRect;
-                if (!qFuzzyIsNull(childShift)) {
-                    for (int childIndex = changedChildIndex + 1; childIndex < expandedChildren.size(); ++childIndex)
-                        expandedChildren[childIndex].rect.translate(0.0, childShift);
-                }
             }
+            containsChangedChild = true;
         }
 
         const bool isAncestorOfChangedGroup = area != bestArea && containsChangedChild;
         if (expandedRect != area->rect || isAncestorOfChangedGroup) {
-            target.expandedGroupRects.prepend(expandedRect);
-            target.expandedGroupChildren.prepend(expandedChildren);
-            target.expandedGroupOperations.prepend(area->operation);
+            target.expandedGroups.prepend({expandedRect, area->operation, expandedChildren});
         }
 
         changedOldRect = area->rect;
@@ -323,10 +322,9 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         target.slotMarkerRect.translate(0.0, targetPreviewShift);
         for (ChildLayout &child : target.previewChildren)
             child.rect.translate(0.0, targetPreviewShift);
-        for (QRectF &expandedRect : target.expandedGroupRects)
-            expandedRect.translate(0.0, targetPreviewShift);
-        for (QVector<ChildLayout> &children : target.expandedGroupChildren) {
-            for (ChildLayout &child : children)
+        for (GroupPreview &expandedGroup : target.expandedGroups) {
+            expandedGroup.rect.translate(0.0, targetPreviewShift);
+            for (ChildLayout &child : expandedGroup.children)
                 child.rect.translate(0.0, targetPreviewShift);
         }
     }

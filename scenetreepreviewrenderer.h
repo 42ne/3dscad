@@ -16,6 +16,7 @@ public:
     using ChildLayout = SceneTreeLayout::ChildLayout;
     using DropTarget = SceneTreeLayout::DropTarget;
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
+    using GroupPreview = SceneTreeLayout::GroupPreview;
 
     SceneTreePreviewRenderer(QGraphicsScene *scene,
                              QVector<QGraphicsItem *> *previewItems,

@@ -30,6 +30,13 @@ public:
         QVector<ChildLayout> children;
     };
 
+    struct GroupPreview
+    {
+        QRectF rect;
+        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+        QVector<ChildLayout> children;
+    };
+
     struct DropTarget
     {
         bool hasTarget = false;
@@ -46,10 +53,8 @@ public:
         QRectF previewGroupRect;
         SceneDocument::TreeNode::Operation previewGroupOperation = SceneDocument::TreeNode::Union;
         qreal previewCutSeparatorY = 0.0;
-        QVector<QRectF> expandedGroupRects;
-        QVector<QVector<ChildLayout>> expandedGroupChildren;
+        QVector<GroupPreview> expandedGroups;
         QVector<ChildLayout> previewChildren;
-        QVector<SceneDocument::TreeNode::Operation> expandedGroupOperations;
     };
 
     void clear();
