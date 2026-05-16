@@ -67,6 +67,7 @@ private:
 
     struct DropTarget
     {
+        bool hasTarget = false;
         int parentGroupId = 0;
         int insertIndex = -1;
         QRectF zoneRect;

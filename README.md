@@ -21,7 +21,8 @@ Implemented:
 - Graphics-tree selection is synchronized with the classic tree, 3D viewport selection, Properties dock, and generated OpenSCAD code highlight.
 - Graphics-tree primitives use shape icons plus stable object numbers instead of text-only cards.
 - Graphics-tree groups use operation icons, nested panels, and dedicated `difference` base/cut regions with reserved cut-space even when empty.
-- Graphics-tree live drag preview now shows future container expansion, source/target reserved slots, and a snapshot of the moved node instead of a second temporary document node.
+- Graphics-tree live drag preview now shows future container expansion, source/target reserved slots, real toolbar-drop previews, and a snapshot of the moved node instead of a second temporary document node.
+- Active graphics-tree drags use a green dashed focus outline: an ellipse for primitives and a rounded rectangle for group blocks.
 - Graphics-tree move preview suppresses self-drop and removes the moved node from its source container preview while dragging.
 - Graphics-tree supports `Delete`/`Backspace` for the selected tree node through the same undoable commands as the classic tree.
 - The graphics tree uses a dark grid canvas with mouse panning and hidden scroll bars.

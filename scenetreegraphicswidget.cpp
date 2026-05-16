@@ -639,6 +639,37 @@ void addReservedPreviewSlot(QGraphicsScene *scene, QVector<QGraphicsItem *> *ite
     appendPreviewItem(items, slot);
 }
 
+QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
+{
+    QPainterPath path;
+    SceneDocument::TreeNode::Operation operation;
+    if (operationForToolName(tool, &operation)) {
+        path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
+        return path;
+    }
+
+    const QRectF iconRect(rect.left() + 20.0,
+                          rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
+                          PrimitiveIconSize,
+                          PrimitiveIconSize);
+    path.addEllipse(iconRect.adjusted(-6.0, -6.0, 6.0, 6.0));
+    return path;
+}
+
+QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene,
+                                       QVector<QGraphicsItem *> *items,
+                                       const QString &tool,
+                                       const QRectF &rect,
+                                       qreal zValue)
+{
+    auto *outline = scene->addPath(dragFocusOutlinePath(tool, rect),
+                                   QPen(QColor(74, 190, 116), 2, Qt::DashLine),
+                                   Qt::NoBrush);
+    outline->setZValue(zValue);
+    appendPreviewItem(items, outline);
+    return outline;
+}
+
 class TreeNodeDragHandleItem : public QGraphicsRectItem
 {
 public:
@@ -702,6 +733,8 @@ protected:
         moveDragSnapshot(dropPosition);
         delete m_dragSnapshot;
         m_dragSnapshot = nullptr;
+        delete m_dragOutline;
+        m_dragOutline = nullptr;
         if (m_onPreviewFinished)
             m_onPreviewFinished();
         if (m_onDropped)
@@ -726,13 +759,20 @@ private:
         m_dragSnapshot = scene()->addPixmap(pixmap);
         m_dragSnapshot->setOpacity(0.88);
         m_dragSnapshot->setZValue(120.0);
+        m_dragOutline = scene()->addPath(dragFocusOutlinePath(m_label, QRectF(QPointF(0.0, 0.0), m_sourceRect.size())),
+                                         QPen(QColor(74, 190, 116), 2, Qt::DashLine),
+                                         Qt::NoBrush);
+        m_dragOutline->setZValue(121.0);
         moveDragSnapshot(scenePosition);
     }
 
     void moveDragSnapshot(const QPointF &scenePosition)
     {
+        const QPointF dragPos = scenePosition - m_dragOffset;
         if (m_dragSnapshot)
-            m_dragSnapshot->setPos(scenePosition - m_dragOffset);
+            m_dragSnapshot->setPos(dragPos);
+        if (m_dragOutline)
+            m_dragOutline->setPos(dragPos);
     }
 
     int m_nodeId = 0;
@@ -745,6 +785,7 @@ private:
     std::function<void()> m_onPreviewFinished;
     std::function<void(int, const QPointF &)> m_onDropped;
     QGraphicsPixmapItem *m_dragSnapshot = nullptr;
+    QGraphicsPathItem *m_dragOutline = nullptr;
 };
 
 class TreeNodeSelectionItem : public QGraphicsRectItem
@@ -1225,7 +1266,10 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     if (!target.zoneRect.isValid()) {
         target.zoneRect = QRectF(scenePosition - QPointF(effectivePreviewSize.width() * 0.5, effectivePreviewSize.height() * 0.5),
                                  effectivePreviewSize);
-        target.placeholderRect = target.zoneRect;
+        if (movingNodeId <= 0) {
+            target.placeholderRect = target.zoneRect;
+            target.hasTarget = true;
+        }
     }
 
     for (int i = 0; i < target.expandedGroupRects.size(); ++i) {
@@ -1243,7 +1287,10 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
         m_dropPreviewItems.append(expanded);
     }
 
-    if (target.sourceGroupRect.isValid()) {
+    const bool sourceGroupCoveredByTarget = target.sourceGroupRect.isValid()
+                                            && target.previewGroupRect.isValid()
+                                            && target.previewGroupRect.contains(target.sourceGroupRect.center());
+    if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget) {
         addPreviewGroupFrame(m_graphicsScene,
                              &m_dropPreviewItems,
                              target.sourceGroupRect,
@@ -1282,11 +1329,28 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                         fillForTool(childTool));
     }
 
-    if (movingNodeId > 0 && target.sourceRect.isValid())
+    const bool sourceSlotCoveredByTarget = target.hasTarget
+                                           && target.sourceRect.isValid()
+                                           && target.placeholderRect.intersects(target.sourceRect);
+    if (movingNodeId > 0 && target.sourceRect.isValid() && !sourceSlotCoveredByTarget)
         addReservedPreviewSlot(m_graphicsScene, &m_dropPreviewItems, target.sourceRect);
 
-    Q_UNUSED(previewTool);
-    addReservedPreviewSlot(m_graphicsScene, &m_dropPreviewItems, target.placeholderRect);
+    if (target.hasTarget) {
+        if (movingNodeId > 0) {
+            addReservedPreviewSlot(m_graphicsScene, &m_dropPreviewItems, target.placeholderRect);
+        } else {
+            addPreviewBlock(m_graphicsScene,
+                            &m_dropPreviewItems,
+                            previewTool,
+                            target.placeholderRect,
+                            fillForTool(previewTool));
+            addDragFocusOutline(m_graphicsScene,
+                                &m_dropPreviewItems,
+                                previewTool,
+                                target.placeholderRect,
+                                90.0);
+        }
+    }
 }
 
 void SceneTreeGraphicsWidget::clearDropPreview()
@@ -1352,6 +1416,7 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
     if (!bestArea)
         return target;
 
+    target.hasTarget = true;
     target.parentGroupId = bestArea->groupId;
     target.previewGroupOperation = bestArea->operation;
     target.previewCutSeparatorY = bestArea->cutSeparatorY;
