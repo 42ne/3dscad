@@ -270,7 +270,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPointF &scenePosition)
 {
     if (m_toolDroppedCallback) {
-        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition);
+        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition, previewSizeForTool(toolName));
         m_toolDroppedCallback(toolName, target.parentGroupId, target.insertIndex);
     }
 }
@@ -287,7 +287,14 @@ QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNod
 void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scenePosition)
 {
     if (m_treeNodeDroppedCallback) {
-        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition);
+        QSizeF previewSize = defaultPreviewSize();
+        if (m_scene) {
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+            if (node)
+                previewSize = previewSizeForTool(previewToolForNode(*node));
+        }
+
+        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition, previewSize, nodeId);
         m_treeNodeDroppedCallback(nodeId, target.parentGroupId, target.insertIndex);
     }
 }
@@ -376,4 +383,3 @@ ShapeNode::Type SceneTreeGraphicsWidget::typeForPrimitive(int shapeId) const
     const ShapeNode *shape = m_scene->shapeById(shapeId);
     return shape ? shape->type : ShapeNode::Cube;
 }
-

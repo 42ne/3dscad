@@ -55,7 +55,7 @@ QGraphicsRectItem *addSoftShadow(QGraphicsScene *scene, const QRectF &rect, qrea
 QGraphicsPathItem *addRoundedPanel(QGraphicsScene *scene, const QRectF &rect, qreal radius, const QPen &pen, const QBrush &brush, qreal zValue);
 QString primitiveNumberText(const QString &label, int fallbackId);
 void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect);
-void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent, qreal symbolInset = 4.0);
+void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent, qreal symbolInset = 7.0);
 
 int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex = 0);
 QSizeF defaultPreviewSize();
@@ -78,13 +78,14 @@ QString labelForOperation(SceneDocument::TreeNode::Operation operation);
 QColor fillForTool(const QString &tool);
 QColor fillForOperation(SceneDocument::TreeNode::Operation operation);
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize);
+QRectF slotMarkerRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex);
 QRectF expandedGroupRectForPreview(const QRectF &groupRect, const QRectF &placeholderRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize);
 QRectF expandedGroupRectForChangedChild(const QRectF &groupRect, const QVector<QRectF> &childRects, const QRectF &oldChildRect, const QRectF &newChildRect);
 
 void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item);
-void addSourceRemovalMask(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect, const QColor &fill);
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect);
 QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect, qreal zValue);
+QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect, qreal zValue);
 
 QGraphicsItem *createTreeNodeDragHandleItem(int nodeId, const QString &label, const QRectF &rect, const QRectF &sourceRect, std::function<void(int)> onSelected, const QSizeF &previewSize, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(int, const QPointF &)> onDropped);
 QGraphicsItem *createTreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal zValue, std::function<void(int)> onSelected);

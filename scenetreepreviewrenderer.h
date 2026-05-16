@@ -27,7 +27,7 @@ public:
 
 private:
     void addExpandedGroupPreviews(const DropTarget &target);
-    void addSourceGroupPreview(const DropTarget &target, int movingNodeId);
+    void addSourceGroupPreview(const DropTarget &target);
     void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);
     void addPreviewExistingNode(int nodeId, const QRectF &rect);
     void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);

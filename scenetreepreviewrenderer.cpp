@@ -15,10 +15,10 @@ SceneTreePreviewRenderer::SceneTreePreviewRenderer(QGraphicsScene *scene,
 {
 }
 
-void SceneTreePreviewRenderer::render(const DropTarget &target, const QString &previewTool, int movingNodeId)
+void SceneTreePreviewRenderer::render(const DropTarget &target, const QString &previewTool, int)
 {
     addExpandedGroupPreviews(target);
-    addSourceGroupPreview(target, movingNodeId);
+    addSourceGroupPreview(target);
     addTargetGroupPreview(target, previewTool);
 }
 
@@ -53,19 +53,23 @@ void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target
     }
 }
 
-void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target, int movingNodeId)
+void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target)
 {
     const bool sourceGroupCoveredByTarget = target.sourceGroupRect.isValid()
                                             && target.previewGroupRect.isValid()
                                             && target.previewGroupRect.contains(target.sourceGroupRect.center());
-    if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget) {
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY);
-        if (movingNodeId > 0 && target.sourceRect.isValid()) {
-            addSourceRemovalMask(m_scene,
-                                 m_previewItems,
-                                 target.sourceRect,
-                                 fillForOperation(target.sourceGroupOperation));
+    bool sourceGroupCoveredByExpandedGroup = false;
+    if (target.sourceGroupRect.isValid()) {
+        for (const QRectF &expandedRect : target.expandedGroupRects) {
+            if (expandedRect.contains(target.sourceGroupRect.center())) {
+                sourceGroupCoveredByExpandedGroup = true;
+                break;
+            }
         }
+    }
+
+    if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget && !sourceGroupCoveredByExpandedGroup) {
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY);
         addPreviewChildren(target.sourceChildren);
     }
 }
@@ -79,6 +83,10 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
     addPreviewChildren(target.previewChildren);
 
     if (target.hasTarget) {
+        addDropSlotMarker(m_scene,
+                          m_previewItems,
+                          target.slotMarkerRect.isValid() ? target.slotMarkerRect : target.placeholderRect,
+                          88.0);
         SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, previewTool, target.placeholderRect);
         addDragFocusOutline(m_scene,
                             m_previewItems,

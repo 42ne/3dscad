@@ -206,15 +206,45 @@ QString primitiveNumberText(const QString &label, int fallbackId)
 
 int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex)
 {
-    int insertIndex = childRects.size();
-    for (int i = minimumIndex; i < childRects.size(); ++i) {
-        if (y < childRects[i].center().y()) {
-            insertIndex = i;
-            break;
+    if (childRects.isEmpty())
+        return minimumIndex;
+
+    const int minIndex = qBound(0, minimumIndex, childRects.size());
+    const qreal hysteresis = qMax<qreal>(ChildGap * 2.0, 20.0);
+
+    if (minIndex == 0 && y <= childRects.first().top() + hysteresis)
+        return 0;
+
+    for (int slot = qMax(1, minIndex); slot < childRects.size(); ++slot) {
+        const qreal gapTop = childRects[slot - 1].bottom();
+        const qreal gapBottom = childRects[slot].top();
+        if (y >= gapTop - hysteresis && y <= gapBottom + hysteresis)
+            return slot;
+    }
+
+    if (y >= childRects.last().bottom() - hysteresis)
+        return childRects.size();
+
+    int bestSlot = minIndex;
+    qreal bestDistance = std::numeric_limits<qreal>::max();
+    for (int slot = minIndex; slot <= childRects.size(); ++slot) {
+        qreal slotY = 0.0;
+        if (slot == 0) {
+            slotY = childRects.first().top();
+        } else if (slot == childRects.size()) {
+            slotY = childRects.last().bottom();
+        } else {
+            slotY = (childRects[slot - 1].bottom() + childRects[slot].top()) * 0.5;
+        }
+
+        const qreal distance = qAbs(y - slotY);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestSlot = slot;
         }
     }
 
-    return qMax(minimumIndex, insertIndex);
+    return bestSlot;
 }
 
 QSizeF defaultPreviewSize()
@@ -335,6 +365,26 @@ QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QR
     return QRectF(contentRect.left(), childRects[insertIndex].top(), previewSize.width(), previewSize.height());
 }
 
+QRectF slotMarkerRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex)
+{
+    const qreal markerWidth = childRects.isEmpty()
+                                  ? qMax(contentRect.width(), PrimitiveWidth)
+                                  : qMax(contentRect.width(), childRects.first().width());
+    qreal y = contentRect.top();
+
+    if (childRects.isEmpty()) {
+        y = contentRect.top();
+    } else if (insertIndex <= 0) {
+        y = childRects.first().top() - ChildGap * 0.5;
+    } else if (insertIndex >= childRects.size()) {
+        y = childRects.last().bottom() + ChildGap * 0.5;
+    } else {
+        y = (childRects[insertIndex - 1].bottom() + childRects[insertIndex].top()) * 0.5;
+    }
+
+    return QRectF(contentRect.left(), y, markerWidth, 1.0);
+}
+
 QRectF expandedGroupRectForPreview(const QRectF &groupRect, const QRectF &placeholderRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
 {
     QRectF expanded = groupRect;
@@ -380,18 +430,6 @@ void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
     items->append(item);
 }
 
-void addSourceRemovalMask(QGraphicsScene *scene,
-                          QVector<QGraphicsItem *> *items,
-                          const QRectF &rect,
-                          const QColor &fill)
-{
-    auto *mask = scene->addRect(rect.adjusted(-2.0, -2.0, 2.0, 2.0),
-                               Qt::NoPen,
-                               QBrush(fill));
-    mask->setZValue(55.0);
-    appendPreviewItem(items, mask);
-}
-
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
 {
     QPainterPath path;
@@ -421,6 +459,40 @@ QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene,
     outline->setZValue(zValue);
     appendPreviewItem(items, outline);
     return outline;
+}
+
+QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene,
+                                     QVector<QGraphicsItem *> *items,
+                                     const QRectF &rect,
+                                     qreal zValue)
+{
+    const qreal y = rect.top();
+    const qreal left = rect.left() - 10.0;
+    const qreal right = rect.right() + 10.0;
+    const qreal arrow = 8.0;
+
+    QPainterPath path;
+    path.moveTo(left, y);
+    path.lineTo(right - arrow, y);
+    path.moveTo(right - arrow, y - arrow * 0.55);
+    path.lineTo(right, y);
+    path.lineTo(right - arrow, y + arrow * 0.55);
+    path.moveTo(left, y - 4.0);
+    path.lineTo(left + 8.0, y);
+    path.lineTo(left, y + 4.0);
+
+    auto *marker = scene->addPath(path,
+                                  QPen(QColor(74, 190, 116, 185), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
+                                  Qt::NoBrush);
+    marker->setZValue(zValue);
+    appendPreviewItem(items, marker);
+
+    auto *shadow = scene->addPath(path,
+                                  QPen(QColor(0, 0, 0, 55), 6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
+                                  Qt::NoBrush);
+    shadow->setZValue(zValue - 0.1);
+    appendPreviewItem(items, shadow);
+    return marker;
 }
 
 class TreeNodeDragHandleItem : public QGraphicsRectItem
@@ -484,24 +556,31 @@ protected:
             m_previewActive = true;
         }
         if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), m_previewSize, m_label);
+            m_onPreviewMoved(draggedRectCenter(event->scenePos()), m_previewSize, m_label);
         event->accept();
     }
 
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override
     {
         const QPointF dropPosition = event->scenePos();
+        const QPointF dropCenter = draggedRectCenter(dropPosition);
+        const bool wasPreviewActive = m_previewActive;
+        const int nodeId = m_nodeId;
+        const auto onPreviewFinished = m_onPreviewFinished;
+        const auto onDropped = m_onDropped;
+
         moveDragSnapshot(dropPosition);
         delete m_dragSnapshot;
         m_dragSnapshot = nullptr;
         delete m_dragOutline;
         m_dragOutline = nullptr;
-        if (m_previewActive && m_onPreviewFinished)
-            m_onPreviewFinished();
-        if (m_previewActive && m_onDropped)
-            m_onDropped(m_nodeId, dropPosition);
         m_previewActive = false;
         event->accept();
+
+        if (wasPreviewActive && onPreviewFinished)
+            onPreviewFinished();
+        if (wasPreviewActive && onDropped)
+            onDropped(nodeId, dropCenter);
     }
 
 private:
@@ -535,6 +614,12 @@ private:
             m_dragSnapshot->setPos(dragPos);
         if (m_dragOutline)
             m_dragOutline->setPos(dragPos);
+    }
+
+    QPointF draggedRectCenter(const QPointF &scenePosition) const
+    {
+        return scenePosition - m_dragOffset + QPointF(m_previewSize.width() * 0.5,
+                                                      m_previewSize.height() * 0.5);
     }
 
     int m_nodeId = 0;
@@ -615,9 +700,9 @@ public:
         const QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         if (operationForToolName(m_label, &operation))
-            paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125), 7.0);
+            paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125));
         else
-            paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect.adjusted(3.0, 3.0, -3.0, -3.0));
+            paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect);
     }
 
 protected:
@@ -627,11 +712,16 @@ protected:
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override
     {
         const QPointF dropPosition = event->scenePos();
-        if (m_onPreviewFinished)
-            m_onPreviewFinished();
-        if (m_onDropped)
-            m_onDropped(m_label, dropPosition);
+        const QString label = m_label;
+        const auto onPreviewFinished = m_onPreviewFinished;
+        const auto onDropped = m_onDropped;
+
         event->accept();
+
+        if (onPreviewFinished)
+            onPreviewFinished();
+        if (onDropped)
+            onDropped(label, dropPosition);
     }
 
 private:

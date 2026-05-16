@@ -151,14 +151,14 @@ public:
         const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
         paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
-        const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, 18.0, 18.0);
+        const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, PrimitiveIconSize, PrimitiveIconSize);
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
-        paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(32.0, 7.0), QColor(24, 34, 44));
+        paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
 
         if (m_empty) {
             paintLabel(painter,
                        QStringLiteral("empty"),
-                       QPointF(m_rect.left() + GroupPadding, m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0),
+                       QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0, m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0),
                        QColor(95, 98, 105));
         }
 

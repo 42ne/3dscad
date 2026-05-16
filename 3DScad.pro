@@ -24,6 +24,10 @@ SOURCES += \
     scenecommands.cpp \
     scenetreegraphicshelpers.cpp \
     scenetreegraphicswidget.cpp \
+    scenetreelayout.cpp \
+    scenetreenoderenderer.cpp \
+    scenetreepreviewrenderer.cpp \
+    scenetreetoolbarrenderer.cpp \
     scenetree.cpp \
     scenemesh.cpp \
     scenedocument.cpp \
@@ -38,6 +42,10 @@ HEADERS += \
     scenecommands.h \
     scenetreegraphicshelpers.h \
     scenetreegraphicswidget.h \
+    scenetreelayout.h \
+    scenetreenoderenderer.h \
+    scenetreepreviewrenderer.h \
+    scenetreetoolbarrenderer.h \
     scenetree.h \
     scenemesh.h \
     scenedocument.h \
