@@ -2,6 +2,7 @@
 #define SCENETREEGRAPHICSWIDGET_H
 
 #include "scenedocument.h"
+#include "scenetreelayout.h"
 
 #include <QGraphicsView>
 #include <QVector>
@@ -35,9 +36,14 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
-    struct DropTarget;
+    using ChildLayout = SceneTreeLayout::ChildLayout;
+    using DropTarget = SceneTreeLayout::DropTarget;
+    using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
     QRectF drawToolbar();
+    void resetGraphicsScene();
+    void drawTreeOrPlaceholder();
+    void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
     QRectF drawNode(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
     QRectF drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
@@ -46,65 +52,16 @@ private:
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
-    void addExpandedGroupPreviews(const DropTarget &target);
-    void addSourceGroupPreview(const DropTarget &target, int movingNodeId);
-    void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);
     void clearDropPreview();
     void setTreeItemsVisible(bool visible);
-    void addPreviewExistingNode(int nodeId, const QRectF &rect);
-    void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);
-    void addPreviewChildren(const QVector<QRectF> &rects,
-                            const QVector<QString> &tools,
-                            const QVector<int> &nodeIds,
-                            const QRectF &excludedRect = QRectF());
-    DropTarget dropTargetAt(const QPointF &scenePosition, const QSizeF &previewSize = QSizeF(), int movingNodeId = 0) const;
+    void updateSceneRect(const QRectF &toolbarRect);
     QString labelForPrimitive(int shapeId) const;
     ShapeNode::Type typeForPrimitive(int shapeId) const;
-    QString labelForGroup(SceneDocument::TreeNode::Operation operation) const;
-    QColor colorForGroup(SceneDocument::TreeNode::Operation operation) const;
 
 private:
-    struct GroupHitArea
-    {
-        QRectF rect;
-        int groupId = 0;
-        int depth = 0;
-        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        qreal cutSeparatorY = 0.0;
-        QVector<QRectF> childRects;
-        QVector<QString> childPreviewTools;
-        QVector<int> childNodeIds;
-    };
-
-    struct DropTarget
-    {
-        bool hasTarget = false;
-        int parentGroupId = 0;
-        int insertIndex = -1;
-        QRectF zoneRect;
-        QRectF sourceRect;
-        QRectF sourceGroupRect;
-        SceneDocument::TreeNode::Operation sourceGroupOperation = SceneDocument::TreeNode::Union;
-        qreal sourceCutSeparatorY = 0.0;
-        QVector<QRectF> sourceChildRects;
-        QVector<QString> sourceChildTools;
-        QRectF placeholderRect;
-        QRectF previewGroupRect;
-        SceneDocument::TreeNode::Operation previewGroupOperation = SceneDocument::TreeNode::Union;
-        qreal previewCutSeparatorY = 0.0;
-        QVector<QRectF> expandedGroupRects;
-        QVector<QVector<QRectF>> expandedGroupChildRects;
-        QVector<QVector<QString>> expandedGroupChildTools;
-        QVector<QVector<int>> expandedGroupChildNodeIds;
-        QVector<QRectF> previewChildRects;
-        QVector<QString> previewChildTools;
-        QVector<int> previewChildNodeIds;
-        QVector<SceneDocument::TreeNode::Operation> expandedGroupOperations;
-    };
-
     QGraphicsScene *m_graphicsScene = nullptr;
     const SceneDocument *m_scene = nullptr;
-    QVector<GroupHitArea> m_groupHitAreas;
+    SceneTreeLayout m_treeLayout;
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     std::function<void(const QString &, int, int)> m_toolDroppedCallback;

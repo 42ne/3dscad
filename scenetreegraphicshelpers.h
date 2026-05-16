@@ -70,6 +70,7 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);
 QColor fillForTool(const QString &tool);
+QColor fillForOperation(SceneDocument::TreeNode::Operation operation);
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize);
 QRectF expandedGroupRectForPreview(const QRectF &groupRect, const QRectF &placeholderRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize);
 QRectF expandedGroupRectForChangedChild(const QRectF &groupRect, const QVector<QRectF> &childRects, const QRectF &oldChildRect, const QRectF &newChildRect);

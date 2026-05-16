@@ -891,6 +891,18 @@ QColor fillForTool(const QString &tool)
     return QColor(219, 231, 246);
 }
 
+
+QColor fillForOperation(SceneDocument::TreeNode::Operation operation)
+{
+    if (operation == SceneDocument::TreeNode::Module)
+        return QColor(230, 232, 236);
+    if (operation == SceneDocument::TreeNode::Difference)
+        return QColor(247, 224, 204);
+    if (operation == SceneDocument::TreeNode::Intersection)
+        return QColor(226, 220, 247);
+    return QColor(216, 237, 226);
+}
+
 QGraphicsScene *createTreeGraphicsScene(QObject *parent)
 {
     return new TreeGraphicsScene(parent);
