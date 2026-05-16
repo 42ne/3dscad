@@ -48,6 +48,11 @@ private:
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
     QRectF drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
     QString previewToolForNode(const SceneDocument::TreeNode &node) const;
+    DropTarget dropTargetForToolAt(const QPointF &scenePosition,
+                                   const QSizeF &previewSize,
+                                   const QString &previewTool,
+                                   int movingNodeId,
+                                   bool allowFreeFloatingInsertion) const;
     void handleToolDrop(const QString &toolName, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);

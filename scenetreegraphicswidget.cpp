@@ -14,6 +14,30 @@
 
 using namespace SceneTreeGraphics;
 
+namespace {
+
+bool isRootOnlyTreeTool(const QString &tool)
+{
+    return tool == QStringLiteral("module");
+}
+
+SceneTreeLayout::DropTarget freeFloatingDropTarget(const QPointF &scenePosition,
+                                                   const QSizeF &previewSize,
+                                                   bool allowInsertion)
+{
+    SceneTreeLayout::DropTarget target;
+    target.zoneRect = QRectF(scenePosition - QPointF(previewSize.width() * 0.5,
+                                                     previewSize.height() * 0.5),
+                             previewSize);
+    if (allowInsertion) {
+        target.placeholderRect = target.zoneRect;
+        target.hasTarget = true;
+    }
+    return target;
+}
+
+} // namespace
+
 
 SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
@@ -270,12 +294,11 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPointF &scenePosition)
 {
     if (m_toolDroppedCallback) {
-        if (toolName == QStringLiteral("module")) {
-            m_toolDroppedCallback(toolName, 0, -1);
-            return;
-        }
-
-        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition, previewSizeForTool(toolName));
+        const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                      previewSizeForTool(toolName),
+                                                      toolName,
+                                                      0,
+                                                      false);
         m_toolDroppedCallback(toolName, target.parentGroupId, target.insertIndex);
     }
 }
@@ -287,6 +310,23 @@ QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNod
 
     const ShapeNode *shape = m_scene ? m_scene->shapeById(node.shapeId) : nullptr;
     return toolNameForPrimitiveType(shape ? shape->type : ShapeNode::Cube);
+}
+
+SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt(const QPointF &scenePosition,
+                                                                                 const QSizeF &previewSize,
+                                                                                 const QString &previewTool,
+                                                                                 int movingNodeId,
+                                                                                 bool allowFreeFloatingInsertion) const
+{
+    const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
+    if (isRootOnlyTreeTool(previewTool))
+        return freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
+
+    DropTarget target = m_treeLayout.dropTargetAt(scenePosition, effectivePreviewSize, movingNodeId);
+    if (!target.zoneRect.isValid())
+        target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
+
+    return target;
 }
 
 void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scenePosition)
@@ -302,12 +342,11 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
             }
         }
 
-        if (previewTool == QStringLiteral("module")) {
-            m_treeNodeDroppedCallback(nodeId, 0, -1);
-            return;
-        }
-
-        const DropTarget target = m_treeLayout.dropTargetAt(scenePosition, previewSize, nodeId);
+        const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                      previewSize,
+                                                      previewTool,
+                                                      nodeId,
+                                                      false);
         m_treeNodeDroppedCallback(nodeId, target.parentGroupId, target.insertIndex);
     }
 }
@@ -326,31 +365,11 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     clearDropPreview();
 
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
-    if (previewTool == QStringLiteral("module")) {
-        DropTarget target;
-        target.zoneRect = QRectF(scenePosition - QPointF(effectivePreviewSize.width() * 0.5,
-                                                         effectivePreviewSize.height() * 0.5),
-                                 effectivePreviewSize);
-        if (movingNodeId <= 0) {
-            target.placeholderRect = target.zoneRect;
-            target.hasTarget = true;
-        }
-
-        setTreeItemsVisible(true);
-        SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout)
-            .render(target, previewTool, movingNodeId);
-        return;
-    }
-
-    DropTarget target = m_treeLayout.dropTargetAt(scenePosition, effectivePreviewSize, movingNodeId);
-    if (!target.zoneRect.isValid()) {
-        target.zoneRect = QRectF(scenePosition - QPointF(effectivePreviewSize.width() * 0.5, effectivePreviewSize.height() * 0.5),
-                                 effectivePreviewSize);
-        if (movingNodeId <= 0) {
-            target.placeholderRect = target.zoneRect;
-            target.hasTarget = true;
-        }
-    }
+    const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                  effectivePreviewSize,
+                                                  previewTool,
+                                                  movingNodeId,
+                                                  movingNodeId <= 0);
 
     const bool hasTreePreview = target.sourceGroupRect.isValid()
                                 || target.previewGroupRect.isValid()
