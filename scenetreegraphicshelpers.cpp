@@ -86,64 +86,42 @@ QGraphicsPathItem *addRoundedPanel(QGraphicsScene *scene,
     return panel;
 }
 
-void addCenteredLabel(QGraphicsScene *scene, const QString &text, const QRectF &rect, const QColor &color)
-{
-    auto *label = scene->addSimpleText(text);
-    label->setBrush(color);
-    const QRectF labelRect = label->boundingRect();
-    label->setPos(rect.center() - QPointF(labelRect.width() * 0.5, labelRect.height() * 0.5 + 1.0));
-    label->setZValue(12.0);
-}
-
-void addPillLabel(QGraphicsScene *scene, const QString &text, const QPointF &position, const QColor &accent)
-{
-    auto *label = scene->addSimpleText(text);
-    label->setBrush(accent.darker(135));
-    const QRectF textRect = label->boundingRect();
-    const QRectF pillRect(position, QSizeF(textRect.width() + 12.0, textRect.height() + 4.0));
-    auto *pill = addRoundedPanel(scene, pillRect, 6.0, QPen(accent, 1), QBrush(QColor(255, 255, 255, 115)), 8.0);
-    pill->setZValue(8.0);
-    label->setPos(pillRect.left() + 6.0, pillRect.top() + 1.0);
-    label->setZValue(9.0);
-}
-
-void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF &rect)
+void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect)
 {
     const QColor outline(59, 95, 134);
     const QColor face(178, 207, 238);
     const QColor faceLight(221, 235, 248);
     const QColor faceDark(139, 176, 214);
 
+    painter->setPen(QPen(outline, 1));
     if (type == ShapeNode::Sphere) {
-        auto *sphere = scene->addEllipse(rect, QPen(outline, 1), QBrush(face));
-        auto *latitude = scene->addEllipse(rect.adjusted(3.0, 9.0, -3.0, -9.0), QPen(QColor(93, 127, 166), 1), Qt::NoBrush);
-        auto *highlight = scene->addEllipse(QRectF(rect.left() + rect.width() * 0.25,
-                                                   rect.top() + rect.height() * 0.18,
-                                                   rect.width() * 0.22,
-                                                   rect.height() * 0.16),
-                                            Qt::NoPen,
-                                            QBrush(QColor(255, 255, 255, 165)));
-        sphere->setZValue(5.0);
-        latitude->setZValue(6.0);
-        highlight->setZValue(7.0);
+        painter->setBrush(face);
+        painter->drawEllipse(rect);
+        painter->setPen(QPen(QColor(93, 127, 166), 1));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(rect.adjusted(3.0, 9.0, -3.0, -9.0));
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 255, 255, 165));
+        painter->drawEllipse(QRectF(rect.left() + rect.width() * 0.25,
+                                    rect.top() + rect.height() * 0.18,
+                                    rect.width() * 0.22,
+                                    rect.height() * 0.16));
         return;
     }
 
     if (type == ShapeNode::Cylinder) {
         const QRectF top(rect.left() + 3.0, rect.top() + 3.0, rect.width() - 6.0, rect.height() * 0.34);
         const QRectF bottom(top.left(), rect.bottom() - top.height() - 3.0, top.width(), top.height());
-        auto *body = scene->addRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()),
-                                    Qt::NoPen,
-                                    QBrush(face));
-        auto *left = scene->addLine(top.left(), top.center().y(), bottom.left(), bottom.center().y(), QPen(outline, 1));
-        auto *right = scene->addLine(top.right(), top.center().y(), bottom.right(), bottom.center().y(), QPen(outline, 1));
-        auto *bottomEllipse = scene->addEllipse(bottom, QPen(outline, 1), QBrush(faceDark));
-        auto *topEllipse = scene->addEllipse(top, QPen(outline, 1), QBrush(faceLight));
-        body->setZValue(5.0);
-        left->setZValue(6.0);
-        right->setZValue(6.0);
-        bottomEllipse->setZValue(7.0);
-        topEllipse->setZValue(8.0);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(face);
+        painter->drawRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()));
+        painter->setPen(QPen(outline, 1));
+        painter->drawLine(top.left(), top.center().y(), bottom.left(), bottom.center().y());
+        painter->drawLine(top.right(), top.center().y(), bottom.right(), bottom.center().y());
+        painter->setBrush(faceDark);
+        painter->drawEllipse(bottom);
+        painter->setBrush(faceLight);
+        painter->drawEllipse(top);
         return;
     }
 
@@ -165,12 +143,49 @@ void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF 
               << QPointF(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.64)
               << QPointF(rect.left() + rect.width() * 0.56, rect.top() + rect.height() * 0.86);
 
-    auto *leftItem = scene->addPolygon(leftFace, QPen(outline, 1), QBrush(face));
-    auto *rightItem = scene->addPolygon(rightFace, QPen(outline, 1), QBrush(faceDark));
-    auto *topItem = scene->addPolygon(topFace, QPen(outline, 1), QBrush(faceLight));
-    leftItem->setZValue(5.0);
-    rightItem->setZValue(6.0);
-    topItem->setZValue(7.0);
+    painter->setPen(QPen(outline, 1));
+    painter->setBrush(face);
+    painter->drawPolygon(leftFace);
+    painter->setBrush(faceDark);
+    painter->drawPolygon(rightFace);
+    painter->setBrush(faceLight);
+    painter->drawPolygon(topFace);
+}
+
+void paintOperationIcon(QPainter *painter,
+                        SceneDocument::TreeNode::Operation operation,
+                        const QRectF &rect,
+                        const QColor &accent,
+                        qreal symbolInset)
+{
+    painter->setPen(QPen(accent.darker(135), 1));
+    painter->setBrush(QColor(255, 255, 255, 135));
+    painter->drawRoundedRect(rect, 3.0, 3.0);
+
+    const QPointF center = rect.center();
+    const QRectF symbolRect = rect.adjusted(symbolInset, symbolInset, -symbolInset, -symbolInset);
+    QPen pen(accent.darker(160), 2);
+    pen.setCapStyle(Qt::RoundCap);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+
+    if (operation == SceneDocument::TreeNode::Union) {
+        painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
+        painter->drawLine(center.x(), symbolRect.top(), center.x(), symbolRect.bottom());
+    } else if (operation == SceneDocument::TreeNode::Difference) {
+        painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
+    } else if (operation == SceneDocument::TreeNode::Intersection) {
+        painter->setPen(QPen(accent.darker(150), 1));
+        painter->setBrush(QColor(255, 255, 255, 60));
+        painter->drawEllipse(QRectF(symbolRect.left(), symbolRect.top() + 1.0, symbolRect.width() * 0.62, symbolRect.height() - 2.0));
+        painter->drawEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
+                                    symbolRect.top() + 1.0,
+                                    symbolRect.width() * 0.62,
+                                    symbolRect.height() - 2.0));
+    } else {
+        painter->setPen(accent.darker(160));
+        painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
+    }
 }
 
 QString primitiveNumberText(const QString &label, int fallbackId)
@@ -187,72 +202,6 @@ QString primitiveNumberText(const QString &label, int fallbackId)
         return label.mid(start + 1, end - start);
 
     return fallbackId > 0 ? QString::number(fallbackId) : QStringLiteral("?");
-}
-
-void addPrimitiveNumberBadge(QGraphicsScene *scene, const QString &number, const QRectF &rect)
-{
-    const QRectF badgeRect(rect.center().x() + 12.0, rect.top() + 5.0, 18.0, 18.0);
-    auto *badge = scene->addEllipse(badgeRect, QPen(QColor(82, 111, 146), 1), QBrush(QColor(244, 248, 252)));
-    badge->setZValue(9.0);
-
-    auto *text = scene->addSimpleText(number);
-    text->setBrush(QColor(30, 58, 90));
-    const QRectF textRect = text->boundingRect();
-    text->setPos(badgeRect.center() - QPointF(textRect.width() * 0.5, textRect.height() * 0.5 + 1.0));
-    text->setZValue(10.0);
-}
-
-void addPrimitiveSelectionHalo(QGraphicsScene *scene, const QRectF &iconRect)
-{
-    auto *halo = scene->addEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0),
-                                   QPen(QColor(255, 203, 87), 2, Qt::DashLine),
-                                   QBrush(QColor(255, 203, 87, 32)));
-    halo->setZValue(4.0);
-}
-
-void addOperationIcon(QGraphicsScene *scene,
-                      SceneDocument::TreeNode::Operation operation,
-                      const QRectF &rect,
-                      const QColor &accent)
-{
-    auto *frame = addRoundedPanel(scene, rect, 3.0, QPen(accent.darker(135), 1), QBrush(QColor(255, 255, 255, 135)), 9.0);
-    frame->setZValue(9.0);
-
-    const QPointF center = rect.center();
-    const QRectF symbolRect = rect.adjusted(4.0, 4.0, -4.0, -4.0);
-    QPen pen(accent.darker(160), 2);
-    pen.setCapStyle(Qt::RoundCap);
-
-    if (operation == SceneDocument::TreeNode::Union) {
-        auto *h = scene->addLine(symbolRect.left(), center.y(), symbolRect.right(), center.y(), pen);
-        auto *v = scene->addLine(center.x(), symbolRect.top(), center.x(), symbolRect.bottom(), pen);
-        h->setZValue(10.0);
-        v->setZValue(10.0);
-        return;
-    }
-
-    if (operation == SceneDocument::TreeNode::Difference) {
-        auto *minus = scene->addLine(symbolRect.left(), center.y(), symbolRect.right(), center.y(), pen);
-        minus->setZValue(10.0);
-        return;
-    }
-
-    if (operation == SceneDocument::TreeNode::Intersection) {
-        auto *left = scene->addEllipse(QRectF(symbolRect.left(), symbolRect.top() + 1.0, symbolRect.width() * 0.62, symbolRect.height() - 2.0),
-                                       QPen(accent.darker(150), 1),
-                                       QBrush(QColor(255, 255, 255, 60)));
-        auto *right = scene->addEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
-                                               symbolRect.top() + 1.0,
-                                               symbolRect.width() * 0.62,
-                                               symbolRect.height() - 2.0),
-                                        QPen(accent.darker(150), 1),
-                                        QBrush(QColor(255, 255, 255, 60)));
-        left->setZValue(10.0);
-        right->setZValue(10.0);
-        return;
-    }
-
-    addCenteredLabel(scene, "M", rect, accent.darker(160));
 }
 
 int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex)
@@ -435,93 +384,11 @@ public:
 
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         if (operationForToolName(m_tool, &operation)) {
-            const QColor accent = fillForTool(m_tool).darker(125);
-            painter->setPen(QPen(accent.darker(135), 1));
-            painter->setBrush(QColor(255, 255, 255, 150));
-            painter->drawRoundedRect(m_rect, 3.0, 3.0);
-
-            const QPointF center = m_rect.center();
-            const QRectF symbolRect = m_rect.adjusted(7.0, 7.0, -7.0, -7.0);
-            QPen pen(accent.darker(160), 2);
-            pen.setCapStyle(Qt::RoundCap);
-            painter->setPen(pen);
-            painter->setBrush(QColor(255, 255, 255, 70));
-
-            if (operation == SceneDocument::TreeNode::Union) {
-                painter->drawLine(QPointF(symbolRect.left(), center.y()), QPointF(symbolRect.right(), center.y()));
-                painter->drawLine(QPointF(center.x(), symbolRect.top()), QPointF(center.x(), symbolRect.bottom()));
-            } else if (operation == SceneDocument::TreeNode::Difference) {
-                painter->drawLine(QPointF(symbolRect.left(), center.y()), QPointF(symbolRect.right(), center.y()));
-            } else if (operation == SceneDocument::TreeNode::Intersection) {
-                painter->drawEllipse(QRectF(symbolRect.left(), symbolRect.top() + 2.0, symbolRect.width() * 0.62, symbolRect.height() - 4.0));
-                painter->drawEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
-                                            symbolRect.top() + 2.0,
-                                            symbolRect.width() * 0.62,
-                                            symbolRect.height() - 4.0));
-            } else {
-                painter->drawText(m_rect, Qt::AlignCenter, "M");
-            }
+            paintOperationIcon(painter, operation, m_rect, fillForTool(m_tool).darker(125), 7.0);
             return;
         }
 
-        const QColor outline(59, 95, 134);
-        const QColor face(178, 207, 238);
-        const QColor faceLight(221, 235, 248);
-        const QColor faceDark(139, 176, 214);
-        const ShapeNode::Type type = primitiveTypeForTool(m_tool);
-
-        painter->setPen(QPen(outline, 1));
-        if (type == ShapeNode::Sphere) {
-            painter->setBrush(face);
-            painter->drawEllipse(m_rect.adjusted(3.0, 3.0, -3.0, -3.0));
-            painter->setBrush(Qt::NoBrush);
-            painter->setPen(QPen(QColor(93, 127, 166), 1));
-            painter->drawEllipse(m_rect.adjusted(6.0, 13.0, -6.0, -13.0));
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(255, 255, 255, 165));
-            painter->drawEllipse(QRectF(m_rect.left() + m_rect.width() * 0.28,
-                                        m_rect.top() + m_rect.height() * 0.22,
-                                        m_rect.width() * 0.18,
-                                        m_rect.height() * 0.14));
-            return;
-        }
-
-        if (type == ShapeNode::Cylinder) {
-            const QRectF top(m_rect.left() + 5.0, m_rect.top() + 5.0, m_rect.width() - 10.0, m_rect.height() * 0.28);
-            const QRectF bottom(top.left(), m_rect.bottom() - top.height() - 5.0, top.width(), top.height());
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(face);
-            painter->drawRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()));
-            painter->setPen(QPen(outline, 1));
-            painter->drawLine(top.left(), top.center().y(), bottom.left(), bottom.center().y());
-            painter->drawLine(top.right(), top.center().y(), bottom.right(), bottom.center().y());
-            painter->setBrush(faceDark);
-            painter->drawEllipse(bottom);
-            painter->setBrush(faceLight);
-            painter->drawEllipse(top);
-            return;
-        }
-
-        QPolygonF topFace;
-        topFace << QPointF(m_rect.left() + m_rect.width() * 0.22, m_rect.top() + m_rect.height() * 0.34)
-                << QPointF(m_rect.left() + m_rect.width() * 0.48, m_rect.top() + m_rect.height() * 0.12)
-                << QPointF(m_rect.left() + m_rect.width() * 0.82, m_rect.top() + m_rect.height() * 0.28)
-                << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.50);
-        QPolygonF leftFace;
-        leftFace << topFace[0] << topFace[3]
-                 << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.86)
-                 << QPointF(m_rect.left() + m_rect.width() * 0.22, m_rect.top() + m_rect.height() * 0.70);
-        QPolygonF rightFace;
-        rightFace << topFace[3] << topFace[2]
-                  << QPointF(m_rect.left() + m_rect.width() * 0.82, m_rect.top() + m_rect.height() * 0.64)
-                  << QPointF(m_rect.left() + m_rect.width() * 0.56, m_rect.top() + m_rect.height() * 0.86);
-        painter->setPen(QPen(outline, 1));
-        painter->setBrush(face);
-        painter->drawPolygon(leftFace);
-        painter->setBrush(faceDark);
-        painter->drawPolygon(rightFace);
-        painter->setBrush(faceLight);
-        painter->drawPolygon(topFace);
+        paintPrimitiveIcon(painter, primitiveTypeForTool(m_tool), m_rect.adjusted(3.0, 3.0, -3.0, -3.0));
     }
 
 private:

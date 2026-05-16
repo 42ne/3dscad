@@ -53,12 +53,9 @@ QGraphicsScene *createTreeGraphicsScene(QObject *parent = nullptr);
 void addLabel(QGraphicsScene *scene, const QString &text, const QPointF &position, const QColor &color = QColor(35, 35, 35));
 QGraphicsRectItem *addSoftShadow(QGraphicsScene *scene, const QRectF &rect, qreal zValue);
 QGraphicsPathItem *addRoundedPanel(QGraphicsScene *scene, const QRectF &rect, qreal radius, const QPen &pen, const QBrush &brush, qreal zValue);
-void addPillLabel(QGraphicsScene *scene, const QString &text, const QPointF &position, const QColor &accent);
-void addPrimitiveIcon(QGraphicsScene *scene, ShapeNode::Type type, const QRectF &rect);
 QString primitiveNumberText(const QString &label, int fallbackId);
-void addPrimitiveNumberBadge(QGraphicsScene *scene, const QString &number, const QRectF &rect);
-void addPrimitiveSelectionHalo(QGraphicsScene *scene, const QRectF &iconRect);
-void addOperationIcon(QGraphicsScene *scene, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent);
+void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect);
+void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent, qreal symbolInset = 4.0);
 
 int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex = 0);
 QSizeF defaultPreviewSize();
