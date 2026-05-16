@@ -63,6 +63,7 @@ QSizeF groupPreviewSize();
 QSizeF differencePreviewSize();
 QSizeF previewSizeForTool(const QString &tool);
 ShapeNode::Type primitiveTypeForTool(const QString &tool);
+QString toolNameForPrimitiveType(ShapeNode::Type type);
 bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation);
 struct OperationVisual {
     SceneDocument::TreeNode::Operation operation;

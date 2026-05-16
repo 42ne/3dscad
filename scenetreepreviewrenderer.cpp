@@ -32,12 +32,6 @@ void SceneTreePreviewRenderer::clear()
     m_previewItems->clear();
 }
 
-void SceneTreePreviewRenderer::addPreviewGroupFrameForOperation(const QRectF &rect,
-                                                                SceneDocument::TreeNode::Operation operation,
-                                                                qreal cutSeparatorY)
-{
-    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, operation, rect, cutSeparatorY);
-}
 
 void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target)
 {
@@ -51,7 +45,7 @@ void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target
         const SceneDocument::TreeNode::Operation operation = i < target.expandedGroupOperations.size()
                                                                  ? target.expandedGroupOperations[i]
                                                                  : SceneDocument::TreeNode::Union;
-        addPreviewGroupFrameForOperation(expandedRect, operation, 0.0);
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, operation, expandedRect, 0.0);
         const QVector<ChildLayout> children = i < target.expandedGroupChildren.size()
                                                   ? target.expandedGroupChildren[i]
                                                   : QVector<ChildLayout>();
@@ -65,7 +59,7 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target, i
                                             && target.previewGroupRect.isValid()
                                             && target.previewGroupRect.contains(target.sourceGroupRect.center());
     if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget) {
-        addPreviewGroupFrameForOperation(target.sourceGroupRect, target.sourceGroupOperation, target.sourceCutSeparatorY);
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY);
         if (movingNodeId > 0 && target.sourceRect.isValid()) {
             addSourceRemovalMask(m_scene,
                                  m_previewItems,
@@ -79,7 +73,7 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target, i
 void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, const QString &previewTool)
 {
     if (target.previewGroupRect.isValid()) {
-        addPreviewGroupFrameForOperation(target.previewGroupRect, target.previewGroupOperation, target.previewCutSeparatorY);
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.previewGroupOperation, target.previewGroupRect, target.previewCutSeparatorY);
     }
 
     addPreviewChildren(target.previewChildren);
@@ -121,7 +115,7 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
     if (area)
         cutSeparatorY = area->cutSeparatorY + (rect.top() - area->rect.top());
 
-    addPreviewGroupFrameForOperation(rect, node->operation, cutSeparatorY);
+    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY);
 
     if (!area)
         return;
@@ -160,10 +154,5 @@ QString SceneTreePreviewRenderer::previewToolForNode(const SceneDocument::TreeNo
         return labelForOperation(node.operation);
 
     const ShapeNode *shape = m_document ? m_document->shapeById(node.shapeId) : nullptr;
-    const ShapeNode::Type type = shape ? shape->type : ShapeNode::Cube;
-    if (type == ShapeNode::Sphere)
-        return "sphere";
-    if (type == ShapeNode::Cylinder)
-        return "cylinder";
-    return "cube";
+    return toolNameForPrimitiveType(shape ? shape->type : ShapeNode::Cube);
 }

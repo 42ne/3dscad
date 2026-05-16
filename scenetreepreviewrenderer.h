@@ -26,9 +26,6 @@ public:
     void clear();
 
 private:
-    void addPreviewGroupFrameForOperation(const QRectF &rect,
-                                          SceneDocument::TreeNode::Operation operation,
-                                          qreal cutSeparatorY);
     void addExpandedGroupPreviews(const DropTarget &target);
     void addSourceGroupPreview(const DropTarget &target, int movingNodeId);
     void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);

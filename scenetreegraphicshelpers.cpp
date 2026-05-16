@@ -256,6 +256,15 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
     return ShapeNode::Cube;
 }
 
+QString toolNameForPrimitiveType(ShapeNode::Type type)
+{
+    if (type == ShapeNode::Sphere)
+        return QStringLiteral("sphere");
+    if (type == ShapeNode::Cylinder)
+        return QStringLiteral("cylinder");
+    return QStringLiteral("cube");
+}
+
 bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation)
 {
     if (!operation)
@@ -363,38 +372,6 @@ QRectF expandedGroupRectForChangedChild(const QRectF &groupRect, const QVector<Q
     return expanded;
 }
 
-class ToolGlyphItem : public QGraphicsItem
-{
-public:
-    ToolGlyphItem(const QString &tool, const QRectF &rect, QGraphicsItem *parent = nullptr)
-        : QGraphicsItem(parent)
-        , m_tool(tool)
-        , m_rect(rect)
-    {
-    }
-
-    QRectF boundingRect() const override
-    {
-        return m_rect;
-    }
-
-    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
-    {
-        painter->setRenderHint(QPainter::Antialiasing, true);
-
-        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        if (operationForToolName(m_tool, &operation)) {
-            paintOperationIcon(painter, operation, m_rect, fillForTool(m_tool).darker(125), 7.0);
-            return;
-        }
-
-        paintPrimitiveIcon(painter, primitiveTypeForTool(m_tool), m_rect.adjusted(3.0, 3.0, -3.0, -3.0));
-    }
-
-private:
-    QString m_tool;
-    QRectF m_rect;
-};
 
 void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
 {
@@ -607,7 +584,7 @@ private:
     std::function<void(int)> m_onSelected;
 };
 
-class PaletteToolItem : public QGraphicsRectItem
+class PaletteToolItem : public QGraphicsItem
 {
 public:
     PaletteToolItem(const QString &label,
@@ -615,36 +592,37 @@ public:
                     std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved,
                     std::function<void()> onPreviewFinished,
                     std::function<void(const QString &, const QPointF &)> onDropped)
-        : QGraphicsRectItem(QRectF(0.0, 0.0, ToolSize, ToolSize))
-        , m_label(label)
+        : m_label(label)
+        , m_fill(fill)
         , m_onPreviewMoved(onPreviewMoved)
         , m_onPreviewFinished(onPreviewFinished)
         , m_onDropped(onDropped)
     {
-        setPen(QPen(fill.darker(145)));
-        setBrush(QColor(255, 255, 255));
         setAcceptedMouseButtons(Qt::LeftButton);
         setToolTip(label);
         setZValue(100.0);
+    }
 
-        auto *glyph = new ToolGlyphItem(label, QRectF(10.0, 8.0, 34.0, 34.0), this);
-        glyph->setZValue(1.0);
+    QRectF boundingRect() const override { return QRectF(0.0, 0.0, ToolSize, ToolSize); }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setPen(QPen(m_fill.darker(145)));
+        painter->setBrush(Qt::white);
+        painter->drawRect(boundingRect());
+
+        const QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
+        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+        if (operationForToolName(m_label, &operation))
+            paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125), 7.0);
+        else
+            paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect.adjusted(3.0, 3.0, -3.0, -3.0));
     }
 
 protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), previewSizeForTool(m_label), m_label);
-        event->accept();
-    }
-
-    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), previewSizeForTool(m_label), m_label);
-        event->accept();
-    }
+    void mousePressEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
+    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
 
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override
     {
@@ -656,7 +634,16 @@ protected:
         event->accept();
     }
 
+private:
+    void updatePreview(QGraphicsSceneMouseEvent *event)
+    {
+        if (m_onPreviewMoved)
+            m_onPreviewMoved(event->scenePos(), previewSizeForTool(m_label), m_label);
+        event->accept();
+    }
+
     QString m_label;
+    QColor m_fill;
     std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
     std::function<void()> m_onPreviewFinished;
     std::function<void(const QString &, const QPointF &)> m_onDropped;

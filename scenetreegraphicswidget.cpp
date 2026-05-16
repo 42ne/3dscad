@@ -281,12 +281,7 @@ QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNod
         return labelForOperation(node.operation);
 
     const ShapeNode *shape = m_scene ? m_scene->shapeById(node.shapeId) : nullptr;
-    const ShapeNode::Type type = shape ? shape->type : ShapeNode::Cube;
-    if (type == ShapeNode::Sphere)
-        return "sphere";
-    if (type == ShapeNode::Cylinder)
-        return "cylinder";
-    return "cube";
+    return toolNameForPrimitiveType(shape ? shape->type : ShapeNode::Cube);
 }
 
 void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scenePosition)
@@ -370,11 +365,7 @@ QString SceneTreeGraphicsWidget::labelForPrimitive(int shapeId) const
     if (!shape->name.isEmpty())
         return shape->name;
 
-    if (shape->type == ShapeNode::Sphere)
-        return "sphere";
-    if (shape->type == ShapeNode::Cylinder)
-        return "cylinder";
-    return "cube";
+    return toolNameForPrimitiveType(shape->type);
 }
 
 ShapeNode::Type SceneTreeGraphicsWidget::typeForPrimitive(int shapeId) const
