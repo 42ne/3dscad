@@ -359,12 +359,6 @@ void MainWindow::buildUi()
     auto *leftPanel = new QWidget;
     auto *leftLayout = new QVBoxLayout(leftPanel);
 
-    auto *addCubeButton = new QPushButton("Add cube");
-    auto *addSphereButton = new QPushButton("Add sphere");
-    auto *addCylinderButton = new QPushButton("Add cylinder");
-    auto *addUnionGroupButton = new QPushButton("Add union group");
-    auto *addDifferenceGroupButton = new QPushButton("Add difference group");
-    auto *addIntersectionGroupButton = new QPushButton("Add intersection group");
     m_deleteShapeButton = new QPushButton("Delete selected");
     m_deleteGroupButton = new QPushButton("Delete group");
     m_useOpenGLCheckBox = new QCheckBox("Use OpenGL");
@@ -415,15 +409,9 @@ void MainWindow::buildUi()
     treeSplitter->addWidget(legacyTreePanel);
     treeSplitter->addWidget(graphicsTreePanel);
     treeSplitter->setStretchFactor(0, 1);
-    treeSplitter->setStretchFactor(1, 3);
-    treeSplitter->setSizes({170, 430});
+    treeSplitter->setStretchFactor(1, 5);
+    treeSplitter->setSizes({115, 520});
 
-    leftLayout->addWidget(addCubeButton);
-    leftLayout->addWidget(addSphereButton);
-    leftLayout->addWidget(addCylinderButton);
-    leftLayout->addWidget(addUnionGroupButton);
-    leftLayout->addWidget(addDifferenceGroupButton);
-    leftLayout->addWidget(addIntersectionGroupButton);
     leftLayout->addWidget(m_deleteShapeButton);
     leftLayout->addWidget(m_deleteGroupButton);
     leftLayout->addWidget(m_useOpenGLCheckBox);
@@ -435,12 +423,6 @@ void MainWindow::buildUi()
     leftDock->setWidget(leftPanel);
     addDockWidget(Qt::LeftDockWidgetArea, leftDock);
 
-    connect(addCubeButton, &QPushButton::clicked, this, &MainWindow::addCube);
-    connect(addSphereButton, &QPushButton::clicked, this, &MainWindow::addSphere);
-    connect(addCylinderButton, &QPushButton::clicked, this, &MainWindow::addCylinder);
-    connect(addUnionGroupButton, &QPushButton::clicked, this, &MainWindow::addUnionGroup);
-    connect(addDifferenceGroupButton, &QPushButton::clicked, this, &MainWindow::addDifferenceGroup);
-    connect(addIntersectionGroupButton, &QPushButton::clicked, this, &MainWindow::addIntersectionGroup);
     connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
     connect(m_deleteGroupButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedGroup);
     connect(m_useOpenGLCheckBox, &QCheckBox::toggled, this, &MainWindow::onUseOpenGLToggled);

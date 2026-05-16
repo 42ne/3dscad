@@ -30,12 +30,15 @@ constexpr qreal TreeY = 92.0;
 constexpr qreal PrimitiveWidth = 88.0;
 constexpr qreal PrimitiveHeight = 42.0;
 constexpr qreal PrimitiveIconSize = 34.0;
-constexpr qreal GroupMinWidth = 180.0;
+constexpr qreal GroupMinWidth = 128.0;
+constexpr qreal GroupModuleMinWidth = 136.0;
+constexpr qreal GroupWideMinWidth = 164.0;
 constexpr qreal GroupHeaderHeight = 28.0;
 constexpr qreal GroupPadding = 12.0;
 constexpr qreal ChildGap = 10.0;
 constexpr qreal CornerRadius = 5.0;
 constexpr qreal DifferenceMinContentHeight = PrimitiveHeight * 2.0 + ChildGap;
+constexpr qreal DragPreviewStartDistance = 6.0;
 constexpr qreal CanvasMargin = 2000.0;
 const QColor CanvasBackground(31, 41, 55);
 const QColor MinorGridColor(96, 106, 121);
@@ -301,7 +304,7 @@ QSizeF groupPreviewSize()
 
 QSizeF differencePreviewSize()
 {
-    return QSizeF(GroupMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + DifferenceMinContentHeight);
+    return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + DifferenceMinContentHeight);
 }
 
 QSizeF previewSizeForTool(const QString &tool)
@@ -310,6 +313,10 @@ QSizeF previewSizeForTool(const QString &tool)
         return defaultPreviewSize();
     if (tool == "difference")
         return differencePreviewSize();
+    if (tool == "intersection")
+        return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "module")
+        return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
 
     return groupPreviewSize();
 }
@@ -347,6 +354,15 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         return true;
     }
     return false;
+}
+
+qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation)
+{
+    if (operation == SceneDocument::TreeNode::Module)
+        return GroupModuleMinWidth;
+    if (operation == SceneDocument::TreeNode::Difference || operation == SceneDocument::TreeNode::Intersection)
+        return GroupWideMinWidth;
+    return GroupMinWidth;
 }
 
 QString labelForOperation(SceneDocument::TreeNode::Operation operation)
@@ -596,7 +612,7 @@ void addPreviewGroupFrame(QGraphicsScene *scene,
                                   rect,
                                   CornerRadius,
                                   QPen(fill.darker(145), 2),
-                                  QBrush(QColor(fill.red(), fill.green(), fill.blue(), 245)),
+                                  QBrush(fill),
                                   52.0);
     appendPreviewItem(items, panel);
 
@@ -605,7 +621,7 @@ void addPreviewGroupFrame(QGraphicsScene *scene,
                                    headerRect,
                                    CornerRadius - 1.0,
                                    Qt::NoPen,
-                                   QBrush(QColor(fill.lighter(112).red(), fill.lighter(112).green(), fill.lighter(112).blue(), 245)),
+                                   QBrush(fill.lighter(112)),
                                    53.0);
     appendPreviewItem(items, header);
 
@@ -626,17 +642,6 @@ void addPreviewGroupFrame(QGraphicsScene *scene,
         separator->setZValue(54.0);
         appendPreviewItem(items, separator);
     }
-}
-
-void addReservedPreviewSlot(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect)
-{
-    QPainterPath path;
-    path.addRoundedRect(rect.adjusted(1.0, 1.0, -1.0, -1.0), CornerRadius, CornerRadius);
-    auto *slot = scene->addPath(path,
-                                QPen(QColor(90, 104, 118, 170), 1, Qt::DashLine),
-                                QBrush(QColor(255, 255, 255, 42)));
-    slot->setZValue(56.0);
-    appendPreviewItem(items, slot);
 }
 
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
@@ -713,15 +718,23 @@ protected:
             return;
         }
 
-        createDragSnapshot(event->scenePos());
-        if (m_onPreviewMoved)
-            m_onPreviewMoved(event->scenePos(), m_previewSize, m_label);
+        m_pressScenePos = event->scenePos();
+        m_previewActive = false;
+        createDragSnapshot(m_pressScenePos);
         event->accept();
     }
 
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override
     {
         moveDragSnapshot(event->scenePos());
+        if (!m_previewActive) {
+            const QPointF delta = event->scenePos() - m_pressScenePos;
+            if (delta.x() * delta.x() + delta.y() * delta.y() < DragPreviewStartDistance * DragPreviewStartDistance) {
+                event->accept();
+                return;
+            }
+            m_previewActive = true;
+        }
         if (m_onPreviewMoved)
             m_onPreviewMoved(event->scenePos(), m_previewSize, m_label);
         event->accept();
@@ -735,10 +748,11 @@ protected:
         m_dragSnapshot = nullptr;
         delete m_dragOutline;
         m_dragOutline = nullptr;
-        if (m_onPreviewFinished)
+        if (m_previewActive && m_onPreviewFinished)
             m_onPreviewFinished();
-        if (m_onDropped)
+        if (m_previewActive && m_onDropped)
             m_onDropped(m_nodeId, dropPosition);
+        m_previewActive = false;
         event->accept();
     }
 
@@ -778,8 +792,10 @@ private:
     int m_nodeId = 0;
     QString m_label;
     QRectF m_sourceRect;
+    QPointF m_pressScenePos;
     QPointF m_dragOffset;
     QSizeF m_previewSize;
+    bool m_previewActive = false;
     std::function<void(int)> m_onSelected;
     std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
     std::function<void()> m_onPreviewFinished;
@@ -1139,7 +1155,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                : childTopLeft.y() - topLeft.y() - GroupHeaderHeight - GroupPadding - ChildGap;
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
-    const QSizeF size(qMax(GroupMinWidth, maxChildWidth + GroupPadding * 2.0),
+    const QSizeF size(qMax(minimumWidthForOperation(node.operation), maxChildWidth + GroupPadding * 2.0),
                       GroupHeaderHeight + GroupPadding * 2.0 + childrenHeight);
     const QRectF rect(topLeft, size);
     const QColor fill = colorForGroup(node.operation);
@@ -1274,17 +1290,20 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
 
     for (int i = 0; i < target.expandedGroupRects.size(); ++i) {
         const QRectF expandedRect = target.expandedGroupRects[i];
+        if ((target.previewGroupRect.isValid() && expandedRect == target.previewGroupRect)
+            || (target.sourceGroupRect.isValid() && expandedRect == target.sourceGroupRect)) {
+            continue;
+        }
+
         const SceneDocument::TreeNode::Operation operation = i < target.expandedGroupOperations.size()
                                                                  ? target.expandedGroupOperations[i]
                                                                  : SceneDocument::TreeNode::Union;
-        const QColor fill = colorForGroup(operation);
-        QPainterPath expandedPath;
-        expandedPath.addRoundedRect(expandedRect, CornerRadius, CornerRadius);
-        auto *expanded = m_graphicsScene->addPath(expandedPath,
-                                                  QPen(fill.darker(145), 2, Qt::DashLine),
-                                                  QBrush(QColor(fill.red(), fill.green(), fill.blue(), 46)));
-        expanded->setZValue(54.0);
-        m_dropPreviewItems.append(expanded);
+        addPreviewGroupFrame(m_graphicsScene,
+                             &m_dropPreviewItems,
+                             expandedRect,
+                             operation,
+                             0.0,
+                             colorForGroup(operation));
     }
 
     const bool sourceGroupCoveredByTarget = target.sourceGroupRect.isValid()
@@ -1329,27 +1348,17 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                         fillForTool(childTool));
     }
 
-    const bool sourceSlotCoveredByTarget = target.hasTarget
-                                           && target.sourceRect.isValid()
-                                           && target.placeholderRect.intersects(target.sourceRect);
-    if (movingNodeId > 0 && target.sourceRect.isValid() && !sourceSlotCoveredByTarget)
-        addReservedPreviewSlot(m_graphicsScene, &m_dropPreviewItems, target.sourceRect);
-
     if (target.hasTarget) {
-        if (movingNodeId > 0) {
-            addReservedPreviewSlot(m_graphicsScene, &m_dropPreviewItems, target.placeholderRect);
-        } else {
-            addPreviewBlock(m_graphicsScene,
+        addPreviewBlock(m_graphicsScene,
+                        &m_dropPreviewItems,
+                        previewTool,
+                        target.placeholderRect,
+                        fillForTool(previewTool));
+        addDragFocusOutline(m_graphicsScene,
                             &m_dropPreviewItems,
                             previewTool,
                             target.placeholderRect,
-                            fillForTool(previewTool));
-            addDragFocusOutline(m_graphicsScene,
-                                &m_dropPreviewItems,
-                                previewTool,
-                                target.placeholderRect,
-                                90.0);
-        }
+                            90.0);
     }
 }
 
@@ -1365,12 +1374,16 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
     DropTarget target;
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     const GroupHitArea *sourceArea = nullptr;
+    int sourceChildIndex = -1;
+    qreal sourceRemovalShift = 0.0;
     if (movingNodeId > 0) {
         for (const GroupHitArea &area : m_groupHitAreas) {
             for (int i = 0; i < area.childNodeIds.size() && i < area.childRects.size(); ++i) {
                 if (area.childNodeIds[i] == movingNodeId) {
                     target.sourceRect = area.childRects[i];
                     sourceArea = &area;
+                    sourceChildIndex = i;
+                    sourceRemovalShift = target.sourceRect.height() + ChildGap;
                     break;
                 }
             }
@@ -1397,24 +1410,67 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
         bestDepth = area.depth;
     }
 
-    if (sourceArea && sourceArea != bestArea) {
+    auto buildSourcePreview = [&target, sourceArea, movingNodeId, sourceChildIndex, sourceRemovalShift]() {
+        if (!sourceArea)
+            return;
+
         target.sourceGroupRect = sourceArea->rect;
         target.sourceGroupOperation = sourceArea->operation;
         target.sourceCutSeparatorY = sourceArea->cutSeparatorY;
+        target.sourceChildRects.clear();
+        target.sourceChildTools.clear();
+        QRectF futureContent;
+        bool hasFutureContent = false;
         for (int i = 0; i < sourceArea->childRects.size(); ++i) {
             const int childNodeId = i < sourceArea->childNodeIds.size() ? sourceArea->childNodeIds[i] : 0;
             if (childNodeId == movingNodeId)
                 continue;
 
-            target.sourceChildRects.append(sourceArea->childRects[i]);
+            QRectF childRect = sourceArea->childRects[i];
+            if (sourceChildIndex >= 0 && i > sourceChildIndex)
+                childRect.translate(0.0, -sourceRemovalShift);
+
+            target.sourceChildRects.append(childRect);
             target.sourceChildTools.append(i < sourceArea->childPreviewTools.size()
                                                ? sourceArea->childPreviewTools[i]
                                                : QStringLiteral("cube"));
+            futureContent = hasFutureContent ? futureContent.united(childRect) : childRect;
+            hasFutureContent = true;
         }
+
+        qreal minContentHeight = PrimitiveHeight;
+        if (sourceArea->operation == SceneDocument::TreeNode::Difference)
+            minContentHeight = DifferenceMinContentHeight;
+
+        const qreal minBottom = sourceArea->rect.top() + GroupHeaderHeight + GroupPadding * 2.0 + minContentHeight;
+        const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
+        target.sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
+        if (sourceArea->operation == SceneDocument::TreeNode::Difference && target.sourceCutSeparatorY > 0.0) {
+            target.sourceCutSeparatorY = qMin(target.sourceCutSeparatorY, target.sourceGroupRect.bottom() - GroupPadding - PrimitiveHeight * 0.5);
+        }
+    };
+
+    if (sourceArea && target.sourceRect.contains(scenePosition)) {
+        buildSourcePreview();
+        return target;
+    }
+
+    if (sourceArea && sourceArea != bestArea) {
+        buildSourcePreview();
     }
 
     if (!bestArea)
         return target;
+
+    qreal targetPreviewShift = 0.0;
+    if (sourceArea && sourceArea != bestArea && sourceChildIndex >= 0) {
+        for (int i = sourceChildIndex + 1; i < sourceArea->childRects.size(); ++i) {
+            if (sourceArea->childRects[i].contains(bestArea->rect.center())) {
+                targetPreviewShift = -sourceRemovalShift;
+                break;
+            }
+        }
+    }
 
     target.hasTarget = true;
     target.parentGroupId = bestArea->groupId;
@@ -1517,6 +1573,15 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetAt(const 
 
         changedOldRect = area->rect;
         changedNewRect = expandedRect;
+    }
+
+    if (targetPreviewShift != 0.0) {
+        target.previewGroupRect.translate(0.0, targetPreviewShift);
+        target.placeholderRect.translate(0.0, targetPreviewShift);
+        for (QRectF &childRect : target.previewChildRects)
+            childRect.translate(0.0, targetPreviewShift);
+        for (QRectF &expandedRect : target.expandedGroupRects)
+            expandedRect.translate(0.0, targetPreviewShift);
     }
 
     return target;
