@@ -67,6 +67,14 @@ QSizeF differencePreviewSize();
 QSizeF previewSizeForTool(const QString &tool);
 ShapeNode::Type primitiveTypeForTool(const QString &tool);
 bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation);
+struct OperationVisual {
+    SceneDocument::TreeNode::Operation operation;
+    const char *toolName;
+    QColor fill;
+    qreal minWidth;
+};
+
+const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation);
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);
 QColor fillForTool(const QString &tool);
@@ -76,9 +84,6 @@ QRectF expandedGroupRectForPreview(const QRectF &groupRect, const QRectF &placeh
 QRectF expandedGroupRectForChangedChild(const QRectF &groupRect, const QVector<QRectF> &childRects, const QRectF &oldChildRect, const QRectF &newChildRect);
 
 void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item);
-void addPreviewGlyph(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect);
-void addPreviewBlock(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &previewTool, const QRectF &rect, const QColor &fill);
-void addPreviewGroupFrame(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect, SceneDocument::TreeNode::Operation operation, qreal cutSeparatorY, const QColor &fill);
 void addSourceRemovalMask(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect, const QColor &fill);
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect);
 QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect, qreal zValue);

@@ -5,9 +5,11 @@
 #include "shapenode.h"
 
 #include <QRectF>
+#include <QVector>
 #include <functional>
 
 class QGraphicsScene;
+class QGraphicsItem;
 
 class SceneTreeNodeRenderer
 {
@@ -25,6 +27,16 @@ public:
                      const QRectF &rect,
                      int depth,
                      qreal cutSeparatorY);
+
+    static void renderPreviewTool(QGraphicsScene *scene,
+                                  QVector<QGraphicsItem *> *items,
+                                  const QString &tool,
+                                  const QRectF &rect);
+    static void renderPreviewGroup(QGraphicsScene *scene,
+                                   QVector<QGraphicsItem *> *items,
+                                   SceneDocument::TreeNode::Operation operation,
+                                   const QRectF &rect,
+                                   qreal cutSeparatorY = 0.0);
 
 private:
     qreal zForDepth(int depth, qreal offset) const;

@@ -1,5 +1,6 @@
 #include "scenetreepreviewrenderer.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenetreenoderenderer.h"
 
 using namespace SceneTreeGraphics;
 
@@ -35,12 +36,7 @@ void SceneTreePreviewRenderer::addPreviewGroupFrameForOperation(const QRectF &re
                                                                 SceneDocument::TreeNode::Operation operation,
                                                                 qreal cutSeparatorY)
 {
-    addPreviewGroupFrame(m_scene,
-                         m_previewItems,
-                         rect,
-                         operation,
-                         cutSeparatorY,
-                         fillForOperation(operation));
+    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, operation, rect, cutSeparatorY);
 }
 
 void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target)
@@ -89,11 +85,7 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
     addPreviewChildren(target.previewChildren);
 
     if (target.hasTarget) {
-        addPreviewBlock(m_scene,
-                        m_previewItems,
-                        previewTool,
-                        target.placeholderRect,
-                        fillForTool(previewTool));
+        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, previewTool, target.placeholderRect);
         addDragFocusOutline(m_scene,
                             m_previewItems,
                             previewTool,
@@ -113,11 +105,7 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
 
     const QString tool = previewToolForNode(*node);
     if (node->type == SceneDocument::TreeNode::Primitive) {
-        addPreviewBlock(m_scene,
-                        m_previewItems,
-                        tool,
-                        rect,
-                        fillForTool(tool));
+        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect);
         return;
     }
 
@@ -151,11 +139,7 @@ void SceneTreePreviewRenderer::addPreviewTreeItem(const QString &tool, int nodeI
         return;
     }
 
-    addPreviewBlock(m_scene,
-                    m_previewItems,
-                    tool,
-                    rect,
-                    fillForTool(tool));
+    SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect);
 }
 
 void SceneTreePreviewRenderer::addPreviewChildren(const QVector<ChildLayout> &children, const QRectF &excludedRect)

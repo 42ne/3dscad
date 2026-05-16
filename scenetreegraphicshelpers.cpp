@@ -332,24 +332,34 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
     return false;
 }
 
+namespace {
+
+const OperationVisual OperationVisuals[] = {
+    {SceneDocument::TreeNode::Union, "union", QColor(216, 237, 226), GroupMinWidth},
+    {SceneDocument::TreeNode::Difference, "difference", QColor(247, 224, 204), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Intersection, "intersection", QColor(226, 220, 247), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Module, "module", QColor(230, 232, 236), GroupModuleMinWidth},
+};
+
+} // namespace
+
+const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation)
+{
+    for (const OperationVisual &visual : OperationVisuals) {
+        if (visual.operation == operation)
+            return visual;
+    }
+    return OperationVisuals[0];
+}
+
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation)
 {
-    if (operation == SceneDocument::TreeNode::Module)
-        return GroupModuleMinWidth;
-    if (operation == SceneDocument::TreeNode::Difference || operation == SceneDocument::TreeNode::Intersection)
-        return GroupWideMinWidth;
-    return GroupMinWidth;
+    return operationVisual(operation).minWidth;
 }
 
 QString labelForOperation(SceneDocument::TreeNode::Operation operation)
 {
-    if (operation == SceneDocument::TreeNode::Module)
-        return "module";
-    if (operation == SceneDocument::TreeNode::Difference)
-        return "difference";
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return "intersection";
-    return "union";
+    return QString::fromLatin1(operationVisual(operation).toolName);
 }
 
 
@@ -524,99 +534,6 @@ void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
     if (!items || !item)
         return;
     items->append(item);
-}
-
-void addPreviewGlyph(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect)
-{
-    auto *glyph = new ToolGlyphItem(tool, rect);
-    glyph->setZValue(58.0);
-    scene->addItem(glyph);
-    appendPreviewItem(items, glyph);
-}
-
-void addPreviewBlock(QGraphicsScene *scene,
-                     QVector<QGraphicsItem *> *items,
-                     const QString &previewTool,
-                     const QRectF &rect,
-                     const QColor &fill)
-{
-    SceneDocument::TreeNode::Operation operation;
-    if (operationForToolName(previewTool, &operation)) {
-        auto *panel = addRoundedPanel(scene,
-                                      rect,
-                                      CornerRadius,
-                                      QPen(fill.darker(145), 2),
-                                      QBrush(QColor(fill.red(), fill.green(), fill.blue(), 205)),
-                                      56.0);
-        appendPreviewItem(items, panel);
-
-        const QRectF headerRect(rect.left() + 1.5, rect.top() + 1.5, rect.width() - 3.0, GroupHeaderHeight - 2.0);
-        auto *header = addRoundedPanel(scene,
-                                       headerRect,
-                                       CornerRadius - 1.0,
-                                       Qt::NoPen,
-                                       QBrush(QColor(fill.lighter(112).red(), fill.lighter(112).green(), fill.lighter(112).blue(), 210)),
-                                       57.0);
-        appendPreviewItem(items, header);
-
-        addPreviewGlyph(scene, items, previewTool, QRectF(rect.left() + 8.0, rect.top() + 6.0, 18.0, 18.0));
-
-        auto *label = scene->addSimpleText(labelForOperation(operation));
-        label->setBrush(QColor(24, 34, 44));
-        label->setPos(rect.topLeft() + QPointF(32.0, 7.0));
-        label->setZValue(58.0);
-        appendPreviewItem(items, label);
-        return;
-    }
-
-    const QRectF iconRect(rect.left() + 20.0,
-                          rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
-                          PrimitiveIconSize,
-                          PrimitiveIconSize);
-    addPreviewGlyph(scene, items, previewTool, iconRect);
-}
-
-void addPreviewGroupFrame(QGraphicsScene *scene,
-                          QVector<QGraphicsItem *> *items,
-                          const QRectF &rect,
-                          SceneDocument::TreeNode::Operation operation,
-                          qreal cutSeparatorY,
-                          const QColor &fill)
-{
-    auto *panel = addRoundedPanel(scene,
-                                  rect,
-                                  CornerRadius,
-                                  QPen(fill.darker(145), 2),
-                                  QBrush(fill),
-                                  52.0);
-    appendPreviewItem(items, panel);
-
-    const QRectF headerRect(rect.left() + 1.5, rect.top() + 1.5, rect.width() - 3.0, GroupHeaderHeight - 2.0);
-    auto *header = addRoundedPanel(scene,
-                                   headerRect,
-                                   CornerRadius - 1.0,
-                                   Qt::NoPen,
-                                   QBrush(fill.lighter(112)),
-                                   53.0);
-    appendPreviewItem(items, header);
-
-    addPreviewGlyph(scene, items, labelForOperation(operation), QRectF(rect.left() + 8.0, rect.top() + 6.0, 18.0, 18.0));
-
-    auto *label = scene->addSimpleText(labelForOperation(operation));
-    label->setBrush(QColor(24, 34, 44));
-    label->setPos(rect.topLeft() + QPointF(32.0, 7.0));
-    label->setZValue(54.0);
-    appendPreviewItem(items, label);
-
-    if (operation == SceneDocument::TreeNode::Difference && cutSeparatorY > 0.0) {
-        auto *separator = scene->addLine(rect.left() + GroupPadding,
-                                         cutSeparatorY,
-                                         rect.right() - GroupPadding,
-                                         cutSeparatorY,
-                                         QPen(QColor(130, 92, 70), 1, Qt::DashLine));
-        separator->setZValue(54.0);
-        appendPreviewItem(items, separator);
-    }
 }
 
 void addSourceRemovalMask(QGraphicsScene *scene,
@@ -880,27 +797,16 @@ protected:
 
 QColor fillForTool(const QString &tool)
 {
-    if (tool == "difference")
-        return QColor(247, 224, 204);
-    if (tool == "intersection")
-        return QColor(226, 220, 247);
-    if (tool == "union")
-        return QColor(216, 237, 226);
-    if (tool == "module")
-        return QColor(230, 232, 236);
+    SceneDocument::TreeNode::Operation operation;
+    if (operationForToolName(tool, &operation))
+        return operationVisual(operation).fill;
     return QColor(219, 231, 246);
 }
 
 
 QColor fillForOperation(SceneDocument::TreeNode::Operation operation)
 {
-    if (operation == SceneDocument::TreeNode::Module)
-        return QColor(230, 232, 236);
-    if (operation == SceneDocument::TreeNode::Difference)
-        return QColor(247, 224, 204);
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return QColor(226, 220, 247);
-    return QColor(216, 237, 226);
+    return operationVisual(operation).fill;
 }
 
 QGraphicsScene *createTreeGraphicsScene(QObject *parent)
