@@ -2,6 +2,10 @@
 
 Prototype of a visual editor for OpenSCAD-style modeling. The goal is a Tinkercad-like interface where UI actions update OpenSCAD code, and supported OpenSCAD code can be applied back into the visual scene.
 
+## Preview
+
+![Preview](docs/images/Screenshot.png)
+
 ## Current State
 
 The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering can use the software `QPainter` raster path or an experimental OpenGL mesh path selected directly inside the viewport.
