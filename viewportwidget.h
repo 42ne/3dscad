@@ -15,6 +15,9 @@
 class QMouseEvent;
 class QOpenGLShaderProgram;
 class QPainter;
+class QCheckBox;
+class QComboBox;
+class QResizeEvent;
 class QWheelEvent;
 
 class ViewportWidget : public QOpenGLWidget, protected QOpenGLFunctions
@@ -58,6 +61,7 @@ signals:
 protected:
     void initializeGL() override;
     void resizeGL(int w, int h) override;
+    void resizeEvent(QResizeEvent *event) override;
     void paintGL() override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -78,10 +82,13 @@ public:
 
 private:
     void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
+    void paintOpenGLGrid();
+    void paintOpenGLContactShadows();
     void paintOpenGLPreview();
     void drawAxisGizmo(QPainter &painter) const;
     void drawTreeTransformControlPreview(QPainter &painter) const;
     void drawTreeShapeParameterPreview(QPainter &painter) const;
+    void updateViewportControls();
     bool canUseOpenGLRenderBackend() const;
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
     QVector3D transformOriginForGroup(int groupId) const;
@@ -98,6 +105,8 @@ private:
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
     RenderBackend m_renderBackend = SoftwareRenderBackend;
+    bool m_darkViewportTheme = true;
+    int m_viewportColorVariant = 0;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
     int m_treeTransformPreviewGroupId = 0;
@@ -127,7 +136,12 @@ private:
     QVector<float> m_depthBuffer;
     QImage m_renderImage;
     QSize m_pickBufferSize;
+    QCheckBox *m_openGLViewportCheckBox = nullptr;
+    QCheckBox *m_darkViewportCheckBox = nullptr;
+    QComboBox *m_colorVariantComboBox = nullptr;
     QOpenGLShaderProgram *m_glMeshProgram = nullptr;
+    QOpenGLShaderProgram *m_glLineProgram = nullptr;
+    QOpenGLShaderProgram *m_glFlatProgram = nullptr;
 };
 
 #endif

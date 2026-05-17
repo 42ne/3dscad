@@ -2,10 +2,15 @@
 
 #include "scenemesh.h"
 
+#include <QCheckBox>
+#include <QComboBox>
 #include <QHash>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
+#include <QPolygonF>
 #include <QOpenGLShaderProgram>
+#include <QVector4D>
 #include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
@@ -29,6 +34,7 @@ struct Triangle2D
     float depthC = 0.0f;
     QColor color;
     int shapeIndex = -1;
+    bool hatched = false;
 };
 
 struct Line2D
@@ -49,7 +55,20 @@ struct OpenGLMeshVertex
 {
     QVector3D position;
     QVector3D normal;
+    QVector3D viewPosition;
     QVector3D color;
+};
+
+struct OpenGLLineVertex
+{
+    QVector3D position;
+    QVector3D color;
+};
+
+struct OpenGLFlatVertex
+{
+    QVector3D position;
+    QVector4D color;
 };
 
 struct AxisGizmoAxis
@@ -322,6 +341,45 @@ static QVector<QVector3D> convexHullXY(QVector<QVector3D> points)
     return hull;
 }
 
+static qreal cross2D(const QPointF &origin, const QPointF &a, const QPointF &b)
+{
+    return (a.x() - origin.x()) * (b.y() - origin.y())
+           - (a.y() - origin.y()) * (b.x() - origin.x());
+}
+
+static QPolygonF convexHull2D(QVector<QPointF> points)
+{
+    std::sort(points.begin(), points.end(), [](const QPointF &left, const QPointF &right) {
+        if (!qFuzzyCompare(left.x(), right.x()))
+            return left.x() < right.x();
+        return left.y() < right.y();
+    });
+
+    QVector<QPointF> hull;
+    for (const QPointF &point : points) {
+        while (hull.size() >= 2 && cross2D(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+
+    const int lowerSize = hull.size();
+    for (int i = points.size() - 2; i >= 0; --i) {
+        const QPointF &point = points[i];
+        while (hull.size() > lowerSize && cross2D(hull[hull.size() - 2], hull.last(), point) <= 0.0)
+            hull.removeLast();
+        hull.append(point);
+    }
+
+    if (!hull.isEmpty())
+        hull.removeLast();
+
+    QPolygonF polygon;
+    for (const QPointF &point : hull)
+        polygon.append(point);
+
+    return polygon;
+}
+
 static void drawArrowHead(QPainter *painter,
                           const QPointF &start,
                           const QPointF &end,
@@ -460,6 +518,93 @@ static QVector3D colorToVector(const QColor &color)
     return QVector3D(color.redF(), color.greenF(), color.blueF());
 }
 
+static QVector4D colorToVector4(const QColor &color)
+{
+    return QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF());
+}
+
+static QColor viewportBackgroundColor(bool darkTheme)
+{
+    return darkTheme ? QColor(30, 32, 36) : QColor(232, 236, 238);
+}
+
+static QColor viewportMinorGridColor(bool darkTheme)
+{
+    return darkTheme ? QColor(70, 74, 82) : QColor(156, 166, 176);
+}
+
+static QColor viewportStatusTextColor(bool darkTheme)
+{
+    return darkTheme ? QColor(220, 220, 220) : QColor(42, 48, 56);
+}
+
+static QColor viewportComputedSolidColor(bool darkTheme, int variant)
+{
+    switch (variant) {
+    case 1:
+        return darkTheme ? QColor(118, 214, 168) : QColor(42, 150, 116);
+    case 2:
+        return darkTheme ? QColor(213, 157, 126) : QColor(173, 91, 58);
+    case 3:
+        return darkTheme ? QColor(164, 181, 206) : QColor(86, 112, 148);
+    case 4:
+        return darkTheme ? QColor(229, 185, 91) : QColor(186, 119, 36);
+    default:
+        return darkTheme ? QColor(132, 192, 184) : QColor(74, 132, 150);
+    }
+}
+
+static QColor viewportPlainSolidColor(bool darkTheme, int variant)
+{
+    switch (variant) {
+    case 1:
+        return darkTheme ? QColor(91, 190, 151) : QColor(38, 128, 105);
+    case 2:
+        return darkTheme ? QColor(198, 128, 95) : QColor(151, 74, 47);
+    case 3:
+        return darkTheme ? QColor(126, 154, 198) : QColor(62, 92, 137);
+    case 4:
+        return darkTheme ? QColor(214, 161, 70) : QColor(166, 95, 31);
+    default:
+        return darkTheme ? QColor(92, 168, 224) : QColor(64, 116, 176);
+    }
+}
+
+static QColor viewportSelectedSolidColor(bool darkTheme, int variant)
+{
+    switch (variant) {
+    case 1:
+        return darkTheme ? QColor(190, 244, 200) : QColor(48, 178, 126);
+    case 2:
+        return darkTheme ? QColor(255, 188, 129) : QColor(220, 108, 54);
+    case 3:
+        return darkTheme ? QColor(198, 214, 238) : QColor(94, 130, 184);
+    case 4:
+        return darkTheme ? QColor(255, 218, 118) : QColor(224, 139, 42);
+    default:
+        return darkTheme ? QColor(166, 224, 205) : QColor(236, 142, 54);
+    }
+}
+
+static QVector3D clipPositionForWorldPoint(const QVector3D &world,
+                                           const QSize &viewportSize,
+                                           float cameraYaw,
+                                           float cameraPitch,
+                                           float cameraDistance,
+                                           const QVector3D &cameraTarget)
+{
+    const ProjectedPoint projected = projectWorldPoint(world,
+                                                       viewportSize,
+                                                       cameraYaw,
+                                                       cameraPitch,
+                                                       cameraDistance,
+                                                       cameraTarget);
+    const float x = (static_cast<float>(projected.point.x()) / qMax(1, viewportSize.width())) * 2.0f - 1.0f;
+    const float y = 1.0f - (static_cast<float>(projected.point.y()) / qMax(1, viewportSize.height())) * 2.0f;
+    const float z = qBound(-1.0f, ((projected.depth - 8.0f) / (1200.0f - 8.0f)) * 2.0f - 1.0f, 1.0f);
+    return QVector3D(x, y, z);
+}
+
 static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
 {
     return static_cast<float>((point.x() - a.x()) * (b.y() - a.y())
@@ -566,9 +711,28 @@ static void drawTransparentTriangles(QPainter *painter, QVector<Triangle2D> tria
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
     for (const Triangle2D &triangle : triangles) {
-        painter->setPen(QPen(triangle.color.darker(135), 0.7));
+        painter->setPen(triangle.hatched ? Qt::NoPen : QPen(triangle.color.darker(135), 0.7));
         painter->setBrush(triangle.color);
-        painter->drawPolygon(QPolygonF() << triangle.a << triangle.b << triangle.c);
+        const QPolygonF polygon = QPolygonF() << triangle.a << triangle.b << triangle.c;
+        painter->drawPolygon(polygon);
+
+        if (triangle.hatched) {
+            QPainterPath clipPath;
+            clipPath.addPolygon(polygon);
+
+            const QRectF bounds = polygon.boundingRect().adjusted(-18.0, -18.0, 18.0, 18.0);
+            painter->save();
+            painter->setClipPath(clipPath);
+            painter->setPen(QPen(QColor(86, 109, 124, qBound(12, triangle.color.alpha() / 2, 58)),
+                                  0.9,
+                                  Qt::SolidLine,
+                                  Qt::RoundCap));
+            const qreal step = 10.0;
+            for (qreal x = bounds.left() - bounds.height(); x < bounds.right() + bounds.height(); x += step)
+                painter->drawLine(QPointF(x, bounds.bottom()), QPointF(x + bounds.height(), bounds.top()));
+
+            painter->restore();
+        }
     }
     painter->restore();
 }
@@ -677,6 +841,50 @@ ViewportWidget::ViewportWidget(QWidget *parent)
 {
     setMinimumSize(500, 400);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_openGLViewportCheckBox = new QCheckBox(QStringLiteral("OpenGL"), this);
+    m_darkViewportCheckBox = new QCheckBox(QStringLiteral("Dark"), this);
+    m_colorVariantComboBox = new QComboBox(this);
+    m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
+    m_colorVariantComboBox->addItems({
+        QStringLiteral("Neutral"),
+        QStringLiteral("Mint"),
+        QStringLiteral("Clay"),
+        QStringLiteral("Steel"),
+        QStringLiteral("Amber")
+    });
+
+    const QString controlStyle = QStringLiteral(
+        "QCheckBox, QComboBox {"
+        "  color: #eef2f6;"
+        "  background: rgba(12, 16, 22, 150);"
+        "  border: 1px solid rgba(230, 236, 244, 70);"
+        "  border-radius: 5px;"
+        "  padding: 3px 7px 3px 5px;"
+        "}"
+        "QComboBox::drop-down { border: 0px; width: 18px; }"
+        "QCheckBox::indicator { width: 13px; height: 13px; }"
+        "QCheckBox:disabled, QComboBox:disabled { color: rgba(238, 242, 246, 95); }");
+    m_openGLViewportCheckBox->setStyleSheet(controlStyle);
+    m_darkViewportCheckBox->setStyleSheet(controlStyle);
+    m_colorVariantComboBox->setStyleSheet(controlStyle);
+    m_openGLViewportCheckBox->setToolTip(QStringLiteral("Use OpenGL rendering for viewport meshes and grid."));
+    m_darkViewportCheckBox->setToolTip(QStringLiteral("Switch viewport between dark and light theme."));
+    m_colorVariantComboBox->setToolTip(QStringLiteral("Choose viewport material color variant."));
+
+    connect(m_openGLViewportCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        setRenderBackend(checked ? OpenGLRenderBackend : SoftwareRenderBackend);
+    });
+    connect(m_darkViewportCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        m_darkViewportTheme = checked;
+        update();
+    });
+    connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_viewportColorVariant = qMax(0, index);
+        update();
+    });
+
+    updateViewportControls();
 }
 
 void ViewportWidget::setScene(const SceneDocument *scene)
@@ -742,10 +950,13 @@ void ViewportWidget::setRenderBackend(RenderBackend backend)
     if (backend == OpenGLRenderBackend && !canUseOpenGLRenderBackend())
         backend = SoftwareRenderBackend;
 
-    if (m_renderBackend == backend)
+    if (m_renderBackend == backend) {
+        updateViewportControls();
         return;
+    }
 
     m_renderBackend = backend;
+    updateViewportControls();
     update();
 }
 
@@ -775,19 +986,23 @@ void ViewportWidget::invalidateCsgPreview()
 void ViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();
-    glClearColor(0.12f, 0.13f, 0.15f, 1.0f);
+    const QColor background = viewportBackgroundColor(m_darkViewportTheme);
+    glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
 
     m_glMeshProgram = new QOpenGLShaderProgram(this);
     m_glMeshProgram->addShaderFromSourceCode(
         QOpenGLShader::Vertex,
         "attribute vec3 a_position;\n"
         "attribute vec3 a_normal;\n"
+        "attribute vec3 a_view_position;\n"
         "attribute vec3 a_color;\n"
         "varying vec3 v_normal;\n"
+        "varying vec3 v_view_position;\n"
         "varying vec3 v_color;\n"
         "void main() {\n"
         "    gl_Position = vec4(a_position, 1.0);\n"
         "    v_normal = normalize(a_normal);\n"
+        "    v_view_position = a_view_position;\n"
         "    v_color = a_color;\n"
         "}\n");
     m_glMeshProgram->addShaderFromSourceCode(
@@ -796,19 +1011,77 @@ void ViewportWidget::initializeGL()
         "precision mediump float;\n"
         "#endif\n"
         "varying vec3 v_normal;\n"
+        "varying vec3 v_view_position;\n"
         "varying vec3 v_color;\n"
         "void main() {\n"
         "    vec3 n = normalize(v_normal);\n"
-        "    vec3 lightA = normalize(vec3(-0.45, -0.35, 1.0));\n"
-        "    vec3 lightB = normalize(vec3(0.85, 0.15, 0.45));\n"
-        "    vec3 lightC = normalize(vec3(-0.2, 0.9, 0.25));\n"
-        "    float amount = 0.22;\n"
-        "    amount += max(0.0, dot(n, lightA)) * 0.78;\n"
-        "    amount += max(0.0, dot(n, lightB)) * 0.34;\n"
-        "    amount += max(0.0, dot(n, lightC)) * 0.24;\n"
-        "    gl_FragColor = vec4(clamp(v_color * amount, 0.0, 1.0), 1.0);\n"
+        "    vec3 viewDir = normalize(-v_view_position);\n"
+        "    vec3 lightA = normalize(vec3(-0.35, 0.48, 0.82));\n"
+        "    vec3 lightB = normalize(vec3(0.78, -0.32, 0.38));\n"
+        "    vec3 lightC = normalize(vec3(-0.25, -0.75, 0.28));\n"
+        "    float diffuseA = max(0.0, dot(n, lightA));\n"
+        "    float diffuseB = max(0.0, dot(n, lightB));\n"
+        "    float diffuseC = max(0.0, dot(n, lightC));\n"
+        "    vec3 reflectedView = reflect(-viewDir, n);\n"
+        "    float skyMix = clamp(reflectedView.y * 0.55 + 0.5, 0.0, 1.0);\n"
+        "    vec3 environment = mix(vec3(0.18, 0.20, 0.22), vec3(0.58, 0.70, 0.82), skyMix);\n"
+        "    float fresnel = pow(1.0 - max(0.0, dot(n, viewDir)), 3.0);\n"
+        "    float specA = pow(max(0.0, dot(reflect(-lightA, n), viewDir)), 42.0);\n"
+        "    float specB = pow(max(0.0, dot(reflect(-lightB, n), viewDir)), 26.0);\n"
+        "    float rim = pow(1.0 - max(0.0, dot(n, viewDir)), 2.0);\n"
+        "    vec3 warmLight = vec3(1.0, 0.92, 0.78) * diffuseA * 0.72;\n"
+        "    vec3 coolLight = vec3(0.58, 0.74, 1.0) * diffuseB * 0.32;\n"
+        "    vec3 sideLight = vec3(1.0, 0.58, 0.38) * diffuseC * 0.18;\n"
+        "    vec3 shaded = v_color * (vec3(0.20) + warmLight + coolLight + sideLight);\n"
+        "    shaded = mix(shaded, environment, 0.14 + fresnel * 0.26);\n"
+        "    shaded += vec3(1.0, 0.92, 0.74) * specA * 0.42;\n"
+        "    shaded += vec3(0.70, 0.86, 1.0) * specB * 0.18;\n"
+        "    shaded += vec3(0.55, 0.75, 1.0) * rim * 0.16;\n"
+        "    gl_FragColor = vec4(clamp(shaded, 0.0, 1.0), 1.0);\n"
         "}\n");
     m_glMeshProgram->link();
+
+    m_glLineProgram = new QOpenGLShaderProgram(this);
+    m_glLineProgram->addShaderFromSourceCode(
+        QOpenGLShader::Vertex,
+        "attribute vec3 a_position;\n"
+        "attribute vec3 a_color;\n"
+        "varying vec3 v_color;\n"
+        "void main() {\n"
+        "    gl_Position = vec4(a_position, 1.0);\n"
+        "    v_color = a_color;\n"
+        "}\n");
+    m_glLineProgram->addShaderFromSourceCode(
+        QOpenGLShader::Fragment,
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "varying vec3 v_color;\n"
+        "void main() {\n"
+        "    gl_FragColor = vec4(v_color, 1.0);\n"
+        "}\n");
+    m_glLineProgram->link();
+
+    m_glFlatProgram = new QOpenGLShaderProgram(this);
+    m_glFlatProgram->addShaderFromSourceCode(
+        QOpenGLShader::Vertex,
+        "attribute vec3 a_position;\n"
+        "attribute vec4 a_color;\n"
+        "varying vec4 v_color;\n"
+        "void main() {\n"
+        "    gl_Position = vec4(a_position, 1.0);\n"
+        "    v_color = a_color;\n"
+        "}\n");
+    m_glFlatProgram->addShaderFromSourceCode(
+        QOpenGLShader::Fragment,
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "varying vec4 v_color;\n"
+        "void main() {\n"
+        "    gl_FragColor = v_color;\n"
+        "}\n");
+    m_glFlatProgram->link();
 }
 
 void ViewportWidget::resizeGL(int w, int h)
@@ -816,13 +1089,24 @@ void ViewportWidget::resizeGL(int w, int h)
     glViewport(0, 0, w, h);
 }
 
+void ViewportWidget::resizeEvent(QResizeEvent *event)
+{
+    QOpenGLWidget::resizeEvent(event);
+    updateViewportControls();
+}
+
 void ViewportWidget::paintGL()
 {
+    const QColor background = viewportBackgroundColor(m_darkViewportTheme);
+    glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const bool useOpenGLPreview = m_renderBackend == OpenGLRenderBackend && canUseOpenGLRenderBackend();
-    if (useOpenGLPreview)
+    if (useOpenGLPreview) {
+        paintOpenGLGrid();
+        paintOpenGLContactShadows();
         paintOpenGLPreview();
+    }
 
     glDisable(GL_DEPTH_TEST);
     QPainter painter(this);
@@ -835,7 +1119,7 @@ void ViewportWidget::paintGL()
 void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 {
     if (drawSceneMeshes)
-        painter.fillRect(rect(), QColor(30, 32, 36));
+        painter.fillRect(rect(), viewportBackgroundColor(m_darkViewportTheme));
 
     const QVector<SceneLight> lights = {
         {QVector3D(-0.45f, -0.35f, 1.0f).normalized(), QColor(255, 244, 214), 0.78f},
@@ -848,7 +1132,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     };
 
     auto drawGrid = [&]() {
-        painter.setPen(QColor(70, 74, 82));
+        painter.setPen(viewportMinorGridColor(m_darkViewportTheme));
 
         for (int i = -120; i <= 120; i += 20) {
             const ProjectedPoint xStart = project(QVector3D(-120, i, 0));
@@ -902,7 +1186,13 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         painter.drawPolygon(shadow.translated(screenOffset));
     };
 
-    auto appendMesh = [&](QVector<Triangle2D> &triangles, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex, bool drawMeshShadow = true) {
+    auto appendMesh = [&](QVector<Triangle2D> &triangles,
+                          const SceneMesh &mesh,
+                          const QColor &baseColor,
+                          int shapeIndex,
+                          bool drawMeshShadow = true,
+                          bool hatched = false,
+                          bool lit = true) {
         if (drawSceneMeshes && drawMeshShadow)
             drawShadow(mesh.shadowPoints);
 
@@ -918,8 +1208,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             triangle.depthA = a.depth;
             triangle.depthB = b.depth;
             triangle.depthC = c.depth;
-            triangle.color = litColor(baseColor.lighter(meshTriangle.shade), meshTriangle.normal, lights);
+            triangle.color = lit ? litColor(baseColor.lighter(meshTriangle.shade), meshTriangle.normal, lights) : baseColor;
             triangle.shapeIndex = shapeIndex;
+            triangle.hatched = hatched;
             triangles.append(triangle);
         }
     };
@@ -934,7 +1225,82 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
     };
 
-    drawGrid();
+    auto appendProjectedHull = [&](QVector<QPair<QPolygonF, QColor>> &outlines,
+                                   const SceneMesh &mesh,
+                                   const QColor &color) {
+        QVector<QPointF> points;
+        points.reserve(mesh.triangles.size() * 3);
+        for (const MeshTriangle &meshTriangle : mesh.triangles) {
+            points.append(project(meshTriangle.a).point);
+            points.append(project(meshTriangle.b).point);
+            points.append(project(meshTriangle.c).point);
+        }
+
+        const QPolygonF hull = convexHull2D(points);
+        if (hull.size() >= 3)
+            outlines.append({hull, color});
+    };
+
+    auto appendCutFeatureEdges = [&](QVector<Line2D> &lines, const SceneMesh &mesh, const QColor &color) {
+        struct EdgeInfo
+        {
+            QVector3D from;
+            QVector3D to;
+            QVector<QVector3D> normals;
+            QVector<bool> frontFacing;
+        };
+
+        auto pointKey = [](const QVector3D &point) {
+            return QStringLiteral("%1,%2,%3")
+                .arg(qRound64(point.x() * 1000.0f))
+                .arg(qRound64(point.y() * 1000.0f))
+                .arg(qRound64(point.z() * 1000.0f));
+        };
+        auto edgeKey = [&](const QVector3D &a, const QVector3D &b) {
+            const QString aKey = pointKey(a);
+            const QString bKey = pointKey(b);
+            return aKey < bKey ? aKey + QLatin1Char('|') + bKey : bKey + QLatin1Char('|') + aKey;
+        };
+        auto appendEdge = [&](QHash<QString, EdgeInfo> *edges,
+                              const QVector3D &a,
+                              const QVector3D &b,
+                              const QVector3D &normal) {
+            EdgeInfo &edge = (*edges)[edgeKey(a, b)];
+            edge.from = a;
+            edge.to = b;
+            edge.normals.append(normal.normalized());
+            edge.frontFacing.append(toCameraDirection(normal, m_cameraYaw, m_cameraPitch).z() < 0.0f);
+        };
+
+        QHash<QString, EdgeInfo> edges;
+        for (const MeshTriangle &triangle : mesh.triangles) {
+            appendEdge(&edges, triangle.a, triangle.b, triangle.normal);
+            appendEdge(&edges, triangle.b, triangle.c, triangle.normal);
+            appendEdge(&edges, triangle.c, triangle.a, triangle.normal);
+        }
+
+        for (const EdgeInfo &edge : edges) {
+            bool useful = edge.normals.size() == 1;
+            if (edge.normals.size() >= 2) {
+                const float normalDot = qAbs(QVector3D::dotProduct(edge.normals[0], edge.normals[1]));
+                const bool sharpCrease = normalDot < 0.74f;
+                const bool silhouette = edge.frontFacing[0] != edge.frontFacing[1];
+                useful = sharpCrease || silhouette;
+            }
+
+            if (!useful)
+                continue;
+
+            Line2D line;
+            line.a = project(edge.from).point;
+            line.b = project(edge.to).point;
+            line.color = color;
+            lines.append(line);
+        }
+    };
+
+    if (drawSceneMeshes)
+        drawGrid();
     QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
@@ -942,6 +1308,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         QVector<Triangle2D> translucentHelperTriangles;
         QVector<Line2D> backgroundHelperLines;
         QVector<Line2D> foregroundHelperLines;
+        QVector<QPair<QPolygonF, QColor>> cutHelperOutlines;
 
         if (m_draggingShape) {
             csgStatus = "CSG preview: paused while dragging";
@@ -984,7 +1351,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     color = QColor(150, 115, 240);
 
                 if (item.computed)
-                    color = QColor(95, 185, 155);
+                    color = viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant);
 
                 if (item.shapeIndex == m_selectedIndex) {
                     if (item.booleanMode == ShapeNode::Subtract)
@@ -992,22 +1359,29 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     else if (item.booleanMode == ShapeNode::Intersect)
                         color = QColor(185, 145, 255);
                     else
-                        color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
+                        color = item.computed ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : QColor(255, 180, 60);
                 }
 
                 if (item.helper) {
                     if (item.booleanMode == ShapeNode::Subtract) {
-                        QColor cutColor = item.shapeIndex == m_selectedIndex
-                                              ? QColor(255, 120, 85, 112)
-                                              : QColor(225, 95, 95, 28);
-                        appendMesh(translucentHelperTriangles, item.mesh, cutColor, -1, false);
+                        const bool selectedCut = item.shapeIndex == m_selectedIndex;
+                        QColor cutColor = selectedCut
+                                              ? (m_darkViewportTheme ? QColor(188, 210, 218, 58) : QColor(190, 205, 212, 82))
+                                              : (m_darkViewportTheme ? QColor(188, 210, 218, 14) : QColor(190, 205, 212, 22));
+                        appendMesh(translucentHelperTriangles, item.mesh, cutColor, -1, false, true, false);
+                        QColor cutEdgeColor = selectedCut
+                                                  ? (m_darkViewportTheme ? QColor(176, 216, 232, 178) : QColor(42, 68, 84, 178))
+                                                  : (m_darkViewportTheme ? QColor(176, 216, 232, 76) : QColor(42, 68, 84, 44));
+                        appendProjectedHull(cutHelperOutlines, item.mesh, cutEdgeColor);
+                        if (selectedCut)
+                            appendCutFeatureEdges(foregroundHelperLines, item.mesh, cutEdgeColor);
                     } else if (item.shapeIndex == m_selectedIndex) {
                         QColor selectedColor = color.lighter(115);
-                        selectedColor.setAlpha(215);
+                        selectedColor.setAlpha(170);
                         appendWireframe(foregroundHelperLines, item.mesh, selectedColor);
                     } else {
                         QColor quietColor = color.lighter(95);
-                        quietColor.setAlpha(75);
+                        quietColor.setAlpha(42);
                         appendWireframe(backgroundHelperLines, item.mesh, quietColor);
                     }
                 } else {
@@ -1017,7 +1391,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
 
         for (const Line2D &line : backgroundHelperLines) {
-            painter.setPen(QPen(line.color, 1, Qt::DashLine, Qt::RoundCap));
+            painter.setPen(QPen(line.color, 0.7, Qt::DashLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
         }
 
@@ -1033,8 +1407,15 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
         drawTransparentTriangles(&painter, translucentHelperTriangles);
 
+        for (const auto &outline : cutHelperOutlines) {
+            painter.setRenderHint(QPainter::Antialiasing, true);
+            painter.setPen(QPen(outline.second, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawPolygon(outline.first);
+        }
+
         for (const Line2D &line : foregroundHelperLines) {
-            painter.setPen(QPen(line.color, 2, Qt::DashLine, Qt::RoundCap));
+            painter.setPen(QPen(line.color, 0.7, Qt::SolidLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
         }
 
@@ -1089,12 +1470,143 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
     }
 
-    painter.setPen(QColor(220, 220, 220));
+    painter.setPen(viewportStatusTextColor(m_darkViewportTheme));
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
     painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
     drawTreeTransformControlPreview(painter);
     drawTreeShapeParameterPreview(painter);
     drawAxisGizmo(painter);
+}
+
+void ViewportWidget::paintOpenGLGrid()
+{
+    if (!m_glLineProgram || !m_glLineProgram->isLinked())
+        return;
+
+    QVector<OpenGLLineVertex> vertices;
+    auto appendLine = [&](const QVector3D &from, const QVector3D &to, const QColor &color) {
+        const QVector3D glColor = colorToVector(color);
+        vertices.append({clipPositionForWorldPoint(from, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), glColor});
+        vertices.append({clipPositionForWorldPoint(to, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), glColor});
+    };
+
+    const QColor minorGrid = viewportMinorGridColor(m_darkViewportTheme);
+    for (int i = -120; i <= 120; i += 20) {
+        appendLine(QVector3D(-120, i, 0), QVector3D(120, i, 0), minorGrid);
+        appendLine(QVector3D(i, -120, 0), QVector3D(i, 120, 0), minorGrid);
+    }
+
+    appendLine(QVector3D(-130, 0, 0), QVector3D(130, 0, 0), QColor(210, 80, 80));
+    appendLine(QVector3D(0, -130, 0), QVector3D(0, 130, 0), QColor(80, 180, 110));
+    appendLine(QVector3D(0, 0, 0), QVector3D(0, 0, 90), QColor(90, 150, 230));
+
+    if (vertices.isEmpty())
+        return;
+
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(1.0f);
+    m_glLineProgram->bind();
+
+    const int positionLocation = m_glLineProgram->attributeLocation("a_position");
+    const int colorLocation = m_glLineProgram->attributeLocation("a_color");
+    m_glLineProgram->enableAttributeArray(positionLocation);
+    m_glLineProgram->enableAttributeArray(colorLocation);
+
+    const char *data = reinterpret_cast<const char *>(vertices.constData());
+    m_glLineProgram->setAttributeArray(positionLocation,
+                                       GL_FLOAT,
+                                       data + offsetof(OpenGLLineVertex, position),
+                                       3,
+                                       sizeof(OpenGLLineVertex));
+    m_glLineProgram->setAttributeArray(colorLocation,
+                                       GL_FLOAT,
+                                       data + offsetof(OpenGLLineVertex, color),
+                                       3,
+                                       sizeof(OpenGLLineVertex));
+
+    glDrawArrays(GL_LINES, 0, vertices.size());
+
+    m_glLineProgram->disableAttributeArray(positionLocation);
+    m_glLineProgram->disableAttributeArray(colorLocation);
+    m_glLineProgram->release();
+}
+
+void ViewportWidget::paintOpenGLContactShadows()
+{
+    if (!m_shapes || !m_glFlatProgram || !m_glFlatProgram->isLinked())
+        return;
+
+    const CsgPreview &preview = m_scene
+                                    ? cachedCsgPreview(*m_scene,
+                                                       &m_cachedCsgPreview,
+                                                       &m_cachedCsgFingerprint,
+                                                       &m_csgPreviewDirty)
+                                    : cachedCsgPreview(*m_shapes,
+                                                       &m_cachedCsgPreview,
+                                                       &m_cachedCsgFingerprint,
+                                                       &m_csgPreviewDirty);
+
+    QVector<OpenGLFlatVertex> vertices;
+    auto appendShadow = [&](const SceneMesh &mesh, int alpha) {
+        if (mesh.shadowPoints.isEmpty())
+            return;
+
+        QVector<QVector3D> groundPoints;
+        groundPoints.reserve(mesh.shadowPoints.size());
+        for (const QVector3D &point : mesh.shadowPoints)
+            groundPoints.append(QVector3D(point.x(), point.y(), 0.0f));
+
+        const QVector<QVector3D> hull = convexHullXY(groundPoints);
+        if (hull.size() < 3)
+            return;
+
+        const QVector4D color = colorToVector4(QColor(0, 0, 0, alpha));
+        const QVector3D anchor = clipPositionForWorldPoint(hull.first(), size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+        for (int i = 1; i + 1 < hull.size(); ++i) {
+            vertices.append({anchor, color});
+            vertices.append({clipPositionForWorldPoint(hull[i], size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), color});
+            vertices.append({clipPositionForWorldPoint(hull[i + 1], size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), color});
+        }
+    };
+
+    for (const CsgRenderItem &item : preview.items) {
+        if (item.helper)
+            continue;
+
+        appendShadow(item.mesh, item.computed ? 44 : 34);
+    }
+
+    if (vertices.isEmpty())
+        return;
+
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    m_glFlatProgram->bind();
+
+    const int positionLocation = m_glFlatProgram->attributeLocation("a_position");
+    const int colorLocation = m_glFlatProgram->attributeLocation("a_color");
+    m_glFlatProgram->enableAttributeArray(positionLocation);
+    m_glFlatProgram->enableAttributeArray(colorLocation);
+
+    const char *data = reinterpret_cast<const char *>(vertices.constData());
+    m_glFlatProgram->setAttributeArray(positionLocation,
+                                       GL_FLOAT,
+                                       data + offsetof(OpenGLFlatVertex, position),
+                                       3,
+                                       sizeof(OpenGLFlatVertex));
+    m_glFlatProgram->setAttributeArray(colorLocation,
+                                       GL_FLOAT,
+                                       data + offsetof(OpenGLFlatVertex, color),
+                                       4,
+                                       sizeof(OpenGLFlatVertex));
+
+    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+
+    m_glFlatProgram->disableAttributeArray(positionLocation);
+    m_glFlatProgram->disableAttributeArray(colorLocation);
+    m_glFlatProgram->release();
+    glDisable(GL_BLEND);
 }
 
 void ViewportWidget::paintOpenGLPreview()
@@ -1104,19 +1616,22 @@ void ViewportWidget::paintOpenGLPreview()
 
     QVector<OpenGLMeshVertex> vertices;
     auto toClipPosition = [this](const QVector3D &world) {
-        const ProjectedPoint projected = projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
-        const float x = (static_cast<float>(projected.point.x()) / qMax(1, width())) * 2.0f - 1.0f;
-        const float y = 1.0f - (static_cast<float>(projected.point.y()) / qMax(1, height())) * 2.0f;
-        const float z = qBound(-1.0f, ((projected.depth - 8.0f) / (1200.0f - 8.0f)) * 2.0f - 1.0f, 1.0f);
-        return QVector3D(x, y, z);
+        return clipPositionForWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    };
+    auto toViewPosition = [this](const QVector3D &world) {
+        return toCameraPoint(world, m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    };
+    auto toViewNormal = [this](const QVector3D &normal) {
+        return toCameraDirection(normal, m_cameraYaw, m_cameraPitch).normalized();
     };
 
     auto appendOpenGLMesh = [&](const SceneMesh &mesh, const QColor &baseColor) {
         for (const MeshTriangle &triangle : mesh.triangles) {
             const QVector3D color = colorToVector(baseColor.lighter(triangle.shade));
-            vertices.append({toClipPosition(triangle.a), triangle.normal, color});
-            vertices.append({toClipPosition(triangle.b), triangle.normal, color});
-            vertices.append({toClipPosition(triangle.c), triangle.normal, color});
+            const QVector3D normal = toViewNormal(triangle.normal);
+            vertices.append({toClipPosition(triangle.a), normal, toViewPosition(triangle.a), color});
+            vertices.append({toClipPosition(triangle.b), normal, toViewPosition(triangle.b), color});
+            vertices.append({toClipPosition(triangle.c), normal, toViewPosition(triangle.c), color});
         }
     };
 
@@ -1145,14 +1660,14 @@ void ViewportWidget::paintOpenGLPreview()
             if (item.helper)
                 continue;
 
-            QColor color = item.computed ? QColor(95, 185, 155) : QColor(80, 160, 255);
+            QColor color = item.computed ? viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant);
             if (!item.computed && item.booleanMode == ShapeNode::Subtract)
                 color = QColor(225, 95, 95);
             else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                 color = QColor(150, 115, 240);
 
             if (item.shapeIndex == m_selectedIndex)
-                color = item.computed ? QColor(115, 220, 180) : QColor(255, 180, 60);
+                color = item.computed ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : QColor(255, 180, 60);
 
             appendOpenGLMesh(item.mesh, color);
         }
@@ -1168,10 +1683,12 @@ void ViewportWidget::paintOpenGLPreview()
 
     const int positionLocation = m_glMeshProgram->attributeLocation("a_position");
     const int normalLocation = m_glMeshProgram->attributeLocation("a_normal");
+    const int viewPositionLocation = m_glMeshProgram->attributeLocation("a_view_position");
     const int colorLocation = m_glMeshProgram->attributeLocation("a_color");
 
     m_glMeshProgram->enableAttributeArray(positionLocation);
     m_glMeshProgram->enableAttributeArray(normalLocation);
+    m_glMeshProgram->enableAttributeArray(viewPositionLocation);
     m_glMeshProgram->enableAttributeArray(colorLocation);
 
     const char *data = reinterpret_cast<const char *>(vertices.constData());
@@ -1185,6 +1702,11 @@ void ViewportWidget::paintOpenGLPreview()
                                        data + offsetof(OpenGLMeshVertex, normal),
                                        3,
                                        sizeof(OpenGLMeshVertex));
+    m_glMeshProgram->setAttributeArray(viewPositionLocation,
+                                       GL_FLOAT,
+                                       data + offsetof(OpenGLMeshVertex, viewPosition),
+                                       3,
+                                       sizeof(OpenGLMeshVertex));
     m_glMeshProgram->setAttributeArray(colorLocation,
                                        GL_FLOAT,
                                        data + offsetof(OpenGLMeshVertex, color),
@@ -1195,6 +1717,7 @@ void ViewportWidget::paintOpenGLPreview()
 
     m_glMeshProgram->disableAttributeArray(positionLocation);
     m_glMeshProgram->disableAttributeArray(normalLocation);
+    m_glMeshProgram->disableAttributeArray(viewPositionLocation);
     m_glMeshProgram->disableAttributeArray(colorLocation);
     m_glMeshProgram->release();
 }
@@ -1491,6 +2014,43 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
     return true;
+}
+
+void ViewportWidget::updateViewportControls()
+{
+    if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_colorVariantComboBox)
+        return;
+
+    const bool openGLAvailable = canUseOpenGLRenderBackend();
+    m_openGLViewportCheckBox->setEnabled(openGLAvailable);
+    m_openGLViewportCheckBox->blockSignals(true);
+    m_openGLViewportCheckBox->setChecked(m_renderBackend == OpenGLRenderBackend);
+    m_openGLViewportCheckBox->blockSignals(false);
+
+    m_darkViewportCheckBox->blockSignals(true);
+    m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
+    m_darkViewportCheckBox->blockSignals(false);
+
+    m_colorVariantComboBox->blockSignals(true);
+    m_colorVariantComboBox->setCurrentIndex(qBound(0, m_viewportColorVariant, m_colorVariantComboBox->count() - 1));
+    m_colorVariantComboBox->blockSignals(false);
+
+    const QSize openGLSize = m_openGLViewportCheckBox->sizeHint();
+    const QSize darkSize = m_darkViewportCheckBox->sizeHint();
+    const QSize colorSize = m_colorVariantComboBox->sizeHint();
+    const int margin = 10;
+    const int gap = 6;
+    const int y = 54;
+    int x = margin;
+    m_openGLViewportCheckBox->setGeometry(x, y, openGLSize.width() + 10, openGLSize.height() + 2);
+    x += m_openGLViewportCheckBox->width() + gap;
+    m_darkViewportCheckBox->setGeometry(x, y, darkSize.width() + 10, darkSize.height() + 2);
+    x += m_darkViewportCheckBox->width() + gap;
+    m_colorVariantComboBox->setGeometry(x, y, qMax(92, colorSize.width() + 12), darkSize.height() + 2);
+
+    m_openGLViewportCheckBox->raise();
+    m_darkViewportCheckBox->raise();
+    m_colorVariantComboBox->raise();
 }
 
 QVector<SceneDocument::TreeNode> ViewportWidget::parentGroupStackForGroup(int groupId) const

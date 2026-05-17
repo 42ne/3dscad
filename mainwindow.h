@@ -11,7 +11,6 @@ class QTextEdit;
 class QLabel;
 class QDoubleSpinBox;
 class QComboBox;
-class QCheckBox;
 class QPushButton;
 class QAction;
 class QUndoStack;
@@ -55,7 +54,6 @@ private slots:
     void onViewportGroupRotationDragStarted(int groupId);
     void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
     void onViewportGroupRotationDragFinished(int groupId);
-    void onUseOpenGLToggled(bool checked);
     void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex);
     void onGraphicsTreeNodeSelected(int nodeId);
     void onGraphicsTreeNodeDeleteRequested(int nodeId);
@@ -106,7 +104,6 @@ private:
     QPushButton *m_sendToOpenScadButton = nullptr;
     QPushButton *m_deleteShapeButton = nullptr;
     QPushButton *m_deleteGroupButton = nullptr;
-    QCheckBox *m_useOpenGLCheckBox = nullptr;
     QLabel *m_csgStatusLabel = nullptr;
     QLabel *m_openScadPreviewLabel = nullptr;
 

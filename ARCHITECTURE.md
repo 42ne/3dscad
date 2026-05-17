@@ -19,8 +19,8 @@ It stores:
 
 It also contains an explicit `TreeNode` hierarchy with group and primitive nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
 The service root is a non-deletable `Module` tree node used as the generated `scene_model` module root. User-visible boolean operation nodes are `Union`, `Difference`, and `Intersection`; `Module` is also reserved in the graphics palette for future nested module work.
-Group `TreeNode` entries store position and rotation transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`, and Manifold CSG applies the same transform after evaluating the group operation.
-Group transforms can be edited from the Properties dock when a group row is selected; edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
+Group `TreeNode` entries store position, rotation, and scale transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`/`scale`, and Manifold CSG applies the same transform after evaluating the group operation.
+Transform groups are edited directly in the graphics tree through compact controls; the Properties dock remains available for legacy/simple property editing. Edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
 Selected groups can also be moved from the viewport axis gizmo and rotated from the viewport rotation rings. Viewport group dragging updates the group transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
 The document model exposes group operations used by the UI layer: add group, remove group by promoting children, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
@@ -34,15 +34,17 @@ The properties panel derives the selected primitive's displayed tree role from `
 The graphics widget maintains transient hit-area metadata for each drawn group so drag preview can compute source and target containers, future child order, container expansion, `difference` base/cut placement, and self-drop suppression without mutating the document during mouse move. For moved nodes, the widget renders a snapshot of the source node under the cursor, shows a reserved slot at the source location, and separately previews the target container after insertion. Palette drags preview the real node that will be inserted. Active drags are marked with a green dashed focus outline, using an ellipse for primitives and a rounded rectangle for operation groups.
 Graphics-tree selection flows back through `MainWindow`, which updates the classic tree, viewport selection, Properties dock, and OpenSCAD code highlight. The widget intentionally avoids `Q_OBJECT`; callbacks are plain `std::function` hooks to keep it easy to isolate while the graphics tree is being developed.
 
-`ViewportWidget` owns interactive viewing and picking:
+`ViewportWidget` owns interactive viewing, picking, and viewport-local display controls:
 
 - camera orbit/zoom
+- right-button viewport panning
 - projection
 - software depth buffer
 - viewport rasterization
-- explicit render backend selection, currently using the software backend by default
+- explicit render backend selection through an in-viewport `OpenGL` checkbox
+- dark/light viewport theme and material color variant controls
 - transform gizmo with move axes and rotation rings
-- helper wireframe picking
+- helper cut-volume drawing
 - cached CSG preview reuse between repaints
 
 ## Code Generation And Parsing
@@ -124,7 +126,7 @@ Runtime flow:
 1. Convert each `ShapeNode` to a Manifold primitive.
 2. Evaluate the `SceneDocument::TreeNode` tree with union, difference, and intersection operators.
 3. Convert Manifold `MeshGL` output back to `SceneMesh`.
-4. Render helper shapes as wireframes for editing.
+4. Render helper shapes for editing. Subtract helpers are displayed as translucent cut volumes; selected cuts show useful silhouette/feature edges, while inactive cuts remain faint.
 
 The current local Manifold builds live under `build/` and are not part of the repository. With Qt's MinGW GCC 8, Manifold needed local sequential fallbacks for unavailable standard parallel numeric functions.
 
@@ -149,7 +151,7 @@ For spheres, cylinders, and rotated cubes:
 2. Triangle centroids are tested against subtract helper volumes.
 3. Triangles inside subtract helpers are removed.
 4. If intersect helpers exist, triangles outside all intersect helpers are removed.
-5. Helper shapes are rendered as wireframes.
+5. Helper shapes are rendered as editing overlays. Subtract helpers use translucent cut volumes instead of full wireframes.
 
 This is only a preview. It does not create cut surfaces.
 
@@ -180,12 +182,13 @@ Dragging:
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
 - Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
-- The Shapes dock exposes a `Use OpenGL` checkbox. When enabled, solid scene meshes are drawn by the OpenGL shader path while grid, helper wireframes, gizmo, text, CPU-side projection, and picking still reuse the software path.
+- The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, and contact shadows are drawn by shader paths while gizmo, helper overlays, text, CPU-side projection, and picking still reuse the software path.
+- Graphics-tree transform and primitive parameter controls can be adjusted with `Ctrl + mouse wheel`. Hovering editable controls provides viewport hints for the affected axis, rotation, scale, or primitive dimension.
 
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
-- The experimental OpenGL mesh backend does not yet use persistent GPU buffers, GPU-side projection, or GPU picking.
+- The experimental OpenGL backend does not yet use persistent GPU buffers, GPU-side projection, or GPU picking.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
@@ -204,7 +207,7 @@ Short term:
 Medium term:
 
 - Continue isolating scene-tree UI/model code so the graphics tree can be developed independently from the main viewport.
-- Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
+- Move the experimental OpenGL backend toward persistent vertex/index buffers and GPU picking.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 
 Long term:

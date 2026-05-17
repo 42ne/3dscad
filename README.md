@@ -4,7 +4,7 @@ Prototype of a visual editor for OpenSCAD-style modeling. The goal is a Tinkerca
 
 ## Current State
 
-The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering currently uses a software rasterizer through `QPainter`, with an explicit backend switch prepared for an optional OpenGL path.
+The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering can use the software `QPainter` raster path or an experimental OpenGL mesh path selected directly inside the viewport.
 
 Implemented:
 
@@ -12,7 +12,7 @@ Implemented:
 - Scene tree displays the generated boolean structure as a root `module scene_model` with `union`, `difference`, and `intersection` groups.
 - The document root is a non-deletable `module scene_model` group, so dropping a top-level group no longer creates an accidental implicit wrapper.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
-- Group tree nodes store position and rotation transforms for upcoming group editing.
+- Group tree nodes store position, rotation, and scale transforms for transform-container editing.
 - `SceneDocument` exposes group operations for add/remove/move, with undo/redo commands ready for UI wiring.
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
 - Experimental graphics tree preview based on `QGraphicsScene`, shown beside the classic tree.
@@ -32,6 +32,8 @@ Implemented:
 - The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
 - Selected primitives and groups can be moved from the viewport with axis gizmo arrows and rotated with the gizmo rings.
+- Graphics-tree transform containers support `translate`, `rotate`, and `scale`; their compact controls can be adjusted with `Ctrl + mouse wheel`.
+- Primitive size/radius/height controls are also exposed in the graphics tree and show viewport hints while editing.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - Moving nodes between groups preserves their world position for translation-only group transforms.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
@@ -43,10 +45,12 @@ Implemented:
 - OpenSCAD generation for the supported scene subset, wrapped as `module scene_model()` plus a call.
 - OpenSCAD source mapping highlights the currently selected tree node in the code editor.
 - Parser for the generated OpenSCAD subset, including the no-parameter module wrapper and call.
-- Interactive viewport orbit/zoom.
+- Interactive viewport orbit/zoom and right-button viewport panning.
 - Depth-tested triangle rendering.
-- Explicit viewport render backend plumbing with a `Use OpenGL` checkbox; software is the active backend by default, and the checkbox enables an experimental OpenGL mesh path.
-- Simple lights and shadows.
+- In-viewport controls for OpenGL/software rendering, dark/light theme, and material color variants.
+- OpenGL preview path with shaded solids, grid/axes, contact shadows, and configurable material palettes.
+- Subtract helper objects render as Tinkercad-like translucent cut volumes: active cuts show useful silhouette/feature edges, while inactive cuts stay faint.
+- Simple lights, material highlights, and fixed-size contact shadows.
 - Shape picking in the viewport.
 - Transform gizmo with X/Y/Z move axes and rotation rings.
 - Boolean modes:
@@ -120,7 +124,7 @@ Use `.\scripts\build-manifold.ps1 -Arch 32` for a 32-bit Qt kit or
 
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 
-The `Use OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes are drawn through an OpenGL shader path with depth testing. Grid, gizmos, helper wireframes, text overlay, CPU-side projection, and the pick buffer still use the existing software path, so large performance gains are not expected yet.
+The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, and contact shadows are drawn through OpenGL shader paths with depth testing. Gizmos, helper overlays, text, CPU-side projection, and the pick buffer still reuse the existing software path, so large performance gains are not expected yet.
 
 ## Limitations
 
@@ -137,6 +141,6 @@ The `Use OpenGL` checkbox enables the optional experimental viewport backend. In
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
 2. Refine graphics-tree editing: rename groups, add explicit reorder affordances, keep improving difference base/cut behavior, and decide when the classic tree can be hidden.
-3. Implement the optional OpenGL backend with vertex/index buffers and GPU picking.
+3. Move the experimental OpenGL backend toward persistent vertex/index buffers and GPU picking.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.
