@@ -106,6 +106,14 @@ static bool operationForTool(const QString &toolName, SceneDocument::TreeNode::O
         *operation = SceneDocument::TreeNode::Intersection;
         return true;
     }
+    if (toolName == "translate") {
+        *operation = SceneDocument::TreeNode::Translate;
+        return true;
+    }
+    if (toolName == "rotate") {
+        *operation = SceneDocument::TreeNode::Rotate;
+        return true;
+    }
 
     return false;
 }
@@ -223,6 +231,10 @@ static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
         return "difference()";
     if (operation == SceneDocument::TreeNode::Intersection)
         return "intersection()";
+    if (operation == SceneDocument::TreeNode::Translate)
+        return "translate";
+    if (operation == SceneDocument::TreeNode::Rotate)
+        return "rotate";
     return "union()";
 }
 
@@ -726,11 +738,22 @@ void MainWindow::onPropertyChanged()
         if (groupId <= 0)
             return;
 
+        const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+        if (!group || group->type != SceneDocument::TreeNode::Group)
+            return;
+
+        QVector3D position(m_posX->value(), m_posY->value(), m_posZ->value());
+        QVector3D rotation(m_rotX->value(), m_rotY->value(), m_rotZ->value());
+        if (group->operation == SceneDocument::TreeNode::Translate)
+            rotation = group->rotation;
+        else if (group->operation == SceneDocument::TreeNode::Rotate)
+            position = group->position;
+
         auto *command = new UpdateGroupTransformCommand(
             &m_scene,
             groupId,
-            QVector3D(m_posX->value(), m_posY->value(), m_posZ->value()),
-            QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value()),
+            position,
+            rotation,
             [this]() {
                 refreshSceneViews();
             });
@@ -745,8 +768,6 @@ void MainWindow::onPropertyChanged()
     }
 
     ShapeNode updatedShape = *selectedShape;
-    updatedShape.position = QVector3D(m_posX->value(), m_posY->value(), m_posZ->value());
-    updatedShape.rotation = QVector3D(m_rotX->value(), m_rotY->value(), m_rotZ->value());
     updatedShape.size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
 
     updatedShape.radius = m_radius->value();
@@ -1232,12 +1253,17 @@ void MainWindow::refreshProperties()
     const int selectedGroupId = selectedDirectGroupId();
     const SceneDocument::TreeNode *selectedGroup = selectedGroupId > 0 ? m_scene.treeNodeById(selectedGroupId) : nullptr;
     const bool hasGroupSelection = selectedGroup && selectedGroup->type == SceneDocument::TreeNode::Group;
-    const bool hasTransformSelection = hasShapeSelection || hasGroupSelection;
+    const bool hasPropertiesSelection = hasShapeSelection || hasGroupSelection;
+    const bool translateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Translate;
+    const bool rotateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Rotate;
+    const bool hasTransformSelection = translateGroupSelected || rotateGroupSelected;
 
     QList<QDoubleSpinBox *> transformBoxes = {
         m_posX, m_posY, m_posZ,
         m_rotX, m_rotY, m_rotZ
     };
+    QList<QDoubleSpinBox *> positionBoxes = {m_posX, m_posY, m_posZ};
+    QList<QDoubleSpinBox *> rotationBoxes = {m_rotX, m_rotY, m_rotZ};
     QList<QDoubleSpinBox *> shapeBoxes = {
         m_sizeX, m_sizeY, m_sizeZ,
         m_radius, m_height
@@ -1246,6 +1272,14 @@ void MainWindow::refreshProperties()
     for (QDoubleSpinBox *box : transformBoxes)
         box->setEnabled(hasTransformSelection);
 
+    if (translateGroupSelected) {
+        for (QDoubleSpinBox *box : rotationBoxes)
+            box->setEnabled(false);
+    } else if (rotateGroupSelected) {
+        for (QDoubleSpinBox *box : positionBoxes)
+            box->setEnabled(false);
+    }
+
     for (QDoubleSpinBox *box : shapeBoxes)
         box->setEnabled(hasShapeSelection);
 
@@ -1253,7 +1287,7 @@ void MainWindow::refreshProperties()
     m_deleteGroupButton->setEnabled(selectedGroupId > 0 && selectedGroupId != m_scene.treeRoot().id);
     m_booleanMode->setEnabled(hasShapeSelection);
 
-    if (!hasTransformSelection)
+    if (!hasPropertiesSelection)
         return;
 
     m_updatingProperties = true;
@@ -1264,13 +1298,13 @@ void MainWindow::refreshProperties()
     m_booleanMode->blockSignals(true);
 
     if (hasGroupSelection) {
-        m_posX->setValue(selectedGroup->position.x());
-        m_posY->setValue(selectedGroup->position.y());
-        m_posZ->setValue(selectedGroup->position.z());
+        m_posX->setValue(hasTransformSelection ? selectedGroup->position.x() : 0.0);
+        m_posY->setValue(hasTransformSelection ? selectedGroup->position.y() : 0.0);
+        m_posZ->setValue(hasTransformSelection ? selectedGroup->position.z() : 0.0);
 
-        m_rotX->setValue(selectedGroup->rotation.x());
-        m_rotY->setValue(selectedGroup->rotation.y());
-        m_rotZ->setValue(selectedGroup->rotation.z());
+        m_rotX->setValue(hasTransformSelection ? selectedGroup->rotation.x() : 0.0);
+        m_rotY->setValue(hasTransformSelection ? selectedGroup->rotation.y() : 0.0);
+        m_rotZ->setValue(hasTransformSelection ? selectedGroup->rotation.z() : 0.0);
 
         m_sizeX->setValue(0.0);
         m_sizeY->setValue(0.0);
@@ -1296,13 +1330,13 @@ void MainWindow::refreshProperties()
         return;
     }
 
-    m_posX->setValue(s->position.x());
-    m_posY->setValue(s->position.y());
-    m_posZ->setValue(s->position.z());
+    m_posX->setValue(0.0);
+    m_posY->setValue(0.0);
+    m_posZ->setValue(0.0);
 
-    m_rotX->setValue(s->rotation.x());
-    m_rotY->setValue(s->rotation.y());
-    m_rotZ->setValue(s->rotation.z());
+    m_rotX->setValue(0.0);
+    m_rotY->setValue(0.0);
+    m_rotZ->setValue(0.0);
 
     m_sizeX->setValue(s->size.x());
     m_sizeY->setValue(s->size.y());

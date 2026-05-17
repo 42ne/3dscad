@@ -143,31 +143,39 @@ static QVector3D inverseRotatePoint(const QVector3D &point, const QVector3D &deg
     return p;
 }
 
-static QVector3D transformPoint(const QVector3D &point, const QVector3D &position, const QVector3D &rotation)
+static QVector3D transformPointForGroup(const QVector3D &point, const SceneDocument::TreeNode &group)
 {
-    return rotatePoint(point, rotation) + position;
+    if (group.operation == SceneDocument::TreeNode::Translate)
+        return point + group.position;
+    if (group.operation == SceneDocument::TreeNode::Rotate)
+        return rotatePoint(point, group.rotation);
+    return point;
 }
 
 static QVector3D transformPointByGroupStack(QVector3D point, const QVector<SceneDocument::TreeNode> &groupStack)
 {
     for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
-        point = transformPoint(point, it->position, it->rotation);
+        point = transformPointForGroup(point, *it);
 
     return point;
 }
 
 static QVector3D transformVectorByGroupStack(QVector3D vector, const QVector<SceneDocument::TreeNode> &groupStack)
 {
-    for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
-        vector = rotatePoint(vector, it->rotation);
+    for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it) {
+        if (it->operation == SceneDocument::TreeNode::Rotate)
+            vector = rotatePoint(vector, it->rotation);
+    }
 
     return vector;
 }
 
 static QVector3D inverseTransformVectorByGroupStack(QVector3D vector, const QVector<SceneDocument::TreeNode> &groupStack)
 {
-    for (const SceneDocument::TreeNode &group : groupStack)
-        vector = inverseRotatePoint(vector, group.rotation);
+    for (const SceneDocument::TreeNode &group : groupStack) {
+        if (group.operation == SceneDocument::TreeNode::Rotate)
+            vector = inverseRotatePoint(vector, group.rotation);
+    }
 
     return vector;
 }
@@ -861,42 +869,52 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             painter.drawLine(line.a, line.b);
         }
 
-        const bool hasSelectedShape = m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size();
         const bool hasSelectedGroup = m_scene && m_selectedGroupId > 0 && m_scene->treeNodeById(m_selectedGroupId);
-        if (hasSelectedShape || hasSelectedGroup) {
-            const QVector3D origin = selectedTransformOrigin();
-            const QVector<QPair<QVector3D, QColor>> axes = {
-                {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
-                {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
-                {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
-            };
+        if (hasSelectedGroup) {
+            const SceneDocument::TreeNode *selectedGroup = m_scene->treeNodeById(m_selectedGroupId);
+            const bool transformGroupSelected = selectedGroup->operation == SceneDocument::TreeNode::Translate
+                                                || selectedGroup->operation == SceneDocument::TreeNode::Rotate;
+            if (transformGroupSelected) {
+                const bool showMoveAxes = selectedGroup->operation != SceneDocument::TreeNode::Rotate;
+                const bool showRotationRings = selectedGroup->operation != SceneDocument::TreeNode::Translate;
+                const QVector3D origin = selectedTransformOrigin();
+                const QVector<QPair<QVector3D, QColor>> axes = {
+                    {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
+                    {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
+                    {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
+                };
 
-            for (const auto &axis : axes) {
-                const QPointF start = project(origin).point;
-                const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
-                painter.setPen(QPen(QColor(5, 8, 12, 185), 7, Qt::SolidLine, Qt::RoundCap));
-                painter.drawLine(start, end);
-                painter.setPen(QPen(axis.second, 4.5, Qt::SolidLine, Qt::RoundCap));
-                painter.drawLine(start, end);
-                drawArrowHead(&painter, start, end, axis.second);
-            }
-
-            const QVector<QPair<DragMode, QColor>> rings = {
-                {RotateXDrag, QColor(235, 80, 80, 185)},
-                {RotateYDrag, QColor(80, 210, 120, 185)},
-                {RotateZDrag, QColor(90, 155, 245, 185)}
-            };
-
-            for (const auto &ring : rings) {
-                QPolygonF ringPath;
-                for (int step = 0; step <= 72; ++step) {
-                    const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
-                    ringPath << project(worldPoint).point;
+                if (showMoveAxes) {
+                    for (const auto &axis : axes) {
+                        const QPointF start = project(origin).point;
+                        const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
+                        painter.setPen(QPen(QColor(5, 8, 12, 185), 7, Qt::SolidLine, Qt::RoundCap));
+                        painter.drawLine(start, end);
+                        painter.setPen(QPen(axis.second, 4.5, Qt::SolidLine, Qt::RoundCap));
+                        painter.drawLine(start, end);
+                        drawArrowHead(&painter, start, end, axis.second);
+                    }
                 }
 
-                painter.setPen(QPen(ring.second, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawPolyline(ringPath);
+                const QVector<QPair<DragMode, QColor>> rings = {
+                    {RotateXDrag, QColor(235, 80, 80, 185)},
+                    {RotateYDrag, QColor(80, 210, 120, 185)},
+                    {RotateZDrag, QColor(90, 155, 245, 185)}
+                };
+
+                if (showRotationRings) {
+                    for (const auto &ring : rings) {
+                        QPolygonF ringPath;
+                        for (int step = 0; step <= 72; ++step) {
+                            const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
+                            ringPath << project(worldPoint).point;
+                        }
+
+                        painter.setPen(QPen(ring.second, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+                        painter.setBrush(Qt::NoBrush);
+                        painter.drawPolyline(ringPath);
+                    }
+                }
             }
         }
     }
@@ -1117,11 +1135,19 @@ QVector3D ViewportWidget::selectedLocalDeltaFromWorldDelta(const QVector3D &worl
 
 bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const
 {
-    const bool hasSelectedShape = m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size();
-    const bool hasSelectedGroup = m_scene && m_selectedGroupId > 0 && m_scene->treeNodeById(m_selectedGroupId);
-    if (!hasSelectedShape && !hasSelectedGroup)
+    const SceneDocument::TreeNode *selectedGroup = m_scene && m_selectedGroupId > 0
+                                                       ? m_scene->treeNodeById(m_selectedGroupId)
+                                                       : nullptr;
+    if (!selectedGroup)
         return false;
 
+    if (selectedGroup->operation != SceneDocument::TreeNode::Translate
+        && selectedGroup->operation != SceneDocument::TreeNode::Rotate) {
+        return false;
+    }
+
+    const bool allowMoveAxes = selectedGroup->operation != SceneDocument::TreeNode::Rotate;
+    const bool allowRotationRings = selectedGroup->operation != SceneDocument::TreeNode::Translate;
     const QVector3D origin = selectedTransformOrigin();
     float bestDistance = 9.0f;
     DragMode pickedAxis = NoDrag;
@@ -1133,33 +1159,37 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
         {AxisZDrag, selectedWorldAxisVector(QVector3D(0.0f, 0.0f, 36.0f))}
     };
 
-    for (const auto &axis : axes) {
-        const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-        const float distance = distanceToSegment(position, start, end);
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            pickedAxis = axis.first;
+    if (allowMoveAxes) {
+        for (const auto &axis : axes) {
+            const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+            const float distance = distanceToSegment(position, start, end);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                pickedAxis = axis.first;
+            }
         }
     }
 
     const QVector<DragMode> rings = {RotateXDrag, RotateYDrag, RotateZDrag};
-    for (DragMode ring : rings) {
-        QPointF previous;
-        bool hasPrevious = false;
+    if (allowRotationRings) {
+        for (DragMode ring : rings) {
+            QPointF previous;
+            bool hasPrevious = false;
 
-        for (int step = 0; step <= 72; ++step) {
-            const QVector3D worldPoint = rotationRingPoint(origin, ring, 48.0f, step * 5.0f);
-            const QPointF current = projectWorldPoint(worldPoint, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-            if (hasPrevious) {
-                const float distance = distanceToSegment(position, previous, current);
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    pickedAxis = ring;
+            for (int step = 0; step <= 72; ++step) {
+                const QVector3D worldPoint = rotationRingPoint(origin, ring, 48.0f, step * 5.0f);
+                const QPointF current = projectWorldPoint(worldPoint, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+                if (hasPrevious) {
+                    const float distance = distanceToSegment(position, previous, current);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        pickedAxis = ring;
+                    }
                 }
-            }
 
-            previous = current;
-            hasPrevious = true;
+                previous = current;
+                hasPrevious = true;
+            }
         }
     }
 

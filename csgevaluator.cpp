@@ -544,9 +544,22 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
-static QVector3D transformPoint(const QVector3D &point, const QVector3D &position, const QVector3D &rotation)
+static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDocument::TreeNode &group)
 {
-    return rotatePoint(point, rotation) + position;
+    if (group.operation == SceneDocument::TreeNode::Translate)
+        return point + group.position;
+    if (group.operation == SceneDocument::TreeNode::Rotate)
+        return rotatePoint(point, group.rotation);
+    return point;
+}
+
+static QVector3D transformNormalForGroup(const QVector3D &normal, const SceneDocument::TreeNode &group)
+{
+    if (group.operation == SceneDocument::TreeNode::Translate)
+        return normal;
+    if (group.operation == SceneDocument::TreeNode::Rotate)
+        return rotatePoint(normal, group.rotation);
+    return normal;
 }
 
 static SceneMesh transformedMesh(const SceneMesh &source, const QVector<SceneDocument::TreeNode> &groupStack)
@@ -555,13 +568,13 @@ static SceneMesh transformedMesh(const SceneMesh &source, const QVector<SceneDoc
 
     auto transformPosition = [&](QVector3D point) {
         for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
-            point = transformPoint(point, it->position, it->rotation);
+            point = transformPositionForGroup(point, *it);
         return point;
     };
 
     auto transformNormal = [&](QVector3D normal) {
         for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
-            normal = rotatePoint(normal, it->rotation);
+            normal = transformNormalForGroup(normal, *it);
         return normal.normalized();
     };
 
@@ -943,9 +956,11 @@ static bool hasVectorValue(const QVector3D &vector)
 
 static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
 {
-    if (node.type == SceneDocument::TreeNode::Group
-        && (hasVectorValue(node.position) || hasVectorValue(node.rotation))) {
-        return true;
+    if (node.type == SceneDocument::TreeNode::Group) {
+        if (node.operation == SceneDocument::TreeNode::Translate && hasVectorValue(node.position))
+            return true;
+        if (node.operation == SceneDocument::TreeNode::Rotate && hasVectorValue(node.rotation))
+            return true;
     }
 
     for (const SceneDocument::TreeNode &child : node.children) {

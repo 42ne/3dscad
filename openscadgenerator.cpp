@@ -40,11 +40,6 @@ static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
     return "union";
 }
 
-static bool hasVectorValue(const QVector3D &vector)
-{
-    return !qFuzzyIsNull(vector.x()) || !qFuzzyIsNull(vector.y()) || !qFuzzyIsNull(vector.z());
-}
-
 void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &scene, QVector<SourceRange> *ranges)
 {
     const int moduleStart = code->size();
@@ -88,6 +83,29 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::Translate
+        || node.operation == SceneDocument::TreeNode::Rotate) {
+        const QString transformName = node.operation == SceneDocument::TreeNode::Translate
+                                          ? QStringLiteral("translate")
+                                          : QStringLiteral("rotate");
+        const QVector3D transformVector = node.operation == SceneDocument::TreeNode::Translate
+                                              ? node.position
+                                              : node.rotation;
+        *code += QString("%1%2([%3, %4, %5]) {\n")
+                     .arg(indent, transformName)
+                     .arg(transformVector.x())
+                     .arg(transformVector.y())
+                     .arg(transformVector.z());
+
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     appendTreeGroup(code, treeOperationName(node.operation), node, scene, indent, ranges);
     if (ranges)
         ranges->append({node.id, start, code->size() - start});
@@ -100,8 +118,6 @@ void OpenScadGenerator::appendTreeGroup(QString *code,
                                         const QString &indent,
                                         QVector<SourceRange> *ranges)
 {
-    appendTransformPrefix(code, node.position, node.rotation, indent);
-
     *code += QString("%1%2() {\n").arg(indent, name);
 
     for (const SceneDocument::TreeNode &child : node.children)
@@ -110,38 +126,9 @@ void OpenScadGenerator::appendTreeGroup(QString *code,
     *code += indent + "}\n";
 }
 
-void OpenScadGenerator::appendTransformPrefix(QString *code, const QVector3D &position, const QVector3D &rotation, const QString &indent)
-{
-    if (hasVectorValue(position)) {
-        *code += QString("%1translate([%2, %3, %4])\n")
-                     .arg(indent)
-                     .arg(position.x())
-                     .arg(position.y())
-                     .arg(position.z());
-    }
-
-    if (hasVectorValue(rotation)) {
-        *code += QString("%1rotate([%2, %3, %4])\n")
-                     .arg(indent)
-                     .arg(rotation.x())
-                     .arg(rotation.y())
-                     .arg(rotation.z());
-    }
-}
-
 QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
 {
     QString code;
-
-    code += QString("translate([%1, %2, %3])\n")
-                .arg(shape.position.x())
-                .arg(shape.position.y())
-                .arg(shape.position.z());
-
-    code += QString("rotate([%1, %2, %3])\n")
-                .arg(shape.rotation.x())
-                .arg(shape.rotation.y())
-                .arg(shape.rotation.z());
 
     if (shape.type == ShapeNode::Cube) {
         code += QString("cube([%1, %2, %3], center=true);\n")

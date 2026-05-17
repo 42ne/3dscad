@@ -37,6 +37,7 @@ constexpr qreal GroupMinWidth = 128.0;
 constexpr qreal GroupModuleMinWidth = 136.0;
 constexpr qreal GroupWideMinWidth = 164.0;
 constexpr qreal GroupHeaderHeight = 28.0;
+constexpr qreal TransformHeaderWidth = 34.0;
 constexpr qreal GroupPadding = 12.0;
 constexpr qreal ChildGap = 10.0;
 constexpr qreal CornerRadius = 5.0;
@@ -65,6 +66,7 @@ QSizeF previewSizeForTool(const QString &tool);
 ShapeNode::Type primitiveTypeForTool(const QString &tool);
 QString toolNameForPrimitiveType(ShapeNode::Type type);
 bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation);
+bool isTransformOperation(SceneDocument::TreeNode::Operation operation);
 struct OperationVisual {
     SceneDocument::TreeNode::Operation operation;
     const char *toolName;

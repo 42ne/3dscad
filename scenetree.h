@@ -26,7 +26,9 @@ public:
             Module,
             Union,
             Difference,
-            Intersection
+            Intersection,
+            Translate,
+            Rotate
         };
 
         int id = 0;

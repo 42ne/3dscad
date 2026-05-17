@@ -46,10 +46,14 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
 }
 
-static Manifold applyTransform(const Manifold &source, const QVector3D &position, const QVector3D &rotation)
+static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::TreeNode &node)
 {
-    return source.Rotate(rotation.x(), rotation.y(), rotation.z())
-        .Translate(vec3(position.x(), position.y(), position.z()));
+    if (node.operation == SceneDocument::TreeNode::Translate)
+        return source.Translate(vec3(node.position.x(), node.position.y(), node.position.z()));
+    if (node.operation == SceneDocument::TreeNode::Rotate)
+        return source.Rotate(node.rotation.x(), node.rotation.y(), node.rotation.z());
+
+    return source;
 }
 
 static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDocument &scene)
@@ -71,7 +75,9 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
         const Manifold child = evaluateNode(node.children[i], scene);
 
         if (node.operation == SceneDocument::TreeNode::Union
-            || node.operation == SceneDocument::TreeNode::Module)
+            || node.operation == SceneDocument::TreeNode::Module
+            || node.operation == SceneDocument::TreeNode::Translate
+            || node.operation == SceneDocument::TreeNode::Rotate)
             result += child;
         else if (node.operation == SceneDocument::TreeNode::Difference)
             result -= child;
@@ -79,7 +85,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
             result ^= child;
     }
 
-    return applyTransform(result, node.position, node.rotation);
+    return applyNodeTransform(result, node);
 }
 
 static SceneMesh sceneMeshFromManifold(const Manifold &manifold)

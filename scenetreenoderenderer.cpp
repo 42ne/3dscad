@@ -144,22 +144,19 @@ public:
                           QPen(m_selected ? QColor(255, 203, 87) : fill.darker(145), m_selected ? 3 : 2),
                           QBrush(bodyFill));
 
-        const QRectF headerRect(m_rect.left() + 1.5,
-                                m_rect.top() + 1.5,
-                                m_rect.width() - 3.0,
-                                GroupHeaderHeight - 2.0);
-        const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
-        paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
-
-        const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, PrimitiveIconSize, PrimitiveIconSize);
-        paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
-        paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
+        if (isTransformOperation(m_operation)) {
+            paintVerticalHeader(painter, fill);
+        } else {
+            paintHorizontalHeader(painter, fill);
+        }
 
         if (m_empty) {
-            paintLabel(painter,
-                       QStringLiteral("empty"),
-                       QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0, m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0),
-                       QColor(95, 98, 105));
+            const QPointF emptyPosition = isTransformOperation(m_operation)
+                                              ? QPointF(m_rect.left() + TransformHeaderWidth + GroupPadding + PrimitiveIconSize + 8.0,
+                                                        m_rect.top() + GroupPadding + 10.0)
+                                              : QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0,
+                                                        m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0);
+            paintLabel(painter, QStringLiteral("empty"), emptyPosition, QColor(95, 98, 105));
         }
 
         if (m_operation != SceneDocument::TreeNode::Difference || m_cutSeparatorY <= 0.0)
@@ -176,6 +173,39 @@ public:
     }
 
 private:
+    void paintHorizontalHeader(QPainter *painter, const QColor &fill)
+    {
+        const QRectF headerRect(m_rect.left() + 1.5,
+                                m_rect.top() + 1.5,
+                                m_rect.width() - 3.0,
+                                GroupHeaderHeight - 2.0);
+        const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
+        paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
+
+        const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, PrimitiveIconSize, PrimitiveIconSize);
+        paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
+        paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
+    }
+
+    void paintVerticalHeader(QPainter *painter, const QColor &fill)
+    {
+        const QRectF headerRect(m_rect.left() + 1.5,
+                                m_rect.top() + 1.5,
+                                TransformHeaderWidth - 2.0,
+                                m_rect.height() - 3.0);
+        const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
+        paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
+
+        const QRectF iconRect(m_rect.left() + 5.0, m_rect.top() + 7.0, PrimitiveIconSize - 4.0, PrimitiveIconSize - 4.0);
+        paintOperationIcon(painter, m_operation, iconRect, fill.darker(125), 6.0);
+
+        painter->save();
+        painter->translate(m_rect.left() + 8.0, m_rect.bottom() - 8.0);
+        painter->rotate(-90.0);
+        paintLabel(painter, labelForOperation(m_operation), QPointF(0.0, 0.0), QColor(24, 34, 44));
+        painter->restore();
+    }
+
     QRectF m_rect;
     qreal m_cutSeparatorY = 0.0;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;

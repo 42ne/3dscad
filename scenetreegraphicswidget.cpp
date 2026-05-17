@@ -254,7 +254,10 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
 QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth)
 {
     QVector<ChildLayout> children;
-    QPointF childTopLeft(topLeft.x() + GroupPadding, topLeft.y() + GroupHeaderHeight + GroupPadding);
+    const bool transformGroup = isTransformOperation(node.operation);
+    const qreal headerWidth = transformGroup ? TransformHeaderWidth : 0.0;
+    const qreal headerHeight = transformGroup ? 0.0 : GroupHeaderHeight;
+    QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;
 
     for (const SceneDocument::TreeNode &child : node.children) {
@@ -266,11 +269,11 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
     qreal childrenHeight = children.isEmpty()
                                ? PrimitiveHeight
-                               : childTopLeft.y() - topLeft.y() - GroupHeaderHeight - GroupPadding - ChildGap;
+                               : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
-    const QSizeF size(qMax(minimumWidthForOperation(node.operation), maxChildWidth + GroupPadding * 2.0),
-                      GroupHeaderHeight + GroupPadding * 2.0 + childrenHeight);
+    const QSizeF size(qMax(minimumWidthForOperation(node.operation), headerWidth + maxChildWidth + GroupPadding * 2.0),
+                      headerHeight + GroupPadding * 2.0 + childrenHeight);
     const QRectF rect(topLeft, size);
     qreal cutSeparatorY = 0.0;
     if (node.operation == SceneDocument::TreeNode::Difference) {
@@ -286,7 +289,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         .renderGroup(node, rect, depth, cutSeparatorY);
 
     const QString groupLabel = labelForOperation(node.operation);
-    addNodeDragHandle(node.id, groupLabel, QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight)), rect, rect.size());
+    const QRectF handleRect = transformGroup
+                                  ? QRectF(rect.topLeft(), QSizeF(TransformHeaderWidth, rect.height()))
+                                  : QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight));
+    addNodeDragHandle(node.id, groupLabel, handleRect, rect, rect.size());
 
     return rect;
 }

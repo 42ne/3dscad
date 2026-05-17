@@ -19,6 +19,8 @@ QStringList paletteTools()
         QStringLiteral("union"),
         QStringLiteral("difference"),
         QStringLiteral("intersection"),
+        QStringLiteral("translate"),
+        QStringLiteral("rotate"),
         QStringLiteral("module")
     };
 }

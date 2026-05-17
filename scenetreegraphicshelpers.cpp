@@ -182,6 +182,14 @@ void paintOperationIcon(QPainter *painter,
                                     symbolRect.top() + 1.0,
                                     symbolRect.width() * 0.62,
                                     symbolRect.height() - 2.0));
+    } else if (operation == SceneDocument::TreeNode::Translate) {
+        painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
+        painter->drawLine(symbolRect.right() - 4.0, center.y() - 4.0, symbolRect.right(), center.y());
+        painter->drawLine(symbolRect.right() - 4.0, center.y() + 4.0, symbolRect.right(), center.y());
+    } else if (operation == SceneDocument::TreeNode::Rotate) {
+        painter->drawArc(symbolRect, 35 * 16, 285 * 16);
+        painter->drawLine(symbolRect.right() - 2.0, center.y() - 5.0, symbolRect.right(), center.y());
+        painter->drawLine(symbolRect.right() - 7.0, center.y() - 1.0, symbolRect.right(), center.y());
     } else {
         painter->setPen(accent.darker(160));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
@@ -257,6 +265,12 @@ QSizeF groupPreviewSize()
     return QSizeF(GroupMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
 }
 
+QSizeF transformPreviewSize()
+{
+    return QSizeF(TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth,
+                  GroupPadding * 2.0 + PrimitiveHeight);
+}
+
 QSizeF differencePreviewSize()
 {
     return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + DifferenceMinContentHeight);
@@ -272,6 +286,8 @@ QSizeF previewSizeForTool(const QString &tool)
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "module")
         return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "translate" || tool == "rotate")
+        return transformPreviewSize();
 
     return groupPreviewSize();
 }
@@ -317,6 +333,14 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Module;
         return true;
     }
+    if (normalized.contains("translate")) {
+        *operation = SceneDocument::TreeNode::Translate;
+        return true;
+    }
+    if (normalized.contains("rotate")) {
+        *operation = SceneDocument::TreeNode::Rotate;
+        return true;
+    }
     return false;
 }
 
@@ -327,6 +351,8 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Difference, "difference", QColor(247, 224, 204), GroupWideMinWidth},
     {SceneDocument::TreeNode::Intersection, "intersection", QColor(226, 220, 247), GroupWideMinWidth},
     {SceneDocument::TreeNode::Module, "module", QColor(230, 232, 236), GroupModuleMinWidth},
+    {SceneDocument::TreeNode::Translate, "translate", QColor(218, 238, 246), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+    {SceneDocument::TreeNode::Rotate, "rotate", QColor(239, 229, 247), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
 };
 
 } // namespace
@@ -350,6 +376,11 @@ QString labelForOperation(SceneDocument::TreeNode::Operation operation)
     return QString::fromLatin1(operationVisual(operation).toolName);
 }
 
+bool isTransformOperation(SceneDocument::TreeNode::Operation operation)
+{
+    return operation == SceneDocument::TreeNode::Translate
+           || operation == SceneDocument::TreeNode::Rotate;
+}
 
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
 {

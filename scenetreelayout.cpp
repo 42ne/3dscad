@@ -8,12 +8,19 @@ using namespace SceneTreeGraphics;
 
 namespace {
 
-QRectF groupContentRect(const QRectF &groupRect)
+QRectF groupContentRect(const QRectF &groupRect, SceneDocument::TreeNode::Operation operation)
 {
+    if (isTransformOperation(operation)) {
+        return groupRect.adjusted(TransformHeaderWidth + GroupPadding,
+                                  GroupPadding,
+                                  -GroupPadding,
+                                  -GroupPadding);
+    }
+
     return groupRect.adjusted(GroupPadding,
-                              GroupHeaderHeight + GroupPadding,
-                              -GroupPadding,
-                              -GroupPadding);
+                             GroupHeaderHeight + GroupPadding,
+                             -GroupPadding,
+                             -GroupPadding);
 }
 
 QVector<SceneTreeLayout::ChildLayout> childrenWithoutMovingNode(const SceneTreeLayout::GroupHitArea &area,
@@ -186,7 +193,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     target.parentGroupId = bestArea->groupId;
     target.previewGroupOperation = bestArea->operation;
     target.previewCutSeparatorY = bestArea->cutSeparatorY;
-    const QRectF contentRect = groupContentRect(bestArea->rect);
+    const QRectF contentRect = groupContentRect(bestArea->rect, bestArea->operation);
     const bool reorderInSourceGroup = sourceArea == bestArea && sourceChildIndex >= 0;
     QVector<ChildLayout> candidateChildren = childrenWithoutMovingNode(*bestArea,
                                                                        movingNodeId,
@@ -331,7 +338,8 @@ void SceneTreeLayout::buildSourcePreview(const GroupHitArea *sourceArea,
     if (sourceArea->operation == SceneDocument::TreeNode::Difference)
         minContentHeight = DifferenceMinContentHeight;
 
-    const qreal minBottom = sourceArea->rect.top() + GroupHeaderHeight + GroupPadding * 2.0 + minContentHeight;
+    const qreal headerHeight = isTransformOperation(sourceArea->operation) ? 0.0 : GroupHeaderHeight;
+    const qreal minBottom = sourceArea->rect.top() + headerHeight + GroupPadding * 2.0 + minContentHeight;
     const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
     target->sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
     if (sourceArea->operation == SceneDocument::TreeNode::Difference && target->sourceCutSeparatorY > 0.0) {
