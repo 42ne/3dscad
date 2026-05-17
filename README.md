@@ -4,7 +4,7 @@ Prototype of a visual editor for OpenSCAD-style modeling. The goal is a Tinkerca
 
 ## Preview
 
-![Preview](docs/images/Screenshot.png)
+![Preview](docs/Images/Screenshot.png)
 
 ## Current State
 
