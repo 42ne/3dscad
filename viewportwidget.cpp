@@ -91,6 +91,124 @@ static QVector3D toCameraDirection(const QVector3D &world, float yawDegrees, flo
     return toCameraPoint(world, yawDegrees, pitchDegrees, 0.0f);
 }
 
+static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
+{
+    const float rx = qDegreesToRadians(degrees.x());
+    const float ry = qDegreesToRadians(degrees.y());
+    const float rz = qDegreesToRadians(degrees.z());
+
+    QVector3D p = point;
+
+    p = QVector3D(
+        p.x(),
+        p.y() * qCos(rx) - p.z() * qSin(rx),
+        p.y() * qSin(rx) + p.z() * qCos(rx));
+
+    p = QVector3D(
+        p.x() * qCos(ry) + p.z() * qSin(ry),
+        p.y(),
+        -p.x() * qSin(ry) + p.z() * qCos(ry));
+
+    p = QVector3D(
+        p.x() * qCos(rz) - p.y() * qSin(rz),
+        p.x() * qSin(rz) + p.y() * qCos(rz),
+        p.z());
+
+    return p;
+}
+
+static QVector3D inverseRotatePoint(const QVector3D &point, const QVector3D &degrees)
+{
+    const float rx = qDegreesToRadians(-degrees.x());
+    const float ry = qDegreesToRadians(-degrees.y());
+    const float rz = qDegreesToRadians(-degrees.z());
+
+    QVector3D p = point;
+
+    p = QVector3D(
+        p.x() * qCos(rz) - p.y() * qSin(rz),
+        p.x() * qSin(rz) + p.y() * qCos(rz),
+        p.z());
+
+    p = QVector3D(
+        p.x() * qCos(ry) + p.z() * qSin(ry),
+        p.y(),
+        -p.x() * qSin(ry) + p.z() * qCos(ry));
+
+    p = QVector3D(
+        p.x(),
+        p.y() * qCos(rx) - p.z() * qSin(rx),
+        p.y() * qSin(rx) + p.z() * qCos(rx));
+
+    return p;
+}
+
+static QVector3D transformPoint(const QVector3D &point, const QVector3D &position, const QVector3D &rotation)
+{
+    return rotatePoint(point, rotation) + position;
+}
+
+static QVector3D transformPointByGroupStack(QVector3D point, const QVector<SceneDocument::TreeNode> &groupStack)
+{
+    for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
+        point = transformPoint(point, it->position, it->rotation);
+
+    return point;
+}
+
+static QVector3D transformVectorByGroupStack(QVector3D vector, const QVector<SceneDocument::TreeNode> &groupStack)
+{
+    for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it)
+        vector = rotatePoint(vector, it->rotation);
+
+    return vector;
+}
+
+static QVector3D inverseTransformVectorByGroupStack(QVector3D vector, const QVector<SceneDocument::TreeNode> &groupStack)
+{
+    for (const SceneDocument::TreeNode &group : groupStack)
+        vector = inverseRotatePoint(vector, group.rotation);
+
+    return vector;
+}
+
+static bool collectParentGroupStackForShape(const SceneDocument::TreeNode &node,
+                                            int shapeId,
+                                            QVector<SceneDocument::TreeNode> *groupStack)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive)
+        return node.shapeId == shapeId;
+
+    groupStack->append(node);
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (collectParentGroupStackForShape(child, shapeId, groupStack))
+            return true;
+    }
+
+    groupStack->removeLast();
+    return false;
+}
+
+static bool collectParentGroupStackForGroup(const SceneDocument::TreeNode &node,
+                                            int groupId,
+                                            QVector<SceneDocument::TreeNode> *groupStack)
+{
+    if (node.type != SceneDocument::TreeNode::Group)
+        return false;
+
+    if (node.id == groupId)
+        return true;
+
+    groupStack->append(node);
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (collectParentGroupStackForGroup(child, groupId, groupStack))
+            return true;
+    }
+
+    groupStack->removeLast();
+    return false;
+}
+
 static ProjectedPoint projectWorldPoint(const QVector3D &world,
                                         const QSize &viewportSize,
                                         float yawDegrees,
@@ -755,7 +873,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
             for (const auto &axis : axes) {
                 const QPointF start = project(origin).point;
-                const QPointF end = project(origin + axis.first).point;
+                const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
                 painter.setPen(QPen(QColor(5, 8, 12, 185), 7, Qt::SolidLine, Qt::RoundCap));
                 painter.drawLine(start, end);
                 painter.setPen(QPen(axis.second, 4.5, Qt::SolidLine, Qt::RoundCap));
@@ -954,17 +1072,47 @@ bool ViewportWidget::canUseOpenGLRenderBackend() const
     return true;
 }
 
+QVector<SceneDocument::TreeNode> ViewportWidget::selectedParentGroupStack() const
+{
+    QVector<SceneDocument::TreeNode> groupStack;
+    if (!m_scene)
+        return groupStack;
+
+    if (m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size()) {
+        const int shapeId = m_shapes->at(m_selectedIndex).id;
+        collectParentGroupStackForShape(m_scene->treeRoot(), shapeId, &groupStack);
+        return groupStack;
+    }
+
+    if (m_selectedGroupId > 0)
+        collectParentGroupStackForGroup(m_scene->treeRoot(), m_selectedGroupId, &groupStack);
+
+    return groupStack;
+}
+
 QVector3D ViewportWidget::selectedTransformOrigin() const
 {
+    const QVector<SceneDocument::TreeNode> parentGroups = selectedParentGroupStack();
+
     if (m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size())
-        return m_shapes->at(m_selectedIndex).position;
+        return transformPointByGroupStack(m_shapes->at(m_selectedIndex).position, parentGroups);
 
     if (m_scene && m_selectedGroupId > 0) {
         if (const SceneDocument::TreeNode *group = m_scene->treeNodeById(m_selectedGroupId))
-            return group->position;
+            return transformPointByGroupStack(group->position, parentGroups);
     }
 
     return QVector3D();
+}
+
+QVector3D ViewportWidget::selectedWorldAxisVector(const QVector3D &localAxis) const
+{
+    return transformVectorByGroupStack(localAxis, selectedParentGroupStack());
+}
+
+QVector3D ViewportWidget::selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const
+{
+    return inverseTransformVectorByGroupStack(worldDelta, selectedParentGroupStack());
 }
 
 bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const
@@ -980,9 +1128,9 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
     const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
 
     const QVector<QPair<DragMode, QVector3D>> axes = {
-        {AxisXDrag, QVector3D(36.0f, 0.0f, 0.0f)},
-        {AxisYDrag, QVector3D(0.0f, 36.0f, 0.0f)},
-        {AxisZDrag, QVector3D(0.0f, 0.0f, 36.0f)}
+        {AxisXDrag, selectedWorldAxisVector(QVector3D(36.0f, 0.0f, 0.0f))},
+        {AxisYDrag, selectedWorldAxisVector(QVector3D(0.0f, 36.0f, 0.0f))},
+        {AxisZDrag, selectedWorldAxisVector(QVector3D(0.0f, 0.0f, 36.0f))}
     };
 
     for (const auto &axis : axes) {
@@ -1031,7 +1179,7 @@ QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) cons
                          0.0f);
 
     if (m_dragMode == PlaneDrag)
-        return worldDelta;
+        return selectedLocalDeltaFromWorldDelta(worldDelta);
 
     QVector3D axisVector;
     if (m_dragMode == AxisXDrag)
@@ -1043,7 +1191,11 @@ QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) cons
 
     const QVector3D origin = selectedTransformOrigin();
     const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
-    const QPointF screenEnd = projectWorldPoint(origin + axisVector * 36.0f, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+    const QPointF screenEnd = projectWorldPoint(origin + selectedWorldAxisVector(axisVector * 36.0f),
+                                                size(),
+                                                m_cameraYaw,
+                                                m_cameraPitch,
+                                                m_cameraDistance).point;
     QVector2D screenAxis(screenEnd - screenOrigin);
 
     if (screenAxis.lengthSquared() <= 0.0001f)

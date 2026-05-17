@@ -79,7 +79,10 @@ private:
     void paintOpenGLPreview();
     void drawAxisGizmo(QPainter &painter) const;
     bool canUseOpenGLRenderBackend() const;
+    QVector<SceneDocument::TreeNode> selectedParentGroupStack() const;
     QVector3D selectedTransformOrigin() const;
+    QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
+    QVector3D selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const;
     bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
     QVector3D dragDeltaForMousePosition(const QPoint &position) const;
     QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
