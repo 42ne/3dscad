@@ -52,6 +52,8 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
         return source.Translate(vec3(node.position.x(), node.position.y(), node.position.z()));
     if (node.operation == SceneDocument::TreeNode::Rotate)
         return source.Rotate(node.rotation.x(), node.rotation.y(), node.rotation.z());
+    if (node.operation == SceneDocument::TreeNode::Scale)
+        return source.Scale(vec3(node.scale.x(), node.scale.y(), node.scale.z()));
 
     return source;
 }
@@ -77,7 +79,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
         if (node.operation == SceneDocument::TreeNode::Union
             || node.operation == SceneDocument::TreeNode::Module
             || node.operation == SceneDocument::TreeNode::Translate
-            || node.operation == SceneDocument::TreeNode::Rotate)
+            || node.operation == SceneDocument::TreeNode::Rotate
+            || node.operation == SceneDocument::TreeNode::Scale)
             result += child;
         else if (node.operation == SceneDocument::TreeNode::Difference)
             result -= child;

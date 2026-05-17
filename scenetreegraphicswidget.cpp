@@ -10,6 +10,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QToolTip>
 #include <QWheelEvent>
 
 using namespace SceneTreeGraphics;
@@ -98,6 +99,11 @@ void SceneTreeGraphicsWidget::setShapeParameterAdjustedCallback(std::function<vo
     m_shapeParameterAdjustedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setShapeParameterHoveredCallback(std::function<void(int, int)> callback)
+{
+    m_shapeParameterHoveredCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -154,6 +160,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Control) {
         const QPointF scenePosition = mapToScene(m_lastMousePosition);
+        updateControlTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
         updateActiveTransformControl(scenePosition, true);
         updateActiveShapeParameterControl(scenePosition, true);
     }
@@ -189,6 +196,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     m_lastMousePosition = event->pos();
     const bool controlDown = event->modifiers() & Qt::ControlModifier;
     const QPointF scenePosition = mapToScene(event->pos());
+    updateControlTooltip(event->globalPos(), scenePosition, controlDown);
     updateActiveTransformControl(scenePosition, controlDown);
     updateActiveShapeParameterControl(scenePosition, controlDown);
 
@@ -219,6 +227,7 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Control) {
+        updateControlTooltip(mapToGlobal(m_lastMousePosition), mapToScene(m_lastMousePosition), false);
         updateActiveTransformControl(QPointF(), false);
         updateActiveShapeParameterControl(QPointF(), false);
     }
@@ -278,7 +287,6 @@ void SceneTreeGraphicsWidget::addNodeDragHandle(int nodeId,
         [this]() { clearDropPreview(); },
         [this](int droppedNodeId, const QPointF &position) { handleTreeNodeDrop(droppedNodeId, position); });
 
-    handle->setToolTip(label);
     m_graphicsScene->addItem(handle);
 }
 
@@ -437,7 +445,11 @@ bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition,
     if (!transformControlAt(scenePosition, &groupId, &operation, &axis))
         return false;
 
-    const qreal step = operation == SceneDocument::TreeNode::Rotate ? 5.0 : 1.0;
+    const qreal step = operation == SceneDocument::TreeNode::Rotate
+                           ? 5.0
+                           : operation == SceneDocument::TreeNode::Scale
+                                 ? 0.1
+                                 : 1.0;
     m_transformValueAdjustedCallback(groupId, axis, wheelSteps * step);
     updateActiveTransformControl(scenePosition, true);
     return true;
@@ -473,7 +485,8 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
     const GroupHitArea *bestArea = nullptr;
     for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
         if (area.operation != SceneDocument::TreeNode::Translate
-            && area.operation != SceneDocument::TreeNode::Rotate) {
+            && area.operation != SceneDocument::TreeNode::Rotate
+            && area.operation != SceneDocument::TreeNode::Scale) {
             continue;
         }
 
@@ -564,6 +577,54 @@ bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePositi
     return false;
 }
 
+void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
+                                                   const QPointF &scenePosition,
+                                                   bool controlDown)
+{
+    QString key;
+    QString message;
+
+    int groupId = 0;
+    int axis = -1;
+    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    if (transformControlAt(scenePosition, &groupId, &operation, &axis)) {
+        static const char *AxisNames[] = {"X", "Y", "Z"};
+        const QString axisName = QString::fromLatin1(AxisNames[axis]);
+        key = QStringLiteral("transform:%1:%2").arg(groupId).arg(axis);
+        message = controlDown
+                      ? QStringLiteral("Use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName)
+                      : QStringLiteral("Hold Ctrl and use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName);
+    } else {
+        int shapeId = -1;
+        int nodeId = 0;
+        int parameter = -1;
+        if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter)) {
+            const ShapeNode *shape = m_scene ? m_scene->shapeById(shapeId) : nullptr;
+            const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
+            if (parameter >= 0 && parameter < controls.size()) {
+                key = QStringLiteral("shape:%1:%2").arg(nodeId).arg(parameter);
+                message = controlDown
+                              ? QStringLiteral("Use mouse wheel to change %1").arg(controls[parameter].label)
+                              : QStringLiteral("Hold Ctrl and use mouse wheel to change %1").arg(controls[parameter].label);
+            }
+        }
+    }
+
+    if (key.isEmpty()) {
+        if (!m_lastControlTooltipKey.isEmpty()) {
+            QToolTip::hideText();
+            m_lastControlTooltipKey.clear();
+        }
+        return;
+    }
+
+    if (key == m_lastControlTooltipKey)
+        return;
+
+    m_lastControlTooltipKey = key;
+    QToolTip::showText(globalPosition + QPoint(12, 18), message, this);
+}
+
 void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &scenePosition, bool enabled)
 {
     int groupId = 0;
@@ -609,7 +670,8 @@ void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &s
     m_activeShapeParameter = parameter;
     refresh();
 
-    Q_UNUSED(shapeId);
+    if (m_shapeParameterHoveredCallback)
+        m_shapeParameterHoveredCallback(shapeId, parameter);
 }
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)

@@ -191,6 +191,17 @@ void paintOperationIcon(QPainter *painter,
         painter->drawArc(symbolRect, 35 * 16, 285 * 16);
         painter->drawLine(symbolRect.right() - 2.0, center.y() - 5.0, symbolRect.right(), center.y());
         painter->drawLine(symbolRect.right() - 7.0, center.y() - 1.0, symbolRect.right(), center.y());
+    } else if (operation == SceneDocument::TreeNode::Scale) {
+        const QRectF small(symbolRect.left(), symbolRect.top() + symbolRect.height() * 0.35,
+                           symbolRect.width() * 0.44, symbolRect.height() * 0.44);
+        const QRectF large(symbolRect.left() + symbolRect.width() * 0.28,
+                           symbolRect.top(),
+                           symbolRect.width() * 0.72,
+                           symbolRect.height() * 0.72);
+        painter->setPen(QPen(accent.darker(160), 1.6));
+        painter->drawRect(large);
+        painter->drawRect(small);
+        painter->drawLine(small.right(), small.top(), large.right(), large.top());
     } else {
         painter->setPen(accent.darker(160));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
@@ -315,7 +326,7 @@ QSizeF previewSizeForTool(const QString &tool)
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "module")
         return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
-    if (tool == "translate" || tool == "rotate")
+    if (tool == "translate" || tool == "rotate" || tool == "scale")
         return transformPreviewSize();
 
     return groupPreviewSize();
@@ -370,6 +381,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Rotate;
         return true;
     }
+    if (normalized.contains("scale")) {
+        *operation = SceneDocument::TreeNode::Scale;
+        return true;
+    }
     return false;
 }
 
@@ -382,6 +397,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Module, "module", QColor(230, 232, 236), GroupModuleMinWidth},
     {SceneDocument::TreeNode::Translate, "translate", QColor(218, 238, 246), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Rotate, "rotate", QColor(239, 229, 247), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+    {SceneDocument::TreeNode::Scale, "scale", QColor(229, 241, 218), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
 };
 
 } // namespace
@@ -408,7 +424,8 @@ QString labelForOperation(SceneDocument::TreeNode::Operation operation)
 bool isTransformOperation(SceneDocument::TreeNode::Operation operation)
 {
     return operation == SceneDocument::TreeNode::Translate
-           || operation == SceneDocument::TreeNode::Rotate;
+           || operation == SceneDocument::TreeNode::Rotate
+           || operation == SceneDocument::TreeNode::Scale;
 }
 
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
@@ -744,7 +761,6 @@ public:
         , m_onDropped(onDropped)
     {
         setAcceptedMouseButtons(Qt::LeftButton);
-        setToolTip(label);
         setZValue(100.0);
     }
 

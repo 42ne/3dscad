@@ -21,6 +21,7 @@ QStringList paletteTools()
         QStringLiteral("intersection"),
         QStringLiteral("translate"),
         QStringLiteral("rotate"),
+        QStringLiteral("scale"),
         QStringLiteral("module")
     };
 }

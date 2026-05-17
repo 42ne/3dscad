@@ -314,6 +314,7 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
                                                          int groupId,
                                                          const QVector3D &position,
                                                          const QVector3D &rotation,
+                                                         const QVector3D &scale,
                                                          std::function<void()> onChanged)
     : QUndoCommand("Update group transform")
     , m_scene(scene)
@@ -323,7 +324,7 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
         return;
 
     m_oldSnapshot = m_scene->snapshot();
-    m_valid = m_scene->updateGroupTransform(groupId, position, rotation);
+    m_valid = m_scene->updateGroupTransform(groupId, position, rotation, scale);
     if (m_valid)
         m_newSnapshot = m_scene->snapshot();
 
@@ -334,9 +335,11 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
                                                          int groupId,
                                                          const QVector3D &newPosition,
                                                          const QVector3D &newRotation,
+                                                         const QVector3D &newScale,
                                                          std::function<void()> onChanged,
                                                          const QVector3D &oldPosition,
-                                                         const QVector3D &oldRotation)
+                                                         const QVector3D &oldRotation,
+                                                         const QVector3D &oldScale)
     : QUndoCommand("Update group transform")
     , m_scene(scene)
     , m_onChanged(onChanged)
@@ -345,10 +348,10 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
         return;
 
     m_oldSnapshot = m_scene->snapshot();
-    m_scene->updateGroupTransform(groupId, oldPosition, oldRotation);
+    m_scene->updateGroupTransform(groupId, oldPosition, oldRotation, oldScale);
     m_oldSnapshot = m_scene->snapshot();
 
-    m_valid = m_scene->updateGroupTransform(groupId, newPosition, newRotation);
+    m_valid = m_scene->updateGroupTransform(groupId, newPosition, newRotation, newScale);
     if (m_valid)
         m_newSnapshot = m_scene->snapshot();
 

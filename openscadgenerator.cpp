@@ -84,13 +84,17 @@ void OpenScadGenerator::appendTreeNode(QString *code,
     }
 
     if (node.operation == SceneDocument::TreeNode::Translate
-        || node.operation == SceneDocument::TreeNode::Rotate) {
-        const QString transformName = node.operation == SceneDocument::TreeNode::Translate
-                                          ? QStringLiteral("translate")
-                                          : QStringLiteral("rotate");
-        const QVector3D transformVector = node.operation == SceneDocument::TreeNode::Translate
-                                              ? node.position
-                                              : node.rotation;
+        || node.operation == SceneDocument::TreeNode::Rotate
+        || node.operation == SceneDocument::TreeNode::Scale) {
+        QString transformName = QStringLiteral("scale");
+        QVector3D transformVector = node.scale;
+        if (node.operation == SceneDocument::TreeNode::Translate) {
+            transformName = QStringLiteral("translate");
+            transformVector = node.position;
+        } else if (node.operation == SceneDocument::TreeNode::Rotate) {
+            transformName = QStringLiteral("rotate");
+            transformVector = node.rotation;
+        }
         *code += QString("%1%2([%3, %4, %5]) {\n")
                      .arg(indent, transformName)
                      .arg(transformVector.x())

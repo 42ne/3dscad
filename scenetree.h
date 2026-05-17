@@ -28,7 +28,8 @@ public:
             Difference,
             Intersection,
             Translate,
-            Rotate
+            Rotate,
+            Scale
         };
 
         int id = 0;
@@ -37,6 +38,7 @@ public:
         int shapeId = -1;
         QVector3D position = QVector3D(0, 0, 0);
         QVector3D rotation = QVector3D(0, 0, 0);
+        QVector3D scale = QVector3D(1, 1, 1);
         QVector<TreeNode> children;
     };
 
@@ -58,7 +60,7 @@ public:
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, MoveInfo *moveInfo = nullptr);
-    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation);
+    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 
     // Primitive management
     bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);

@@ -260,9 +260,9 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     return true;
 }
 
-bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation)
+bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale)
 {
-    return m_tree.updateGroupTransform(groupId, position, rotation);
+    return m_tree.updateGroupTransform(groupId, position, rotation, scale);
 }
 
 bool SceneDocument::isValidIndex(int index) const

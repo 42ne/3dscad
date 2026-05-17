@@ -179,6 +179,8 @@ static QVector3D transformPointForGroup(const QVector3D &point, const SceneDocum
         return point + group.position;
     if (group.operation == SceneDocument::TreeNode::Rotate)
         return rotatePoint(point, group.rotation);
+    if (group.operation == SceneDocument::TreeNode::Scale)
+        return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
     return point;
 }
 
@@ -195,6 +197,8 @@ static QVector3D transformVectorByGroupStack(QVector3D vector, const QVector<Sce
     for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it) {
         if (it->operation == SceneDocument::TreeNode::Rotate)
             vector = rotatePoint(vector, it->rotation);
+        else if (it->operation == SceneDocument::TreeNode::Scale)
+            vector = QVector3D(vector.x() * it->scale.x(), vector.y() * it->scale.y(), vector.z() * it->scale.z());
     }
 
     return vector;
@@ -205,6 +209,10 @@ static QVector3D inverseTransformVectorByGroupStack(QVector3D vector, const QVec
     for (const SceneDocument::TreeNode &group : groupStack) {
         if (group.operation == SceneDocument::TreeNode::Rotate)
             vector = inverseRotatePoint(vector, group.rotation);
+        else if (group.operation == SceneDocument::TreeNode::Scale)
+            vector = QVector3D(qFuzzyIsNull(group.scale.x()) ? vector.x() : vector.x() / group.scale.x(),
+                               qFuzzyIsNull(group.scale.y()) ? vector.y() : vector.y() / group.scale.y(),
+                               qFuzzyIsNull(group.scale.z()) ? vector.z() : vector.z() / group.scale.z());
     }
 
     return vector;
@@ -314,7 +322,13 @@ static QVector<QVector3D> convexHullXY(QVector<QVector3D> points)
     return hull;
 }
 
-static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF &end, const QColor &color)
+static void drawArrowHead(QPainter *painter,
+                          const QPointF &start,
+                          const QPointF &end,
+                          const QColor &color,
+                          float length = 18.0f,
+                          float width = 7.5f,
+                          qreal outlineWidth = 3.0)
 {
     QVector2D direction(end - start);
     if (direction.lengthSquared() <= 0.0001f)
@@ -322,8 +336,6 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
 
     direction.normalize();
     const QVector2D normal(-direction.y(), direction.x());
-    const float length = 18.0f;
-    const float width = 7.5f;
 
     const QPointF tip = end;
     const QPointF base = end - (direction * length).toPointF();
@@ -338,7 +350,7 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
     QPolygonF darkFace;
     darkFace << tip << ridge << right;
 
-    painter->setPen(QPen(QColor(5, 8, 12, 190), 3));
+    painter->setPen(QPen(QColor(5, 8, 12, 190), outlineWidth));
     painter->setBrush(QColor(5, 8, 12, 150));
     painter->drawPolygon(QPolygonF() << tip << left << ridge << right);
 
@@ -348,6 +360,53 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
 
     painter->setBrush(darkSide);
     painter->drawPolygon(darkFace);
+}
+
+static void drawValueLabel(QPainter *painter, const QPointF &anchor, const QString &text)
+{
+    QFont labelFont = painter->font();
+    labelFont.setBold(true);
+    labelFont.setPointSizeF(qMax<qreal>(8.0, labelFont.pointSizeF()));
+    painter->setFont(labelFont);
+
+    const QFontMetricsF metrics(labelFont);
+    const QSizeF size(metrics.horizontalAdvance(text) + 14.0, metrics.height() + 6.0);
+    const QRectF rect(anchor.x() - size.width() * 0.5, anchor.y() - size.height() * 0.5, size.width(), size.height());
+    painter->setPen(QPen(QColor(255, 204, 88), 1.4));
+    painter->setBrush(QColor(18, 24, 32, 220));
+    painter->drawRoundedRect(rect, 5.0, 5.0);
+    painter->setPen(QColor(255, 248, 210));
+    painter->drawText(rect, Qt::AlignCenter, text);
+}
+
+static QString formatPreviewValue(float value, int precision = -1)
+{
+    if (precision >= 0)
+        return QString::number(value, 'f', precision);
+
+    return QString::number(value, 'f', qAbs(value - qRound(value)) < 0.01f ? 0 : 1);
+}
+
+static void drawDirectionLabel(QPainter *painter, const QPointF &anchor, const QPointF &awayFrom, const QString &label)
+{
+    QPointF direction = anchor - awayFrom;
+    const qreal length = std::hypot(direction.x(), direction.y());
+    if (length > 0.001)
+        direction /= length;
+    else
+        direction = QPointF(0.0, -1.0);
+
+    const QPointF center = anchor + direction * 18.0;
+    const QRectF labelRect(center.x() - 9.0, center.y() - 9.0, 18.0, 18.0);
+    QFont labelFont = painter->font();
+    labelFont.setBold(true);
+    labelFont.setPointSizeF(qMax<qreal>(8.0, labelFont.pointSizeF() + 1.0));
+    painter->setFont(labelFont);
+
+    painter->setPen(QPen(QColor(5, 8, 12, 220), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->drawText(labelRect, Qt::AlignCenter, label);
+    painter->setPen(QColor(255, 248, 190, 245));
+    painter->drawText(labelRect, Qt::AlignCenter, label);
 }
 
 static QVector3D rotationRingPoint(const QVector3D &origin, ViewportWidget::DragMode dragMode, float radius, float degrees)
@@ -392,7 +451,8 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal, const Q
     return QColor(
         clampColorChannel(red * 255.0f),
         clampColorChannel(green * 255.0f),
-        clampColorChannel(blue * 255.0f));
+        clampColorChannel(blue * 255.0f),
+        baseColor.alpha());
 }
 
 static QVector3D colorToVector(const QColor &color)
@@ -495,6 +555,24 @@ static void drawTrianglesWithDepth(QPainter *painter,
     painter->drawImage(0, 0, *image);
 }
 
+static void drawTransparentTriangles(QPainter *painter, QVector<Triangle2D> triangles)
+{
+    std::sort(triangles.begin(), triangles.end(), [](const Triangle2D &left, const Triangle2D &right) {
+        const float leftDepth = (left.depthA + left.depthB + left.depthC) / 3.0f;
+        const float rightDepth = (right.depthA + right.depthB + right.depthC) / 3.0f;
+        return leftDepth > rightDepth;
+    });
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    for (const Triangle2D &triangle : triangles) {
+        painter->setPen(QPen(triangle.color.darker(135), 0.7));
+        painter->setBrush(triangle.color);
+        painter->drawPolygon(QPolygonF() << triangle.a << triangle.b << triangle.c);
+    }
+    painter->restore();
+}
+
 static QVector<QPair<QVector3D, QVector3D>> meshEdges(const SceneMesh &mesh)
 {
     QVector<QPair<QVector3D, QVector3D>> edges;
@@ -548,6 +626,9 @@ static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
     seed = qHash(node.rotation.x(), seed);
     seed = qHash(node.rotation.y(), seed);
     seed = qHash(node.rotation.z(), seed);
+    seed = qHash(node.scale.x(), seed);
+    seed = qHash(node.scale.y(), seed);
+    seed = qHash(node.scale.z(), seed);
     seed = qHash(node.children.size(), seed);
 
     for (const SceneDocument::TreeNode &child : node.children)
@@ -641,6 +722,18 @@ void ViewportWidget::setTreeTransformControlPreview(int groupId, SceneDocument::
     m_treeTransformPreviewGroupId = groupId;
     m_treeTransformPreviewOperation = operation;
     m_treeTransformPreviewAxis = axis;
+    update();
+}
+
+void ViewportWidget::setTreeShapeParameterPreview(int shapeId, int parameter)
+{
+    if (m_treeShapePreviewShapeId == shapeId
+        && m_treeShapePreviewParameter == parameter) {
+        return;
+    }
+
+    m_treeShapePreviewShapeId = shapeId;
+    m_treeShapePreviewParameter = parameter;
     update();
 }
 
@@ -809,8 +902,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         painter.drawPolygon(shadow.translated(screenOffset));
     };
 
-    auto appendMesh = [&](QVector<Triangle2D> &triangles, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex) {
-        if (drawSceneMeshes)
+    auto appendMesh = [&](QVector<Triangle2D> &triangles, const SceneMesh &mesh, const QColor &baseColor, int shapeIndex, bool drawMeshShadow = true) {
+        if (drawSceneMeshes && drawMeshShadow)
             drawShadow(mesh.shadowPoints);
 
         for (const MeshTriangle &meshTriangle : mesh.triangles) {
@@ -846,6 +939,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
     if (m_shapes) {
         QVector<Triangle2D> triangles;
+        QVector<Triangle2D> translucentHelperTriangles;
         QVector<Line2D> backgroundHelperLines;
         QVector<Line2D> foregroundHelperLines;
 
@@ -902,7 +996,12 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 }
 
                 if (item.helper) {
-                    if (item.shapeIndex == m_selectedIndex) {
+                    if (item.booleanMode == ShapeNode::Subtract) {
+                        QColor cutColor = item.shapeIndex == m_selectedIndex
+                                              ? QColor(255, 120, 85, 112)
+                                              : QColor(225, 95, 95, 28);
+                        appendMesh(translucentHelperTriangles, item.mesh, cutColor, -1, false);
+                    } else if (item.shapeIndex == m_selectedIndex) {
                         QColor selectedColor = color.lighter(115);
                         selectedColor.setAlpha(215);
                         appendWireframe(foregroundHelperLines, item.mesh, selectedColor);
@@ -932,6 +1031,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             drawTrianglesWithDepth(&pickPainter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
         }
 
+        drawTransparentTriangles(&painter, translucentHelperTriangles);
+
         for (const Line2D &line : foregroundHelperLines) {
             painter.setPen(QPen(line.color, 2, Qt::DashLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
@@ -941,10 +1042,11 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         if (hasSelectedGroup) {
             const SceneDocument::TreeNode *selectedGroup = m_scene->treeNodeById(m_selectedGroupId);
             const bool transformGroupSelected = selectedGroup->operation == SceneDocument::TreeNode::Translate
-                                                || selectedGroup->operation == SceneDocument::TreeNode::Rotate;
+                                                || selectedGroup->operation == SceneDocument::TreeNode::Rotate
+                                                || selectedGroup->operation == SceneDocument::TreeNode::Scale;
             if (transformGroupSelected) {
-                const bool showMoveAxes = selectedGroup->operation != SceneDocument::TreeNode::Rotate;
-                const bool showRotationRings = selectedGroup->operation != SceneDocument::TreeNode::Translate;
+                const bool showMoveAxes = selectedGroup->operation == SceneDocument::TreeNode::Translate;
+                const bool showRotationRings = selectedGroup->operation == SceneDocument::TreeNode::Rotate;
                 const QVector3D origin = selectedTransformOrigin();
                 const QVector<QPair<QVector3D, QColor>> axes = {
                     {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
@@ -991,6 +1093,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
     painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
     drawTreeTransformControlPreview(painter);
+    drawTreeShapeParameterPreview(painter);
     drawAxisGizmo(painter);
 }
 
@@ -1165,7 +1268,8 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
 
     const bool translatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Translate;
     const bool rotatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Rotate;
-    if (!translatePreview && !rotatePreview)
+    const bool scalePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Scale;
+    if (!translatePreview && !rotatePreview && !scalePreview)
         return;
 
     const QVector3D origin = transformOriginForGroup(m_treeTransformPreviewGroupId);
@@ -1185,47 +1289,52 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
     auto project = [&](const QVector3D &world) {
         return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
     };
+    auto axisName = [&]() {
+        if (m_treeTransformPreviewAxis == 0)
+            return QStringLiteral("X");
+        if (m_treeTransformPreviewAxis == 1)
+            return QStringLiteral("Y");
+        return QStringLiteral("Z");
+    };
+    auto axisValue = [&]() {
+        const QVector3D values = translatePreview
+                                     ? group->position
+                                     : rotatePreview
+                                           ? group->rotation
+                                           : group->scale;
+        if (m_treeTransformPreviewAxis == 0)
+            return values.x();
+        if (m_treeTransformPreviewAxis == 1)
+            return values.y();
+        return values.z();
+    };
+    const QString valueLabel = QStringLiteral("%1%2 %3")
+                                   .arg(scalePreview ? QStringLiteral("S") : rotatePreview ? QStringLiteral("R") : QStringLiteral("T"),
+                                        axisName(),
+                                        formatPreviewValue(axisValue(), scalePreview ? 1 : -1));
 
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
-    auto drawDirectionLabel = [&](const QPointF &anchor, const QPointF &awayFrom, const QString &label) {
-        QPointF direction = anchor - awayFrom;
-        const qreal length = std::hypot(direction.x(), direction.y());
-        if (length > 0.001)
-            direction /= length;
-        else
-            direction = QPointF(0.0, -1.0);
 
-        const QPointF center = anchor + direction * 18.0;
-        const QRectF labelRect(center.x() - 9.0, center.y() - 9.0, 18.0, 18.0);
-        QFont labelFont = painter.font();
-        labelFont.setBold(true);
-        labelFont.setPointSizeF(qMax<qreal>(8.0, labelFont.pointSizeF() + 1.0));
-        painter.setFont(labelFont);
-
-        painter.setPen(QPen(QColor(5, 8, 12, 220), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawText(labelRect, Qt::AlignCenter, label);
-        painter.setPen(QColor(255, 248, 190, 245));
-        painter.drawText(labelRect, Qt::AlignCenter, label);
-    };
-
-    if (translatePreview) {
+    if (translatePreview || scalePreview) {
         QVector3D worldAxis = worldAxisVectorForGroup(m_treeTransformPreviewGroupId, localAxis);
         if (worldAxis.lengthSquared() <= 0.0001f)
             worldAxis = localAxis;
         worldAxis.normalize();
 
         const QPointF center = project(origin);
-        const QPointF negative = project(origin - worldAxis * 34.0f);
-        const QPointF positive = project(origin + worldAxis * 34.0f);
+        const float axisLength = scalePreview ? 42.0f : 34.0f;
+        const QPointF negative = project(origin - worldAxis * axisLength);
+        const QPointF positive = project(origin + worldAxis * axisLength);
         painter.setPen(QPen(QColor(5, 8, 12, 190), 8, Qt::SolidLine, Qt::RoundCap));
         painter.drawLine(negative, positive);
         painter.setPen(QPen(accent, 4, Qt::SolidLine, Qt::RoundCap));
         painter.drawLine(negative, positive);
         drawArrowHead(&painter, center, positive, accent);
         drawArrowHead(&painter, center, negative, accent);
-        drawDirectionLabel(positive, center, "+");
-        drawDirectionLabel(negative, center, "-");
+        drawDirectionLabel(&painter, positive, center, "+");
+        drawDirectionLabel(&painter, negative, center, "-");
+        drawValueLabel(&painter, center + QPointF(0.0, -28.0), valueLabel);
     } else {
         QVector<QPointF> arcPoints;
         const float radius = 48.0f;
@@ -1253,8 +1362,126 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
             drawArrowHead(&painter, arcPoints[1], arcPoints.first(), accent);
             drawArrowHead(&painter, arcPoints[arcPoints.size() - 2], arcPoints.last(), accent);
             const QPointF center = project(origin);
-            drawDirectionLabel(arcPoints.last(), center, "+");
-            drawDirectionLabel(arcPoints.first(), center, "-");
+            drawDirectionLabel(&painter, arcPoints.last(), center, "+");
+            drawDirectionLabel(&painter, arcPoints.first(), center, "-");
+            drawValueLabel(&painter, center + QPointF(0.0, -62.0), valueLabel);
+        }
+    }
+
+    painter.restore();
+}
+
+void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
+{
+    if (!m_shapes || m_treeShapePreviewShapeId <= 0 || m_treeShapePreviewParameter < 0)
+        return;
+
+    const ShapeNode *shape = nullptr;
+    for (const ShapeNode &candidate : *m_shapes) {
+        if (candidate.id == m_treeShapePreviewShapeId) {
+            shape = &candidate;
+            break;
+        }
+    }
+
+    if (!shape)
+        return;
+
+    auto project = [&](const QVector3D &world) {
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    };
+
+    auto rotated = [&](const QVector3D &local) {
+        return rotatePoint(local, shape->rotation) + shape->position;
+    };
+
+    auto drawDimension = [&](const QVector3D &localAxis,
+                             float halfLength,
+                             float sideOffset,
+                             const QColor &accent,
+                             const QString &label,
+                             float value) {
+        if (halfLength <= 0.001f)
+            return;
+
+        QVector3D localSide;
+        if (qAbs(localAxis.z()) > 0.5f)
+            localSide = QVector3D(1.0f, 0.0f, 0.0f);
+        else
+            localSide = QVector3D(0.0f, 0.0f, 1.0f);
+
+        const QVector3D negative = rotated(-localAxis * halfLength + localSide * sideOffset);
+        const QVector3D positive = rotated(localAxis * halfLength + localSide * sideOffset);
+        const QVector3D center = rotated(localSide * sideOffset);
+        const QPointF negativePoint = project(negative);
+        const QPointF positivePoint = project(positive);
+        const QPointF centerPoint = project(center);
+
+        painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(negativePoint, positivePoint);
+        painter.setPen(QPen(accent, 2.6, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(negativePoint, positivePoint);
+        drawArrowHead(&painter, centerPoint, positivePoint, accent, 12.0f, 5.0f, 2.0);
+        drawArrowHead(&painter, centerPoint, negativePoint, accent, 12.0f, 5.0f, 2.0);
+        drawDirectionLabel(&painter, positivePoint, centerPoint, "+");
+        drawDirectionLabel(&painter, negativePoint, centerPoint, "-");
+        drawValueLabel(&painter, centerPoint + QPointF(0.0, -24.0), QStringLiteral("%1 %2").arg(label, formatPreviewValue(value)));
+    };
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    if (shape->type == ShapeNode::Cube) {
+        QVector3D localAxis;
+        QColor accent;
+        float halfLength = 0.0f;
+        if (m_treeShapePreviewParameter == 0) {
+            localAxis = QVector3D(1.0f, 0.0f, 0.0f);
+            accent = QColor(255, 95, 120);
+            halfLength = shape->size.x() * 0.5f;
+            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("X"), shape->size.x());
+        } else if (m_treeShapePreviewParameter == 1) {
+            localAxis = QVector3D(0.0f, 1.0f, 0.0f);
+            accent = QColor(105, 245, 145);
+            halfLength = shape->size.y() * 0.5f;
+            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("Y"), shape->size.y());
+        } else if (m_treeShapePreviewParameter == 2) {
+            localAxis = QVector3D(0.0f, 0.0f, 1.0f);
+            accent = QColor(105, 180, 255);
+            halfLength = shape->size.z() * 0.5f;
+            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("Z"), shape->size.z());
+        }
+    } else if (shape->type == ShapeNode::Cylinder && m_treeShapePreviewParameter == 1) {
+        drawDimension(QVector3D(0.0f, 0.0f, 1.0f), shape->height * 0.5f, shape->radius + 8.0f, QColor(105, 180, 255), QStringLiteral("H"), shape->height);
+    } else {
+        const float radius = shape->radius;
+        if (radius > 0.001f) {
+            const QColor accent(255, 190, 85);
+            QVector<QPointF> circlePoints;
+            for (int step = 0; step <= 48; ++step) {
+                const float angle = qDegreesToRadians(step * 360.0f / 48.0f);
+                circlePoints.append(project(rotated(QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f))));
+            }
+
+            painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPolyline(QPolygonF(circlePoints));
+            painter.setPen(QPen(accent, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPolyline(QPolygonF(circlePoints));
+
+            const QVector3D center = rotated(QVector3D());
+            const QVector3D edge = rotated(QVector3D(radius, 0.0f, 0.0f));
+            const QVector3D inward = rotated(QVector3D(radius * 0.45f, 0.0f, 0.0f));
+            const QPointF centerPoint = project(center);
+            const QPointF edgePoint = project(edge);
+            const QPointF inwardPoint = project(inward);
+            painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(centerPoint, edgePoint);
+            painter.setPen(QPen(accent, 2.6, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(centerPoint, edgePoint);
+            drawArrowHead(&painter, inwardPoint, edgePoint, accent, 12.0f, 5.0f, 2.0);
+            drawArrowHead(&painter, inwardPoint, centerPoint, accent, 12.0f, 5.0f, 2.0);
+            drawDirectionLabel(&painter, edgePoint, inwardPoint, "+");
+            drawDirectionLabel(&painter, centerPoint, inwardPoint, "-");
+            drawValueLabel(&painter, inwardPoint + QPointF(0.0, -24.0), QStringLiteral("R %1").arg(formatPreviewValue(radius)));
         }
     }
 
@@ -1347,8 +1574,8 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
         return false;
     }
 
-    const bool allowMoveAxes = selectedGroup->operation != SceneDocument::TreeNode::Rotate;
-    const bool allowRotationRings = selectedGroup->operation != SceneDocument::TreeNode::Translate;
+    const bool allowMoveAxes = selectedGroup->operation == SceneDocument::TreeNode::Translate;
+    const bool allowRotationRings = selectedGroup->operation == SceneDocument::TreeNode::Rotate;
     const QVector3D origin = selectedTransformOrigin();
     float bestDistance = 9.0f;
     DragMode pickedAxis = NoDrag;

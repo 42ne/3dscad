@@ -114,6 +114,10 @@ static bool operationForTool(const QString &toolName, SceneDocument::TreeNode::O
         *operation = SceneDocument::TreeNode::Rotate;
         return true;
     }
+    if (toolName == "scale") {
+        *operation = SceneDocument::TreeNode::Scale;
+        return true;
+    }
 
     return false;
 }
@@ -235,6 +239,8 @@ static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
         return "translate";
     if (operation == SceneDocument::TreeNode::Rotate)
         return "rotate";
+    if (operation == SceneDocument::TreeNode::Scale)
+        return "scale";
     return "union()";
 }
 
@@ -412,6 +418,9 @@ void MainWindow::buildUi()
     });
     m_sceneTreeGraphics->setShapeParameterAdjustedCallback([this](int shapeId, int parameter, qreal delta) {
         onGraphicsTreeShapeParameterAdjusted(shapeId, parameter, delta);
+    });
+    m_sceneTreeGraphics->setShapeParameterHoveredCallback([this](int shapeId, int parameter) {
+        onGraphicsTreeShapeParameterHovered(shapeId, parameter);
     });
 
     auto *legacyTreePanel = new QWidget;
@@ -753,6 +762,7 @@ void MainWindow::onPropertyChanged()
 
         QVector3D position(m_posX->value(), m_posY->value(), m_posZ->value());
         QVector3D rotation(m_rotX->value(), m_rotY->value(), m_rotZ->value());
+        QVector3D scale = group->scale;
         if (group->operation == SceneDocument::TreeNode::Translate)
             rotation = group->rotation;
         else if (group->operation == SceneDocument::TreeNode::Rotate)
@@ -763,6 +773,7 @@ void MainWindow::onPropertyChanged()
             groupId,
             position,
             rotation,
+            scale,
             [this]() {
                 refreshSceneViews();
             });
@@ -898,6 +909,7 @@ void MainWindow::onViewportGroupDragStarted(int groupId)
     m_viewportDragGroupId = groupId;
     m_viewportDragStartGroupPosition = group->position;
     m_viewportDragStartGroupRotation = group->rotation;
+    m_viewportDragStartGroupScale = group->scale;
     m_viewportGroupDragActive = true;
 }
 
@@ -906,7 +918,10 @@ void MainWindow::onViewportGroupDragged(int groupId, const QVector3D &delta)
     if (!m_viewportGroupDragActive || m_viewportDragGroupId != groupId)
         return;
 
-    m_scene.updateGroupTransform(groupId, m_viewportDragStartGroupPosition + delta, m_viewportDragStartGroupRotation);
+    m_scene.updateGroupTransform(groupId,
+                                 m_viewportDragStartGroupPosition + delta,
+                                 m_viewportDragStartGroupRotation,
+                                 m_viewportDragStartGroupScale);
     m_viewport->invalidateCsgPreview();
     m_viewport->update();
 }
@@ -924,13 +939,19 @@ void MainWindow::onViewportGroupDragFinished(int groupId)
 
     const QVector3D finalPosition = group->position;
     const QVector3D finalRotation = group->rotation;
-    if (finalPosition == m_viewportDragStartGroupPosition && finalRotation == m_viewportDragStartGroupRotation) {
+    const QVector3D finalScale = group->scale;
+    if (finalPosition == m_viewportDragStartGroupPosition
+        && finalRotation == m_viewportDragStartGroupRotation
+        && finalScale == m_viewportDragStartGroupScale) {
         refreshProperties();
         return;
     }
 
     const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
-    m_scene.updateGroupTransform(groupId, m_viewportDragStartGroupPosition, m_viewportDragStartGroupRotation);
+    m_scene.updateGroupTransform(groupId,
+                                 m_viewportDragStartGroupPosition,
+                                 m_viewportDragStartGroupRotation,
+                                 m_viewportDragStartGroupScale);
     const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
     m_scene.restoreSnapshot(newSnapshot);
 
@@ -959,7 +980,8 @@ void MainWindow::onViewportGroupRotated(int groupId, const QVector3D &deltaDegre
 
     m_scene.updateGroupTransform(groupId,
                                  m_viewportDragStartGroupPosition,
-                                 normalizedRotation(m_viewportDragStartGroupRotation + deltaDegrees));
+                                 normalizedRotation(m_viewportDragStartGroupRotation + deltaDegrees),
+                                 m_viewportDragStartGroupScale);
     m_viewport->invalidateCsgPreview();
     m_viewport->update();
     refreshProperties();
@@ -1087,22 +1109,31 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qre
 
     QVector3D position = group->position;
     QVector3D rotation = group->rotation;
+    QVector3D scale = group->scale;
     QVector3D *targetVector = nullptr;
     if (group->operation == SceneDocument::TreeNode::Translate)
         targetVector = &position;
     else if (group->operation == SceneDocument::TreeNode::Rotate)
         targetVector = &rotation;
+    else if (group->operation == SceneDocument::TreeNode::Scale)
+        targetVector = &scale;
     else
         return;
 
     if (axis == 0)
-        targetVector->setX(targetVector->x() + delta);
+        targetVector->setX(group->operation == SceneDocument::TreeNode::Scale
+                               ? qMax<qreal>(0.01, targetVector->x() + delta)
+                               : targetVector->x() + delta);
     else if (axis == 1)
-        targetVector->setY(targetVector->y() + delta);
+        targetVector->setY(group->operation == SceneDocument::TreeNode::Scale
+                               ? qMax<qreal>(0.01, targetVector->y() + delta)
+                               : targetVector->y() + delta);
     else
-        targetVector->setZ(targetVector->z() + delta);
+        targetVector->setZ(group->operation == SceneDocument::TreeNode::Scale
+                               ? qMax<qreal>(0.01, targetVector->z() + delta)
+                               : targetVector->z() + delta);
 
-    auto *command = new UpdateGroupTransformCommand(&m_scene, groupId, position, rotation, [this]() {
+    auto *command = new UpdateGroupTransformCommand(&m_scene, groupId, position, rotation, scale, [this]() {
         refreshSceneViews();
     });
 
@@ -1164,6 +1195,12 @@ void MainWindow::onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter
     }
 
     m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeShapeParameterHovered(int shapeId, int parameter)
+{
+    if (m_viewport)
+        m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
 }
 
 void MainWindow::refreshShapeList()

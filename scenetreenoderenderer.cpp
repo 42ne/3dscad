@@ -26,6 +26,9 @@ void paintRoundedPanel(QPainter *painter, const QRectF &rect, qreal radius, cons
 
 void paintVerticalPillLabel(QPainter *painter, const QString &text, const QRectF &rect, const QColor &accent)
 {
+    if (!rect.isValid() || rect.height() < 18.0)
+        return;
+
     painter->save();
     paintRoundedPanel(painter, rect, 6.0, QPen(accent, 1), QBrush(QColor(255, 255, 255, 115)));
     painter->translate(rect.center());
@@ -46,6 +49,18 @@ void paintLabel(QPainter *painter, const QString &text, const QPointF &position,
 QColor translucent(const QColor &color, int alpha)
 {
     return QColor(color.red(), color.green(), color.blue(), alpha);
+}
+
+QRectF boundedVerticalLabelRect(qreal left, qreal top, qreal bottom, qreal width, qreal preferredHeight)
+{
+    if (bottom <= top)
+        return QRectF();
+
+    const qreal height = qMin(preferredHeight, bottom - top);
+    if (height < 18.0)
+        return QRectF();
+
+    return QRectF(left, top + (bottom - top - height) * 0.5, width, height);
 }
 
 void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &iconRect)
@@ -204,16 +219,16 @@ public:
             const qreal labelHeight = 42.0;
             const qreal labelLeft = m_rect.left() + GroupPadding * 0.5;
             const qreal baseTop = m_rect.top() + GroupHeaderHeight + GroupPadding;
-            const qreal baseHeight = qMax<qreal>(labelHeight, m_cutSeparatorY - baseTop - 4.0);
+            const qreal baseBottom = m_cutSeparatorY - 4.0;
             const qreal cutTop = m_cutSeparatorY + 4.0;
-            const qreal cutHeight = qMax<qreal>(labelHeight, m_rect.bottom() - GroupPadding - cutTop);
+            const qreal cutBottom = m_rect.bottom() - GroupPadding;
             paintVerticalPillLabel(painter,
                                    QStringLiteral("base"),
-                                   QRectF(labelLeft, baseTop, labelWidth, qMin(labelHeight, baseHeight)),
+                                   boundedVerticalLabelRect(labelLeft, baseTop, baseBottom, labelWidth, labelHeight),
                                    QColor(128, 99, 73));
             paintVerticalPillLabel(painter,
                                    QStringLiteral("cut"),
-                                   QRectF(labelLeft, cutTop, labelWidth, qMin(labelHeight, cutHeight)),
+                                   boundedVerticalLabelRect(labelLeft, cutTop, cutBottom, labelWidth, labelHeight),
                                    QColor(153, 85, 56));
         }
     }
@@ -248,7 +263,11 @@ private:
         painter->setPen(QColor(24, 34, 44));
         painter->drawText(QRectF(iconRect.left(), iconRect.bottom() - 1.0, iconRect.width(), 14.0),
                           Qt::AlignCenter,
-                          m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T") : QStringLiteral("R"));
+                          m_operation == SceneDocument::TreeNode::Translate
+                              ? QStringLiteral("T")
+                              : m_operation == SceneDocument::TreeNode::Rotate
+                                    ? QStringLiteral("R")
+                                    : QStringLiteral("S"));
 
         const QVector<QPair<QString, qreal>> rows = {
             {QStringLiteral("X"), m_transformValues.x()},
@@ -275,9 +294,10 @@ private:
                               Qt::AlignLeft | Qt::AlignVCenter,
                               row.first);
             painter->setPen(QColor(24, 34, 44));
+            const int precision = m_operation == SceneDocument::TreeNode::Scale ? 1 : 0;
             painter->drawText(QRectF(rowRect.left() + 12.0, rowRect.top(), rowRect.width() - 15.0, rowRect.height()),
                               Qt::AlignRight | Qt::AlignVCenter,
-                              QString::number(row.second, 'f', 0));
+                              QString::number(row.second, 'f', precision));
             rowTop += 13.0;
         }
     }
@@ -332,7 +352,9 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                           ? node.position
                                           : node.operation == SceneDocument::TreeNode::Rotate
                                                 ? node.rotation
-                                                : QVector3D();
+                                                : node.operation == SceneDocument::TreeNode::Scale
+                                                      ? node.scale
+                                                      : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,

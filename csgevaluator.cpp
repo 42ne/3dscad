@@ -550,6 +550,8 @@ static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDo
         return point + group.position;
     if (group.operation == SceneDocument::TreeNode::Rotate)
         return rotatePoint(point, group.rotation);
+    if (group.operation == SceneDocument::TreeNode::Scale)
+        return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
     return point;
 }
 
@@ -559,6 +561,11 @@ static QVector3D transformNormalForGroup(const QVector3D &normal, const SceneDoc
         return normal;
     if (group.operation == SceneDocument::TreeNode::Rotate)
         return rotatePoint(normal, group.rotation);
+    if (group.operation == SceneDocument::TreeNode::Scale) {
+        return QVector3D(qFuzzyIsNull(group.scale.x()) ? normal.x() : normal.x() / group.scale.x(),
+                         qFuzzyIsNull(group.scale.y()) ? normal.y() : normal.y() / group.scale.y(),
+                         qFuzzyIsNull(group.scale.z()) ? normal.z() : normal.z() / group.scale.z());
+    }
     return normal;
 }
 
@@ -954,12 +961,21 @@ static bool hasVectorValue(const QVector3D &vector)
     return !qFuzzyIsNull(vector.x()) || !qFuzzyIsNull(vector.y()) || !qFuzzyIsNull(vector.z());
 }
 
+static bool hasScaleValue(const QVector3D &vector)
+{
+    return !qFuzzyCompare(vector.x(), 1.0f)
+           || !qFuzzyCompare(vector.y(), 1.0f)
+           || !qFuzzyCompare(vector.z(), 1.0f);
+}
+
 static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
 {
     if (node.type == SceneDocument::TreeNode::Group) {
         if (node.operation == SceneDocument::TreeNode::Translate && hasVectorValue(node.position))
             return true;
         if (node.operation == SceneDocument::TreeNode::Rotate && hasVectorValue(node.rotation))
+            return true;
+        if (node.operation == SceneDocument::TreeNode::Scale && hasScaleValue(node.scale))
             return true;
     }
 

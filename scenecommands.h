@@ -139,14 +139,17 @@ public:
                                 int groupId,
                                 const QVector3D &position,
                                 const QVector3D &rotation,
+                                const QVector3D &scale,
                                 std::function<void()> onChanged);
     UpdateGroupTransformCommand(SceneDocument *scene,
                                 int groupId,
                                 const QVector3D &newPosition,
                                 const QVector3D &newRotation,
+                                const QVector3D &newScale,
                                 std::function<void()> onChanged,
                                 const QVector3D &oldPosition,
-                                const QVector3D &oldRotation);
+                                const QVector3D &oldRotation,
+                                const QVector3D &oldScale);
     UpdateGroupTransformCommand(SceneDocument *scene,
                                 const SceneDocument::Snapshot &oldSnapshot,
                                 const SceneDocument::Snapshot &newSnapshot,

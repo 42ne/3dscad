@@ -54,7 +54,7 @@ public:
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
-    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation);
+    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 
 private:
     bool isValidIndex(int index) const;

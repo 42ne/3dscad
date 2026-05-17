@@ -62,6 +62,7 @@ private slots:
     void onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qreal delta);
     void onGraphicsTreeTransformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter, qreal delta);
+    void onGraphicsTreeShapeParameterHovered(int shapeId, int parameter);
 
 private:
     void buildUi();
@@ -94,6 +95,7 @@ private:
     int m_viewportDragGroupId = 0;
     QVector3D m_viewportDragStartGroupPosition;
     QVector3D m_viewportDragStartGroupRotation;
+    QVector3D m_viewportDragStartGroupScale;
     QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
 
     ViewportWidget *m_viewport = nullptr;
