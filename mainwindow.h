@@ -59,6 +59,9 @@ private slots:
     void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex);
     void onGraphicsTreeNodeSelected(int nodeId);
     void onGraphicsTreeNodeDeleteRequested(int nodeId);
+    void onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qreal delta);
+    void onGraphicsTreeTransformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
+    void onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter, qreal delta);
 
 private:
     void buildUi();

@@ -83,6 +83,21 @@ void SceneTreeGraphicsWidget::setTreeNodeDeleteRequestedCallback(std::function<v
     m_treeNodeDeleteRequestedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setTransformValueAdjustedCallback(std::function<void(int, int, qreal)> callback)
+{
+    m_transformValueAdjustedCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback)
+{
+    m_transformControlHoveredCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setShapeParameterAdjustedCallback(std::function<void(int, int, qreal)> callback)
+{
+    m_shapeParameterAdjustedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -137,6 +152,12 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
 
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Control) {
+        const QPointF scenePosition = mapToScene(m_lastMousePosition);
+        updateActiveTransformControl(scenePosition, true);
+        updateActiveShapeParameterControl(scenePosition, true);
+    }
+
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
         if (m_treeNodeDeleteRequestedCallback)
             m_treeNodeDeleteRequestedCallback(m_selectedTreeNodeId);
@@ -150,6 +171,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
 {
     setFocus();
+    m_lastMousePosition = event->pos();
 
     if (event->button() == Qt::LeftButton && itemAt(event->pos()) == nullptr) {
         m_panning = true;
@@ -164,6 +186,12 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
 
 void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
 {
+    m_lastMousePosition = event->pos();
+    const bool controlDown = event->modifiers() & Qt::ControlModifier;
+    const QPointF scenePosition = mapToScene(event->pos());
+    updateActiveTransformControl(scenePosition, controlDown);
+    updateActiveShapeParameterControl(scenePosition, controlDown);
+
     if (m_panning) {
         const QPoint delta = event->pos() - m_lastPanPoint;
         m_lastPanPoint = event->pos();
@@ -188,8 +216,31 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
     QGraphicsView::mouseReleaseEvent(event);
 }
 
+void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Control) {
+        updateActiveTransformControl(QPointF(), false);
+        updateActiveShapeParameterControl(QPointF(), false);
+    }
+
+    QGraphicsView::keyReleaseEvent(event);
+}
+
 void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 {
+    if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
+        const int wheelSteps = event->angleDelta().y() / 120;
+        const QPointF scenePosition = mapToScene(event->position().toPoint());
+        if (wheelSteps != 0 && handleShapeParameterWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
+        if (wheelSteps != 0 && handleTransformWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
+    }
+
     const qreal factor = event->angleDelta().y() > 0 ? 1.12 : 1.0 / 1.12;
     scale(factor, factor);
     event->accept();
@@ -243,9 +294,16 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
 {
     const QRectF rect(topLeft, QSizeF(PrimitiveWidth, PrimitiveHeight));
     const QString label = labelForPrimitive(node.shapeId);
+    const ShapeNode *shape = m_scene ? m_scene->shapeById(node.shapeId) : nullptr;
 
-    SceneTreeNodeRenderer(m_graphicsScene, m_selectedTreeNodeId, nullptr)
-        .renderPrimitive(node, rect, label, typeForPrimitive(node.shapeId));
+    SceneTreeNodeRenderer(m_graphicsScene,
+                          m_selectedTreeNodeId,
+                          nullptr,
+                          0,
+                          -1,
+                          m_activeShapeParameterNodeId,
+                          m_activeShapeParameter)
+        .renderPrimitive(node, rect, label, shape);
 
     addNodeDragHandle(node.id, label, rect, rect, rect.size());
     return rect;
@@ -285,7 +343,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
-                          [this](int nodeId) { handleTreeNodeSelected(nodeId); })
+                          [this](int nodeId) { handleTreeNodeSelected(nodeId); },
+                          m_activeTransformControlNodeId,
+                          m_activeTransformControlAxis)
         .renderGroup(node, rect, depth, cutSeparatorY);
 
     const QString groupLabel = labelForOperation(node.operation);
@@ -364,6 +424,192 @@ void SceneTreeGraphicsWidget::handleTreeNodeSelected(int nodeId)
     refresh();
     if (m_treeNodeSelectedCallback)
         m_treeNodeSelectedCallback(nodeId);
+}
+
+bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    if (!m_scene || !m_transformValueAdjustedCallback)
+        return false;
+
+    int groupId = 0;
+    int axis = -1;
+    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    if (!transformControlAt(scenePosition, &groupId, &operation, &axis))
+        return false;
+
+    const qreal step = operation == SceneDocument::TreeNode::Rotate ? 5.0 : 1.0;
+    m_transformValueAdjustedCallback(groupId, axis, wheelSteps * step);
+    updateActiveTransformControl(scenePosition, true);
+    return true;
+}
+
+bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    if (!m_scene || !m_shapeParameterAdjustedCallback)
+        return false;
+
+    int shapeId = -1;
+    int nodeId = 0;
+    int parameter = -1;
+    if (!shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter))
+        return false;
+
+    const ShapeNode *shape = m_scene->shapeById(shapeId);
+    if (!shape)
+        return false;
+
+    const qreal step = 1.0;
+    m_shapeParameterAdjustedCallback(shapeId, parameter, wheelSteps * step);
+    updateActiveShapeParameterControl(scenePosition, true);
+    Q_UNUSED(nodeId);
+    return true;
+}
+
+bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
+                                                 int *groupId,
+                                                 SceneDocument::TreeNode::Operation *operation,
+                                                 int *axisOut) const
+{
+    const GroupHitArea *bestArea = nullptr;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.operation != SceneDocument::TreeNode::Translate
+            && area.operation != SceneDocument::TreeNode::Rotate) {
+            continue;
+        }
+
+        if (!area.rect.contains(scenePosition))
+            continue;
+
+        if (!bestArea || area.depth > bestArea->depth)
+            bestArea = &area;
+    }
+
+    if (!bestArea)
+        return false;
+
+    const qreal rowLeft = bestArea->rect.left() + 6.0;
+    const qreal rowWidth = TransformHeaderWidth - 12.0;
+    const qreal rowHeight = 17.0;
+    qreal rowTop = bestArea->rect.top() + 39.0;
+    int hitAxis = -1;
+    for (int i = 0; i < 3; ++i) {
+        const QRectF rowRect(rowLeft, rowTop, rowWidth, rowHeight);
+        if (rowRect.contains(scenePosition)) {
+            hitAxis = i;
+            break;
+        }
+        rowTop += 20.0;
+    }
+
+    if (hitAxis < 0)
+        return false;
+
+    if (groupId)
+        *groupId = bestArea->groupId;
+    if (operation)
+        *operation = bestArea->operation;
+    if (axisOut)
+        *axisOut = hitAxis;
+    return true;
+}
+
+bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePosition,
+                                                      int *shapeId,
+                                                      int *nodeId,
+                                                      int *parameter) const
+{
+    if (!m_scene)
+        return false;
+
+    const SceneDocument::TreeNode *bestNode = nullptr;
+    QRectF bestRect;
+    int bestDepth = -1;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        for (const ChildLayout &child : area.children) {
+            if (!child.rect.contains(scenePosition))
+                continue;
+
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
+            if (!node || node->type != SceneDocument::TreeNode::Primitive)
+                continue;
+
+            if (area.depth > bestDepth) {
+                bestNode = node;
+                bestRect = child.rect;
+                bestDepth = area.depth;
+            }
+        }
+    }
+
+    if (!bestNode)
+        return false;
+
+    const ShapeNode *shape = m_scene->shapeById(bestNode->shapeId);
+    if (!shape)
+        return false;
+
+    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
+    for (int i = 0; i < controls.size(); ++i) {
+        if (shapeParameterControlRect(bestRect, i, controls.size()).contains(scenePosition)) {
+            if (shapeId)
+                *shapeId = bestNode->shapeId;
+            if (nodeId)
+                *nodeId = bestNode->id;
+            if (parameter)
+                *parameter = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &scenePosition, bool enabled)
+{
+    int groupId = 0;
+    int axis = -1;
+    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    if (!enabled || !transformControlAt(scenePosition, &groupId, &operation, &axis)) {
+        groupId = 0;
+        axis = -1;
+        operation = SceneDocument::TreeNode::Union;
+    }
+
+    if (m_activeTransformControlNodeId == groupId
+        && m_activeTransformControlAxis == axis
+        && m_activeTransformControlOperation == operation) {
+        return;
+    }
+
+    m_activeTransformControlNodeId = groupId;
+    m_activeTransformControlAxis = axis;
+    m_activeTransformControlOperation = operation;
+    refresh();
+
+    if (m_transformControlHoveredCallback)
+        m_transformControlHoveredCallback(groupId, operation, axis);
+}
+
+void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled)
+{
+    int shapeId = -1;
+    int nodeId = 0;
+    int parameter = -1;
+    if (!enabled || !shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter)) {
+        nodeId = 0;
+        parameter = -1;
+    }
+
+    if (m_activeShapeParameterNodeId == nodeId
+        && m_activeShapeParameter == parameter) {
+        return;
+    }
+
+    m_activeShapeParameterNodeId = nodeId;
+    m_activeShapeParameter = parameter;
+    refresh();
+
+    Q_UNUSED(shapeId);
 }
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)

@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
+#include <QVector3D>
 #include <utility>
 
 using namespace SceneTreeGraphics;
@@ -42,9 +43,9 @@ QColor translucent(const QColor &color, int alpha)
     return QColor(color.red(), color.green(), color.blue(), alpha);
 }
 
-void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &rect)
+void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &iconRect)
 {
-    const QRectF badgeRect(rect.center().x() + 12.0, rect.top() + 5.0, 18.0, 18.0);
+    const QRectF badgeRect(iconRect.right() - 4.0, iconRect.top() + 1.0, 18.0, 18.0);
     painter->setPen(QPen(QColor(82, 111, 146), 1));
     painter->setBrush(QColor(244, 248, 252));
     painter->drawEllipse(badgeRect);
@@ -56,15 +57,17 @@ class PrimitiveCardItem final : public QGraphicsItem
 {
 public:
     PrimitiveCardItem(const QRectF &rect,
-                      ShapeNode::Type type,
+                      const ShapeNode *shape,
                       const QString &number,
                       bool selected,
+                      int activeParameter,
                       qreal opacity,
                       qreal zValue)
         : m_rect(rect)
-        , m_type(type)
+        , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
         , m_selected(selected)
+        , m_activeParameter(activeParameter)
         , m_opacity(opacity)
     {
         setZValue(zValue);
@@ -77,7 +80,7 @@ public:
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
 
-        const QRectF iconRect(m_rect.left() + 20.0,
+        const QRectF iconRect(m_rect.left() + 10.0,
                               m_rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
                               PrimitiveIconSize,
                               PrimitiveIconSize);
@@ -87,16 +90,37 @@ public:
             painter->drawEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0));
         }
 
-        paintPrimitiveIcon(painter, m_type, iconRect);
+        paintPrimitiveIcon(painter, m_shape.type, iconRect);
         if (!m_number.isEmpty())
-            paintPrimitiveBadge(painter, m_number, m_rect);
+            paintPrimitiveBadge(painter, m_number, iconRect);
+
+        const QVector<ShapeParameterControl> controls = shapeParameterControls(m_shape);
+        for (int i = 0; i < controls.size(); ++i) {
+            const ShapeParameterControl &control = controls[i];
+            const QRectF controlRect = shapeParameterControlRect(m_rect, i, controls.size());
+            const bool active = i == m_activeParameter;
+            paintRoundedPanel(painter,
+                              controlRect,
+                              3.0,
+                              QPen(active ? QColor(220, 156, 26) : QColor(86, 117, 150), active ? 2 : 1),
+                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(244, 248, 252, 190)));
+            painter->setPen(QColor(58, 89, 125));
+            painter->drawText(QRectF(controlRect.left() + 4.0, controlRect.top(), 14.0, controlRect.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              control.label);
+            painter->setPen(QColor(24, 34, 44));
+            painter->drawText(QRectF(controlRect.left() + 20.0, controlRect.top(), controlRect.width() - 24.0, controlRect.height()),
+                              Qt::AlignRight | Qt::AlignVCenter,
+                              QString::number(control.value, 'f', 0));
+        }
     }
 
 private:
     QRectF m_rect;
-    ShapeNode::Type m_type = ShapeNode::Cube;
+    ShapeNode m_shape;
     QString m_number;
     bool m_selected = false;
+    int m_activeParameter = -1;
     qreal m_opacity = 1.0;
 };
 
@@ -111,9 +135,13 @@ public:
                   bool empty,
                   bool showShadow,
                   bool showDifferenceLabels,
-                  bool insertedPreview)
+                  bool insertedPreview,
+                  const QVector3D &transformValues = QVector3D(),
+                  int activeTransformAxis = -1)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
+        , m_transformValues(transformValues)
+        , m_activeTransformAxis(activeTransformAxis)
         , m_operation(operation)
         , m_selected(selected)
         , m_empty(empty)
@@ -196,18 +224,46 @@ private:
         const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
         paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
-        const QRectF iconRect(m_rect.left() + 5.0, m_rect.top() + 7.0, PrimitiveIconSize - 4.0, PrimitiveIconSize - 4.0);
+        const QRectF iconRect(m_rect.left() + 6.0, m_rect.top() + 7.0, PrimitiveIconSize - 6.0, PrimitiveIconSize - 6.0);
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125), 6.0);
 
-        painter->save();
-        painter->translate(m_rect.left() + 8.0, m_rect.bottom() - 8.0);
-        painter->rotate(-90.0);
-        paintLabel(painter, labelForOperation(m_operation), QPointF(0.0, 0.0), QColor(24, 34, 44));
-        painter->restore();
+        painter->setPen(QColor(24, 34, 44));
+        painter->drawText(QRectF(m_rect.left() + 39.0, m_rect.top() + 8.0, 30.0, 18.0),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T") : QStringLiteral("R"));
+
+        const QVector<QPair<QString, qreal>> rows = {
+            {QStringLiteral("X"), m_transformValues.x()},
+            {QStringLiteral("Y"), m_transformValues.y()},
+            {QStringLiteral("Z"), m_transformValues.z()}
+        };
+        qreal rowTop = m_rect.top() + 39.0;
+        for (int rowIndex = 0; rowIndex < rows.size(); ++rowIndex) {
+            const auto &row = rows[rowIndex];
+            const QRectF rowRect(m_rect.left() + 6.0, rowTop, TransformHeaderWidth - 12.0, 17.0);
+            const bool active = rowIndex == m_activeTransformAxis;
+            paintRoundedPanel(painter,
+                              rowRect,
+                              4.0,
+                              QPen(active ? QColor(220, 156, 26) : fill.darker(125), active ? 2 : 1),
+                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+
+            painter->setPen(fill.darker(170));
+            painter->drawText(QRectF(rowRect.left() + 5.0, rowRect.top(), 12.0, rowRect.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              row.first);
+            painter->setPen(QColor(24, 34, 44));
+            painter->drawText(QRectF(rowRect.left() + 19.0, rowRect.top(), rowRect.width() - 23.0, rowRect.height()),
+                              Qt::AlignRight | Qt::AlignVCenter,
+                              QString::number(row.second, 'f', 0));
+            rowTop += 20.0;
+        }
     }
 
     QRectF m_rect;
     qreal m_cutSeparatorY = 0.0;
+    QVector3D m_transformValues;
+    int m_activeTransformAxis = -1;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
     bool m_selected = false;
     bool m_empty = false;
@@ -221,9 +277,17 @@ private:
 
 SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
                                              int selectedNodeId,
-                                             NodeSelectedCallback onSelected)
+                                             NodeSelectedCallback onSelected,
+                                             int activeTransformNodeId,
+                                             int activeTransformAxis,
+                                             int activeShapeNodeId,
+                                             int activeShapeParameter)
     : m_scene(scene)
     , m_selectedNodeId(selectedNodeId)
+    , m_activeTransformNodeId(activeTransformNodeId)
+    , m_activeTransformAxis(activeTransformAxis)
+    , m_activeShapeNodeId(activeShapeNodeId)
+    , m_activeShapeParameter(activeShapeParameter)
     , m_onSelected(std::move(onSelected))
 {
 }
@@ -231,9 +295,10 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
 void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
                                             const QRectF &rect,
                                             const QString &label,
-                                            ShapeNode::Type type)
+                                            const ShapeNode *shape)
 {
-    m_scene->addItem(new PrimitiveCardItem(rect, type, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, 1.0, 5.0));
+    const int activeParameter = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParameter, 1.0, 5.0));
 }
 
 void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
@@ -241,7 +306,13 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         int depth,
                                         qreal cutSeparatorY)
 {
-    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false));
+    const QVector3D transformValues = node.operation == SceneDocument::TreeNode::Translate
+                                          ? node.position
+                                          : node.operation == SceneDocument::TreeNode::Rotate
+                                                ? node.rotation
+                                                : QVector3D();
+    const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
+    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),
@@ -261,10 +332,13 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
 {
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
-    if (operationForToolName(tool, &operation))
+    if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true);
-    else
-        item = new PrimitiveCardItem(rect, primitiveTypeForTool(tool), QString(), false, 0.78, 58.0);
+    } else {
+        ShapeNode shape;
+        shape.type = primitiveTypeForTool(tool);
+        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, 0.78, 58.0);
+    }
 
     scene->addItem(item);
     appendPreviewItem(items, item);

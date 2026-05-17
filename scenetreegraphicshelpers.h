@@ -30,14 +30,14 @@ constexpr qreal ToolSize = 54.0;
 constexpr qreal ToolGap = 8.0;
 constexpr qreal TreeX = 12.0;
 constexpr qreal TreeY = 92.0;
-constexpr qreal PrimitiveWidth = 88.0;
+constexpr qreal PrimitiveWidth = 148.0;
 constexpr qreal PrimitiveHeight = 42.0;
 constexpr qreal PrimitiveIconSize = 34.0;
 constexpr qreal GroupMinWidth = 128.0;
 constexpr qreal GroupModuleMinWidth = 136.0;
 constexpr qreal GroupWideMinWidth = 164.0;
 constexpr qreal GroupHeaderHeight = 28.0;
-constexpr qreal TransformHeaderWidth = 34.0;
+constexpr qreal TransformHeaderWidth = 78.0;
 constexpr qreal GroupPadding = 12.0;
 constexpr qreal ChildGap = 10.0;
 constexpr qreal CornerRadius = 5.0;
@@ -74,6 +74,13 @@ struct OperationVisual {
     qreal minWidth;
 };
 
+struct ShapeParameterControl {
+    QString label;
+    qreal value = 0.0;
+};
+
+QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
+QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
 const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation);
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);

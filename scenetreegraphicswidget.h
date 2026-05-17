@@ -24,6 +24,9 @@ public:
     void setTreeNodeDroppedCallback(std::function<void(int, int, int)> callback);
     void setTreeNodeSelectedCallback(std::function<void(int)> callback);
     void setTreeNodeDeleteRequestedCallback(std::function<void(int)> callback);
+    void setTransformValueAdjustedCallback(std::function<void(int, int, qreal)> callback);
+    void setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback);
+    void setShapeParameterAdjustedCallback(std::function<void(int, int, qreal)> callback);
     void setSelectedTreeNodeId(int nodeId);
     void refresh();
 
@@ -33,6 +36,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
 private:
@@ -56,6 +60,12 @@ private:
     void handleToolDrop(const QString &toolName, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
+    bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
+    bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
+    bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis) const;
+    bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter) const;
+    void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
+    void updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void clearDropPreview();
     void setTreeItemsVisible(bool visible);
@@ -73,8 +83,17 @@ private:
     std::function<void(int, int, int)> m_treeNodeDroppedCallback;
     std::function<void(int)> m_treeNodeSelectedCallback;
     std::function<void(int)> m_treeNodeDeleteRequestedCallback;
+    std::function<void(int, int, qreal)> m_transformValueAdjustedCallback;
+    std::function<void(int, SceneDocument::TreeNode::Operation, int)> m_transformControlHoveredCallback;
+    std::function<void(int, int, qreal)> m_shapeParameterAdjustedCallback;
     int m_selectedTreeNodeId = 0;
+    int m_activeTransformControlNodeId = 0;
+    int m_activeTransformControlAxis = -1;
+    SceneDocument::TreeNode::Operation m_activeTransformControlOperation = SceneDocument::TreeNode::Union;
+    int m_activeShapeParameterNodeId = 0;
+    int m_activeShapeParameter = -1;
     QPoint m_lastPanPoint;
+    QPoint m_lastMousePosition;
     bool m_panning = false;
 };
 

@@ -10,6 +10,7 @@
 #include <QPixmap>
 #include <QPolygonF>
 #include <QStyleOptionGraphicsItem>
+#include <QtGlobal>
 #include <QVarLengthArray>
 #include <QWidget>
 #include <cmath>
@@ -194,6 +195,34 @@ void paintOperationIcon(QPainter *painter,
         painter->setPen(accent.darker(160));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
     }
+}
+
+QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
+{
+    if (shape.type == ShapeNode::Sphere)
+        return {{QStringLiteral("R"), shape.radius}};
+
+    if (shape.type == ShapeNode::Cylinder)
+        return {{QStringLiteral("R"), shape.radius}, {QStringLiteral("H"), shape.height}};
+
+    return {{QStringLiteral("X"), shape.size.x()},
+            {QStringLiteral("Y"), shape.size.y()},
+            {QStringLiteral("Z"), shape.size.z()}};
+}
+
+QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count)
+{
+    if (index < 0 || count <= 0 || index >= count)
+        return QRectF();
+
+    const qreal left = primitiveRect.left() + 54.0;
+    const qreal width = qMax<qreal>(54.0, primitiveRect.width() - 60.0);
+    const qreal gap = 2.0;
+    const qreal availableHeight = PrimitiveHeight - 6.0;
+    const qreal rowHeight = qMin<qreal>(16.0, (availableHeight - gap * (count - 1)) / count);
+    const qreal totalHeight = rowHeight * count + gap * (count - 1);
+    const qreal top = primitiveRect.top() + (PrimitiveHeight - totalHeight) * 0.5 + index * (rowHeight + gap);
+    return QRectF(left, top, width, rowHeight);
 }
 
 QString primitiveNumberText(const QString &label, int fallbackId)

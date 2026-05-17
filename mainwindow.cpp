@@ -404,6 +404,15 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics->setTreeNodeDeleteRequestedCallback([this](int nodeId) {
         onGraphicsTreeNodeDeleteRequested(nodeId);
     });
+    m_sceneTreeGraphics->setTransformValueAdjustedCallback([this](int groupId, int axis, qreal delta) {
+        onGraphicsTreeTransformValueAdjusted(groupId, axis, delta);
+    });
+    m_sceneTreeGraphics->setTransformControlHoveredCallback([this](int groupId, SceneDocument::TreeNode::Operation operation, int axis) {
+        onGraphicsTreeTransformControlHovered(groupId, operation, axis);
+    });
+    m_sceneTreeGraphics->setShapeParameterAdjustedCallback([this](int shapeId, int parameter, qreal delta) {
+        onGraphicsTreeShapeParameterAdjusted(shapeId, parameter, delta);
+    });
 
     auto *legacyTreePanel = new QWidget;
     auto *legacyTreeLayout = new QVBoxLayout(legacyTreePanel);
@@ -1056,6 +1065,96 @@ void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
         return;
 
     auto *command = new RemoveGroupCommand(&m_scene, node->id, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qreal delta)
+{
+    if (axis < 0 || axis > 2 || qFuzzyIsNull(delta))
+        return;
+
+    const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group)
+        return;
+
+    QVector3D position = group->position;
+    QVector3D rotation = group->rotation;
+    QVector3D *targetVector = nullptr;
+    if (group->operation == SceneDocument::TreeNode::Translate)
+        targetVector = &position;
+    else if (group->operation == SceneDocument::TreeNode::Rotate)
+        targetVector = &rotation;
+    else
+        return;
+
+    if (axis == 0)
+        targetVector->setX(targetVector->x() + delta);
+    else if (axis == 1)
+        targetVector->setY(targetVector->y() + delta);
+    else
+        targetVector->setZ(targetVector->z() + delta);
+
+    auto *command = new UpdateGroupTransformCommand(&m_scene, groupId, position, rotation, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeTransformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis)
+{
+    if (m_viewport)
+        m_viewport->setTreeTransformControlPreview(groupId, operation, axis);
+}
+
+void MainWindow::onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter, qreal delta)
+{
+    if (parameter < 0 || qFuzzyIsNull(delta))
+        return;
+
+    const ShapeNode *shape = m_scene.shapeById(shapeId);
+    if (!shape)
+        return;
+
+    ShapeNode updatedShape = *shape;
+    if (updatedShape.type == ShapeNode::Cube) {
+        QVector3D size = updatedShape.size;
+        if (parameter == 0)
+            size.setX(qMax<qreal>(0.1, size.x() + delta));
+        else if (parameter == 1)
+            size.setY(qMax<qreal>(0.1, size.y() + delta));
+        else if (parameter == 2)
+            size.setZ(qMax<qreal>(0.1, size.z() + delta));
+        else
+            return;
+        updatedShape.size = size;
+    } else if (updatedShape.type == ShapeNode::Sphere) {
+        if (parameter != 0)
+            return;
+        updatedShape.radius = qMax<qreal>(0.1, updatedShape.radius + delta);
+    } else if (updatedShape.type == ShapeNode::Cylinder) {
+        if (parameter == 0)
+            updatedShape.radius = qMax<qreal>(0.1, updatedShape.radius + delta);
+        else if (parameter == 1)
+            updatedShape.height = qMax<qreal>(0.1, updatedShape.height + delta);
+        else
+            return;
+    }
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape, [this]() {
         refreshSceneViews();
     });
 

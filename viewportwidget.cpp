@@ -565,6 +565,20 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     update();
 }
 
+void ViewportWidget::setTreeTransformControlPreview(int groupId, SceneDocument::TreeNode::Operation operation, int axis)
+{
+    if (m_treeTransformPreviewGroupId == groupId
+        && m_treeTransformPreviewOperation == operation
+        && m_treeTransformPreviewAxis == axis) {
+        return;
+    }
+
+    m_treeTransformPreviewGroupId = groupId;
+    m_treeTransformPreviewOperation = operation;
+    m_treeTransformPreviewAxis = axis;
+    update();
+}
+
 void ViewportWidget::setRenderBackend(RenderBackend backend)
 {
     if (backend == OpenGLRenderBackend && !canUseOpenGLRenderBackend())
@@ -922,6 +936,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     painter.setPen(QColor(220, 220, 220));
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
     painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
+    drawTreeTransformControlPreview(painter);
     drawAxisGizmo(painter);
 }
 
@@ -1085,9 +1100,141 @@ void ViewportWidget::drawAxisGizmo(QPainter &painter) const
     painter.restore();
 }
 
+void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
+{
+    if (!m_scene || m_treeTransformPreviewGroupId <= 0 || m_treeTransformPreviewAxis < 0)
+        return;
+
+    const SceneDocument::TreeNode *group = m_scene->treeNodeById(m_treeTransformPreviewGroupId);
+    if (!group)
+        return;
+
+    const bool translatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Translate;
+    const bool rotatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Rotate;
+    if (!translatePreview && !rotatePreview)
+        return;
+
+    const QVector3D origin = transformOriginForGroup(m_treeTransformPreviewGroupId);
+    QVector3D localAxis;
+    QColor accent;
+    if (m_treeTransformPreviewAxis == 0) {
+        localAxis = QVector3D(1.0f, 0.0f, 0.0f);
+        accent = QColor(255, 95, 120);
+    } else if (m_treeTransformPreviewAxis == 1) {
+        localAxis = QVector3D(0.0f, 1.0f, 0.0f);
+        accent = QColor(105, 245, 145);
+    } else {
+        localAxis = QVector3D(0.0f, 0.0f, 1.0f);
+        accent = QColor(105, 180, 255);
+    }
+
+    auto project = [&](const QVector3D &world) {
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance).point;
+    };
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    auto drawDirectionLabel = [&](const QPointF &anchor, const QPointF &awayFrom, const QString &label) {
+        QPointF direction = anchor - awayFrom;
+        const qreal length = std::hypot(direction.x(), direction.y());
+        if (length > 0.001)
+            direction /= length;
+        else
+            direction = QPointF(0.0, -1.0);
+
+        const QPointF center = anchor + direction * 18.0;
+        const QRectF labelRect(center.x() - 9.0, center.y() - 9.0, 18.0, 18.0);
+        QFont labelFont = painter.font();
+        labelFont.setBold(true);
+        labelFont.setPointSizeF(qMax<qreal>(8.0, labelFont.pointSizeF() + 1.0));
+        painter.setFont(labelFont);
+
+        painter.setPen(QPen(QColor(5, 8, 12, 220), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawText(labelRect, Qt::AlignCenter, label);
+        painter.setPen(QColor(255, 248, 190, 245));
+        painter.drawText(labelRect, Qt::AlignCenter, label);
+    };
+
+    if (translatePreview) {
+        QVector3D worldAxis = worldAxisVectorForGroup(m_treeTransformPreviewGroupId, localAxis);
+        if (worldAxis.lengthSquared() <= 0.0001f)
+            worldAxis = localAxis;
+        worldAxis.normalize();
+
+        const QPointF center = project(origin);
+        const QPointF negative = project(origin - worldAxis * 34.0f);
+        const QPointF positive = project(origin + worldAxis * 34.0f);
+        painter.setPen(QPen(QColor(5, 8, 12, 190), 8, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(negative, positive);
+        painter.setPen(QPen(accent, 4, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(negative, positive);
+        drawArrowHead(&painter, center, positive, accent);
+        drawArrowHead(&painter, center, negative, accent);
+        drawDirectionLabel(positive, center, "+");
+        drawDirectionLabel(negative, center, "-");
+    } else {
+        QVector<QPointF> arcPoints;
+        const float radius = 48.0f;
+        const QVector<SceneDocument::TreeNode> stack = parentGroupStackForGroup(m_treeTransformPreviewGroupId);
+        for (int step = -7; step <= 7; ++step) {
+            const float angle = qDegreesToRadians(step * 8.0f);
+            const float c = qCos(angle) * radius;
+            const float s = qSin(angle) * radius;
+            QVector3D localPoint;
+            if (m_treeTransformPreviewAxis == 0)
+                localPoint = QVector3D(0.0f, c, s);
+            else if (m_treeTransformPreviewAxis == 1)
+                localPoint = QVector3D(c, 0.0f, s);
+            else
+                localPoint = QVector3D(c, s, 0.0f);
+
+            arcPoints.append(project(origin + transformVectorByGroupStack(localPoint, stack)));
+        }
+
+        if (arcPoints.size() >= 2) {
+            painter.setPen(QPen(QColor(5, 8, 12, 190), 7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPolyline(QPolygonF(arcPoints));
+            painter.setPen(QPen(accent, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPolyline(QPolygonF(arcPoints));
+            drawArrowHead(&painter, arcPoints[1], arcPoints.first(), accent);
+            drawArrowHead(&painter, arcPoints[arcPoints.size() - 2], arcPoints.last(), accent);
+            const QPointF center = project(origin);
+            drawDirectionLabel(arcPoints.last(), center, "+");
+            drawDirectionLabel(arcPoints.first(), center, "-");
+        }
+    }
+
+    painter.restore();
+}
+
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
     return true;
+}
+
+QVector<SceneDocument::TreeNode> ViewportWidget::parentGroupStackForGroup(int groupId) const
+{
+    QVector<SceneDocument::TreeNode> groupStack;
+    if (m_scene && groupId > 0)
+        collectParentGroupStackForGroup(m_scene->treeRoot(), groupId, &groupStack);
+    return groupStack;
+}
+
+QVector3D ViewportWidget::transformOriginForGroup(int groupId) const
+{
+    if (!m_scene || groupId <= 0)
+        return QVector3D();
+
+    const SceneDocument::TreeNode *group = m_scene->treeNodeById(groupId);
+    if (!group)
+        return QVector3D();
+
+    return transformPointByGroupStack(group->position, parentGroupStackForGroup(groupId));
+}
+
+QVector3D ViewportWidget::worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const
+{
+    return transformVectorByGroupStack(localAxis, parentGroupStackForGroup(groupId));
 }
 
 QVector<SceneDocument::TreeNode> ViewportWidget::selectedParentGroupStack() const

@@ -32,6 +32,7 @@ public:
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
     void setSelectedGroupId(int groupId);
+    void setTreeTransformControlPreview(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void setRenderBackend(RenderBackend backend);
     RenderBackend renderBackend() const;
     QString renderBackendName() const;
@@ -78,7 +79,11 @@ private:
     void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
     void paintOpenGLPreview();
     void drawAxisGizmo(QPainter &painter) const;
+    void drawTreeTransformControlPreview(QPainter &painter) const;
     bool canUseOpenGLRenderBackend() const;
+    QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
+    QVector3D transformOriginForGroup(int groupId) const;
+    QVector3D worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const;
     QVector<SceneDocument::TreeNode> selectedParentGroupStack() const;
     QVector3D selectedTransformOrigin() const;
     QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
@@ -93,6 +98,9 @@ private:
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
+    int m_treeTransformPreviewGroupId = 0;
+    int m_treeTransformPreviewAxis = -1;
+    SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;
     float m_cameraYaw = -35.0f;
     float m_cameraPitch = 28.0f;
     float m_cameraDistance = 220.0f;
