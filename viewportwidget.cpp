@@ -52,6 +52,15 @@ struct OpenGLMeshVertex
     QVector3D color;
 };
 
+struct AxisGizmoAxis
+{
+    QString label;
+    QVector3D direction;
+    QColor color;
+    QPointF end;
+    float cameraDepth = 0.0f;
+};
+
 static int clampColorChannel(float value)
 {
     return qBound(0, qRound(value), 255);
@@ -75,6 +84,11 @@ static QVector3D toCameraPoint(const QVector3D &world, float yawDegrees, float p
 
     p.setZ(p.z() + cameraDistance);
     return p;
+}
+
+static QVector3D toCameraDirection(const QVector3D &world, float yawDegrees, float pitchDegrees)
+{
+    return toCameraPoint(world, yawDegrees, pitchDegrees, 0.0f);
 }
 
 static ProjectedPoint projectWorldPoint(const QVector3D &world,
@@ -117,8 +131,8 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
 
     direction.normalize();
     const QVector2D normal(-direction.y(), direction.x());
-    const float length = 15.0f;
-    const float width = 6.0f;
+    const float length = 18.0f;
+    const float width = 7.5f;
 
     const QPointF tip = end;
     const QPointF base = end - (direction * length).toPointF();
@@ -133,7 +147,11 @@ static void drawArrowHead(QPainter *painter, const QPointF &start, const QPointF
     QPolygonF darkFace;
     darkFace << tip << ridge << right;
 
-    painter->setPen(QPen(color.darker(135), 1));
+    painter->setPen(QPen(QColor(5, 8, 12, 190), 3));
+    painter->setBrush(QColor(5, 8, 12, 150));
+    painter->drawPolygon(QPolygonF() << tip << left << ridge << right);
+
+    painter->setPen(QPen(color.darker(135), 1.2));
     painter->setBrush(lightSide);
     painter->drawPolygon(lightFace);
 
@@ -730,15 +748,17 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         if (hasSelectedShape || hasSelectedGroup) {
             const QVector3D origin = selectedTransformOrigin();
             const QVector<QPair<QVector3D, QColor>> axes = {
-                {QVector3D(36.0f, 0.0f, 0.0f), QColor(235, 80, 80)},
-                {QVector3D(0.0f, 36.0f, 0.0f), QColor(80, 210, 120)},
-                {QVector3D(0.0f, 0.0f, 36.0f), QColor(90, 155, 245)}
+                {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
+                {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
+                {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
             };
 
             for (const auto &axis : axes) {
                 const QPointF start = project(origin).point;
                 const QPointF end = project(origin + axis.first).point;
-                painter.setPen(QPen(axis.second, 3, Qt::SolidLine, Qt::RoundCap));
+                painter.setPen(QPen(QColor(5, 8, 12, 185), 7, Qt::SolidLine, Qt::RoundCap));
+                painter.drawLine(start, end);
+                painter.setPen(QPen(axis.second, 4.5, Qt::SolidLine, Qt::RoundCap));
                 painter.drawLine(start, end);
                 drawArrowHead(&painter, start, end, axis.second);
             }
@@ -766,6 +786,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     painter.setPen(QColor(220, 220, 220));
     painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
     painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
+    drawAxisGizmo(painter);
 }
 
 void ViewportWidget::paintOpenGLPreview()
@@ -868,6 +889,64 @@ void ViewportWidget::paintOpenGLPreview()
     m_glMeshProgram->disableAttributeArray(normalLocation);
     m_glMeshProgram->disableAttributeArray(colorLocation);
     m_glMeshProgram->release();
+}
+
+void ViewportWidget::drawAxisGizmo(QPainter &painter) const
+{
+    const QRectF panelRect(width() - 94.0, 14.0, 76.0, 76.0);
+    const QPointF center = panelRect.center();
+    const float axisLength = 27.0f;
+
+    QVector<AxisGizmoAxis> axes = {
+        {QStringLiteral("X"), QVector3D(1.0f, 0.0f, 0.0f), QColor(235, 80, 80), QPointF(), 0.0f},
+        {QStringLiteral("Y"), QVector3D(0.0f, 1.0f, 0.0f), QColor(80, 210, 120), QPointF(), 0.0f},
+        {QStringLiteral("Z"), QVector3D(0.0f, 0.0f, 1.0f), QColor(90, 155, 245), QPointF(), 0.0f}
+    };
+
+    for (AxisGizmoAxis &axis : axes) {
+        const QVector3D cameraDirection = toCameraDirection(axis.direction, m_cameraYaw, m_cameraPitch);
+        axis.end = center + QPointF(cameraDirection.x() * axisLength, -cameraDirection.y() * axisLength);
+        axis.cameraDepth = cameraDirection.z();
+    }
+
+    std::sort(axes.begin(), axes.end(), [](const AxisGizmoAxis &left, const AxisGizmoAxis &right) {
+        return left.cameraDepth < right.cameraDepth;
+    });
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(QColor(255, 255, 255, 42), 1));
+    painter.setBrush(QColor(10, 14, 20, 105));
+    painter.drawRoundedRect(panelRect, 8.0, 8.0);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(235, 240, 245, 180));
+    painter.drawEllipse(center, 3.0, 3.0);
+
+    QFont labelFont = painter.font();
+    labelFont.setBold(true);
+    labelFont.setPointSize(qMax(7, labelFont.pointSize()));
+    painter.setFont(labelFont);
+
+    for (const AxisGizmoAxis &axis : axes) {
+        QColor lineColor = axis.color;
+        lineColor.setAlpha(axis.cameraDepth < 0.0f ? 120 : 235);
+        painter.setPen(QPen(lineColor, axis.cameraDepth < 0.0f ? 2 : 3, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(center, axis.end);
+
+        QColor dotColor = axis.color.lighter(axis.cameraDepth < 0.0f ? 105 : 118);
+        dotColor.setAlpha(axis.cameraDepth < 0.0f ? 155 : 245);
+        painter.setPen(QPen(axis.color.darker(135), 1));
+        painter.setBrush(dotColor);
+        painter.drawEllipse(axis.end, 8.0, 8.0);
+
+        painter.setPen(QColor(255, 255, 255, axis.cameraDepth < 0.0f ? 170 : 245));
+        painter.drawText(QRectF(axis.end.x() - 8.0, axis.end.y() - 8.0, 16.0, 16.0),
+                         Qt::AlignCenter,
+                         axis.label);
+    }
+
+    painter.restore();
 }
 
 bool ViewportWidget::canUseOpenGLRenderBackend() const

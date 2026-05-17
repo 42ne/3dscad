@@ -77,6 +77,7 @@ public:
 private:
     void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
     void paintOpenGLPreview();
+    void drawAxisGizmo(QPainter &painter) const;
     bool canUseOpenGLRenderBackend() const;
     QVector3D selectedTransformOrigin() const;
     bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
