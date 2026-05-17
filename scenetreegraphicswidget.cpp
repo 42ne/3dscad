@@ -487,10 +487,10 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
     if (!bestArea)
         return false;
 
-    const qreal rowLeft = bestArea->rect.left() + 6.0;
-    const qreal rowWidth = TransformHeaderWidth - 12.0;
-    const qreal rowHeight = 17.0;
-    qreal rowTop = bestArea->rect.top() + 39.0;
+    const qreal rowLeft = bestArea->rect.left() + 38.0;
+    const qreal rowWidth = TransformHeaderWidth - 44.0;
+    const qreal rowHeight = 11.0;
+    qreal rowTop = bestArea->rect.top() + 8.0;
     int hitAxis = -1;
     for (int i = 0; i < 3; ++i) {
         const QRectF rowRect(rowLeft, rowTop, rowWidth, rowHeight);
@@ -498,7 +498,7 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
             hitAxis = i;
             break;
         }
-        rowTop += 20.0;
+        rowTop += 13.0;
     }
 
     if (hitAxis < 0)

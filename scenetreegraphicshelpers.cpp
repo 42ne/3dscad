@@ -215,8 +215,8 @@ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int cou
     if (index < 0 || count <= 0 || index >= count)
         return QRectF();
 
-    const qreal left = primitiveRect.left() + 54.0;
-    const qreal width = qMax<qreal>(54.0, primitiveRect.width() - 60.0);
+    const qreal left = primitiveRect.left() + 72.0;
+    const qreal width = qMin<qreal>(54.0, qMax<qreal>(44.0, primitiveRect.right() - left - 6.0));
     const qreal gap = 2.0;
     const qreal availableHeight = PrimitiveHeight - 6.0;
     const qreal rowHeight = qMin<qreal>(16.0, (availableHeight - gap * (count - 1)) / count);

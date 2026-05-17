@@ -24,18 +24,23 @@ void paintRoundedPanel(QPainter *painter, const QRectF &rect, qreal radius, cons
     painter->drawPath(path);
 }
 
+void paintVerticalPillLabel(QPainter *painter, const QString &text, const QRectF &rect, const QColor &accent)
+{
+    painter->save();
+    paintRoundedPanel(painter, rect, 6.0, QPen(accent, 1), QBrush(QColor(255, 255, 255, 115)));
+    painter->translate(rect.center());
+    painter->rotate(-90.0);
+    painter->setPen(accent.darker(135));
+    painter->drawText(QRectF(-rect.height() * 0.5, -rect.width() * 0.5, rect.height(), rect.width()),
+                      Qt::AlignCenter,
+                      text);
+    painter->restore();
+}
+
 void paintLabel(QPainter *painter, const QString &text, const QPointF &position, const QColor &color)
 {
     painter->setPen(color);
     painter->drawText(QRectF(position, QSizeF(220.0, 24.0)), Qt::AlignLeft | Qt::AlignTop, text);
-}
-
-void paintPillLabel(QPainter *painter, const QString &text, const QPointF &position, const QColor &accent)
-{
-    const QFontMetricsF metrics(painter->font());
-    const QRectF pillRect(position, QSizeF(metrics.horizontalAdvance(text) + 12.0, metrics.height() + 4.0));
-    paintRoundedPanel(painter, pillRect, 6.0, QPen(accent, 1), QBrush(QColor(255, 255, 255, 115)));
-    paintLabel(painter, text, QPointF(pillRect.left() + 6.0, pillRect.top() + 1.0), accent.darker(135));
 }
 
 QColor translucent(const QColor &color, int alpha)
@@ -195,8 +200,21 @@ public:
                           QPointF(m_rect.right() - GroupPadding, m_cutSeparatorY));
 
         if (m_showDifferenceLabels) {
-            paintPillLabel(painter, QStringLiteral("base"), QPointF(m_rect.right() - 61.0, m_rect.top() + GroupHeaderHeight + 7.0), QColor(128, 99, 73));
-            paintPillLabel(painter, QStringLiteral("cut"), QPointF(m_rect.right() - 51.0, m_cutSeparatorY + 5.0), QColor(153, 85, 56));
+            const qreal labelWidth = 20.0;
+            const qreal labelHeight = 42.0;
+            const qreal labelLeft = m_rect.left() + GroupPadding * 0.5;
+            const qreal baseTop = m_rect.top() + GroupHeaderHeight + GroupPadding;
+            const qreal baseHeight = qMax<qreal>(labelHeight, m_cutSeparatorY - baseTop - 4.0);
+            const qreal cutTop = m_cutSeparatorY + 4.0;
+            const qreal cutHeight = qMax<qreal>(labelHeight, m_rect.bottom() - GroupPadding - cutTop);
+            paintVerticalPillLabel(painter,
+                                   QStringLiteral("base"),
+                                   QRectF(labelLeft, baseTop, labelWidth, qMin(labelHeight, baseHeight)),
+                                   QColor(128, 99, 73));
+            paintVerticalPillLabel(painter,
+                                   QStringLiteral("cut"),
+                                   QRectF(labelLeft, cutTop, labelWidth, qMin(labelHeight, cutHeight)),
+                                   QColor(153, 85, 56));
         }
     }
 
@@ -228,8 +246,8 @@ private:
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125), 6.0);
 
         painter->setPen(QColor(24, 34, 44));
-        painter->drawText(QRectF(m_rect.left() + 39.0, m_rect.top() + 8.0, 30.0, 18.0),
-                          Qt::AlignLeft | Qt::AlignVCenter,
+        painter->drawText(QRectF(iconRect.left(), iconRect.bottom() - 1.0, iconRect.width(), 14.0),
+                          Qt::AlignCenter,
                           m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T") : QStringLiteral("R"));
 
         const QVector<QPair<QString, qreal>> rows = {
@@ -237,10 +255,14 @@ private:
             {QStringLiteral("Y"), m_transformValues.y()},
             {QStringLiteral("Z"), m_transformValues.z()}
         };
-        qreal rowTop = m_rect.top() + 39.0;
+        QFont valueFont = painter->font();
+        valueFont.setPointSizeF(qMax<qreal>(7.0, valueFont.pointSizeF() - 2.0));
+        painter->setFont(valueFont);
+
+        qreal rowTop = m_rect.top() + 8.0;
         for (int rowIndex = 0; rowIndex < rows.size(); ++rowIndex) {
             const auto &row = rows[rowIndex];
-            const QRectF rowRect(m_rect.left() + 6.0, rowTop, TransformHeaderWidth - 12.0, 17.0);
+            const QRectF rowRect(m_rect.left() + 38.0, rowTop, TransformHeaderWidth - 44.0, 11.0);
             const bool active = rowIndex == m_activeTransformAxis;
             paintRoundedPanel(painter,
                               rowRect,
@@ -249,14 +271,14 @@ private:
                               QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
 
             painter->setPen(fill.darker(170));
-            painter->drawText(QRectF(rowRect.left() + 5.0, rowRect.top(), 12.0, rowRect.height()),
+            painter->drawText(QRectF(rowRect.left() + 3.0, rowRect.top(), 9.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter,
                               row.first);
             painter->setPen(QColor(24, 34, 44));
-            painter->drawText(QRectF(rowRect.left() + 19.0, rowRect.top(), rowRect.width() - 23.0, rowRect.height()),
+            painter->drawText(QRectF(rowRect.left() + 12.0, rowRect.top(), rowRect.width() - 15.0, rowRect.height()),
                               Qt::AlignRight | Qt::AlignVCenter,
                               QString::number(row.second, 'f', 0));
-            rowTop += 20.0;
+            rowTop += 13.0;
         }
     }
 

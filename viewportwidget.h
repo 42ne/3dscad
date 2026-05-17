@@ -102,8 +102,9 @@ private:
     int m_treeTransformPreviewAxis = -1;
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;
     float m_cameraYaw = -35.0f;
-    float m_cameraPitch = 28.0f;
+    float m_cameraPitch = -28.0f;
     float m_cameraDistance = 220.0f;
+    QVector3D m_cameraTarget;
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
     QVector3D m_lastDragDelta;
@@ -111,6 +112,7 @@ private:
     QVector2D m_rotationDragScreenTangent;
     bool m_draggingShape = false;
     bool m_draggingGroup = false;
+    bool m_panningViewport = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
     int m_dragGroupId = 0;
