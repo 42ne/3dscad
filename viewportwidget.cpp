@@ -513,6 +513,56 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal, const Q
         baseColor.alpha());
 }
 
+static QVector<SceneLight> viewportLightsForPreset(int preset)
+{
+    switch (preset) {
+    case 1:
+        return {
+            {QVector3D(-0.25f, -0.15f, 1.0f).normalized(), QColor(255, 248, 230), 0.56f},
+            {QVector3D(0.65f, 0.35f, 0.55f).normalized(), QColor(190, 220, 255), 0.28f},
+            {QVector3D(-0.7f, 0.65f, 0.35f).normalized(), QColor(255, 205, 170), 0.18f}
+        };
+    case 2:
+        return {
+            {QVector3D(0.92f, -0.22f, 0.42f).normalized(), QColor(255, 238, 205), 0.84f},
+            {QVector3D(-0.55f, 0.35f, 0.85f).normalized(), QColor(125, 185, 255), 0.20f},
+            {QVector3D(-0.25f, -0.9f, 0.18f).normalized(), QColor(255, 145, 95), 0.10f}
+        };
+    case 3:
+        return {
+            {QVector3D(-0.55f, -0.35f, 1.0f).normalized(), QColor(255, 250, 230), 1.02f},
+            {QVector3D(0.9f, 0.25f, 0.25f).normalized(), QColor(90, 150, 255), 0.18f},
+            {QVector3D(-0.25f, 0.85f, 0.25f).normalized(), QColor(255, 120, 70), 0.18f}
+        };
+    default:
+        return {
+            {QVector3D(-0.45f, -0.35f, 1.0f).normalized(), QColor(255, 244, 214), 0.78f},
+            {QVector3D(0.85f, 0.15f, 0.45f).normalized(), QColor(160, 205, 255), 0.34f},
+            {QVector3D(-0.2f, 0.9f, 0.25f).normalized(), QColor(255, 170, 110), 0.24f}
+        };
+    }
+}
+
+static float viewportAmbientForLightingPreset(int preset)
+{
+    if (preset == 1)
+        return 0.30f;
+    if (preset == 3)
+        return 0.14f;
+    return 0.20f;
+}
+
+static float viewportSpecularForLightingPreset(int preset)
+{
+    if (preset == 1)
+        return 0.24f;
+    if (preset == 2)
+        return 0.34f;
+    if (preset == 3)
+        return 0.54f;
+    return 0.42f;
+}
+
 static QVector3D colorToVector(const QColor &color)
 {
     return QVector3D(color.redF(), color.greenF(), color.blueF());
@@ -845,6 +895,7 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     m_openGLViewportCheckBox = new QCheckBox(QStringLiteral("OpenGL"), this);
     m_darkViewportCheckBox = new QCheckBox(QStringLiteral("Dark"), this);
     m_colorVariantComboBox = new QComboBox(this);
+    m_lightingPresetComboBox = new QComboBox(this);
     m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
     m_colorVariantComboBox->addItems({
         QStringLiteral("Neutral"),
@@ -852,6 +903,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         QStringLiteral("Clay"),
         QStringLiteral("Steel"),
         QStringLiteral("Amber")
+    });
+    m_lightingPresetComboBox->addItems({
+        QStringLiteral("Studio"),
+        QStringLiteral("Soft"),
+        QStringLiteral("Side"),
+        QStringLiteral("Contrast")
     });
 
     const QString controlStyle = QStringLiteral(
@@ -868,9 +925,11 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     m_openGLViewportCheckBox->setStyleSheet(controlStyle);
     m_darkViewportCheckBox->setStyleSheet(controlStyle);
     m_colorVariantComboBox->setStyleSheet(controlStyle);
+    m_lightingPresetComboBox->setStyleSheet(controlStyle);
     m_openGLViewportCheckBox->setToolTip(QStringLiteral("Use OpenGL rendering for viewport meshes and grid."));
     m_darkViewportCheckBox->setToolTip(QStringLiteral("Switch viewport between dark and light theme."));
     m_colorVariantComboBox->setToolTip(QStringLiteral("Choose viewport material color variant."));
+    m_lightingPresetComboBox->setToolTip(QStringLiteral("Choose viewport lighting preset."));
 
     connect(m_openGLViewportCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         setRenderBackend(checked ? OpenGLRenderBackend : SoftwareRenderBackend);
@@ -881,6 +940,10 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     });
     connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         m_viewportColorVariant = qMax(0, index);
+        update();
+    });
+    connect(m_lightingPresetComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        m_lightingPreset = qMax(0, index);
         update();
     });
 
@@ -1013,12 +1076,23 @@ void ViewportWidget::initializeGL()
         "varying vec3 v_normal;\n"
         "varying vec3 v_view_position;\n"
         "varying vec3 v_color;\n"
+        "uniform vec3 u_light_direction_a;\n"
+        "uniform vec3 u_light_direction_b;\n"
+        "uniform vec3 u_light_direction_c;\n"
+        "uniform vec3 u_light_color_a;\n"
+        "uniform vec3 u_light_color_b;\n"
+        "uniform vec3 u_light_color_c;\n"
+        "uniform float u_light_intensity_a;\n"
+        "uniform float u_light_intensity_b;\n"
+        "uniform float u_light_intensity_c;\n"
+        "uniform float u_ambient;\n"
+        "uniform float u_specular_strength;\n"
         "void main() {\n"
         "    vec3 n = normalize(v_normal);\n"
         "    vec3 viewDir = normalize(-v_view_position);\n"
-        "    vec3 lightA = normalize(vec3(-0.35, 0.48, 0.82));\n"
-        "    vec3 lightB = normalize(vec3(0.78, -0.32, 0.38));\n"
-        "    vec3 lightC = normalize(vec3(-0.25, -0.75, 0.28));\n"
+        "    vec3 lightA = normalize(u_light_direction_a);\n"
+        "    vec3 lightB = normalize(u_light_direction_b);\n"
+        "    vec3 lightC = normalize(u_light_direction_c);\n"
         "    float diffuseA = max(0.0, dot(n, lightA));\n"
         "    float diffuseB = max(0.0, dot(n, lightB));\n"
         "    float diffuseC = max(0.0, dot(n, lightC));\n"
@@ -1029,13 +1103,13 @@ void ViewportWidget::initializeGL()
         "    float specA = pow(max(0.0, dot(reflect(-lightA, n), viewDir)), 42.0);\n"
         "    float specB = pow(max(0.0, dot(reflect(-lightB, n), viewDir)), 26.0);\n"
         "    float rim = pow(1.0 - max(0.0, dot(n, viewDir)), 2.0);\n"
-        "    vec3 warmLight = vec3(1.0, 0.92, 0.78) * diffuseA * 0.72;\n"
-        "    vec3 coolLight = vec3(0.58, 0.74, 1.0) * diffuseB * 0.32;\n"
-        "    vec3 sideLight = vec3(1.0, 0.58, 0.38) * diffuseC * 0.18;\n"
-        "    vec3 shaded = v_color * (vec3(0.20) + warmLight + coolLight + sideLight);\n"
+        "    vec3 warmLight = u_light_color_a * diffuseA * u_light_intensity_a;\n"
+        "    vec3 coolLight = u_light_color_b * diffuseB * u_light_intensity_b;\n"
+        "    vec3 sideLight = u_light_color_c * diffuseC * u_light_intensity_c;\n"
+        "    vec3 shaded = v_color * (vec3(u_ambient) + warmLight + coolLight + sideLight);\n"
         "    shaded = mix(shaded, environment, 0.14 + fresnel * 0.26);\n"
-        "    shaded += vec3(1.0, 0.92, 0.74) * specA * 0.42;\n"
-        "    shaded += vec3(0.70, 0.86, 1.0) * specB * 0.18;\n"
+        "    shaded += vec3(1.0, 0.92, 0.74) * specA * u_specular_strength;\n"
+        "    shaded += vec3(0.70, 0.86, 1.0) * specB * (u_specular_strength * 0.43);\n"
         "    shaded += vec3(0.55, 0.75, 1.0) * rim * 0.16;\n"
         "    gl_FragColor = vec4(clamp(shaded, 0.0, 1.0), 1.0);\n"
         "}\n");
@@ -1121,11 +1195,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     if (drawSceneMeshes)
         painter.fillRect(rect(), viewportBackgroundColor(m_darkViewportTheme));
 
-    const QVector<SceneLight> lights = {
-        {QVector3D(-0.45f, -0.35f, 1.0f).normalized(), QColor(255, 244, 214), 0.78f},
-        {QVector3D(0.85f, 0.15f, 0.45f).normalized(), QColor(160, 205, 255), 0.34f},
-        {QVector3D(-0.2f, 0.9f, 0.25f).normalized(), QColor(255, 170, 110), 0.24f}
-    };
+    const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
 
     auto project = [&](const QVector3D &world) {
         return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
@@ -1680,6 +1750,22 @@ void ViewportWidget::paintOpenGLPreview()
     glDepthFunc(GL_LESS);
 
     m_glMeshProgram->bind();
+    const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
+    if (lights.size() >= 3) {
+        auto setLightUniforms = [this, &lights](int index,
+                                                const char *directionName,
+                                                const char *colorName,
+                                                const char *intensityName) {
+            m_glMeshProgram->setUniformValue(directionName, lights[index].direction);
+            m_glMeshProgram->setUniformValue(colorName, colorToVector(lights[index].color));
+            m_glMeshProgram->setUniformValue(intensityName, lights[index].intensity);
+        };
+        setLightUniforms(0, "u_light_direction_a", "u_light_color_a", "u_light_intensity_a");
+        setLightUniforms(1, "u_light_direction_b", "u_light_color_b", "u_light_intensity_b");
+        setLightUniforms(2, "u_light_direction_c", "u_light_color_c", "u_light_intensity_c");
+    }
+    m_glMeshProgram->setUniformValue("u_ambient", viewportAmbientForLightingPreset(m_lightingPreset));
+    m_glMeshProgram->setUniformValue("u_specular_strength", viewportSpecularForLightingPreset(m_lightingPreset));
 
     const int positionLocation = m_glMeshProgram->attributeLocation("a_position");
     const int normalLocation = m_glMeshProgram->attributeLocation("a_normal");
@@ -2018,7 +2104,7 @@ bool ViewportWidget::canUseOpenGLRenderBackend() const
 
 void ViewportWidget::updateViewportControls()
 {
-    if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_colorVariantComboBox)
+    if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_colorVariantComboBox || !m_lightingPresetComboBox)
         return;
 
     const bool openGLAvailable = canUseOpenGLRenderBackend();
@@ -2034,10 +2120,14 @@ void ViewportWidget::updateViewportControls()
     m_colorVariantComboBox->blockSignals(true);
     m_colorVariantComboBox->setCurrentIndex(qBound(0, m_viewportColorVariant, m_colorVariantComboBox->count() - 1));
     m_colorVariantComboBox->blockSignals(false);
+    m_lightingPresetComboBox->blockSignals(true);
+    m_lightingPresetComboBox->setCurrentIndex(qBound(0, m_lightingPreset, m_lightingPresetComboBox->count() - 1));
+    m_lightingPresetComboBox->blockSignals(false);
 
     const QSize openGLSize = m_openGLViewportCheckBox->sizeHint();
     const QSize darkSize = m_darkViewportCheckBox->sizeHint();
     const QSize colorSize = m_colorVariantComboBox->sizeHint();
+    const QSize lightingSize = m_lightingPresetComboBox->sizeHint();
     const int margin = 10;
     const int gap = 6;
     const int y = 54;
@@ -2047,10 +2137,13 @@ void ViewportWidget::updateViewportControls()
     m_darkViewportCheckBox->setGeometry(x, y, darkSize.width() + 10, darkSize.height() + 2);
     x += m_darkViewportCheckBox->width() + gap;
     m_colorVariantComboBox->setGeometry(x, y, qMax(92, colorSize.width() + 12), darkSize.height() + 2);
+    x += m_colorVariantComboBox->width() + gap;
+    m_lightingPresetComboBox->setGeometry(x, y, qMax(94, lightingSize.width() + 12), darkSize.height() + 2);
 
     m_openGLViewportCheckBox->raise();
     m_darkViewportCheckBox->raise();
     m_colorVariantComboBox->raise();
+    m_lightingPresetComboBox->raise();
 }
 
 QVector<SceneDocument::TreeNode> ViewportWidget::parentGroupStackForGroup(int groupId) const

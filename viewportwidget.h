@@ -107,6 +107,7 @@ private:
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     bool m_darkViewportTheme = true;
     int m_viewportColorVariant = 0;
+    int m_lightingPreset = 0;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
     int m_treeTransformPreviewGroupId = 0;
@@ -139,6 +140,7 @@ private:
     QCheckBox *m_openGLViewportCheckBox = nullptr;
     QCheckBox *m_darkViewportCheckBox = nullptr;
     QComboBox *m_colorVariantComboBox = nullptr;
+    QComboBox *m_lightingPresetComboBox = nullptr;
     QOpenGLShaderProgram *m_glMeshProgram = nullptr;
     QOpenGLShaderProgram *m_glLineProgram = nullptr;
     QOpenGLShaderProgram *m_glFlatProgram = nullptr;
