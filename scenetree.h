@@ -1,6 +1,7 @@
 #ifndef SCENETREE_H
 #define SCENETREE_H
 
+#include <QStringList>
 #include <QVector>
 #include <QVector3D>
 #include <QString>
@@ -44,6 +45,7 @@ public:
         QVector3D position = QVector3D(0, 0, 0);
         QVector3D rotation = QVector3D(0, 0, 0);
         QVector3D scale = QVector3D(1, 1, 1);
+        QStringList transformExpressions; // 3 entries (x,y,z) for Translate/Rotate/Scale
         QVector<TreeNode> children;
     };
 
@@ -61,7 +63,7 @@ public:
     int addVariable(const QString &name, const QString &expression = QStringLiteral("0"), qreal value = 0.0, int insertIndex = -1);
     bool removeVariableById(int variableId);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1);
-    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
+    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
 
     // Primitive management
     bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);

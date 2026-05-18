@@ -147,18 +147,20 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
     return true;
 }
 
-bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale)
+bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions)
 {
     TreeNode *node = nodeById(groupId);
     if (!node || node->type != TreeNode::Group)
         return false;
 
-    if (node->position == position && node->rotation == rotation && node->scale == scale)
+    if (node->position == position && node->rotation == rotation && node->scale == scale
+        && node->transformExpressions == transformExpressions)
         return false;
 
     node->position = position;
     node->rotation = rotation;
     node->scale = scale;
+    node->transformExpressions = transformExpressions;
     return true;
 }
 

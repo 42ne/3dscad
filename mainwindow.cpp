@@ -1,8 +1,10 @@
 #include "mainwindow.h"
 #include "csgevaluator.h"
+#include "expression.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
 #include "scenecommands.h"
+#include "scenetreegraphicshelpers.h"
 #include "scenetreegraphicswidget.h"
 #include "viewportwidget.h"
 
@@ -421,14 +423,14 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics->setTreeNodeDeleteRequestedCallback([this](int nodeId) {
         onGraphicsTreeNodeDeleteRequested(nodeId);
     });
-    m_sceneTreeGraphics->setTransformValueAdjustedCallback([this](int groupId, int axis, qreal delta) {
-        onGraphicsTreeTransformValueAdjusted(groupId, axis, delta);
+    m_sceneTreeGraphics->setTransformValueAdjustedCallback([this](int groupId, int axis, int numberStart, int numberLength, qreal delta) {
+        onGraphicsTreeTransformValueAdjusted(groupId, axis, numberStart, numberLength, delta);
     });
     m_sceneTreeGraphics->setTransformControlHoveredCallback([this](int groupId, SceneDocument::TreeNode::Operation operation, int axis) {
         onGraphicsTreeTransformControlHovered(groupId, operation, axis);
     });
-    m_sceneTreeGraphics->setShapeParameterAdjustedCallback([this](int shapeId, int parameter, qreal delta) {
-        onGraphicsTreeShapeParameterAdjusted(shapeId, parameter, delta);
+    m_sceneTreeGraphics->setShapeParameterAdjustedCallback([this](int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta) {
+        onGraphicsTreeShapeParameterAdjusted(nodeId, paramIndex, numberStart, numberLength, delta);
     });
     m_sceneTreeGraphics->setShapeParameterHoveredCallback([this](int shapeId, int parameter) {
         onGraphicsTreeShapeParameterHovered(shapeId, parameter);
@@ -1149,7 +1151,7 @@ void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
     m_undoStack->push(command);
 }
 
-void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qreal delta)
+void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta)
 {
     if (axis < 0 || axis > 2 || qFuzzyIsNull(delta))
         return;
@@ -1158,41 +1160,86 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, qre
     if (!group || group->type != SceneDocument::TreeNode::Group)
         return;
 
+    // Get effective expression for this axis
+    const QString currentExpr = SceneTreeGraphics::transformAxisExpression(*group, axis);
+
+    QStringList newExpressions = group->transformExpressions;
+    while (newExpressions.size() < 3)
+        newExpressions.append(QString());
+
     QVector3D position = group->position;
     QVector3D rotation = group->rotation;
     QVector3D scale = group->scale;
-    QVector3D *targetVector = nullptr;
-    if (group->operation == SceneDocument::TreeNode::Translate)
-        targetVector = &position;
-    else if (group->operation == SceneDocument::TreeNode::Rotate)
-        targetVector = &rotation;
-    else if (group->operation == SceneDocument::TreeNode::Scale)
-        targetVector = &scale;
-    else
-        return;
 
-    if (axis == 0)
-        targetVector->setX(group->operation == SceneDocument::TreeNode::Scale
-                               ? qMax<qreal>(0.01, targetVector->x() + delta)
-                               : targetVector->x() + delta);
-    else if (axis == 1)
-        targetVector->setY(group->operation == SceneDocument::TreeNode::Scale
-                               ? qMax<qreal>(0.01, targetVector->y() + delta)
-                               : targetVector->y() + delta);
-    else
-        targetVector->setZ(group->operation == SceneDocument::TreeNode::Scale
-                               ? qMax<qreal>(0.01, targetVector->z() + delta)
-                               : targetVector->z() + delta);
+    if (numberStart >= 0 && numberLength > 0 && numberStart + numberLength <= currentExpr.size()) {
+        // Expression-aware adjustment: replace number token in expression
+        const QString numberText = currentExpr.mid(numberStart, numberLength);
+        bool ok = false;
+        const qreal value = numberText.toDouble(&ok);
+        if (!ok)
+            return;
 
-    auto *command = new UpdateGroupTransformCommand(&m_scene, groupId, position, rotation, scale, [this]() {
-        refreshSceneViews();
-    });
+        const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+        const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+        const qreal step = precision > 0 ? 0.1 : 1.0;
+        const bool isScale = group->operation == SceneDocument::TreeNode::Scale;
+        const qreal minVal = isScale ? 0.01 : -1e9;
+        const qreal newValue = qMax(minVal, value + delta * step);
+        const QString replacement = QString::number(newValue, 'f', precision > 0 ? precision : (isScale ? 1 : 0));
+        const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
+        newExpressions[axis] = newExpr;
 
-    if (!command->isValid()) {
-        delete command;
-        return;
+        // Evaluate new expression to get numeric value
+        QHash<QString, qreal> varValues;
+        for (const SceneDocument::TreeNode &child : m_scene.treeRoot().children) {
+            if (child.type == SceneDocument::TreeNode::Variable)
+                varValues[child.variableName] = child.variableValue;
+        }
+        qreal newNumeric = newValue;
+        ExpressionSyntax::evaluate(newExpr, varValues, &newNumeric);
+        newNumeric = qMax(minVal, newNumeric);
+
+        if (axis == 0) {
+            if (group->operation == SceneDocument::TreeNode::Translate) position.setX(static_cast<float>(newNumeric));
+            else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setX(static_cast<float>(newNumeric));
+            else scale.setX(static_cast<float>(newNumeric));
+        } else if (axis == 1) {
+            if (group->operation == SceneDocument::TreeNode::Translate) position.setY(static_cast<float>(newNumeric));
+            else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setY(static_cast<float>(newNumeric));
+            else scale.setY(static_cast<float>(newNumeric));
+        } else {
+            if (group->operation == SceneDocument::TreeNode::Translate) position.setZ(static_cast<float>(newNumeric));
+            else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setZ(static_cast<float>(newNumeric));
+            else scale.setZ(static_cast<float>(newNumeric));
+        }
+    } else {
+        // Plain numeric adjustment (no expression or no number found)
+        const bool isScale = group->operation == SceneDocument::TreeNode::Scale;
+        const qreal step = group->operation == SceneDocument::TreeNode::Rotate ? 5.0
+                         : isScale ? 0.1 : 1.0;
+        QVector3D *targetVector = group->operation == SceneDocument::TreeNode::Translate ? &position
+                                : group->operation == SceneDocument::TreeNode::Rotate    ? &rotation
+                                                                                         : &scale;
+        auto adjustAxis = [&](float current) -> float {
+            return static_cast<float>(isScale ? qMax(0.01, static_cast<qreal>(current) + delta * step)
+                                              : static_cast<qreal>(current) + delta * step);
+        };
+        if (axis == 0)      targetVector->setX(adjustAxis(targetVector->x()));
+        else if (axis == 1) targetVector->setY(adjustAxis(targetVector->y()));
+        else                targetVector->setZ(adjustAxis(targetVector->z()));
+        // Clear expression for this axis so numeric value takes over
+        newExpressions[axis].clear();
     }
 
+    const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+    if (!m_scene.updateGroupTransform(groupId, position, rotation, scale, newExpressions))
+        return;
+    const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+    m_scene.restoreSnapshot(oldSnapshot);
+
+    auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot, [this]() {
+        refreshSceneViews();
+    });
     m_undoStack->push(command);
 }
 
@@ -1202,38 +1249,69 @@ void MainWindow::onGraphicsTreeTransformControlHovered(int groupId, SceneDocumen
         m_viewport->setTreeTransformControlPreview(groupId, operation, axis);
 }
 
-void MainWindow::onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter, qreal delta)
+void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta)
 {
-    if (parameter < 0 || qFuzzyIsNull(delta))
+    if (nodeId <= 0 || paramIndex < 0 || numberStart < 0 || numberLength <= 0 || qFuzzyIsNull(delta))
         return;
 
-    const ShapeNode *shape = m_scene.shapeById(shapeId);
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Primitive)
+        return;
+
+    const ShapeNode *shape = m_scene.shapeById(node->shapeId);
     if (!shape)
         return;
 
+    const QVector<SceneTreeGraphics::ShapeParameterControl> controls =
+        SceneTreeGraphics::shapeParameterControls(*shape);
+    if (paramIndex >= controls.size())
+        return;
+
+    const QString &currentExpr = controls[paramIndex].expression;
+    if (numberStart + numberLength > currentExpr.size())
+        return;
+
+    const QString numberText = currentExpr.mid(numberStart, numberLength);
+    bool ok = false;
+    const qreal value = numberText.toDouble(&ok);
+    if (!ok)
+        return;
+
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal step = precision > 0 ? 0.1 : 1.0;
+    const qreal newValue = qMax(0.1, value + delta * step);
+    const QString replacement = QString::number(newValue, 'f', precision);
+
+    const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
+
+    // Build variable context for re-evaluation.
+    QHash<QString, qreal> varValues;
+    for (const SceneDocument::TreeNode &child : m_scene.treeRoot().children) {
+        if (child.type == SceneDocument::TreeNode::Variable)
+            varValues[child.variableName] = child.variableValue;
+    }
+
+    qreal newNumericValue = newValue;
+    ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
+    newNumericValue = qMax(0.1, newNumericValue);
+
     ShapeNode updatedShape = *shape;
+    while (updatedShape.parameterExpressions.size() < controls.size())
+        updatedShape.parameterExpressions.append(QString());
+    updatedShape.parameterExpressions[paramIndex] = newExpr;
+
     if (updatedShape.type == ShapeNode::Cube) {
         QVector3D size = updatedShape.size;
-        if (parameter == 0)
-            size.setX(qMax<qreal>(0.1, size.x() + delta));
-        else if (parameter == 1)
-            size.setY(qMax<qreal>(0.1, size.y() + delta));
-        else if (parameter == 2)
-            size.setZ(qMax<qreal>(0.1, size.z() + delta));
-        else
-            return;
+        if (paramIndex == 0)      size.setX(newNumericValue);
+        else if (paramIndex == 1) size.setY(newNumericValue);
+        else if (paramIndex == 2) size.setZ(newNumericValue);
         updatedShape.size = size;
     } else if (updatedShape.type == ShapeNode::Sphere) {
-        if (parameter != 0)
-            return;
-        updatedShape.radius = qMax<qreal>(0.1, updatedShape.radius + delta);
+        if (paramIndex == 0) updatedShape.radius = newNumericValue;
     } else if (updatedShape.type == ShapeNode::Cylinder) {
-        if (parameter == 0)
-            updatedShape.radius = qMax<qreal>(0.1, updatedShape.radius + delta);
-        else if (parameter == 1)
-            updatedShape.height = qMax<qreal>(0.1, updatedShape.height + delta);
-        else
-            return;
+        if (paramIndex == 0)      updatedShape.radius = newNumericValue;
+        else if (paramIndex == 1) updatedShape.height = newNumericValue;
     }
 
     auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape, [this]() {
@@ -1276,9 +1354,8 @@ void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int
     const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
     const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
     const qreal step = precision > 0 ? 0.1 : 1.0;
-    QString replacement = QString::number(value + delta * step, 'f', precision);
-    if (precision == 0 && replacement == QStringLiteral("-0"))
-        replacement = QStringLiteral("0");
+    const qreal newValue = qMax(0.0, value + delta * step);
+    QString replacement = QString::number(newValue, 'f', precision);
 
     expression.replace(start, length, replacement);
     auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression, [this]() {

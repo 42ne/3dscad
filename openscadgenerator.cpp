@@ -106,11 +106,16 @@ void OpenScadGenerator::appendTreeNode(QString *code,
             transformName = QStringLiteral("rotate");
             transformVector = node.rotation;
         }
+        auto txExpr = [&](int axis, float numericValue) -> QString {
+            if (axis < node.transformExpressions.size() && !node.transformExpressions[axis].isEmpty())
+                return node.transformExpressions[axis];
+            return QString::number(numericValue, 'g');
+        };
         *code += QString("%1%2([%3, %4, %5]) {\n")
                      .arg(indent, transformName)
-                     .arg(transformVector.x())
-                     .arg(transformVector.y())
-                     .arg(transformVector.z());
+                     .arg(txExpr(0, transformVector.x()),
+                          txExpr(1, transformVector.y()),
+                          txExpr(2, transformVector.z()));
 
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent + "    ", ranges);
@@ -143,21 +148,27 @@ void OpenScadGenerator::appendTreeGroup(QString *code,
 
 QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
 {
-    QString code;
+    auto paramExpr = [&](int idx, qreal numericValue) -> QString {
+        if (idx < shape.parameterExpressions.size() && !shape.parameterExpressions[idx].isEmpty())
+            return shape.parameterExpressions[idx];
+        return QString::number(numericValue, 'g');
+    };
 
     if (shape.type == ShapeNode::Cube) {
-        code += QString("cube([%1, %2, %3], center=true);\n")
-                    .arg(shape.size.x())
-                    .arg(shape.size.y())
-                    .arg(shape.size.z());
-    } else if (shape.type == ShapeNode::Sphere) {
-        code += QString("sphere(r=%1);\n")
-                    .arg(shape.radius);
-    } else if (shape.type == ShapeNode::Cylinder) {
-        code += QString("cylinder(h=%1, r=%2, center=true);\n")
-                    .arg(shape.height)
-                    .arg(shape.radius);
+        return QString("cube([%1, %2, %3], center=true);\n")
+            .arg(paramExpr(0, shape.size.x()))
+            .arg(paramExpr(1, shape.size.y()))
+            .arg(paramExpr(2, shape.size.z()));
     }
-
-    return code;
+    if (shape.type == ShapeNode::Sphere) {
+        return QString("sphere(r=%1);\n")
+            .arg(paramExpr(0, shape.radius));
+    }
+    if (shape.type == ShapeNode::Cylinder) {
+        // parameterExpressions: index 0 = R (radius), index 1 = H (height)
+        return QString("cylinder(h=%1, r=%2, center=true);\n")
+            .arg(paramExpr(1, shape.height))
+            .arg(paramExpr(0, shape.radius));
+    }
+    return QString();
 }

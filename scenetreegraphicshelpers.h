@@ -33,14 +33,19 @@ constexpr qreal TreeX = 12.0;
 constexpr qreal TreeY = 92.0;
 constexpr qreal PrimitiveWidth = 132.0;
 constexpr qreal PrimitiveHeight = 42.0;
+constexpr qreal PrimitiveCardWidth = 60.0;  // icon+badge area inside the card border
+constexpr qreal PrimitiveParamLabelArea = 24.0; // "X =" prefix before the expression
+constexpr qreal VariableHeight = 26.0;
 constexpr qreal PrimitiveIconSize = 34.0;
 constexpr qreal GroupMinWidth = 128.0;
 constexpr qreal GroupModuleMinWidth = 136.0;
 constexpr qreal GroupWideMinWidth = 164.0;
 constexpr qreal GroupHeaderHeight = 28.0;
-constexpr qreal TransformHeaderWidth = 78.0;
+constexpr qreal TransformHeaderWidth = 112.0;
+constexpr qreal TransformIconWidth = 40.0;
+constexpr qreal TransformParamLabelArea = 22.0;
 constexpr qreal GroupPadding = 12.0;
-constexpr qreal ChildGap = 10.0;
+constexpr qreal ChildGap = 5.0;
 constexpr qreal CornerRadius = 5.0;
 constexpr qreal DifferenceMinContentHeight = PrimitiveHeight * 2.0 + ChildGap;
 constexpr qreal DragPreviewStartDistance = 6.0;
@@ -80,6 +85,7 @@ struct OperationVisual {
 struct ShapeParameterControl {
     QString label;
     qreal value = 0.0;
+    QString expression; // number string or full expression (e.g. "20" or "width*2+5")
 };
 
 struct ExpressionNumberControl {
@@ -97,11 +103,17 @@ struct ExpressionTextSpan {
     bool number = false;
 };
 
+QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis);
+QRectF transformParameterControlRect(const QRectF &groupRect, int axis);
+QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &groupRect, int axis, const QString &expression, const QFontMetricsF &metrics);
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
-QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics);
-QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics);
-QRectF variableExpressionTextRect(const QRectF &variableRect);
+QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);
+QSizeF primitivePreviewSize(const ShapeNode &shape);
+QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics);
+QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth);
+QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth);
+QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidth);
 const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation);
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);

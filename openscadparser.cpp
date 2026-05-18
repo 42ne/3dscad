@@ -18,9 +18,7 @@ struct ParserState
     int index = 0;
     int nextShapeId = 1;
     int nextTreeNodeId = 1;
-    int cubeCount = 0;
-    int sphereCount = 0;
-    int cylinderCount = 0;
+    QHash<QString, qreal> variableValues;
     QVector<ShapeNode> shapes;
 };
 
@@ -65,6 +63,56 @@ static bool parseVector3Value(const QString &text, QVector3D *vector)
     return true;
 }
 
+// Splits "a+1, b, max(c,d)" on commas at parenthesis depth 0.
+static QStringList splitVector3Components(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar c = text[i];
+        if (c == '(' || c == '[') ++depth;
+        else if (c == ')' || c == ']') --depth;
+        else if (c == ',' && depth == 0) {
+            result.append(text.mid(start, i - start));
+            start = i + 1;
+        }
+    }
+    result.append(text.mid(start));
+    return result;
+}
+
+static bool parseVector3WithExpressions(const QString &text, const QHash<QString, qreal> &varValues, QVector3D *vector, QStringList *expressions = nullptr)
+{
+    if (!vector)
+        return false;
+    const QStringList parts = splitVector3Components(text);
+    if (parts.size() != 3)
+        return false;
+
+    qreal vals[3] = {0.0, 0.0, 0.0};
+    QStringList exprs;
+    exprs.reserve(3);
+    for (int i = 0; i < 3; ++i) {
+        const QString trimmed = parts[i].trimmed();
+        qreal floatVal = 0.0;
+        if (parseReal(trimmed, &floatVal)) {
+            vals[i] = floatVal;
+            exprs.append(trimmed);
+        } else {
+            qreal exprVal = 0.0;
+            if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal))
+                return false;
+            vals[i] = exprVal;
+            exprs.append(trimmed);
+        }
+    }
+    *vector = QVector3D(static_cast<float>(vals[0]), static_cast<float>(vals[1]), static_cast<float>(vals[2]));
+    if (expressions)
+        *expressions = exprs;
+    return true;
+}
+
 static SceneDocument::TreeNode makeGroupNode(SceneDocument::TreeNode::Operation operation, ParserState *state)
 {
     SceneDocument::TreeNode node;
@@ -106,7 +154,7 @@ static bool isSceneModelCallLine(const QString &line)
     return regex.match(line).hasMatch();
 }
 
-static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Operation *operation, QVector3D *vector)
+static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Operation *operation, QVector3D *vector, const QHash<QString, qreal> &varValues, QStringList *expressions = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
@@ -131,19 +179,19 @@ static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Ope
     QRegularExpressionMatch match = translateRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Translate;
-        return parseVector3Value(match.captured(1), vector);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
     }
 
     match = rotateRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Rotate;
-        return parseVector3Value(match.captured(1), vector);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
     }
 
     match = scaleRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Scale;
-        return parseVector3Value(match.captured(1), vector);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
     }
 
     return false;
@@ -176,6 +224,28 @@ static bool parseVariableLine(const QString &line, QString *name, QString *expre
     return true;
 }
 
+static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    qreal floatVal = 0.0;
+    if (parseReal(trimmed, &floatVal)) {
+        *value = floatVal;
+        *expression = trimmed;
+        return true;
+    }
+
+    qreal exprVal = 0.0;
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal))
+        return false;
+
+    *value = exprVal;
+    *expression = trimmed;
+    return true;
+}
+
 static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserState *state)
 {
     static const QRegularExpression cubeRegex("^cube\\s*\\(\\s*\\[([^\\]]+)\\]\\s*,\\s*center\\s*=\\s*true\\s*\\)\\s*;\\s*$");
@@ -186,25 +256,57 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     if (match.hasMatch()) {
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Cube;
-        shape->name = QStringLiteral("Cube %1").arg(++state->cubeCount);
-        return parseVector3Value(match.captured(1), &shape->size);
+        shape->name = QStringLiteral("Cube %1").arg(shape->id);
+
+        const QStringList parts = match.captured(1).split(',');
+        if (parts.size() != 3)
+            return false;
+
+        qreal x = 0.0, y = 0.0, z = 0.0;
+        QString xe, ye, ze;
+        if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
+            || !parseParamExpression(parts[1], state->variableValues, &y, &ye)
+            || !parseParamExpression(parts[2], state->variableValues, &z, &ze))
+            return false;
+
+        shape->size = QVector3D(x, y, z);
+        shape->parameterExpressions = QStringList{xe, ye, ze};
+        return true;
     }
 
     match = sphereRegex.match(line);
     if (match.hasMatch()) {
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Sphere;
-        shape->name = QStringLiteral("Sphere %1").arg(++state->sphereCount);
-        return parseFloat(match.captured(1), &shape->radius);
+        shape->name = QStringLiteral("Sphere %1").arg(shape->id);
+
+        qreal r = 0.0;
+        QString re;
+        if (!parseParamExpression(match.captured(1), state->variableValues, &r, &re))
+            return false;
+
+        shape->radius = r;
+        shape->parameterExpressions = QStringList{re};
+        return true;
     }
 
     match = cylinderRegex.match(line);
     if (match.hasMatch()) {
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Cylinder;
-        shape->name = QStringLiteral("Cylinder %1").arg(++state->cylinderCount);
-        return parseFloat(match.captured(1), &shape->height)
-               && parseFloat(match.captured(2), &shape->radius);
+        shape->name = QStringLiteral("Cylinder %1").arg(shape->id);
+
+        qreal h = 0.0, r = 0.0;
+        QString he, re;
+        if (!parseParamExpression(match.captured(1), state->variableValues, &h, &he)
+            || !parseParamExpression(match.captured(2), state->variableValues, &r, &re))
+            return false;
+
+        shape->height = h;
+        shape->radius = r;
+        // shapeParameterControls order: R=index 0, H=index 1
+        shape->parameterExpressions = QStringList{re, he};
+        return true;
     }
 
     return false;
@@ -267,6 +369,12 @@ static bool parseBlock(ParserState *state,
                 return false;
             }
 
+            // Evaluate using current variable context so downstream shapes can reference this variable.
+            qreal evaluatedValue = 0.0;
+            if (ExpressionSyntax::evaluate(variableExpression, state->variableValues, &evaluatedValue))
+                variableValue = evaluatedValue;
+            state->variableValues[variableName] = variableValue;
+
             parent->children.append(makeVariableNode(variableName, variableExpression, variableValue, state));
             continue;
         } else if (!variableError.isEmpty()) {
@@ -277,7 +385,8 @@ static bool parseBlock(ParserState *state,
 
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         QVector3D transformVector;
-        if (parseOperationLine(line, &operation, &transformVector)) {
+        QStringList transformExpressions;
+        if (parseOperationLine(line, &operation, &transformVector, state->variableValues, &transformExpressions)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -285,6 +394,10 @@ static bool parseBlock(ParserState *state,
                 group.rotation = transformVector;
             else if (operation == SceneDocument::TreeNode::Scale)
                 group.scale = transformVector;
+            if (operation == SceneDocument::TreeNode::Translate
+                || operation == SceneDocument::TreeNode::Rotate
+                || operation == SceneDocument::TreeNode::Scale)
+                group.transformExpressions = transformExpressions;
 
             parent->children.append(group);
             SceneDocument::TreeNode &child = parent->children.last();

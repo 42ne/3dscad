@@ -80,14 +80,16 @@ public:
                       const ShapeNode *shape,
                       const QString &number,
                       bool selected,
-                      int activeParameter,
+                      int activeParamIndex,
+                      int activeNumberStart,
                       qreal opacity,
                       qreal zValue)
         : m_rect(rect)
         , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
         , m_selected(selected)
-        , m_activeParameter(activeParameter)
+        , m_activeParamIndex(activeParamIndex)
+        , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
     {
         setZValue(zValue);
@@ -99,6 +101,12 @@ public:
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
+
+        // Card border — covers only the icon area (left PrimitiveCardWidth pixels).
+        const QRectF cardRect(m_rect.left(), m_rect.top(), PrimitiveCardWidth, m_rect.height());
+        paintRoundedPanel(painter, cardRect, CornerRadius,
+                          QPen(QColor(86, 117, 150), 1),
+                          QBrush(QColor(219, 231, 246)));
 
         const QRectF iconRect(m_rect.left() + 10.0,
                               m_rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
@@ -114,24 +122,49 @@ public:
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
 
+        // Parameters outside the card border.
+        const QFontMetricsF metrics(painter->font());
         const QVector<ShapeParameterControl> controls = shapeParameterControls(m_shape);
         for (int i = 0; i < controls.size(); ++i) {
             const ShapeParameterControl &control = controls[i];
-            const QRectF controlRect = shapeParameterControlRect(m_rect, i, controls.size());
-            const bool active = i == m_activeParameter;
-            paintRoundedPanel(painter,
-                              controlRect,
-                              3.0,
-                              QPen(active ? QColor(220, 156, 26) : QColor(86, 117, 150), active ? 2 : 1),
-                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(244, 248, 252, 190)));
+            const QRectF rowRect = shapeParameterControlRect(m_rect, i, controls.size());
+
+            // Label "X =" in muted color.
             painter->setPen(QColor(58, 89, 125));
-            painter->drawText(QRectF(controlRect.left() + 4.0, controlRect.top(), 14.0, controlRect.height()),
-                              Qt::AlignLeft | Qt::AlignVCenter,
-                              control.label);
+            painter->drawText(QRectF(rowRect.left(), rowRect.top(), 10.0, rowRect.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter, control.label);
+            painter->setPen(QColor(104, 122, 148));
+            painter->drawText(QRectF(rowRect.left() + 12.0, rowRect.top(), 10.0, rowRect.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("="));
+
+            // Expression spans with number highlights.
+            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea,
+                                  rowRect.top(),
+                                  rowRect.right() - rowRect.left() - PrimitiveParamLabelArea,
+                                  rowRect.height());
+            const QVector<ExpressionTextSpan> spans = expressionSpansInTextRect(textRect, control.expression, metrics);
+
+            for (const ExpressionTextSpan &span : spans) {
+                if (!span.number)
+                    continue;
+                const bool active = (i == m_activeParamIndex) && (span.start == m_activeNumberStart);
+                paintRoundedPanel(painter,
+                                  span.rect,
+                                  3.0,
+                                  QPen(active ? QColor(220, 156, 26) : QColor(86, 117, 150), active ? 2 : 1),
+                                  QBrush(active ? QColor(255, 220, 108, 205) : QColor(244, 248, 252, 190)));
+            }
+
             painter->setPen(QColor(24, 34, 44));
-            painter->drawText(QRectF(controlRect.left() + 20.0, controlRect.top(), controlRect.width() - 24.0, controlRect.height()),
-                              Qt::AlignRight | Qt::AlignVCenter,
-                              QString::number(control.value, 'f', 0));
+            for (const ExpressionTextSpan &span : spans)
+                painter->drawText(span.rect, Qt::AlignCenter, span.text);
+
+            // Non-number text (variable names, operators).
+            painter->setPen(QColor(58, 89, 125));
+            for (const ExpressionTextSpan &span : spans) {
+                if (!span.number)
+                    painter->drawText(span.rect, Qt::AlignCenter, span.text);
+            }
         }
     }
 
@@ -140,7 +173,8 @@ private:
     ShapeNode m_shape;
     QString m_number;
     bool m_selected = false;
-    int m_activeParameter = -1;
+    int m_activeParamIndex = -1;
+    int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
 };
 
@@ -173,33 +207,39 @@ public:
 
         const QColor accent(150, 116, 42);
 
-        const QRectF badgeRect(m_rect.left() + 9.0,
-                               m_rect.top() + (PrimitiveHeight - 26.0) * 0.5,
-                               38.0,
-                               26.0);
-        paintRoundedPanel(painter, badgeRect, 4.0, QPen(accent, 1.1), QBrush(QColor(255, 255, 255, 150)));
-        QFont badgeFont = painter->font();
-        badgeFont.setBold(true);
-        badgeFont.setPointSizeF(qMax<qreal>(7.0, badgeFont.pointSizeF() - 1.0));
-        painter->setFont(badgeFont);
-        painter->setPen(accent.darker(130));
-        painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
+        // VAR badge — small horizontal pill, vertically centered in VariableHeight
+        const qreal badgeH = 13.0;
+        const QRectF badgeRect(m_rect.left() + 6.0,
+                               m_rect.top() + (VariableHeight - badgeH) * 0.5,
+                               28.0,
+                               badgeH);
+        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(QColor(255, 255, 255, 150)));
+        {
+            painter->save();
+            QFont badgeFont = painter->font();
+            badgeFont.setBold(true);
+            badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
+            painter->setFont(badgeFont);
+            painter->setPen(accent.darker(130));
+            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
+            painter->restore(); // font restored to scene default before badge
+        }
 
-        QFont textFont = painter->font();
-        textFont.setBold(false);
-        painter->setFont(textFont);
+        // Name, = and expression — all with the original painter font
+        const QFontMetricsF metrics(painter->font());
+        const qreal nameW = metrics.horizontalAdvance(m_name);
+
         painter->setPen(QColor(43, 37, 28));
-        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 5.0, m_rect.width() - 62.0, 18.0),
+        painter->drawText(QRectF(m_rect.left() + 38.0, m_rect.top(), nameW, VariableHeight),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           m_name);
 
         painter->setPen(QColor(104, 83, 48));
-        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 21.0, 16.0, 16.0),
+        painter->drawText(QRectF(m_rect.left() + 38.0 + nameW + 4.0, m_rect.top(), 12.0, VariableHeight),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
 
-        const QFontMetricsF metrics(painter->font());
-        const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics);
+        const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics, nameW);
         for (const ExpressionTextSpan &span : spans) {
             if (!span.number)
                 continue;
@@ -239,11 +279,15 @@ public:
                   bool showDifferenceLabels,
                   bool insertedPreview,
                   const QVector3D &transformValues = QVector3D(),
-                  int activeTransformAxis = -1)
+                  int activeTransformAxis = -1,
+                  int activeTransformNumberStart = -1,
+                  const QStringList &transformExpressions = QStringList())
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
+        , m_transformExpressions(transformExpressions)
         , m_activeTransformAxis(activeTransformAxis)
+        , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_operation(operation)
         , m_selected(selected)
         , m_empty(empty)
@@ -332,12 +376,13 @@ private:
 
     void paintVerticalHeader(QPainter *painter, const QColor &fill)
     {
-        const QRectF headerRect(m_rect.left() + 1.5,
-                                m_rect.top() + 1.5,
-                                TransformHeaderWidth - 2.0,
-                                m_rect.height() - 3.0);
+        // Narrow icon-only border (like PrimitiveCardWidth for shapes)
+        const QRectF iconBorderRect(m_rect.left() + 1.5,
+                                    m_rect.top() + 1.5,
+                                    TransformIconWidth - 2.0,
+                                    m_rect.height() - 3.0);
         const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
-        paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
+        paintRoundedPanel(painter, iconBorderRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
         const QRectF iconRect(m_rect.left() + 6.0, m_rect.top() + 7.0, PrimitiveIconSize - 6.0, PrimitiveIconSize - 6.0);
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125), 6.0);
@@ -351,43 +396,62 @@ private:
                                     ? QStringLiteral("R")
                                     : QStringLiteral("S"));
 
-        const QVector<QPair<QString, qreal>> rows = {
-            {QStringLiteral("X"), m_transformValues.x()},
-            {QStringLiteral("Y"), m_transformValues.y()},
-            {QStringLiteral("Z"), m_transformValues.z()}
-        };
+        // X/Y/Z rows outside icon border
+        const QFontMetricsF metrics(painter->font());
         QFont valueFont = painter->font();
         valueFont.setPointSizeF(qMax<qreal>(7.0, valueFont.pointSizeF() - 2.0));
-        painter->setFont(valueFont);
 
-        qreal rowTop = m_rect.top() + 8.0;
-        for (int rowIndex = 0; rowIndex < rows.size(); ++rowIndex) {
-            const auto &row = rows[rowIndex];
-            const QRectF rowRect(m_rect.left() + 38.0, rowTop, TransformHeaderWidth - 44.0, 11.0);
-            const bool active = rowIndex == m_activeTransformAxis;
-            paintRoundedPanel(painter,
-                              rowRect,
-                              4.0,
-                              QPen(active ? QColor(220, 156, 26) : fill.darker(125), active ? 2 : 1),
-                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+        static const QString axisLabels[3] = {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
+        for (int axis = 0; axis < 3; ++axis) {
+            const QRectF rowRect = transformParameterControlRect(m_rect, axis);
+            const bool rowActive = axis == m_activeTransformAxis;
 
-            painter->setPen(fill.darker(170));
-            painter->drawText(QRectF(rowRect.left() + 3.0, rowRect.top(), 9.0, rowRect.height()),
+            // Expression for this axis
+            QString expr;
+            if (axis < m_transformExpressions.size() && !m_transformExpressions[axis].isEmpty())
+                expr = m_transformExpressions[axis];
+            else {
+                const float val = axis == 0 ? m_transformValues.x()
+                                : axis == 1 ? m_transformValues.y()
+                                            : m_transformValues.z();
+                const int precision = m_operation == SceneDocument::TreeNode::Scale ? 1 : 0;
+                expr = QString::number(val, 'f', precision);
+            }
+
+            // Label "X =" in muted color
+            painter->setFont(valueFont);
+            painter->setPen(fill.darker(160));
+            painter->drawText(QRectF(rowRect.left(), rowRect.top(), TransformParamLabelArea - 2.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter,
-                              row.first);
-            painter->setPen(QColor(24, 34, 44));
-            const int precision = m_operation == SceneDocument::TreeNode::Scale ? 1 : 0;
-            painter->drawText(QRectF(rowRect.left() + 12.0, rowRect.top(), rowRect.width() - 15.0, rowRect.height()),
-                              Qt::AlignRight | Qt::AlignVCenter,
-                              QString::number(row.second, 'f', precision));
-            rowTop += 13.0;
+                              axisLabels[axis] + QStringLiteral(" ="));
+
+            // Expression text spans
+            const QRectF textRect(rowRect.left() + TransformParamLabelArea,
+                                  rowRect.top(),
+                                  rowRect.width() - TransformParamLabelArea,
+                                  rowRect.height());
+            const QVector<ExpressionTextSpan> spans = expressionSpansInTextRect(textRect, expr, metrics);
+            for (const ExpressionTextSpan &span : spans) {
+                const bool numActive = rowActive && span.number && span.start == m_activeTransformNumberStart;
+                if (span.number) {
+                    paintRoundedPanel(painter,
+                                      span.rect,
+                                      3.0,
+                                      QPen(numActive ? QColor(220, 156, 26) : fill.darker(125), numActive ? 2 : 1),
+                                      QBrush(numActive ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+                }
+                painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 110, 160));
+                painter->drawText(span.rect, Qt::AlignLeft | Qt::AlignVCenter, span.text);
+            }
         }
     }
 
     QRectF m_rect;
     qreal m_cutSeparatorY = 0.0;
     QVector3D m_transformValues;
+    QStringList m_transformExpressions;
     int m_activeTransformAxis = -1;
+    int m_activeTransformNumberStart = -1;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
     bool m_selected = false;
     bool m_empty = false;
@@ -404,16 +468,20 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
                                              NodeSelectedCallback onSelected,
                                              int activeTransformNodeId,
                                              int activeTransformAxis,
+                                             int activeTransformNumberStart,
                                              int activeShapeNodeId,
                                              int activeShapeParameter,
+                                             int activeShapeParamNumberStart,
                                              int activeVariableNodeId,
                                              int activeVariableNumberStart)
     : m_scene(scene)
     , m_selectedNodeId(selectedNodeId)
     , m_activeTransformNodeId(activeTransformNodeId)
     , m_activeTransformAxis(activeTransformAxis)
+    , m_activeTransformNumberStart(activeTransformNumberStart)
     , m_activeShapeNodeId(activeShapeNodeId)
     , m_activeShapeParameter(activeShapeParameter)
+    , m_activeShapeParamNumberStart(activeShapeParamNumberStart)
     , m_activeVariableNodeId(activeVariableNodeId)
     , m_activeVariableNumberStart(activeVariableNumberStart)
     , m_onSelected(std::move(onSelected))
@@ -425,8 +493,9 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
                                             const QString &label,
                                             const ShapeNode *shape)
 {
-    const int activeParameter = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
-    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParameter, 1.0, 5.0));
+    const int activeParamIndex = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
+    const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
@@ -448,7 +517,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                                       ? node.scale
                                                       : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
-    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis));
+    const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
+    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis, activeNumberStart, node.transformExpressions));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),
@@ -475,7 +545,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
-        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, 0.78, 58.0);
+        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, -1, 0.78, 58.0);
     }
 
     scene->addItem(item);

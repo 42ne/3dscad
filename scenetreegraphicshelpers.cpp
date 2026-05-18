@@ -211,29 +211,37 @@ void paintOperationIcon(QPainter *painter,
 
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
 {
+    auto expr = [&](int idx, qreal numericValue) -> QString {
+        if (idx < shape.parameterExpressions.size() && !shape.parameterExpressions[idx].isEmpty())
+            return shape.parameterExpressions[idx];
+        return QString::number(numericValue, 'g');
+    };
+
     if (shape.type == ShapeNode::Sphere)
-        return {{QStringLiteral("R"), shape.radius}};
+        return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)}};
 
     if (shape.type == ShapeNode::Cylinder)
-        return {{QStringLiteral("R"), shape.radius}, {QStringLiteral("H"), shape.height}};
+        return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)},
+                {QStringLiteral("H"), shape.height, expr(1, shape.height)}};
 
-    return {{QStringLiteral("X"), shape.size.x()},
-            {QStringLiteral("Y"), shape.size.y()},
-            {QStringLiteral("Z"), shape.size.z()}};
+    return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
+            {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())},
+            {QStringLiteral("Z"), shape.size.z(), expr(2, shape.size.z())}};
 }
 
-QRectF variableExpressionTextRect(const QRectF &variableRect)
+QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidth)
 {
-    return QRectF(variableRect.left() + 74.0,
-                  variableRect.top() + 21.0,
-                  variableRect.width() - 82.0,
+    // Single-row: badge(6+28+4=38) + nameW + gap(4) + eq(12) + gap(2) = 56+nameW
+    const qreal exprLeft = 56.0 + nameTextWidth;
+    return QRectF(variableRect.left() + exprLeft,
+                  variableRect.top() + (VariableHeight - 16.0) * 0.5,
+                  variableRect.width() - exprLeft - 6.0,
                   16.0);
 }
 
-QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics)
+QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics)
 {
     QVector<ExpressionTextSpan> spans;
-    const QRectF textRect = variableExpressionTextRect(variableRect);
     const qreal operatorGap = 3.0;
     qreal x = textRect.left();
 
@@ -314,11 +322,56 @@ QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, cons
     return spans;
 }
 
-QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics)
+QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth)
+{
+    return expressionSpansInTextRect(variableExpressionTextRect(variableRect, nameTextWidth), expression, metrics);
+}
+
+QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth)
 {
     QVector<ExpressionNumberControl> controls;
-    const QVector<ExpressionTextSpan> spans = expressionTextSpans(variableRect, expression, metrics);
+    const QVector<ExpressionTextSpan> spans = expressionTextSpans(variableRect, expression, metrics, nameTextWidth);
     for (const ExpressionTextSpan &span : spans) {
+        if (span.number)
+            controls.append({span.text, span.start, span.length, span.rect});
+    }
+    return controls;
+}
+
+QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis)
+{
+    if (axis >= 0 && axis < node.transformExpressions.size() && !node.transformExpressions[axis].isEmpty())
+        return node.transformExpressions[axis];
+    const QVector3D &v = node.operation == SceneDocument::TreeNode::Translate ? node.position
+                       : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
+                                                                              : node.scale;
+    const float val = axis == 0 ? v.x() : axis == 1 ? v.y() : v.z();
+    const int precision = node.operation == SceneDocument::TreeNode::Scale ? 1 : 0;
+    return QString::number(val, 'f', precision);
+}
+
+QRectF transformParameterControlRect(const QRectF &groupRect, int axis)
+{
+    if (axis < 0 || axis > 2)
+        return QRectF();
+    const qreal left = groupRect.left() + TransformIconWidth + 4.0;
+    const qreal width = TransformHeaderWidth - TransformIconWidth - 8.0;
+    const qreal rowHeight = 13.0;
+    const qreal rowTop = groupRect.top() + 8.0 + axis * 15.0;
+    return QRectF(left, rowTop, width, rowHeight);
+}
+
+QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &groupRect, int axis, const QString &expression, const QFontMetricsF &metrics)
+{
+    const QRectF rowRect = transformParameterControlRect(groupRect, axis);
+    if (!rowRect.isValid())
+        return {};
+    const QRectF textRect(rowRect.left() + TransformParamLabelArea,
+                          rowRect.top(),
+                          rowRect.width() - TransformParamLabelArea,
+                          rowRect.height());
+    QVector<ExpressionNumberControl> controls;
+    for (const ExpressionTextSpan &span : expressionSpansInTextRect(textRect, expression, metrics)) {
         if (span.number)
             controls.append({span.text, span.start, span.length, span.rect});
     }
@@ -330,14 +383,47 @@ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int cou
     if (index < 0 || count <= 0 || index >= count)
         return QRectF();
 
-    const qreal left = primitiveRect.left() + 72.0;
-    const qreal width = qMin<qreal>(54.0, qMax<qreal>(44.0, primitiveRect.right() - left - 6.0));
+    // Row is positioned outside the card border (right of PrimitiveCardWidth).
+    const qreal left = primitiveRect.left() + PrimitiveCardWidth + 4.0;
+    const qreal width = primitiveRect.right() - left - 4.0;
     const qreal gap = 2.0;
     const qreal availableHeight = PrimitiveHeight - 6.0;
     const qreal rowHeight = qMin<qreal>(16.0, (availableHeight - gap * (count - 1)) / count);
     const qreal totalHeight = rowHeight * count + gap * (count - 1);
     const qreal top = primitiveRect.top() + (PrimitiveHeight - totalHeight) * 0.5 + index * (rowHeight + gap);
     return QRectF(left, top, width, rowHeight);
+}
+
+QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics)
+{
+    const QRectF rowRect = shapeParameterControlRect(primitiveRect, paramIndex, paramCount);
+    if (!rowRect.isValid())
+        return {};
+
+    const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea,
+                          rowRect.top(),
+                          rowRect.right() - rowRect.left() - PrimitiveParamLabelArea,
+                          rowRect.height());
+
+    QVector<ExpressionNumberControl> controls;
+    for (const ExpressionTextSpan &span : expressionSpansInTextRect(textRect, expression, metrics)) {
+        if (span.number)
+            controls.append({span.text, span.start, span.length, span.rect});
+    }
+    return controls;
+}
+
+QSizeF primitivePreviewSize(const ShapeNode &shape)
+{
+    const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
+    qreal maxExprWidth = 0.0;
+    for (const auto &control : controls) {
+        const qreal w = control.expression.size() * 7.0 + 8.0;
+        maxExprWidth = qMax(maxExprWidth, w);
+    }
+    const qreal width = qMax<qreal>(PrimitiveWidth,
+                                    PrimitiveCardWidth + 4.0 + PrimitiveParamLabelArea + maxExprWidth + 4.0);
+    return QSizeF(width, PrimitiveHeight);
 }
 
 QString primitiveNumberText(const QString &label, int fallbackId)
@@ -414,8 +500,10 @@ QSizeF variablePreviewSize(const QString &name, const QString &expression)
             ++operatorCount;
     }
 
-    const qreal textWidth = qMax<qreal>(nameChars * 7.0, expressionChars * 7.0 + operatorCount * 6.0 + 20.0);
-    return QSizeF(qMax(PrimitiveWidth, 54.0 + textWidth + 16.0), PrimitiveHeight);
+    // Single-row: badge(38) + nameW + gap(4) + eq(12) + gap(2) + exprW + right_pad(6)
+    const qreal nameWidth = nameChars * 7.0;
+    const qreal exprWidth = expressionChars * 7.0 + operatorCount * 6.0 + 4.0;
+    return QSizeF(qMax(PrimitiveWidth, 62.0 + nameWidth + exprWidth), VariableHeight);
 }
 
 QSizeF groupPreviewSize()
@@ -637,7 +725,7 @@ QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
 {
     QPainterPath path;
     SceneDocument::TreeNode::Operation operation;
-    if (operationForToolName(tool, &operation)) {
+    if (operationForToolName(tool, &operation) || isVariableToolName(tool)) {
         path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
         return path;
     }

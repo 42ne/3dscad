@@ -1,6 +1,7 @@
 #include "scenedocument.h"
 #include "expression.h"
 
+#include <QHash>
 #include <QSet>
 
 namespace {
@@ -281,19 +282,132 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
         return false;
 
     const QString trimmed = expression.trimmed();
-    if (trimmed.isEmpty() || !ExpressionSyntax::validate(trimmed))
+    if (trimmed.isEmpty())
         return false;
 
-    if (node->variableExpression == trimmed)
+    // Build variable context excluding self to prevent trivial self-reference.
+    QHash<QString, qreal> varValues;
+    for (const TreeNode &child : m_tree.root().children) {
+        if (child.type == TreeNode::Variable && child.id != variableId)
+            varValues[child.variableName] = child.variableValue;
+    }
+
+    qreal value = 0.0;
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &value))
+        return false;
+
+    if (node->variableExpression == trimmed && node->variableValue == value)
         return false;
 
     node->variableExpression = trimmed;
+    node->variableValue = value;
 
-    bool ok = false;
-    const qreal numericValue = trimmed.toDouble(&ok);
-    node->variableValue = ok ? numericValue : 0.0;
+    reEvaluateDependentVariables(variableId);
+    reEvaluateDependentExpressions();
 
     return true;
+}
+
+void SceneDocument::reEvaluateDependentVariables(int changedId)
+{
+    // Collect variable ids in tree order so upstream definitions propagate forward.
+    QVector<int> varIds;
+    for (const TreeNode &child : m_tree.root().children) {
+        if (child.type == TreeNode::Variable)
+            varIds.append(child.id);
+    }
+
+    for (int varId : varIds) {
+        if (varId == changedId)
+            continue;
+
+        TreeNode *node = m_tree.nodeById(varId);
+        if (!node)
+            continue;
+
+        // Build context from the current (progressively updated) values, excluding self.
+        QHash<QString, qreal> varValues;
+        for (const TreeNode &child : m_tree.root().children) {
+            if (child.type == TreeNode::Variable && child.id != varId)
+                varValues[child.variableName] = child.variableValue;
+        }
+
+        qreal value = 0.0;
+        if (ExpressionSyntax::evaluate(node->variableExpression, varValues, &value))
+            node->variableValue = value;
+        // If evaluation fails (e.g. unresolved reference), keep the previous value.
+    }
+}
+
+void SceneDocument::reEvaluateDependentExpressions()
+{
+    QHash<QString, qreal> varValues;
+    for (const TreeNode &child : m_tree.root().children) {
+        if (child.type == TreeNode::Variable)
+            varValues[child.variableName] = child.variableValue;
+    }
+
+    for (ShapeNode &shape : m_shapes) {
+        if (shape.parameterExpressions.isEmpty())
+            continue;
+        for (int i = 0; i < shape.parameterExpressions.size(); ++i) {
+            const QString &expr = shape.parameterExpressions[i];
+            if (expr.isEmpty())
+                continue;
+            qreal val = 0.0;
+            if (!ExpressionSyntax::evaluate(expr, varValues, &val))
+                continue;
+            val = qMax(0.1, val);
+            if (shape.type == ShapeNode::Cube) {
+                if (i == 0)      shape.size.setX(static_cast<float>(val));
+                else if (i == 1) shape.size.setY(static_cast<float>(val));
+                else if (i == 2) shape.size.setZ(static_cast<float>(val));
+            } else if (shape.type == ShapeNode::Sphere) {
+                if (i == 0) shape.radius = val;
+            } else if (shape.type == ShapeNode::Cylinder) {
+                if (i == 0)      shape.radius = val;
+                else if (i == 1) shape.height = val;
+            }
+        }
+    }
+
+    TreeNode *root = m_tree.nodeById(m_tree.root().id);
+    if (root)
+        reEvaluateTransformExpressionsInNode(root, varValues);
+}
+
+void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues)
+{
+    if (!node)
+        return;
+    if (node->type == TreeNode::Group
+        && (node->operation == TreeNode::Translate
+            || node->operation == TreeNode::Rotate
+            || node->operation == TreeNode::Scale)) {
+        for (int i = 0; i < node->transformExpressions.size() && i < 3; ++i) {
+            const QString &expr = node->transformExpressions[i];
+            if (expr.isEmpty())
+                continue;
+            qreal val = 0.0;
+            if (!ExpressionSyntax::evaluate(expr, varValues, &val))
+                continue;
+            if (node->operation == TreeNode::Translate) {
+                if (i == 0)      node->position.setX(static_cast<float>(val));
+                else if (i == 1) node->position.setY(static_cast<float>(val));
+                else if (i == 2) node->position.setZ(static_cast<float>(val));
+            } else if (node->operation == TreeNode::Rotate) {
+                if (i == 0)      node->rotation.setX(static_cast<float>(val));
+                else if (i == 1) node->rotation.setY(static_cast<float>(val));
+                else if (i == 2) node->rotation.setZ(static_cast<float>(val));
+            } else {
+                if (i == 0)      node->scale.setX(static_cast<float>(val));
+                else if (i == 1) node->scale.setY(static_cast<float>(val));
+                else if (i == 2) node->scale.setZ(static_cast<float>(val));
+            }
+        }
+    }
+    for (TreeNode &child : node->children)
+        reEvaluateTransformExpressionsInNode(&child, varValues);
 }
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
@@ -307,9 +421,9 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
     return true;
 }
 
-bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale)
+bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions)
 {
-    return m_tree.updateGroupTransform(groupId, position, rotation, scale);
+    return m_tree.updateGroupTransform(groupId, position, rotation, scale, transformExpressions);
 }
 
 bool SceneDocument::isValidIndex(int index) const

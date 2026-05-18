@@ -4,6 +4,7 @@
 #include "shapenode.h"
 #include "scenetree.h"
 
+#include <QHash>
 #include <QString>
 #include <QVector>
 
@@ -58,7 +59,7 @@ public:
     bool removeVariableById(int variableId);
     bool updateVariableExpression(int variableId, const QString &expression);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
-    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
+    bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
 
 private:
     bool isValidIndex(int index) const;
@@ -68,6 +69,9 @@ private:
     void rebuildTreeFromShapes();
     TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
     QString uniqueVariableName() const;
+    void reEvaluateDependentVariables(int changedId);
+    void reEvaluateDependentExpressions();
+    void reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues);
 
 private:
     QVector<ShapeNode> m_shapes;

@@ -2,6 +2,7 @@
 #define SHAPENODE_H
 
 #include <QString>
+#include <QStringList>
 #include <QVector3D>
 
 struct ShapeNode
@@ -29,6 +30,10 @@ struct ShapeNode
 
     float radius = 10.0f;
     float height = 20.0f;
+
+    // One expression string per parameter, in shapeParameterControls() order.
+    // Empty list = plain numeric mode (use size/radius/height directly).
+    QStringList parameterExpressions;
 };
 
 inline bool operator==(const ShapeNode &left, const ShapeNode &right)
@@ -41,7 +46,8 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.rotation == right.rotation
            && left.size == right.size
            && left.radius == right.radius
-           && left.height == right.height;
+           && left.height == right.height
+           && left.parameterExpressions == right.parameterExpressions;
 }
 
 inline bool operator!=(const ShapeNode &left, const ShapeNode &right)
