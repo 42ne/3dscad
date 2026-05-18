@@ -1459,6 +1459,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 }
 
                 if (item.helper) {
+                    if (!drawSceneMeshes)
+                        continue;
+
                     if (item.booleanMode == ShapeNode::Subtract) {
                         const bool selectedCut = item.shapeIndex == m_selectedIndex;
                         QColor cutColor = selectedCut
@@ -1480,7 +1483,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                         quietColor.setAlpha(42);
                         appendWireframe(backgroundHelperLines, item.mesh, quietColor);
                     }
-                } else {
+                } else if (drawSceneMeshes) {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
                 }
             }
@@ -1494,11 +1497,6 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         if (drawSceneMeshes) {
             m_pickBufferSize = size();
             drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
-        } else {
-            QImage pickImage(size(), QImage::Format_ARGB32_Premultiplied);
-            QPainter pickPainter(&pickImage);
-            m_pickBufferSize = size();
-            drawTrianglesWithDepth(&pickPainter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
         }
 
         drawTransparentTriangles(&painter, translucentHelperTriangles);
