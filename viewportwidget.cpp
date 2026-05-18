@@ -1055,6 +1055,23 @@ void ViewportWidget::invalidateCsgPreview()
     m_csgPreviewDirty = true;
 }
 
+QString ViewportWidget::csgStatusText()
+{
+    if (!m_shapes)
+        return QStringLiteral("CSG preview: empty");
+
+    const CsgPreview &preview = m_scene
+                                    ? cachedCsgPreview(*m_scene,
+                                                       &m_cachedCsgPreview,
+                                                       &m_cachedCsgFingerprint,
+                                                       &m_csgPreviewDirty)
+                                    : cachedCsgPreview(*m_shapes,
+                                                       &m_cachedCsgPreview,
+                                                       &m_cachedCsgFingerprint,
+                                                       &m_csgPreviewDirty);
+    return preview.statusText;
+}
+
 void ViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();

@@ -42,6 +42,7 @@ public:
     QString renderBackendName() const;
     bool isOpenGLRenderBackendAvailable() const;
     void invalidateCsgPreview();
+    QString csgStatusText();
 
 signals:
     void shapeClicked(int index);

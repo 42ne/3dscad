@@ -1472,7 +1472,6 @@ void MainWindow::refreshSceneViews()
     m_viewport->setSelectedIndex(m_scene.selectedIndex());
     m_viewport->setSelectedGroupId(selectedDirectGroupId());
     refreshProperties();
-    refreshCsgStatus();
 }
 
 void MainWindow::selectShapeInSceneTree(int shapeId)
@@ -1793,8 +1792,12 @@ void MainWindow::refreshCsgStatus()
     if (!m_csgStatusLabel)
         return;
 
-    const CsgPreview preview = buildCsgPreview(m_scene);
-    m_csgStatusLabel->setText(preview.statusText);
+    if (m_viewport) {
+        m_csgStatusLabel->setText(m_viewport->csgStatusText());
+        return;
+    }
+
+    m_csgStatusLabel->setText(buildCsgPreview(m_scene).statusText);
 }
 
 QString MainWindow::previewScadPath() const
