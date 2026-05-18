@@ -144,6 +144,67 @@ private:
     qreal m_opacity = 1.0;
 };
 
+class VariableCardItem final : public QGraphicsItem
+{
+public:
+    VariableCardItem(const QRectF &rect, const QString &name, qreal value, bool selected, qreal opacity, qreal zValue)
+        : m_rect(rect)
+        , m_name(name)
+        , m_value(value)
+        , m_selected(selected)
+        , m_opacity(opacity)
+    {
+        setZValue(zValue);
+    }
+
+    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setOpacity(m_opacity);
+
+        const QColor fill(255, 248, 218);
+        const QColor accent(150, 116, 42);
+        paintRoundedPanel(painter,
+                          m_rect.adjusted(2.0, 4.0, -2.0, -4.0),
+                          5.0,
+                          QPen(m_selected ? QColor(255, 203, 87) : accent, m_selected ? 2.4 : 1.4),
+                          QBrush(fill));
+
+        const QRectF badgeRect(m_rect.left() + 9.0,
+                               m_rect.top() + (PrimitiveHeight - 26.0) * 0.5,
+                               38.0,
+                               26.0);
+        paintRoundedPanel(painter, badgeRect, 4.0, QPen(accent, 1.1), QBrush(QColor(255, 255, 255, 150)));
+        QFont badgeFont = painter->font();
+        badgeFont.setBold(true);
+        badgeFont.setPointSizeF(qMax<qreal>(7.0, badgeFont.pointSizeF() - 1.0));
+        painter->setFont(badgeFont);
+        painter->setPen(accent.darker(130));
+        painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
+
+        QFont textFont = painter->font();
+        textFont.setBold(false);
+        painter->setFont(textFont);
+        painter->setPen(QColor(43, 37, 28));
+        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 5.0, m_rect.width() - 62.0, 18.0),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          m_name);
+        painter->setPen(QColor(104, 83, 48));
+        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 21.0, m_rect.width() - 62.0, 16.0),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          QStringLiteral("= %1").arg(m_value));
+    }
+
+private:
+    QRectF m_rect;
+    QString m_name;
+    qreal m_value = 0.0;
+    bool m_selected = false;
+    qreal m_opacity = 1.0;
+};
+
 class GroupCardItem final : public QGraphicsItem
 {
 public:
@@ -343,6 +404,11 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
     m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParameter, 1.0, 5.0));
 }
 
+void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
+{
+    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableValue, node.id == m_selectedNodeId, 1.0, 5.0));
+}
+
 void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         const QRectF &rect,
                                         int depth,
@@ -376,7 +442,9 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
 {
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
-    if (operationForToolName(tool, &operation)) {
+    if (isVariableToolName(tool)) {
+        item = new VariableCardItem(rect, QStringLiteral("var"), 0.0, false, 0.78, 58.0);
+    } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true);
     } else {
         ShapeNode shape;

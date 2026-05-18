@@ -115,6 +115,40 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class AddVariableCommand : public QUndoCommand
+{
+public:
+    AddVariableCommand(SceneDocument *scene, int insertIndex, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class RemoveVariableCommand : public QUndoCommand
+{
+public:
+    RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 class MoveTreeNodeCommand : public QUndoCommand
 {
 public:

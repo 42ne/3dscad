@@ -68,13 +68,22 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
         return manifoldFromShape(*shape);
     }
 
-    if (node.children.isEmpty())
+    if (node.type == SceneDocument::TreeNode::Variable)
         return {};
 
-    Manifold result = evaluateNode(node.children.first(), scene);
+    QVector<const SceneDocument::TreeNode *> geometryChildren;
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (child.type != SceneDocument::TreeNode::Variable)
+            geometryChildren.append(&child);
+    }
 
-    for (int i = 1; i < node.children.size(); ++i) {
-        const Manifold child = evaluateNode(node.children[i], scene);
+    if (geometryChildren.isEmpty())
+        return {};
+
+    Manifold result = evaluateNode(*geometryChildren.first(), scene);
+
+    for (int i = 1; i < geometryChildren.size(); ++i) {
+        const Manifold child = evaluateNode(*geometryChildren[i], scene);
 
         if (node.operation == SceneDocument::TreeNode::Union
             || node.operation == SceneDocument::TreeNode::Module

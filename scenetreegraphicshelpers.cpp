@@ -318,6 +318,8 @@ QSizeF differencePreviewSize()
 
 QSizeF previewSizeForTool(const QString &tool)
 {
+    if (isVariableToolName(tool))
+        return defaultPreviewSize();
     if (tool == "cube" || tool == "sphere" || tool == "cylinder")
         return defaultPreviewSize();
     if (tool == "difference")
@@ -330,6 +332,12 @@ QSizeF previewSizeForTool(const QString &tool)
         return transformPreviewSize();
 
     return groupPreviewSize();
+}
+
+bool isVariableToolName(const QString &tool)
+{
+    const QString normalized = tool.toLower();
+    return normalized == QStringLiteral("var") || normalized == QStringLiteral("variable");
 }
 
 ShapeNode::Type primitiveTypeForTool(const QString &tool)
@@ -775,10 +783,20 @@ public:
 
         const QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        if (operationForToolName(m_label, &operation))
+        if (isVariableToolName(m_label)) {
+            painter->setPen(QPen(QColor(115, 92, 38), 1.4));
+            painter->setBrush(QColor(255, 248, 218));
+            painter->drawRoundedRect(glyphRect.adjusted(1.0, 5.0, -1.0, -5.0), 4.0, 4.0);
+            QFont font = painter->font();
+            font.setBold(true);
+            font.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 1.0));
+            painter->setFont(font);
+            painter->drawText(glyphRect, Qt::AlignCenter, QStringLiteral("VAR"));
+        } else if (operationForToolName(m_label, &operation)) {
             paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125));
-        else
+        } else {
             paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect);
+        }
     }
 
 protected:
@@ -817,6 +835,9 @@ private:
 
 QColor fillForTool(const QString &tool)
 {
+    if (isVariableToolName(tool))
+        return QColor(246, 236, 196);
+
     SceneDocument::TreeNode::Operation operation;
     if (operationForToolName(tool, &operation))
         return operationVisual(operation).fill;

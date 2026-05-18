@@ -267,6 +267,93 @@ void RemoveGroupCommand::redo()
         m_onChanged();
 }
 
+AddVariableCommand::AddVariableCommand(SceneDocument *scene, int insertIndex, std::function<void()> onChanged)
+    : QUndoCommand("Add variable")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    const int variableId = m_scene->addVariable(insertIndex);
+    m_valid = variableId > 0;
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool AddVariableCommand::isValid() const
+{
+    return m_valid;
+}
+
+void AddVariableCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void AddVariableCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+RemoveVariableCommand::RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged)
+    : QUndoCommand("Remove variable")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->removeVariableById(variableId);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool RemoveVariableCommand::isValid() const
+{
+    return m_valid;
+}
+
+void RemoveVariableCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void RemoveVariableCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
 MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged)
     : QUndoCommand("Move tree node")
     , m_scene(scene)

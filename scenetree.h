@@ -3,6 +3,7 @@
 
 #include <QVector>
 #include <QVector3D>
+#include <QString>
 
 /**
  * @brief Scene tree model for boolean operations
@@ -19,7 +20,8 @@ public:
     {
         enum Type {
             Primitive,
-            Group
+            Group,
+            Variable
         };
 
         enum Operation {
@@ -36,6 +38,8 @@ public:
         Type type = Group;
         Operation operation = Union;
         int shapeId = -1;
+        QString variableName;
+        qreal variableValue = 0.0;
         QVector3D position = QVector3D(0, 0, 0);
         QVector3D rotation = QVector3D(0, 0, 0);
         QVector3D scale = QVector3D(1, 1, 1);
@@ -53,6 +57,8 @@ public:
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
+    int addVariable(const QString &name, qreal value = 0.0, int insertIndex = -1);
+    bool removeVariableById(int variableId);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 
@@ -90,6 +96,7 @@ private:
 
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
+    TreeNode makeVariableNode(const QString &name, qreal value);
 
 private:
     TreeNode m_root;

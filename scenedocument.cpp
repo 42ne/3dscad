@@ -1,5 +1,25 @@
 #include "scenedocument.h"
 
+#include <QSet>
+
+namespace {
+
+void collectVariableNames(const SceneDocument::TreeNode &node, QSet<QString> *names)
+{
+    if (!names)
+        return;
+
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        names->insert(node.variableName);
+        return;
+    }
+
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectVariableNames(child, names);
+}
+
+} // namespace
+
 const QVector<ShapeNode> &SceneDocument::shapes() const
 {
     return m_shapes;
@@ -243,6 +263,16 @@ bool SceneDocument::removeGroupById(int groupId)
     return removed;
 }
 
+int SceneDocument::addVariable(int insertIndex)
+{
+    return m_tree.addVariable(uniqueVariableName(), 0.0, insertIndex);
+}
+
+bool SceneDocument::removeVariableById(int variableId)
+{
+    return m_tree.removeVariableById(variableId);
+}
+
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
 {
     const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex);
@@ -286,6 +316,9 @@ void SceneDocument::applyTreeBooleanModes(const TreeNode &node, ShapeNode::Boole
         return;
     }
 
+    if (node.type == TreeNode::Variable)
+        return;
+
     for (int i = 0; i < node.children.size(); ++i) {
         ShapeNode::BooleanMode childMode = inheritedMode;
         if (node.operation == TreeNode::Difference && i > 0)
@@ -312,4 +345,18 @@ SceneDocument::TreeNode::Operation SceneDocument::operationForBooleanMode(ShapeN
     if (booleanMode == ShapeNode::Intersect)
         return TreeNode::Intersection;
     return TreeNode::Union;
+}
+
+QString SceneDocument::uniqueVariableName() const
+{
+    QSet<QString> names;
+    collectVariableNames(m_tree.root(), &names);
+
+    int index = 1;
+    QString candidate;
+    do {
+        candidate = QStringLiteral("var%1").arg(index++);
+    } while (names.contains(candidate));
+
+    return candidate;
 }

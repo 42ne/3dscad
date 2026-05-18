@@ -37,6 +37,7 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
 
     const QRegularExpression translateRegex("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
     const QRegularExpression rotateRegex("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    const QRegularExpression variableRegex("^[A-Za-z_][A-Za-z0-9_]*\\s*=\\s*[-+]?[0-9]*\\.?[0-9]+\\s*;\\s*$");
     const QRegularExpression cubeRegex("^cube\\s*\\(\\s*\\[([^\\]]+)\\]\\s*,\\s*center\\s*=\\s*true\\s*\\)\\s*;\\s*$");
     const QRegularExpression sphereRegex("^sphere\\s*\\(\\s*r\\s*=\\s*([^\\)]+)\\)\\s*;\\s*$");
     const QRegularExpression cylinderRegex("^cylinder\\s*\\(\\s*h\\s*=\\s*([^,]+)\\s*,\\s*r\\s*=\\s*([^,\\)]+)\\s*,\\s*center\\s*=\\s*true\\s*\\)\\s*;\\s*$");
@@ -46,6 +47,9 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
         const QString line = lines[i].trimmed();
 
         if (line.isEmpty() || line.startsWith("//"))
+            continue;
+
+        if (variableRegex.match(line).hasMatch())
             continue;
 
         if (line == "difference() {") {

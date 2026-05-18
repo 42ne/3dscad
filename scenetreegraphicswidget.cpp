@@ -294,6 +294,15 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
 {
     if (node.type == SceneDocument::TreeNode::Primitive)
         return drawPrimitive(node, topLeft);
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        const QRectF rect(topLeft, QSizeF(PrimitiveWidth, PrimitiveHeight));
+        SceneTreeNodeRenderer(m_graphicsScene,
+                              m_selectedTreeNodeId,
+                              nullptr)
+            .renderVariable(node, rect);
+        addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
+        return rect;
+    }
 
     return drawGroup(node, topLeft, depth);
 }
@@ -379,6 +388,8 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
 
 QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNode &node) const
 {
+    if (node.type == SceneDocument::TreeNode::Variable)
+        return QStringLiteral("var");
     if (node.type != SceneDocument::TreeNode::Primitive)
         return labelForOperation(node.operation);
 
@@ -399,6 +410,12 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
     DropTarget target = m_treeLayout.dropTargetAt(scenePosition, effectivePreviewSize, movingNodeId);
     if (!target.zoneRect.isValid())
         target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
+
+    if (isVariableToolName(previewTool) && m_scene) {
+        const int rootId = m_scene->treeRoot().id;
+        if (target.parentGroupId > 0 && target.parentGroupId != rootId)
+            return DropTarget();
+    }
 
     return target;
 }

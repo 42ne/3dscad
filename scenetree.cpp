@@ -72,6 +72,35 @@ bool SceneTree::removeGroupById(int groupId)
     return removed;
 }
 
+int SceneTree::addVariable(const QString &name, qreal value, int insertIndex)
+{
+    if (m_root.id <= 0)
+        m_root = makeGroupNode(TreeNode::Module);
+
+    if (name.trimmed().isEmpty())
+        return 0;
+
+    TreeNode variable = makeVariableNode(name.trimmed(), value);
+    const int variableId = variable.id;
+    const int boundedIndex = insertIndex < 0
+                                 ? m_root.children.size()
+                                 : qBound(0, insertIndex, m_root.children.size());
+    m_root.children.insert(boundedIndex, variable);
+    return variableId;
+}
+
+bool SceneTree::removeVariableById(int variableId)
+{
+    if (variableId <= 0)
+        return false;
+
+    const TreeNode *node = nodeById(variableId);
+    if (!node || node->type != TreeNode::Variable)
+        return false;
+
+    return detachNodeById(&m_root, variableId);
+}
+
 bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
 {
     if (nodeId <= 0 || m_root.id == nodeId)
@@ -83,6 +112,8 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
 
     const TreeNode *node = nodeById(&m_root, nodeId);
     if (!node || containsNodeId(*node, parentGroupId))
+        return false;
+    if (node->type == TreeNode::Variable && targetParent != &m_root)
         return false;
 
     QVector3D sourceParentWorldPosition;
@@ -475,5 +506,15 @@ SceneTree::TreeNode SceneTree::makePrimitiveNode(int shapeId)
     node.id = m_nextNodeId++;
     node.type = TreeNode::Primitive;
     node.shapeId = shapeId;
+    return node;
+}
+
+SceneTree::TreeNode SceneTree::makeVariableNode(const QString &name, qreal value)
+{
+    TreeNode node;
+    node.id = m_nextNodeId++;
+    node.type = TreeNode::Variable;
+    node.variableName = name;
+    node.variableValue = value;
     return node;
 }

@@ -29,6 +29,9 @@ public:
                          const QString &label,
                          const ShapeNode *shape);
 
+    void renderVariable(const SceneDocument::TreeNode &node,
+                        const QRectF &rect);
+
     void renderGroup(const SceneDocument::TreeNode &node,
                      const QRectF &rect,
                      int depth,

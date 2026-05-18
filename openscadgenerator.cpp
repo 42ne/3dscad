@@ -75,6 +75,15 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        *code += QString("%1%2 = %3;\n")
+                     .arg(indent, node.variableName)
+                     .arg(node.variableValue);
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::Module) {
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent, ranges);

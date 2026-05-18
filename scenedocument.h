@@ -4,6 +4,7 @@
 #include "shapenode.h"
 #include "scenetree.h"
 
+#include <QString>
 #include <QVector>
 
 class SceneDocument
@@ -53,6 +54,8 @@ public:
     bool takeShapeById(int id, ShapeNode *removedShape, int *removedIndex);
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
+    int addVariable(int insertIndex = -1);
+    bool removeVariableById(int variableId);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 
@@ -63,6 +66,7 @@ private:
     void applyTreeBooleanModes(const TreeNode &node, ShapeNode::BooleanMode inheritedMode);
     void rebuildTreeFromShapes();
     TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
+    QString uniqueVariableName() const;
 
 private:
     QVector<ShapeNode> m_shapes;

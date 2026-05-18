@@ -620,6 +620,9 @@ static void appendTreeHelpers(CsgPreview *preview,
         return;
     }
 
+    if (node.type == SceneDocument::TreeNode::Variable)
+        return;
+
     groupStack.append(node);
     for (int i = 0; i < node.children.size(); ++i) {
         ShapeNode::BooleanMode childMode = inheritedMode;

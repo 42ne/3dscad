@@ -121,6 +121,11 @@ static bool operationForTool(const QString &toolName, SceneDocument::TreeNode::O
     return false;
 }
 
+static bool isVariableTool(const QString &toolName)
+{
+    return toolName == QStringLiteral("var") || toolName == QStringLiteral("variable");
+}
+
 class SceneTreeWidget : public QTreeWidget
 {
 public:
@@ -286,6 +291,16 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
         return item;
     }
 
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        auto *item = new QTreeWidgetItem(parent);
+        item->setText(0, QStringLiteral("%1 = %2").arg(node.variableName).arg(node.variableValue));
+        item->setData(0, ShapeIdRole, -1);
+        item->setData(0, TreeNodeIdRole, node.id);
+        item->setForeground(0, QColor(122, 92, 36));
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+        return item;
+    }
+
     auto *groupItem = new QTreeWidgetItem(parent);
     groupItem->setText(0, booleanGroupLabel(node.operation) + roleSuffix);
     markGroupItem(groupItem, node);
@@ -311,6 +326,9 @@ static bool findEffectiveBooleanMode(const SceneDocument::TreeNode &node,
 
         return false;
     }
+
+    if (node.type == SceneDocument::TreeNode::Variable)
+        return false;
 
     for (int i = 0; i < node.children.size(); ++i) {
         ShapeNode::BooleanMode childMode = inheritedMode;
@@ -602,6 +620,24 @@ void MainWindow::addIntersectionGroup()
 
 void MainWindow::deleteSelectedShape()
 {
+    if (m_shapeTree && m_shapeTree->currentItem()) {
+        const int nodeId = m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
+        const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+        if (node && node->type == SceneDocument::TreeNode::Variable) {
+            auto *command = new RemoveVariableCommand(&m_scene, nodeId, [this]() {
+                refreshSceneViews();
+            });
+
+            if (!command->isValid()) {
+                delete command;
+                return;
+            }
+
+            m_undoStack->push(command);
+            return;
+        }
+    }
+
     auto *command = new DeleteShapeCommand(&m_scene, m_scene.selectedShapeId(), [this]() {
         refreshSceneViews();
     });
@@ -985,6 +1021,24 @@ void MainWindow::onViewportGroupRotationDragFinished(int groupId)
 
 void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex)
 {
+    if (isVariableTool(toolName)) {
+        const int rootId = m_scene.treeRoot().id;
+        if (parentGroupId > 0 && parentGroupId != rootId)
+            return;
+
+        auto *command = new AddVariableCommand(&m_scene, insertIndex, [this]() {
+            refreshSceneViews();
+        });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
+        return;
+    }
+
     SceneDocument::TreeNode::Operation operation;
     if (operationForTool(toolName, &operation)) {
         if (operation == SceneDocument::TreeNode::Module && parentGroupId == 0)
@@ -1025,6 +1079,11 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
         selectShapeInSceneTree(node->shapeId);
         m_viewport->setSelectedIndex(m_scene.selectedIndex());
         m_viewport->setSelectedGroupId(0);
+    } else if (node->type == SceneDocument::TreeNode::Variable) {
+        m_scene.setSelectedShapeId(-1);
+        selectTreeNodeInSceneTree(node->id);
+        m_viewport->setSelectedIndex(-1);
+        m_viewport->setSelectedGroupId(0);
     } else {
         m_scene.setSelectedShapeId(-1);
         selectTreeNodeInSceneTree(node->id);
@@ -1046,6 +1105,20 @@ void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
 
     if (node->type == SceneDocument::TreeNode::Primitive) {
         auto *command = new DeleteShapeCommand(&m_scene, node->shapeId, [this]() {
+            refreshSceneViews();
+        });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
+        return;
+    }
+
+    if (node->type == SceneDocument::TreeNode::Variable) {
+        auto *command = new RemoveVariableCommand(&m_scene, node->id, [this]() {
             refreshSceneViews();
         });
 
@@ -1320,6 +1393,13 @@ void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
 
 void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex)
 {
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (node && node->type == SceneDocument::TreeNode::Variable
+        && parentGroupId > 0
+        && parentGroupId != m_scene.treeRoot().id) {
+        return;
+    }
+
     auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, insertIndex, [this]() {
         refreshSceneViews();
     });
@@ -1364,6 +1444,11 @@ void MainWindow::refreshProperties()
     const int selectedGroupId = selectedDirectGroupId();
     const SceneDocument::TreeNode *selectedGroup = selectedGroupId > 0 ? m_scene.treeNodeById(selectedGroupId) : nullptr;
     const bool hasGroupSelection = selectedGroup && selectedGroup->type == SceneDocument::TreeNode::Group;
+    const int selectedTreeNodeId = m_shapeTree && m_shapeTree->currentItem()
+                                      ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
+                                      : 0;
+    const SceneDocument::TreeNode *selectedTreeNode = selectedTreeNodeId > 0 ? m_scene.treeNodeById(selectedTreeNodeId) : nullptr;
+    const bool hasVariableSelection = selectedTreeNode && selectedTreeNode->type == SceneDocument::TreeNode::Variable;
     const bool hasPropertiesSelection = hasShapeSelection || hasGroupSelection;
     const bool translateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Translate;
     const bool rotateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Rotate;
@@ -1394,7 +1479,7 @@ void MainWindow::refreshProperties()
     for (QDoubleSpinBox *box : shapeBoxes)
         box->setEnabled(hasShapeSelection);
 
-    m_deleteShapeButton->setEnabled(hasShapeSelection);
+    m_deleteShapeButton->setEnabled(hasShapeSelection || hasVariableSelection);
     m_deleteGroupButton->setEnabled(selectedGroupId > 0 && selectedGroupId != m_scene.treeRoot().id);
     m_booleanMode->setEnabled(hasShapeSelection);
 

@@ -100,7 +100,7 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
         return;
 
     const QString tool = previewToolForNode(*node);
-    if (node->type == SceneDocument::TreeNode::Primitive) {
+    if (node->type == SceneDocument::TreeNode::Primitive || node->type == SceneDocument::TreeNode::Variable) {
         SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect);
         return;
     }
@@ -152,6 +152,8 @@ void SceneTreePreviewRenderer::addPreviewChildren(const QVector<ChildLayout> &ch
 
 QString SceneTreePreviewRenderer::previewToolForNode(const SceneDocument::TreeNode &node) const
 {
+    if (node.type == SceneDocument::TreeNode::Variable)
+        return QStringLiteral("var");
     if (node.type != SceneDocument::TreeNode::Primitive)
         return labelForOperation(node.operation);
 
