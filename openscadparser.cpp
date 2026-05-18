@@ -154,7 +154,13 @@ static bool isSceneModelCallLine(const QString &line)
     return regex.match(line).hasMatch();
 }
 
-static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Operation *operation, QVector3D *vector, const QHash<QString, qreal> &varValues, QStringList *expressions = nullptr)
+static bool parseOperationLine(const QString &line,
+                               SceneDocument::TreeNode::Operation *operation,
+                               QVector3D *vector,
+                               const QHash<QString, qreal> &varValues,
+                               QStringList *expressions = nullptr,
+                               QString *loopVariable = nullptr,
+                               QString *loopRangeExpression = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
@@ -162,6 +168,7 @@ static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Ope
     static const QRegularExpression translateRegex("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression rotateRegex("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression scaleRegex("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression forRegex("^for\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(\\[[^\\]]+\\])\\s*\\)\\s*\\{\\s*$");
 
     if (unionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Union;
@@ -173,6 +180,16 @@ static bool parseOperationLine(const QString &line, SceneDocument::TreeNode::Ope
     }
     if (intersectionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Intersection;
+        return true;
+    }
+
+    QRegularExpressionMatch forMatch = forRegex.match(line);
+    if (forMatch.hasMatch()) {
+        *operation = SceneDocument::TreeNode::For;
+        if (loopVariable)
+            *loopVariable = forMatch.captured(1);
+        if (loopRangeExpression)
+            *loopRangeExpression = forMatch.captured(2).trimmed();
         return true;
     }
 
@@ -386,7 +403,9 @@ static bool parseBlock(ParserState *state,
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         QVector3D transformVector;
         QStringList transformExpressions;
-        if (parseOperationLine(line, &operation, &transformVector, state->variableValues, &transformExpressions)) {
+        QString loopVariable;
+        QString loopRangeExpression;
+        if (parseOperationLine(line, &operation, &transformVector, state->variableValues, &transformExpressions, &loopVariable, &loopRangeExpression)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -394,6 +413,10 @@ static bool parseBlock(ParserState *state,
                 group.rotation = transformVector;
             else if (operation == SceneDocument::TreeNode::Scale)
                 group.scale = transformVector;
+            else if (operation == SceneDocument::TreeNode::For) {
+                group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
+                group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
+            }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale)
@@ -401,7 +424,23 @@ static bool parseBlock(ParserState *state,
 
             parent->children.append(group);
             SceneDocument::TreeNode &child = parent->children.last();
-            if (!parseBlock(state, &child, true, errorMessage))
+            const bool scopedLoopVariable = operation == SceneDocument::TreeNode::For;
+            const QString scopedVariableName = child.loopVariable;
+            const bool hadPreviousLoopValue = scopedLoopVariable && state->variableValues.contains(scopedVariableName);
+            const qreal previousLoopValue = hadPreviousLoopValue ? state->variableValues.value(scopedVariableName) : 0.0;
+            if (scopedLoopVariable)
+                state->variableValues[scopedVariableName] = 0.0;
+
+            const bool parsedChild = parseBlock(state, &child, true, errorMessage);
+
+            if (scopedLoopVariable) {
+                if (hadPreviousLoopValue)
+                    state->variableValues[scopedVariableName] = previousLoopValue;
+                else
+                    state->variableValues.remove(scopedVariableName);
+            }
+
+            if (!parsedChild)
                 return false;
             continue;
         }

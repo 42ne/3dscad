@@ -22,6 +22,7 @@ QStringList paletteTools()
         QStringLiteral("translate"),
         QStringLiteral("rotate"),
         QStringLiteral("scale"),
+        QStringLiteral("for"),
         QStringLiteral("var"),
         QStringLiteral("module")
     };

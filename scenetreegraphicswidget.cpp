@@ -110,6 +110,11 @@ void SceneTreeGraphicsWidget::setVariableNumberAdjustedCallback(std::function<vo
     m_variableNumberAdjustedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
+{
+    m_forLoopRangeAdjustedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -170,6 +175,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
         updateActiveTransformControl(scenePosition, true);
         updateActiveShapeParameterControl(scenePosition, true);
         updateActiveVariableNumberControl(scenePosition, true);
+        updateActiveForLoopRangeControl(scenePosition, true);
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
@@ -207,6 +213,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     updateActiveTransformControl(scenePosition, controlDown);
     updateActiveShapeParameterControl(scenePosition, controlDown);
     updateActiveVariableNumberControl(scenePosition, controlDown);
+    updateActiveForLoopRangeControl(scenePosition, controlDown);
 
     if (m_panning) {
         const QPoint delta = event->pos() - m_lastPanPoint;
@@ -239,6 +246,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
         updateActiveTransformControl(QPointF(), false);
         updateActiveShapeParameterControl(QPointF(), false);
         updateActiveVariableNumberControl(QPointF(), false);
+        updateActiveForLoopRangeControl(QPointF(), false);
     }
 
     QGraphicsView::keyReleaseEvent(event);
@@ -249,6 +257,10 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
     if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
         const int wheelSteps = event->angleDelta().y() / 120;
         const QPointF scenePosition = mapToScene(event->position().toPoint());
+        if (wheelSteps != 0 && handleForLoopRangeWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
         if (wheelSteps != 0 && handleVariableNumberWheel(scenePosition, wheelSteps)) {
             event->accept();
             return;
@@ -319,7 +331,9 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               -1,  // activeShapeParameter
                               -1,  // activeShapeParamNumberStart
                               m_activeVariableNodeId,
-                              m_activeVariableNumberStart)
+                              m_activeVariableNumberStart,
+                              0,
+                              -1)
             .renderVariable(node, rect);
         addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
         return rect;
@@ -343,7 +357,11 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
                           -1,
                           m_activeShapeParameterNodeId,
                           m_activeShapeParameter,
-                          m_activeShapeParameterNumberStart)
+                          m_activeShapeParameterNumberStart,
+                          0,
+                          -1,
+                          0,
+                          -1)
         .renderPrimitive(node, rect, label, shape);
 
     addNodeDragHandle(node.id, label, rect, rect, size);
@@ -354,7 +372,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 {
     QVector<ChildLayout> children;
     const bool transformGroup = isTransformOperation(node.operation);
-    const qreal headerWidth = transformGroup ? TransformHeaderWidth : 0.0;
+    const qreal headerWidth = transformGroup ? transformHeaderWidthForNode(node) : 0.0;
     const qreal headerHeight = transformGroup ? 0.0 : GroupHeaderHeight;
     QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;
@@ -387,12 +405,19 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           [this](int nodeId) { handleTreeNodeSelected(nodeId); },
                           m_activeTransformControlNodeId,
                           m_activeTransformControlAxis,
-                          m_activeTransformControlNumberStart)
+                          m_activeTransformControlNumberStart,
+                          0,
+                          -1,
+                          -1,
+                          0,
+                          -1,
+                          m_activeForLoopNodeId,
+                          m_activeForLoopNumberStart)
         .renderGroup(node, rect, depth, cutSeparatorY);
 
     const QString groupLabel = labelForOperation(node.operation);
     const QRectF handleRect = transformGroup
-                                  ? QRectF(rect.topLeft(), QSizeF(TransformHeaderWidth, rect.height()))
+                                  ? QRectF(rect.topLeft(), QSizeF(headerWidth, rect.height()))
                                   : QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight));
     addNodeDragHandle(node.id, groupLabel, handleRect, rect, rect.size());
 
@@ -531,6 +556,22 @@ bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosi
     return true;
 }
 
+bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    if (!m_scene || !m_forLoopRangeAdjustedCallback)
+        return false;
+
+    int nodeId = 0;
+    int start = -1;
+    int length = 0;
+    if (!forLoopRangeControlAt(scenePosition, &nodeId, &start, &length))
+        return false;
+
+    m_forLoopRangeAdjustedCallback(nodeId, start, length, wheelSteps);
+    updateActiveForLoopRangeControl(scenePosition, true);
+    return true;
+}
+
 bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
                                                  int *groupId,
                                                  SceneDocument::TreeNode::Operation *operation,
@@ -556,10 +597,16 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
     if (!bestArea)
         return false;
 
+    qreal headerWidth = TransformHeaderWidth;
+    if (!bestArea->children.isEmpty()) {
+        headerWidth = qMax<qreal>(TransformHeaderWidth,
+                                  bestArea->children.first().rect.left() - bestArea->rect.left() - GroupPadding);
+    }
+
     // Find which axis row the mouse is over
     int hitAxis = -1;
     for (int i = 0; i < 3; ++i) {
-        if (transformParameterControlRect(bestArea->rect, i).contains(scenePosition)) {
+        if (transformParameterControlRect(bestArea->rect, i, headerWidth).contains(scenePosition)) {
             hitAxis = i;
             break;
         }
@@ -575,7 +622,7 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
             const QString expr = transformAxisExpression(*node, hitAxis);
             const QFontMetricsF hitMetrics(font());
             const QVector<ExpressionNumberControl> numControls =
-                transformParameterNumberControls(bestArea->rect, hitAxis, expr, hitMetrics);
+                transformParameterNumberControls(bestArea->rect, hitAxis, expr, hitMetrics, headerWidth);
             for (const ExpressionNumberControl &nc : numControls) {
                 if (nc.rect.contains(scenePosition)) {
                     if (numberStart)  *numberStart  = nc.start;
@@ -703,6 +750,51 @@ bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePositi
     return false;
 }
 
+bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &scenePosition,
+                                                    int *nodeId,
+                                                    int *start,
+                                                    int *length) const
+{
+    if (!m_scene)
+        return false;
+
+    const GroupHitArea *bestArea = nullptr;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.operation != SceneDocument::TreeNode::For || !area.rect.contains(scenePosition))
+            continue;
+
+        if (!bestArea || area.depth > bestArea->depth)
+            bestArea = &area;
+    }
+
+    if (!bestArea)
+        return false;
+
+    const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestArea->groupId);
+    if (!node || node->type != SceneDocument::TreeNode::Group || node->operation != SceneDocument::TreeNode::For)
+        return false;
+
+    const QFontMetricsF hitMetrics(font());
+    const QString variableName = forLoopVariableName(*node);
+    const QString rangeExpression = forLoopRangeExpression(*node);
+    const QVector<ExpressionNumberControl> controls =
+        forLoopRangeNumberControls(bestArea->rect, variableName, rangeExpression, hitMetrics);
+    for (const ExpressionNumberControl &control : controls) {
+        if (!control.rect.contains(scenePosition))
+            continue;
+
+        if (nodeId)
+            *nodeId = node->id;
+        if (start)
+            *start = control.start;
+        if (length)
+            *length = control.length;
+        return true;
+    }
+
+    return false;
+}
+
 void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
                                                    const QPointF &scenePosition,
                                                    bool controlDown)
@@ -713,7 +805,15 @@ void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
     int groupId = 0;
     int axis = -1;
     SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-    if (transformControlAt(scenePosition, &groupId, &operation, &axis)) {
+    int forNodeId = 0;
+    int forNumberStart = -1;
+    int forNumberLength = 0;
+    if (forLoopRangeControlAt(scenePosition, &forNodeId, &forNumberStart, &forNumberLength)) {
+        key = QStringLiteral("for:%1:%2").arg(forNodeId).arg(forNumberStart);
+        message = controlDown
+                      ? QStringLiteral("Use mouse wheel to change this for range number")
+                      : QStringLiteral("Hold Ctrl and use mouse wheel to change this for range number");
+    } else if (transformControlAt(scenePosition, &groupId, &operation, &axis)) {
         static const char *AxisNames[] = {"X", "Y", "Z"};
         const QString axisName = QString::fromLatin1(AxisNames[axis]);
         key = QStringLiteral("transform:%1:%2").arg(groupId).arg(axis);
@@ -844,6 +944,29 @@ void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &s
 
     m_activeVariableNodeId = nodeId;
     m_activeVariableNumberStart = start;
+    if (!m_dragActive)
+        refresh();
+}
+
+void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled)
+{
+    int nodeId = 0;
+    int start = -1;
+    int length = 0;
+    if (!enabled || !forLoopRangeControlAt(scenePosition, &nodeId, &start, &length)) {
+        nodeId = 0;
+        start = -1;
+    }
+
+    Q_UNUSED(length);
+
+    if (m_activeForLoopNodeId == nodeId
+        && m_activeForLoopNumberStart == start) {
+        return;
+    }
+
+    m_activeForLoopNodeId = nodeId;
+    m_activeForLoopNumberStart = start;
     if (!m_dragActive)
         refresh();
 }

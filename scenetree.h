@@ -32,7 +32,8 @@ public:
             Intersection,
             Translate,
             Rotate,
-            Scale
+            Scale,
+            For
         };
 
         int id = 0;
@@ -46,6 +47,8 @@ public:
         QVector3D rotation = QVector3D(0, 0, 0);
         QVector3D scale = QVector3D(1, 1, 1);
         QStringList transformExpressions; // 3 entries (x,y,z) for Translate/Rotate/Scale
+        QString loopVariable = QStringLiteral("i");
+        QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
         QVector<TreeNode> children;
     };
 

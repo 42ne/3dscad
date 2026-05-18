@@ -94,6 +94,24 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::For) {
+        const QString variableName = node.loopVariable.trimmed().isEmpty()
+                                         ? QStringLiteral("i")
+                                         : node.loopVariable.trimmed();
+        const QString rangeExpression = node.loopRangeExpression.trimmed().isEmpty()
+                                            ? QStringLiteral("[0 : 1 : 3]")
+                                            : node.loopRangeExpression.trimmed();
+        *code += QString("%1for (%2 = %3) {\n").arg(indent, variableName, rangeExpression);
+
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::Translate
         || node.operation == SceneDocument::TreeNode::Rotate
         || node.operation == SceneDocument::TreeNode::Scale) {

@@ -62,6 +62,7 @@ private slots:
     void onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
     void onGraphicsTreeShapeParameterHovered(int shapeId, int parameter);
     void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
+    void onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
 
 private:
     void buildUi();

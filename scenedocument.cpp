@@ -20,6 +20,23 @@ void collectVariableNames(const SceneDocument::TreeNode &node, QSet<QString> *na
         collectVariableNames(child, names);
 }
 
+bool isValidIdentifier(const QString &name)
+{
+    if (name.isEmpty())
+        return false;
+
+    const QChar first = name.front();
+    if (!(first == QLatin1Char('_') || first.isLetter()))
+        return false;
+
+    for (const QChar ch : name) {
+        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
+            return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 const QVector<ShapeNode> &SceneDocument::shapes() const
@@ -305,6 +322,31 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
     reEvaluateDependentVariables(variableId);
     reEvaluateDependentExpressions();
 
+    return true;
+}
+
+bool SceneDocument::updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression)
+{
+    TreeNode *node = m_tree.nodeById(groupId);
+    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::For)
+        return false;
+
+    const QString variableName = loopVariable.trimmed().isEmpty()
+                                     ? QStringLiteral("i")
+                                     : loopVariable.trimmed();
+    const QString range = rangeExpression.trimmed().isEmpty()
+                              ? QStringLiteral("[0 : 1 : 3]")
+                              : rangeExpression.trimmed();
+    if (!isValidIdentifier(variableName))
+        return false;
+    if (!range.startsWith(QLatin1Char('[')) || !range.endsWith(QLatin1Char(']')))
+        return false;
+
+    if (node->loopVariable == variableName && node->loopRangeExpression == range)
+        return false;
+
+    node->loopVariable = variableName;
+    node->loopRangeExpression = range;
     return true;
 }
 

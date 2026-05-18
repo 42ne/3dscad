@@ -26,7 +26,9 @@ public:
                           int activeShapeParameter = -1,
                           int activeShapeParamNumberStart = -1,
                           int activeVariableNodeId = 0,
-                          int activeVariableNumberStart = -1);
+                          int activeVariableNumberStart = -1,
+                          int activeForLoopNodeId = 0,
+                          int activeForLoopNumberStart = -1);
 
     void renderPrimitive(const SceneDocument::TreeNode &node,
                          const QRectF &rect,
@@ -65,6 +67,8 @@ private:
     int m_activeShapeParamNumberStart = -1;
     int m_activeVariableNodeId = 0;
     int m_activeVariableNumberStart = -1;
+    int m_activeForLoopNodeId = 0;
+    int m_activeForLoopNumberStart = -1;
     NodeSelectedCallback m_onSelected;
 };
 

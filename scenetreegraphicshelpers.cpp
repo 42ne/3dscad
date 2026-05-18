@@ -203,6 +203,9 @@ void paintOperationIcon(QPainter *painter,
         painter->drawRect(large);
         painter->drawRect(small);
         painter->drawLine(small.right(), small.top(), large.right(), large.top());
+    } else if (operation == SceneDocument::TreeNode::For) {
+        painter->setPen(QPen(accent.darker(160), 1.6));
+        painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
     } else {
         painter->setPen(accent.darker(160));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
@@ -244,6 +247,25 @@ QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, co
     QVector<ExpressionTextSpan> spans;
     const qreal operatorGap = 3.0;
     qreal x = textRect.left();
+
+    const QString trimmed = expression.trimmed();
+    const bool standaloneSignedNumber = !trimmed.isEmpty()
+                                        && (trimmed[0] == QLatin1Char('-') || trimmed[0] == QLatin1Char('+'))
+                                        && trimmed.size() > 1;
+    if (standaloneSignedNumber) {
+        bool ok = false;
+        trimmed.toDouble(&ok);
+        if (ok) {
+            const int start = expression.indexOf(trimmed);
+            const qreal width = metrics.horizontalAdvance(trimmed);
+            spans.append({trimmed,
+                          start,
+                          trimmed.size(),
+                          QRectF(x - 4.0, textRect.top() + 1.0, width + 8.0, textRect.height() - 2.0),
+                          true});
+            return spans;
+        }
+    }
 
     int index = 0;
     while (index < expression.size()) {
@@ -350,20 +372,39 @@ QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis)
     return QString::number(val, 'f', precision);
 }
 
-QRectF transformParameterControlRect(const QRectF &groupRect, int axis)
+qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node)
+{
+    if (!isTransformOperation(node.operation))
+        return 0.0;
+
+    qreal maxExpressionWidth = 0.0;
+    for (int axis = 0; axis < 3; ++axis) {
+        const QString expression = transformAxisExpression(node, axis);
+        int operatorCount = 0;
+        for (const QChar ch : expression) {
+            if (ch == QLatin1Char('+') || ch == QLatin1Char('-') || ch == QLatin1Char('*') || ch == QLatin1Char('/'))
+                ++operatorCount;
+        }
+        maxExpressionWidth = qMax(maxExpressionWidth, expression.size() * 7.0 + operatorCount * 6.0 + 8.0);
+    }
+
+    return qMax<qreal>(TransformHeaderWidth, TransformIconWidth + 4.0 + TransformParamLabelArea + maxExpressionWidth + 8.0);
+}
+
+QRectF transformParameterControlRect(const QRectF &groupRect, int axis, qreal headerWidth)
 {
     if (axis < 0 || axis > 2)
         return QRectF();
     const qreal left = groupRect.left() + TransformIconWidth + 4.0;
-    const qreal width = TransformHeaderWidth - TransformIconWidth - 8.0;
+    const qreal width = qMax<qreal>(TransformHeaderWidth, headerWidth) - TransformIconWidth - 8.0;
     const qreal rowHeight = 13.0;
     const qreal rowTop = groupRect.top() + 8.0 + axis * 15.0;
     return QRectF(left, rowTop, width, rowHeight);
 }
 
-QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &groupRect, int axis, const QString &expression, const QFontMetricsF &metrics)
+QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &groupRect, int axis, const QString &expression, const QFontMetricsF &metrics, qreal headerWidth)
 {
-    const QRectF rowRect = transformParameterControlRect(groupRect, axis);
+    const QRectF rowRect = transformParameterControlRect(groupRect, axis, headerWidth);
     if (!rowRect.isValid())
         return {};
     const QRectF textRect(rowRect.left() + TransformParamLabelArea,
@@ -372,6 +413,106 @@ QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &
                           rowRect.height());
     QVector<ExpressionNumberControl> controls;
     for (const ExpressionTextSpan &span : expressionSpansInTextRect(textRect, expression, metrics)) {
+        if (span.number)
+            controls.append({span.text, span.start, span.length, span.rect});
+    }
+    return controls;
+}
+
+QString forLoopVariableName(const SceneDocument::TreeNode &node)
+{
+    const QString name = node.loopVariable.trimmed();
+    return name.isEmpty() ? QStringLiteral("i") : name;
+}
+
+QString forLoopRangeExpression(const SceneDocument::TreeNode &node)
+{
+    const QString range = node.loopRangeExpression.trimmed();
+    return range.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : range;
+}
+
+QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName, const QFontMetricsF &metrics)
+{
+    const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
+    const qreal left = groupRect.left() + 52.0 + metrics.horizontalAdvance(prefix);
+    return QRectF(left,
+                  groupRect.top() + 7.0,
+                  qMax<qreal>(0.0, groupRect.right() - left - 8.0),
+                  16.0);
+}
+
+QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect,
+                                                  const QString &variableName,
+                                                  const QString &rangeExpression,
+                                                  const QFontMetricsF &metrics)
+{
+    QVector<ExpressionTextSpan> spans;
+    const QRectF textRect = forLoopRangeTextRect(groupRect, variableName, metrics);
+    qreal x = textRect.left();
+    int index = 0;
+
+    while (index < rangeExpression.size()) {
+        const QChar ch = rangeExpression[index];
+        if (ch.isSpace()) {
+            x += metrics.horizontalAdvance(ch);
+            ++index;
+            continue;
+        }
+
+        const bool signedNumber = (ch == QLatin1Char('-') || ch == QLatin1Char('+'))
+                                  && index + 1 < rangeExpression.size()
+                                  && (rangeExpression[index + 1].isDigit() || rangeExpression[index + 1] == QLatin1Char('.'));
+        if (ch.isDigit() || ch == QLatin1Char('.') || signedNumber) {
+            const int start = index;
+            if (signedNumber)
+                ++index;
+
+            bool hasDigit = false;
+            while (index < rangeExpression.size() && rangeExpression[index].isDigit()) {
+                hasDigit = true;
+                ++index;
+            }
+
+            if (index < rangeExpression.size() && rangeExpression[index] == QLatin1Char('.')) {
+                ++index;
+                while (index < rangeExpression.size() && rangeExpression[index].isDigit()) {
+                    hasDigit = true;
+                    ++index;
+                }
+            }
+
+            if (hasDigit) {
+                const QString text = rangeExpression.mid(start, index - start);
+                const qreal width = metrics.horizontalAdvance(text);
+                spans.append({text,
+                              start,
+                              index - start,
+                              QRectF(x - 4.0, textRect.top() + 1.0, width + 8.0, textRect.height() - 2.0),
+                              true});
+                x += width;
+                continue;
+            }
+
+            index = start;
+        }
+
+        const QString text(ch);
+        const qreal width = metrics.horizontalAdvance(text);
+        spans.append({text, index, 1, QRectF(x, textRect.top(), width, textRect.height()), false});
+        x += width;
+        ++index;
+    }
+
+    return spans;
+}
+
+QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupRect,
+                                                            const QString &variableName,
+                                                            const QString &rangeExpression,
+                                                            const QFontMetricsF &metrics)
+{
+    QVector<ExpressionNumberControl> controls;
+    for (const ExpressionTextSpan &span : forLoopRangeTextSpans(groupRect, variableName, rangeExpression, metrics)) {
         if (span.number)
             controls.append({span.text, span.start, span.length, span.rect});
     }
@@ -534,6 +675,8 @@ QSizeF previewSizeForTool(const QString &tool)
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "module")
         return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "for")
+        return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
         return transformPreviewSize();
 
@@ -599,6 +742,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Scale;
         return true;
     }
+    if (normalized == QStringLiteral("for")) {
+        *operation = SceneDocument::TreeNode::For;
+        return true;
+    }
     return false;
 }
 
@@ -612,6 +759,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Translate, "translate", QColor(218, 238, 246), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Rotate, "rotate", QColor(239, 229, 247), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scale, "scale", QColor(229, 241, 218), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+    {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
 };
 
 } // namespace

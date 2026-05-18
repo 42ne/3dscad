@@ -47,6 +47,38 @@ static constexpr int ShapeIdRole = Qt::UserRole;
 static constexpr int TreeNodeIdRole = Qt::UserRole + 1;
 static constexpr int GroupOperationRole = Qt::UserRole + 2;
 
+static bool isStandaloneNumericToken(const QString &expression, int start, int length)
+{
+    if (start < 0 || length <= 0 || start + length > expression.size())
+        return false;
+
+    return expression.mid(start, length) == expression.trimmed();
+}
+
+static QString adjustedNumericToken(const QString &expression,
+                                    int start,
+                                    int length,
+                                    qreal delta,
+                                    qreal step,
+                                    qreal minimumValue,
+                                    bool clampMagnitude)
+{
+    const QString numberText = expression.mid(start, length);
+    bool ok = false;
+    const qreal value = numberText.toDouble(&ok);
+    if (!ok)
+        return QString();
+
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal adjusted = value + delta * step;
+    const qreal newValue = clampMagnitude ? qMax(minimumValue, adjusted) : adjusted;
+    QString replacement = QString::number(newValue, 'f', precision);
+    if (precision == 0 && replacement == QStringLiteral("-0"))
+        replacement = QStringLiteral("0");
+    return replacement;
+}
+
 static float normalizedRotationDegrees(float value)
 {
     while (value > 180.0f)
@@ -117,6 +149,10 @@ static bool operationForTool(const QString &toolName, SceneDocument::TreeNode::O
     }
     if (toolName == "scale") {
         *operation = SceneDocument::TreeNode::Scale;
+        return true;
+    }
+    if (toolName == "for") {
+        *operation = SceneDocument::TreeNode::For;
         return true;
     }
 
@@ -247,6 +283,8 @@ static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
         return "rotate";
     if (operation == SceneDocument::TreeNode::Scale)
         return "scale";
+    if (operation == SceneDocument::TreeNode::For)
+        return "for";
     return "union()";
 }
 
@@ -437,6 +475,9 @@ void MainWindow::buildUi()
     });
     m_sceneTreeGraphics->setVariableNumberAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
         onGraphicsTreeVariableNumberAdjusted(nodeId, start, length, delta);
+    });
+    m_sceneTreeGraphics->setForLoopRangeAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
+        onGraphicsTreeForLoopRangeAdjusted(nodeId, start, length, delta);
     });
 
     auto *legacyTreePanel = new QWidget;
@@ -1172,20 +1213,19 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int
     QVector3D scale = group->scale;
 
     if (numberStart >= 0 && numberLength > 0 && numberStart + numberLength <= currentExpr.size()) {
-        // Expression-aware adjustment: replace number token in expression
+        const bool isScale = group->operation == SceneDocument::TreeNode::Scale;
+        const qreal minVal = isScale ? 0.01 : -1e9;
         const QString numberText = currentExpr.mid(numberStart, numberLength);
-        bool ok = false;
-        const qreal value = numberText.toDouble(&ok);
-        if (!ok)
-            return;
-
         const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
         const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
         const qreal step = precision > 0 ? 0.1 : 1.0;
-        const bool isScale = group->operation == SceneDocument::TreeNode::Scale;
-        const qreal minVal = isScale ? 0.01 : -1e9;
-        const qreal newValue = qMax(minVal, value + delta * step);
-        const QString replacement = QString::number(newValue, 'f', precision > 0 ? precision : (isScale ? 1 : 0));
+        const bool standaloneNumber = isStandaloneNumericToken(currentExpr, numberStart, numberLength);
+        const qreal tokenMin = isScale ? 0.01 : (standaloneNumber ? -1e9 : 0.0);
+        QString replacement = adjustedNumericToken(currentExpr, numberStart, numberLength, delta, step, tokenMin, isScale || !standaloneNumber);
+        if (replacement.isEmpty())
+            return;
+        if (isScale && precision == 0 && !replacement.contains(QLatin1Char('.')))
+            replacement = QString::number(replacement.toDouble(), 'f', 1);
         const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
         newExpressions[axis] = newExpr;
 
@@ -1195,7 +1235,7 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int
             if (child.type == SceneDocument::TreeNode::Variable)
                 varValues[child.variableName] = child.variableValue;
         }
-        qreal newNumeric = newValue;
+        qreal newNumeric = replacement.toDouble();
         ExpressionSyntax::evaluate(newExpr, varValues, &newNumeric);
         newNumeric = qMax(minVal, newNumeric);
 
@@ -1272,16 +1312,13 @@ void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex
         return;
 
     const QString numberText = currentExpr.mid(numberStart, numberLength);
-    bool ok = false;
-    const qreal value = numberText.toDouble(&ok);
-    if (!ok)
-        return;
-
     const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
     const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
     const qreal step = precision > 0 ? 0.1 : 1.0;
-    const qreal newValue = qMax(0.1, value + delta * step);
-    const QString replacement = QString::number(newValue, 'f', precision);
+    const bool standaloneNumber = isStandaloneNumericToken(currentExpr, numberStart, numberLength);
+    const QString replacement = adjustedNumericToken(currentExpr, numberStart, numberLength, delta, step, 0.1, !standaloneNumber);
+    if (replacement.isEmpty())
+        return;
 
     const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
 
@@ -1292,7 +1329,7 @@ void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex
             varValues[child.variableName] = child.variableValue;
     }
 
-    qreal newNumericValue = newValue;
+    qreal newNumericValue = replacement.toDouble();
     ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
     newNumericValue = qMax(0.1, newNumericValue);
 
@@ -1346,19 +1383,51 @@ void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int
         return;
 
     const QString numberText = expression.mid(start, length);
-    bool ok = false;
-    const qreal value = numberText.toDouble(&ok);
-    if (!ok)
-        return;
-
     const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
     const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
     const qreal step = precision > 0 ? 0.1 : 1.0;
-    const qreal newValue = qMax(0.0, value + delta * step);
-    QString replacement = QString::number(newValue, 'f', precision);
+    const bool standaloneNumber = isStandaloneNumericToken(expression, start, length);
+    QString replacement = adjustedNumericToken(expression, start, length, delta, step, 0.0, !standaloneNumber);
+    if (replacement.isEmpty())
+        return;
 
     expression.replace(start, length, replacement);
     auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta)
+{
+    if (nodeId <= 0 || start < 0 || length <= 0 || qFuzzyIsNull(delta))
+        return;
+
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Group || node->operation != SceneDocument::TreeNode::For)
+        return;
+
+    QString expression = SceneTreeGraphics::forLoopRangeExpression(*node);
+    if (start + length > expression.size())
+        return;
+
+    const QString numberText = expression.mid(start, length);
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal step = precision > 0 ? 0.1 : 1.0;
+    const bool standaloneNumber = isStandaloneNumericToken(expression, start, length);
+    const QString replacement = adjustedNumericToken(expression, start, length, delta, step, 0.0, !standaloneNumber);
+    if (replacement.isEmpty())
+        return;
+
+    expression.replace(start, length, replacement);
+    auto *command = new UpdateForLoopCommand(&m_scene, nodeId, SceneTreeGraphics::forLoopVariableName(*node), expression, [this]() {
         refreshSceneViews();
     });
 

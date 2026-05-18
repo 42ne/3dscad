@@ -416,6 +416,53 @@ void UpdateVariableExpressionCommand::redo()
         m_onChanged();
 }
 
+UpdateForLoopCommand::UpdateForLoopCommand(SceneDocument *scene,
+                                           int groupId,
+                                           const QString &loopVariable,
+                                           const QString &rangeExpression,
+                                           std::function<void()> onChanged)
+    : QUndoCommand("Update for loop")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateForLoop(groupId, loopVariable, rangeExpression);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool UpdateForLoopCommand::isValid() const
+{
+    return m_valid;
+}
+
+void UpdateForLoopCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void UpdateForLoopCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
 MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged)
     : QUndoCommand("Move tree node")
     , m_scene(scene)

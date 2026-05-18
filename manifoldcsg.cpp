@@ -1,8 +1,12 @@
 #include "manifoldcsg.h"
 
 #ifdef HAVE_MANIFOLD_CSG
+#include "expression.h"
+
 #include <manifold/manifold.h>
 
+#include <QHash>
+#include <QStringList>
 #include <QtMath>
 
 using manifold::Manifold;
@@ -46,6 +50,87 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
 }
 
+static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHash<QString, qreal> &variables)
+{
+    ShapeNode evaluated = shape;
+    if (evaluated.parameterExpressions.isEmpty())
+        return evaluated;
+
+    for (int i = 0; i < evaluated.parameterExpressions.size(); ++i) {
+        const QString expression = evaluated.parameterExpressions[i].trimmed();
+        if (expression.isEmpty())
+            continue;
+
+        qreal value = 0.0;
+        if (!ExpressionSyntax::evaluate(expression, variables, &value))
+            continue;
+
+        value = qMax<qreal>(0.1, value);
+        if (evaluated.type == ShapeNode::Cube) {
+            if (i == 0)
+                evaluated.size.setX(static_cast<float>(value));
+            else if (i == 1)
+                evaluated.size.setY(static_cast<float>(value));
+            else if (i == 2)
+                evaluated.size.setZ(static_cast<float>(value));
+        } else if (evaluated.type == ShapeNode::Sphere) {
+            if (i == 0)
+                evaluated.radius = static_cast<float>(value);
+        } else if (evaluated.type == ShapeNode::Cylinder) {
+            if (i == 0)
+                evaluated.radius = static_cast<float>(value);
+            else if (i == 1)
+                evaluated.height = static_cast<float>(value);
+        }
+    }
+
+    return evaluated;
+}
+
+static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::TreeNode &node,
+                                                          const QHash<QString, qreal> &variables)
+{
+    SceneDocument::TreeNode evaluated = node;
+    if (evaluated.transformExpressions.isEmpty())
+        return evaluated;
+
+    for (int axis = 0; axis < evaluated.transformExpressions.size() && axis < 3; ++axis) {
+        const QString expression = evaluated.transformExpressions[axis].trimmed();
+        if (expression.isEmpty())
+            continue;
+
+        qreal value = 0.0;
+        if (!ExpressionSyntax::evaluate(expression, variables, &value))
+            continue;
+
+        if (evaluated.operation == SceneDocument::TreeNode::Translate) {
+            if (axis == 0)
+                evaluated.position.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.position.setY(static_cast<float>(value));
+            else
+                evaluated.position.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Rotate) {
+            if (axis == 0)
+                evaluated.rotation.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.rotation.setY(static_cast<float>(value));
+            else
+                evaluated.rotation.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Scale) {
+            value = qMax<qreal>(0.01, value);
+            if (axis == 0)
+                evaluated.scale.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.scale.setY(static_cast<float>(value));
+            else
+                evaluated.scale.setZ(static_cast<float>(value));
+        }
+    }
+
+    return evaluated;
+}
+
 static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::TreeNode &node)
 {
     if (node.operation == SceneDocument::TreeNode::Translate)
@@ -58,21 +143,106 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
     return source;
 }
 
-static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDocument &scene)
+static bool evaluateRangeExpression(const QString &rangeExpression,
+                                    const QHash<QString, qreal> &variables,
+                                    QVector<qreal> *values)
+{
+    if (!values)
+        return false;
+
+    values->clear();
+
+    const QString range = rangeExpression.trimmed();
+    if (!range.startsWith(QLatin1Char('[')) || !range.endsWith(QLatin1Char(']')))
+        return false;
+
+    const QStringList parts = range.mid(1, range.size() - 2).split(QLatin1Char(':'));
+    if (parts.size() != 2 && parts.size() != 3)
+        return false;
+
+    qreal start = 0.0;
+    qreal step = 1.0;
+    qreal end = 0.0;
+    if (!ExpressionSyntax::evaluate(parts[0].trimmed(), variables, &start))
+        return false;
+    if (parts.size() == 2) {
+        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &end))
+            return false;
+    } else {
+        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &step))
+            return false;
+        if (!ExpressionSyntax::evaluate(parts[2].trimmed(), variables, &end))
+            return false;
+    }
+
+    if (qFuzzyIsNull(step))
+        return false;
+
+    constexpr int MaxForIterations = 200;
+    const qreal epsilon = qAbs(step) * 0.0001 + 0.0001;
+    for (qreal value = start;
+         step > 0.0 ? value <= end + epsilon : value >= end - epsilon;
+         value += step) {
+        values->append(value);
+        if (values->size() >= MaxForIterations)
+            break;
+    }
+
+    return true;
+}
+
+static Manifold evaluateNode(const SceneDocument::TreeNode &node,
+                             const SceneDocument &scene,
+                             QHash<QString, qreal> variables)
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = scene.shapeById(node.shapeId);
         if (!shape)
             return {};
 
-        return manifoldFromShape(*shape);
+        return manifoldFromShape(shapeWithEvaluatedParameters(*shape, variables));
     }
 
     if (node.type == SceneDocument::TreeNode::Variable)
         return {};
 
+    if (node.operation == SceneDocument::TreeNode::For) {
+        QVector<qreal> values;
+        const QString variableName = node.loopVariable.trimmed().isEmpty()
+                                         ? QStringLiteral("i")
+                                         : node.loopVariable.trimmed();
+        const QString rangeExpression = node.loopRangeExpression.trimmed().isEmpty()
+                                            ? QStringLiteral("[0 : 1 : 3]")
+                                            : node.loopRangeExpression.trimmed();
+        if (!evaluateRangeExpression(rangeExpression, variables, &values) || values.isEmpty())
+            return {};
+
+        bool hasResult = false;
+        Manifold result;
+        for (qreal value : values) {
+            QHash<QString, qreal> iterationVariables = variables;
+            iterationVariables[variableName] = value;
+            for (const SceneDocument::TreeNode &child : node.children) {
+                if (child.type == SceneDocument::TreeNode::Variable)
+                    continue;
+
+                const Manifold childResult = evaluateNode(child, scene, iterationVariables);
+                if (!hasResult) {
+                    result = childResult;
+                    hasResult = true;
+                } else {
+                    result += childResult;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, variables);
+
     QVector<const SceneDocument::TreeNode *> geometryChildren;
-    for (const SceneDocument::TreeNode &child : node.children) {
+    for (const SceneDocument::TreeNode &child : evaluatedNode.children) {
         if (child.type != SceneDocument::TreeNode::Variable)
             geometryChildren.append(&child);
     }
@@ -80,24 +250,24 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node, const SceneDoc
     if (geometryChildren.isEmpty())
         return {};
 
-    Manifold result = evaluateNode(*geometryChildren.first(), scene);
+    Manifold result = evaluateNode(*geometryChildren.first(), scene, variables);
 
     for (int i = 1; i < geometryChildren.size(); ++i) {
-        const Manifold child = evaluateNode(*geometryChildren[i], scene);
+        const Manifold child = evaluateNode(*geometryChildren[i], scene, variables);
 
-        if (node.operation == SceneDocument::TreeNode::Union
-            || node.operation == SceneDocument::TreeNode::Module
-            || node.operation == SceneDocument::TreeNode::Translate
-            || node.operation == SceneDocument::TreeNode::Rotate
-            || node.operation == SceneDocument::TreeNode::Scale)
+        if (evaluatedNode.operation == SceneDocument::TreeNode::Union
+            || evaluatedNode.operation == SceneDocument::TreeNode::Module
+            || evaluatedNode.operation == SceneDocument::TreeNode::Translate
+            || evaluatedNode.operation == SceneDocument::TreeNode::Rotate
+            || evaluatedNode.operation == SceneDocument::TreeNode::Scale)
             result += child;
-        else if (node.operation == SceneDocument::TreeNode::Difference)
+        else if (evaluatedNode.operation == SceneDocument::TreeNode::Difference)
             result -= child;
-        else if (node.operation == SceneDocument::TreeNode::Intersection)
+        else if (evaluatedNode.operation == SceneDocument::TreeNode::Intersection)
             result ^= child;
     }
 
-    return applyNodeTransform(result, node);
+    return applyNodeTransform(result, evaluatedNode);
 }
 
 static SceneMesh sceneMeshFromManifold(const Manifold &manifold)
@@ -144,7 +314,13 @@ bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *
     if (!mesh)
         return false;
 
-    const Manifold result = evaluateNode(scene.treeRoot(), scene);
+    QHash<QString, qreal> variables;
+    for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
+        if (child.type == SceneDocument::TreeNode::Variable)
+            variables[child.variableName] = child.variableValue;
+    }
+
+    const Manifold result = evaluateNode(scene.treeRoot(), scene, variables);
 
     if (result.Status() != Manifold::Error::NoError) {
         if (errorMessage)

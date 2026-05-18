@@ -990,13 +990,27 @@ static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
     return false;
 }
 
+static bool treeHasForOperation(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::For)
+        return true;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (treeHasForOperation(child))
+            return true;
+    }
+
+    return false;
+}
+
 CsgPreview buildCsgPreview(const SceneDocument &scene)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
     const bool hasTreeBoolean = treeHasBooleanOperation(scene.treeRoot());
     const bool hasGroupTransform = treeHasGroupTransform(scene.treeRoot());
+    const bool hasForOperation = treeHasForOperation(scene.treeRoot());
 
-    if ((hasTreeBoolean || hasGroupTransform) && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -1012,7 +1026,9 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add);
             preview.statusText = hasTreeBoolean
                                      ? "CSG preview: Manifold exact mesh"
-                                     : "CSG preview: Manifold tree transform mesh";
+                                     : hasForOperation
+                                           ? "CSG preview: Manifold for-expanded mesh"
+                                           : "CSG preview: Manifold tree transform mesh";
             return preview;
         }
 

@@ -816,6 +816,8 @@ static uint shapeFingerprint(const ShapeNode &shape, uint seed)
     seed = qHash(shape.size.z(), seed);
     seed = qHash(shape.radius, seed);
     seed = qHash(shape.height, seed);
+    for (const QString &expression : shape.parameterExpressions)
+        seed = qHash(expression, seed);
     return seed;
 }
 
@@ -837,6 +839,8 @@ static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
     seed = qHash(node.variableName, seed);
     seed = qHash(node.variableExpression, seed);
     seed = qHash(node.variableValue, seed);
+    seed = qHash(node.loopVariable, seed);
+    seed = qHash(node.loopRangeExpression, seed);
     seed = qHash(node.position.x(), seed);
     seed = qHash(node.position.y(), seed);
     seed = qHash(node.position.z(), seed);
@@ -846,6 +850,8 @@ static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
     seed = qHash(node.scale.x(), seed);
     seed = qHash(node.scale.y(), seed);
     seed = qHash(node.scale.z(), seed);
+    for (const QString &expression : node.transformExpressions)
+        seed = qHash(expression, seed);
     seed = qHash(node.children.size(), seed);
 
     for (const SceneDocument::TreeNode &child : node.children)

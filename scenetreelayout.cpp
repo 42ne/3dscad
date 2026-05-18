@@ -193,7 +193,9 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     target.parentGroupId = bestArea->groupId;
     target.previewGroupOperation = bestArea->operation;
     target.previewCutSeparatorY = bestArea->cutSeparatorY;
-    const QRectF contentRect = groupContentRect(bestArea->rect, bestArea->operation);
+    QRectF contentRect = groupContentRect(bestArea->rect, bestArea->operation);
+    if (isTransformOperation(bestArea->operation) && !bestArea->children.isEmpty())
+        contentRect.setLeft(bestArea->children.first().rect.left());
     const bool reorderInSourceGroup = sourceArea == bestArea && sourceChildIndex >= 0;
     QVector<ChildLayout> candidateChildren = childrenWithoutMovingNode(*bestArea,
                                                                        movingNodeId,

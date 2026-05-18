@@ -281,11 +281,19 @@ public:
                   const QVector3D &transformValues = QVector3D(),
                   int activeTransformAxis = -1,
                   int activeTransformNumberStart = -1,
-                  const QStringList &transformExpressions = QStringList())
+                  qreal transformHeaderWidth = TransformHeaderWidth,
+                  const QStringList &transformExpressions = QStringList(),
+                  const QString &loopVariable = QString(),
+                  const QString &loopRangeExpression = QString(),
+                  int activeForLoopNumberStart = -1)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
         , m_transformExpressions(transformExpressions)
+        , m_transformHeaderWidth(transformHeaderWidth)
+        , m_loopVariable(loopVariable)
+        , m_loopRangeExpression(loopRangeExpression)
+        , m_activeForLoopNumberStart(activeForLoopNumberStart)
         , m_activeTransformAxis(activeTransformAxis)
         , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_operation(operation)
@@ -371,7 +379,37 @@ private:
 
         const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, PrimitiveIconSize, PrimitiveIconSize);
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
-        paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
+
+        if (m_operation == SceneDocument::TreeNode::For) {
+            const QString variableName = m_loopVariable.trimmed().isEmpty() ? QStringLiteral("i") : m_loopVariable.trimmed();
+            const QString rangeExpression = m_loopRangeExpression.trimmed().isEmpty() ? QStringLiteral("[0 : 1 : 3]") : m_loopRangeExpression.trimmed();
+            const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
+            const QFontMetricsF metrics(painter->font());
+            painter->setPen(QColor(24, 34, 44));
+            painter->drawText(QRectF(m_rect.left() + 52.0, m_rect.top() + 7.0, metrics.horizontalAdvance(prefix), 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              prefix);
+
+            const QVector<ExpressionTextSpan> spans = forLoopRangeTextSpans(m_rect, variableName, rangeExpression, metrics);
+            for (const ExpressionTextSpan &span : spans) {
+                if (span.number) {
+                    const bool active = span.start == m_activeForLoopNumberStart;
+                    paintRoundedPanel(painter,
+                                      span.rect,
+                                      3.0,
+                                      QPen(active ? QColor(220, 156, 26) : fill.darker(125), active ? 2 : 1),
+                                      QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+                }
+                painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 82, 64));
+                painter->drawText(span.rect, Qt::AlignLeft | Qt::AlignVCenter, span.text);
+            }
+            const qreal suffixLeft = forLoopRangeTextRect(m_rect, variableName, metrics).left()
+                                     + metrics.horizontalAdvance(rangeExpression);
+            painter->setPen(QColor(24, 34, 44));
+            painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+        } else {
+            paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
+        }
     }
 
     void paintVerticalHeader(QPainter *painter, const QColor &fill)
@@ -403,7 +441,7 @@ private:
 
         static const QString axisLabels[3] = {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
         for (int axis = 0; axis < 3; ++axis) {
-            const QRectF rowRect = transformParameterControlRect(m_rect, axis);
+            const QRectF rowRect = transformParameterControlRect(m_rect, axis, m_transformHeaderWidth);
             const bool rowActive = axis == m_activeTransformAxis;
 
             // Expression for this axis
@@ -450,6 +488,10 @@ private:
     qreal m_cutSeparatorY = 0.0;
     QVector3D m_transformValues;
     QStringList m_transformExpressions;
+    qreal m_transformHeaderWidth = TransformHeaderWidth;
+    QString m_loopVariable;
+    QString m_loopRangeExpression;
+    int m_activeForLoopNumberStart = -1;
     int m_activeTransformAxis = -1;
     int m_activeTransformNumberStart = -1;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
@@ -473,7 +515,9 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
                                              int activeShapeParameter,
                                              int activeShapeParamNumberStart,
                                              int activeVariableNodeId,
-                                             int activeVariableNumberStart)
+                                             int activeVariableNumberStart,
+                                             int activeForLoopNodeId,
+                                             int activeForLoopNumberStart)
     : m_scene(scene)
     , m_selectedNodeId(selectedNodeId)
     , m_activeTransformNodeId(activeTransformNodeId)
@@ -484,6 +528,8 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
     , m_activeShapeParamNumberStart(activeShapeParamNumberStart)
     , m_activeVariableNodeId(activeVariableNodeId)
     , m_activeVariableNumberStart(activeVariableNumberStart)
+    , m_activeForLoopNodeId(activeForLoopNodeId)
+    , m_activeForLoopNumberStart(activeForLoopNumberStart)
     , m_onSelected(std::move(onSelected))
 {
 }
@@ -518,7 +564,9 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                                       : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
-    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis, activeNumberStart, node.transformExpressions));
+    const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
+    const qreal transformHeaderWidth = transformHeaderWidthForNode(node);
+    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis, activeNumberStart, transformHeaderWidth, node.transformExpressions, node.loopVariable, node.loopRangeExpression, activeForLoopStart));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),
