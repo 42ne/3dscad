@@ -42,12 +42,6 @@ public:
         QVector<TreeNode> children;
     };
 
-    struct MoveInfo
-    {
-        QVector<int> movedPrimitiveShapeIds;
-        QVector3D primitiveOffset = QVector3D(0, 0, 0);
-    };
-
     SceneTree();
 
     const TreeNode &root() const;
@@ -59,7 +53,7 @@ public:
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
-    bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, MoveInfo *moveInfo = nullptr);
+    bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 
     // Primitive management

@@ -245,15 +245,9 @@ bool SceneDocument::removeGroupById(int groupId)
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
 {
-    SceneTree::MoveInfo moveInfo;
-    const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex, &moveInfo);
+    const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex);
     if (!moved)
         return false;
-
-    for (int shapeId : moveInfo.movedPrimitiveShapeIds) {
-        if (ShapeNode *shape = shapeById(shapeId))
-            shape->position += moveInfo.primitiveOffset;
-    }
 
     ensureTreeContainsAllShapes();
     synchronizeBooleanModesFromTree();

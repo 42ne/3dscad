@@ -72,11 +72,8 @@ bool SceneTree::removeGroupById(int groupId)
     return removed;
 }
 
-bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, MoveInfo *moveInfo)
+bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
 {
-    if (moveInfo)
-        *moveInfo = {};
-
     if (nodeId <= 0 || m_root.id == nodeId)
         return false;
 
@@ -112,10 +109,6 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, MoveInf
                                  ? targetParent->children.size()
                                  : qBound(0, insertIndex, targetParent->children.size());
     const QVector3D offset = sourceParentWorldPosition - targetParentWorldPosition;
-    if (moveInfo && movedNode.type == TreeNode::Primitive) {
-        collectPrimitiveShapeIds(movedNode, &moveInfo->movedPrimitiveShapeIds);
-        moveInfo->primitiveOffset = offset;
-    }
 
     offsetMovedNode(&movedNode, offset);
     targetParent->children.insert(boundedIndex, movedNode);
