@@ -2003,8 +2003,13 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
         return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
     };
 
-    auto rotated = [&](const QVector3D &local) {
-        return rotatePoint(local, shape->rotation) + shape->position;
+    QVector<SceneDocument::TreeNode> parentGroups;
+    if (m_scene)
+        collectParentGroupStackForShape(m_scene->treeRoot(), shape->id, &parentGroups);
+
+    auto transformed = [&](const QVector3D &local) {
+        const QVector3D shapeSpace = rotatePoint(local, shape->rotation) + shape->position;
+        return transformPointByGroupStack(shapeSpace, parentGroups);
     };
 
     auto drawDimension = [&](const QVector3D &localAxis,
@@ -2022,9 +2027,9 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
         else
             localSide = QVector3D(0.0f, 0.0f, 1.0f);
 
-        const QVector3D negative = rotated(-localAxis * halfLength + localSide * sideOffset);
-        const QVector3D positive = rotated(localAxis * halfLength + localSide * sideOffset);
-        const QVector3D center = rotated(localSide * sideOffset);
+        const QVector3D negative = transformed(-localAxis * halfLength + localSide * sideOffset);
+        const QVector3D positive = transformed(localAxis * halfLength + localSide * sideOffset);
+        const QVector3D center = transformed(localSide * sideOffset);
         const QPointF negativePoint = project(negative);
         const QPointF positivePoint = project(positive);
         const QPointF centerPoint = project(center);
@@ -2071,7 +2076,7 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
             QVector<QPointF> circlePoints;
             for (int step = 0; step <= 48; ++step) {
                 const float angle = qDegreesToRadians(step * 360.0f / 48.0f);
-                circlePoints.append(project(rotated(QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f))));
+                circlePoints.append(project(transformed(QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f))));
             }
 
             painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
@@ -2079,9 +2084,9 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
             painter.setPen(QPen(accent, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.drawPolyline(QPolygonF(circlePoints));
 
-            const QVector3D center = rotated(QVector3D());
-            const QVector3D edge = rotated(QVector3D(radius, 0.0f, 0.0f));
-            const QVector3D inward = rotated(QVector3D(radius * 0.45f, 0.0f, 0.0f));
+            const QVector3D center = transformed(QVector3D());
+            const QVector3D edge = transformed(QVector3D(radius, 0.0f, 0.0f));
+            const QVector3D inward = transformed(QVector3D(radius * 0.45f, 0.0f, 0.0f));
             const QPointF centerPoint = project(center);
             const QPointF edgePoint = project(edge);
             const QPointF inwardPoint = project(inward);
