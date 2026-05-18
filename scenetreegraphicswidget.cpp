@@ -6,6 +6,7 @@
 #include "scenetreetoolbarrenderer.h"
 
 #include <QGraphicsScene>
+#include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -104,6 +105,11 @@ void SceneTreeGraphicsWidget::setShapeParameterHoveredCallback(std::function<voi
     m_shapeParameterHoveredCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
+{
+    m_variableNumberAdjustedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -163,6 +169,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
         updateControlTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
         updateActiveTransformControl(scenePosition, true);
         updateActiveShapeParameterControl(scenePosition, true);
+        updateActiveVariableNumberControl(scenePosition, true);
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
@@ -199,6 +206,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     updateControlTooltip(event->globalPos(), scenePosition, controlDown);
     updateActiveTransformControl(scenePosition, controlDown);
     updateActiveShapeParameterControl(scenePosition, controlDown);
+    updateActiveVariableNumberControl(scenePosition, controlDown);
 
     if (m_panning) {
         const QPoint delta = event->pos() - m_lastPanPoint;
@@ -230,6 +238,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
         updateControlTooltip(mapToGlobal(m_lastMousePosition), mapToScene(m_lastMousePosition), false);
         updateActiveTransformControl(QPointF(), false);
         updateActiveShapeParameterControl(QPointF(), false);
+        updateActiveVariableNumberControl(QPointF(), false);
     }
 
     QGraphicsView::keyReleaseEvent(event);
@@ -240,6 +249,10 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
     if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
         const int wheelSteps = event->angleDelta().y() / 120;
         const QPointF scenePosition = mapToScene(event->position().toPoint());
+        if (wheelSteps != 0 && handleVariableNumberWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
         if (wheelSteps != 0 && handleShapeParameterWheel(scenePosition, wheelSteps)) {
             event->accept();
             return;
@@ -295,10 +308,16 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
     if (node.type == SceneDocument::TreeNode::Primitive)
         return drawPrimitive(node, topLeft);
     if (node.type == SceneDocument::TreeNode::Variable) {
-        const QRectF rect(topLeft, QSizeF(PrimitiveWidth, PrimitiveHeight));
+        const QRectF rect(topLeft, variablePreviewSize(node.variableName, node.variableExpression));
         SceneTreeNodeRenderer(m_graphicsScene,
                               m_selectedTreeNodeId,
-                              nullptr)
+                              nullptr,
+                              0,
+                              -1,
+                              0,
+                              -1,
+                              m_activeVariableNodeId,
+                              m_activeVariableNumberStart)
             .renderVariable(node, rect);
         addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
         return rect;
@@ -429,7 +448,9 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
             const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
             if (node) {
                 previewTool = previewToolForNode(*node);
-                previewSize = previewSizeForTool(previewTool);
+                previewSize = node->type == SceneDocument::TreeNode::Variable
+                                  ? variablePreviewSize(node->variableName, node->variableExpression)
+                                  : previewSizeForTool(previewTool);
             }
         }
 
@@ -491,6 +512,22 @@ bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosi
     m_shapeParameterAdjustedCallback(shapeId, parameter, wheelSteps * step);
     updateActiveShapeParameterControl(scenePosition, true);
     Q_UNUSED(nodeId);
+    return true;
+}
+
+bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    if (!m_scene || !m_variableNumberAdjustedCallback)
+        return false;
+
+    int nodeId = 0;
+    int start = -1;
+    int length = 0;
+    if (!variableNumberControlAt(scenePosition, &nodeId, &start, &length))
+        return false;
+
+    m_variableNumberAdjustedCallback(nodeId, start, length, wheelSteps);
+    updateActiveVariableNumberControl(scenePosition, true);
     return true;
 }
 
@@ -594,6 +631,54 @@ bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePositi
     return false;
 }
 
+bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePosition,
+                                                      int *nodeId,
+                                                      int *start,
+                                                      int *length) const
+{
+    if (!m_scene)
+        return false;
+
+    const SceneDocument::TreeNode *bestNode = nullptr;
+    QRectF bestRect;
+    int bestDepth = -1;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        for (const ChildLayout &child : area.children) {
+            if (!child.rect.contains(scenePosition))
+                continue;
+
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
+            if (!node || node->type != SceneDocument::TreeNode::Variable)
+                continue;
+
+            if (area.depth > bestDepth) {
+                bestNode = node;
+                bestRect = child.rect;
+                bestDepth = area.depth;
+            }
+        }
+    }
+
+    if (!bestNode)
+        return false;
+
+    const QVector<ExpressionNumberControl> controls = expressionNumberControls(bestRect, bestNode->variableExpression, QFontMetricsF(font()));
+    for (const ExpressionNumberControl &control : controls) {
+        if (!control.rect.contains(scenePosition))
+            continue;
+
+        if (nodeId)
+            *nodeId = bestNode->id;
+        if (start)
+            *start = control.start;
+        if (length)
+            *length = control.length;
+        return true;
+    }
+
+    return false;
+}
+
 void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
                                                    const QPointF &scenePosition,
                                                    bool controlDown)
@@ -612,10 +697,19 @@ void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
                       ? QStringLiteral("Use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName)
                       : QStringLiteral("Hold Ctrl and use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName);
     } else {
-        int shapeId = -1;
-        int nodeId = 0;
-        int parameter = -1;
-        if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter)) {
+        int variableNodeId = 0;
+        int numberStart = -1;
+        int numberLength = 0;
+        if (variableNumberControlAt(scenePosition, &variableNodeId, &numberStart, &numberLength)) {
+            key = QStringLiteral("variable:%1:%2").arg(variableNodeId).arg(numberStart);
+            message = controlDown
+                          ? QStringLiteral("Use mouse wheel to change this number")
+                          : QStringLiteral("Hold Ctrl and use mouse wheel to change this number");
+        } else {
+            int shapeId = -1;
+            int nodeId = 0;
+            int parameter = -1;
+            if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter)) {
             const ShapeNode *shape = m_scene ? m_scene->shapeById(shapeId) : nullptr;
             const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
             if (parameter >= 0 && parameter < controls.size()) {
@@ -623,6 +717,7 @@ void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
                 message = controlDown
                               ? QStringLiteral("Use mouse wheel to change %1").arg(controls[parameter].label)
                               : QStringLiteral("Hold Ctrl and use mouse wheel to change %1").arg(controls[parameter].label);
+            }
             }
         }
     }
@@ -689,6 +784,28 @@ void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &s
 
     if (m_shapeParameterHoveredCallback)
         m_shapeParameterHoveredCallback(shapeId, parameter);
+}
+
+void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled)
+{
+    int nodeId = 0;
+    int start = -1;
+    int length = 0;
+    if (!enabled || !variableNumberControlAt(scenePosition, &nodeId, &start, &length)) {
+        nodeId = 0;
+        start = -1;
+    }
+
+    Q_UNUSED(length);
+
+    if (m_activeVariableNodeId == nodeId
+        && m_activeVariableNumberStart == start) {
+        return;
+    }
+
+    m_activeVariableNodeId = nodeId;
+    m_activeVariableNumberStart = start;
+    refresh();
 }
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)

@@ -293,7 +293,7 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
 
     if (node.type == SceneDocument::TreeNode::Variable) {
         auto *item = new QTreeWidgetItem(parent);
-        item->setText(0, QStringLiteral("%1 = %2").arg(node.variableName).arg(node.variableValue));
+        item->setText(0, QStringLiteral("%1 = %2").arg(node.variableName, node.variableExpression));
         item->setData(0, ShapeIdRole, -1);
         item->setData(0, TreeNodeIdRole, node.id);
         item->setForeground(0, QColor(122, 92, 36));
@@ -432,6 +432,9 @@ void MainWindow::buildUi()
     });
     m_sceneTreeGraphics->setShapeParameterHoveredCallback([this](int shapeId, int parameter) {
         onGraphicsTreeShapeParameterHovered(shapeId, parameter);
+    });
+    m_sceneTreeGraphics->setVariableNumberAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
+        onGraphicsTreeVariableNumberAdjusted(nodeId, start, length, delta);
     });
 
     auto *legacyTreePanel = new QWidget;
@@ -672,15 +675,15 @@ void MainWindow::deleteSelectedGroup()
 
 void MainWindow::applyOpenScadCode()
 {
-    QVector<ShapeNode> shapes;
+    SceneDocument::Snapshot snapshot;
     QString errorMessage;
 
-    if (!OpenScadParser::parse(m_codeEditor->toPlainText(), &shapes, &errorMessage)) {
+    if (!OpenScadParser::parseScene(m_codeEditor->toPlainText(), &snapshot, &errorMessage)) {
         QMessageBox::warning(this, "OpenSCAD parse error", errorMessage);
         return;
     }
 
-    auto *command = new ReplaceSceneCommand(&m_scene, shapes, [this]() {
+    auto *command = new ReplaceSceneCommand(&m_scene, snapshot, [this]() {
         refreshSceneViews();
     });
 
@@ -1249,6 +1252,45 @@ void MainWindow::onGraphicsTreeShapeParameterHovered(int shapeId, int parameter)
 {
     if (m_viewport)
         m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
+}
+
+void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta)
+{
+    if (nodeId <= 0 || start < 0 || length <= 0 || qFuzzyIsNull(delta))
+        return;
+
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Variable)
+        return;
+
+    QString expression = node->variableExpression;
+    if (start + length > expression.size())
+        return;
+
+    const QString numberText = expression.mid(start, length);
+    bool ok = false;
+    const qreal value = numberText.toDouble(&ok);
+    if (!ok)
+        return;
+
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal step = precision > 0 ? 0.1 : 1.0;
+    QString replacement = QString::number(value + delta * step, 'f', precision);
+    if (precision == 0 && replacement == QStringLiteral("-0"))
+        replacement = QStringLiteral("0");
+
+    expression.replace(start, length, replacement);
+    auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
 }
 
 void MainWindow::refreshShapeList()

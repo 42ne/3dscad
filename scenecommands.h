@@ -64,6 +64,7 @@ class ReplaceSceneCommand : public QUndoCommand
 {
 public:
     ReplaceSceneCommand(SceneDocument *scene, const QVector<ShapeNode> &newShapes, std::function<void()> onChanged);
+    ReplaceSceneCommand(SceneDocument *scene, const SceneDocument::Snapshot &newSnapshot, std::function<void()> onChanged);
 
     bool isValid() const;
     void undo() override;
@@ -72,6 +73,7 @@ public:
 private:
     SceneDocument *m_scene = nullptr;
     SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
     QVector<ShapeNode> m_newShapes;
     bool m_valid = false;
     std::function<void()> m_onChanged;
@@ -136,6 +138,23 @@ class RemoveVariableCommand : public QUndoCommand
 {
 public:
     RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class UpdateVariableExpressionCommand : public QUndoCommand
+{
+public:
+    UpdateVariableExpressionCommand(SceneDocument *scene, int variableId, const QString &expression, std::function<void()> onChanged);
 
     bool isValid() const;
     void undo() override;

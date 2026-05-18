@@ -28,6 +28,7 @@ public:
     void setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback);
     void setShapeParameterAdjustedCallback(std::function<void(int, int, qreal)> callback);
     void setShapeParameterHoveredCallback(std::function<void(int, int)> callback);
+    void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setSelectedTreeNodeId(int nodeId);
     void refresh();
 
@@ -63,11 +64,14 @@ private:
     void handleTreeNodeSelected(int nodeId);
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
+    bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis) const;
     bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter) const;
+    bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     void updateControlTooltip(const QPoint &globalPosition, const QPointF &scenePosition, bool controlDown);
     void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
     void updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled);
+    void updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void clearDropPreview();
     void setTreeItemsVisible(bool visible);
@@ -89,12 +93,15 @@ private:
     std::function<void(int, SceneDocument::TreeNode::Operation, int)> m_transformControlHoveredCallback;
     std::function<void(int, int, qreal)> m_shapeParameterAdjustedCallback;
     std::function<void(int, int)> m_shapeParameterHoveredCallback;
+    std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;
     SceneDocument::TreeNode::Operation m_activeTransformControlOperation = SceneDocument::TreeNode::Union;
     int m_activeShapeParameterNodeId = 0;
     int m_activeShapeParameter = -1;
+    int m_activeVariableNodeId = 0;
+    int m_activeVariableNumberStart = -1;
     QString m_lastControlTooltipKey;
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;

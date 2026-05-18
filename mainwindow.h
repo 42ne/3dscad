@@ -61,6 +61,7 @@ private slots:
     void onGraphicsTreeTransformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void onGraphicsTreeShapeParameterAdjusted(int shapeId, int parameter, qreal delta);
     void onGraphicsTreeShapeParameterHovered(int shapeId, int parameter);
+    void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
 
 private:
     void buildUi();

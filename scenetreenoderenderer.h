@@ -22,7 +22,9 @@ public:
                           int activeTransformNodeId = 0,
                           int activeTransformAxis = -1,
                           int activeShapeNodeId = 0,
-                          int activeShapeParameter = -1);
+                          int activeShapeParameter = -1,
+                          int activeVariableNodeId = 0,
+                          int activeVariableNumberStart = -1);
 
     void renderPrimitive(const SceneDocument::TreeNode &node,
                          const QRectF &rect,
@@ -57,6 +59,8 @@ private:
     int m_activeTransformAxis = -1;
     int m_activeShapeNodeId = 0;
     int m_activeShapeParameter = -1;
+    int m_activeVariableNodeId = 0;
+    int m_activeVariableNumberStart = -1;
     NodeSelectedCallback m_onSelected;
 };
 

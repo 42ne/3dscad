@@ -147,11 +147,18 @@ private:
 class VariableCardItem final : public QGraphicsItem
 {
 public:
-    VariableCardItem(const QRectF &rect, const QString &name, qreal value, bool selected, qreal opacity, qreal zValue)
+    VariableCardItem(const QRectF &rect,
+                     const QString &name,
+                     const QString &expression,
+                     bool selected,
+                     int activeNumberStart,
+                     qreal opacity,
+                     qreal zValue)
         : m_rect(rect)
         , m_name(name)
-        , m_value(value)
+        , m_expression(expression)
         , m_selected(selected)
+        , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
     {
         setZValue(zValue);
@@ -164,13 +171,7 @@ public:
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
 
-        const QColor fill(255, 248, 218);
         const QColor accent(150, 116, 42);
-        paintRoundedPanel(painter,
-                          m_rect.adjusted(2.0, 4.0, -2.0, -4.0),
-                          5.0,
-                          QPen(m_selected ? QColor(255, 203, 87) : accent, m_selected ? 2.4 : 1.4),
-                          QBrush(fill));
 
         const QRectF badgeRect(m_rect.left() + 9.0,
                                m_rect.top() + (PrimitiveHeight - 26.0) * 0.5,
@@ -191,17 +192,37 @@ public:
         painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 5.0, m_rect.width() - 62.0, 18.0),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           m_name);
+
         painter->setPen(QColor(104, 83, 48));
-        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 21.0, m_rect.width() - 62.0, 16.0),
+        painter->drawText(QRectF(m_rect.left() + 54.0, m_rect.top() + 21.0, 16.0, 16.0),
                           Qt::AlignLeft | Qt::AlignVCenter,
-                          QStringLiteral("= %1").arg(m_value));
+                          QStringLiteral("="));
+
+        const QFontMetricsF metrics(painter->font());
+        const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics);
+        for (const ExpressionTextSpan &span : spans) {
+            if (!span.number)
+                continue;
+
+            const bool active = span.start == m_activeNumberStart;
+            paintRoundedPanel(painter,
+                              span.rect,
+                              4.0,
+                              QPen(active ? QColor(220, 156, 26) : QColor(158, 126, 51), active ? 2 : 1),
+                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 110)));
+        }
+
+        painter->setPen(QColor(104, 83, 48));
+        for (const ExpressionTextSpan &span : spans)
+            painter->drawText(span.rect, Qt::AlignCenter, span.text);
     }
 
 private:
     QRectF m_rect;
     QString m_name;
-    qreal m_value = 0.0;
+    QString m_expression;
     bool m_selected = false;
+    int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
 };
 
@@ -384,13 +405,17 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
                                              int activeTransformNodeId,
                                              int activeTransformAxis,
                                              int activeShapeNodeId,
-                                             int activeShapeParameter)
+                                             int activeShapeParameter,
+                                             int activeVariableNodeId,
+                                             int activeVariableNumberStart)
     : m_scene(scene)
     , m_selectedNodeId(selectedNodeId)
     , m_activeTransformNodeId(activeTransformNodeId)
     , m_activeTransformAxis(activeTransformAxis)
     , m_activeShapeNodeId(activeShapeNodeId)
     , m_activeShapeParameter(activeShapeParameter)
+    , m_activeVariableNodeId(activeVariableNodeId)
+    , m_activeVariableNumberStart(activeVariableNumberStart)
     , m_onSelected(std::move(onSelected))
 {
 }
@@ -406,7 +431,8 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
 {
-    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableValue, node.id == m_selectedNodeId, 1.0, 5.0));
+    const int activeNumberStart = node.id == m_activeVariableNodeId ? m_activeVariableNumberStart : -1;
+    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression, node.id == m_selectedNodeId, activeNumberStart, 1.0, 5.0));
 }
 
 void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
@@ -443,7 +469,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
     if (isVariableToolName(tool)) {
-        item = new VariableCardItem(rect, QStringLiteral("var"), 0.0, false, 0.78, 58.0);
+        item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0);
     } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true);
     } else {

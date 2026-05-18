@@ -39,6 +39,7 @@ public:
         Operation operation = Union;
         int shapeId = -1;
         QString variableName;
+        QString variableExpression = QStringLiteral("0");
         qreal variableValue = 0.0;
         QVector3D position = QVector3D(0, 0, 0);
         QVector3D rotation = QVector3D(0, 0, 0);
@@ -57,7 +58,7 @@ public:
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
-    int addVariable(const QString &name, qreal value = 0.0, int insertIndex = -1);
+    int addVariable(const QString &name, const QString &expression = QStringLiteral("0"), qreal value = 0.0, int insertIndex = -1);
     bool removeVariableById(int variableId);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
@@ -96,7 +97,7 @@ private:
 
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
-    TreeNode makeVariableNode(const QString &name, qreal value);
+    TreeNode makeVariableNode(const QString &name, const QString &expression, qreal value);
 
 private:
     TreeNode m_root;

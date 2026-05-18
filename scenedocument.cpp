@@ -1,4 +1,5 @@
 #include "scenedocument.h"
+#include "expression.h"
 
 #include <QSet>
 
@@ -265,12 +266,34 @@ bool SceneDocument::removeGroupById(int groupId)
 
 int SceneDocument::addVariable(int insertIndex)
 {
-    return m_tree.addVariable(uniqueVariableName(), 0.0, insertIndex);
+    return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0, insertIndex);
 }
 
 bool SceneDocument::removeVariableById(int variableId)
 {
     return m_tree.removeVariableById(variableId);
+}
+
+bool SceneDocument::updateVariableExpression(int variableId, const QString &expression)
+{
+    TreeNode *node = m_tree.nodeById(variableId);
+    if (!node || node->type != TreeNode::Variable)
+        return false;
+
+    const QString trimmed = expression.trimmed();
+    if (trimmed.isEmpty() || !ExpressionSyntax::validate(trimmed))
+        return false;
+
+    if (node->variableExpression == trimmed)
+        return false;
+
+    node->variableExpression = trimmed;
+
+    bool ok = false;
+    const qreal numericValue = trimmed.toDouble(&ok);
+    node->variableValue = ok ? numericValue : 0.0;
+
+    return true;
 }
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)

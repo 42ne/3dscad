@@ -146,7 +146,23 @@ ReplaceSceneCommand::ReplaceSceneCommand(SceneDocument *scene, const QVector<Sha
         return;
 
     m_oldSnapshot = m_scene->snapshot();
+    SceneDocument previewScene;
+    previewScene.replaceShapes(m_newShapes);
+    m_newSnapshot = previewScene.snapshot();
     m_valid = m_oldSnapshot.shapes != m_newShapes;
+}
+
+ReplaceSceneCommand::ReplaceSceneCommand(SceneDocument *scene, const SceneDocument::Snapshot &newSnapshot, std::function<void()> onChanged)
+    : QUndoCommand("Apply OpenSCAD code")
+    , m_scene(scene)
+    , m_newSnapshot(newSnapshot)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = true;
 }
 
 bool ReplaceSceneCommand::isValid() const
@@ -170,7 +186,7 @@ void ReplaceSceneCommand::redo()
     if (!m_scene || !m_valid)
         return;
 
-    m_scene->replaceShapes(m_newShapes);
+    m_scene->restoreSnapshot(m_newSnapshot);
 
     if (m_onChanged)
         m_onChanged();
@@ -344,6 +360,52 @@ void RemoveVariableCommand::undo()
 }
 
 void RemoveVariableCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+UpdateVariableExpressionCommand::UpdateVariableExpressionCommand(SceneDocument *scene,
+                                                                 int variableId,
+                                                                 const QString &expression,
+                                                                 std::function<void()> onChanged)
+    : QUndoCommand("Update variable expression")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateVariableExpression(variableId, expression);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool UpdateVariableExpressionCommand::isValid() const
+{
+    return m_valid;
+}
+
+void UpdateVariableExpressionCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void UpdateVariableExpressionCommand::redo()
 {
     if (!m_scene || !m_valid)
         return;

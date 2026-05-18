@@ -56,6 +56,7 @@ public:
     bool removeGroupById(int groupId);
     int addVariable(int insertIndex = -1);
     bool removeVariableById(int variableId);
+    bool updateVariableExpression(int variableId, const QString &expression);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale);
 

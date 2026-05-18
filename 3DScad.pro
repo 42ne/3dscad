@@ -35,6 +35,7 @@ SOURCES += \
 
 HEADERS += \
     csgevaluator.h \
+    expression.h \
     mainwindow.h \
     manifoldcsg.h \
     openscadgenerator.h \

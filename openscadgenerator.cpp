@@ -78,7 +78,9 @@ void OpenScadGenerator::appendTreeNode(QString *code,
     if (node.type == SceneDocument::TreeNode::Variable) {
         *code += QString("%1%2 = %3;\n")
                      .arg(indent, node.variableName)
-                     .arg(node.variableValue);
+                     .arg(node.variableExpression.trimmed().isEmpty()
+                              ? QString::number(node.variableValue)
+                              : node.variableExpression.trimmed());
         if (ranges)
             ranges->append({node.id, start, code->size() - start});
         return;

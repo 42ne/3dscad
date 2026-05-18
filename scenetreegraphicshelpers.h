@@ -19,6 +19,7 @@ class QGraphicsItem;
 class QGraphicsScene;
 class QPainter;
 class QPointF;
+class QFontMetricsF;
 class QBrush;
 class QPen;
 
@@ -60,6 +61,7 @@ void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation op
 
 int insertionIndexForY(const QVector<QRectF> &childRects, qreal y, int minimumIndex = 0);
 QSizeF defaultPreviewSize();
+QSizeF variablePreviewSize(const QString &name = QString(), const QString &expression = QString());
 QSizeF groupPreviewSize();
 QSizeF differencePreviewSize();
 QSizeF previewSizeForTool(const QString &tool);
@@ -80,8 +82,26 @@ struct ShapeParameterControl {
     qreal value = 0.0;
 };
 
+struct ExpressionNumberControl {
+    QString text;
+    int start = 0;
+    int length = 0;
+    QRectF rect;
+};
+
+struct ExpressionTextSpan {
+    QString text;
+    int start = 0;
+    int length = 0;
+    QRectF rect;
+    bool number = false;
+};
+
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
+QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics);
+QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics);
+QRectF variableExpressionTextRect(const QRectF &variableRect);
 const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation);
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);

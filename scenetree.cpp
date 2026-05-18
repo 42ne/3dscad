@@ -72,15 +72,15 @@ bool SceneTree::removeGroupById(int groupId)
     return removed;
 }
 
-int SceneTree::addVariable(const QString &name, qreal value, int insertIndex)
+int SceneTree::addVariable(const QString &name, const QString &expression, qreal value, int insertIndex)
 {
     if (m_root.id <= 0)
         m_root = makeGroupNode(TreeNode::Module);
 
-    if (name.trimmed().isEmpty())
+    if (name.trimmed().isEmpty() || expression.trimmed().isEmpty())
         return 0;
 
-    TreeNode variable = makeVariableNode(name.trimmed(), value);
+    TreeNode variable = makeVariableNode(name.trimmed(), expression.trimmed(), value);
     const int variableId = variable.id;
     const int boundedIndex = insertIndex < 0
                                  ? m_root.children.size()
@@ -509,12 +509,13 @@ SceneTree::TreeNode SceneTree::makePrimitiveNode(int shapeId)
     return node;
 }
 
-SceneTree::TreeNode SceneTree::makeVariableNode(const QString &name, qreal value)
+SceneTree::TreeNode SceneTree::makeVariableNode(const QString &name, const QString &expression, qreal value)
 {
     TreeNode node;
     node.id = m_nextNodeId++;
     node.type = TreeNode::Variable;
     node.variableName = name;
+    node.variableExpression = expression;
     node.variableValue = value;
     return node;
 }

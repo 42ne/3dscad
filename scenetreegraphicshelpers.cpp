@@ -5,6 +5,7 @@
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSimpleTextItem>
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPen>
 #include <QPixmap>
@@ -221,6 +222,109 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
             {QStringLiteral("Z"), shape.size.z()}};
 }
 
+QRectF variableExpressionTextRect(const QRectF &variableRect)
+{
+    return QRectF(variableRect.left() + 74.0,
+                  variableRect.top() + 21.0,
+                  variableRect.width() - 82.0,
+                  16.0);
+}
+
+QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics)
+{
+    QVector<ExpressionTextSpan> spans;
+    const QRectF textRect = variableExpressionTextRect(variableRect);
+    const qreal operatorGap = 3.0;
+    qreal x = textRect.left();
+
+    int index = 0;
+    while (index < expression.size()) {
+        const QChar ch = expression[index];
+        const bool startsWithDigit = ch.isDigit();
+        const bool startsWithDecimalPoint = ch == QLatin1Char('.')
+                                            && index + 1 < expression.size()
+                                            && expression[index + 1].isDigit();
+
+        const bool previousIsIdentifier = index > 0
+                                          && (expression[index - 1].isLetterOrNumber()
+                                              || expression[index - 1] == QLatin1Char('_'));
+        if ((startsWithDigit || startsWithDecimalPoint) && !previousIsIdentifier) {
+            const int start = index;
+            bool hasDigit = false;
+            while (index < expression.size() && expression[index].isDigit()) {
+                hasDigit = true;
+                ++index;
+            }
+            if (index < expression.size() && expression[index] == QLatin1Char('.')) {
+                ++index;
+                while (index < expression.size() && expression[index].isDigit()) {
+                    hasDigit = true;
+                    ++index;
+                }
+            }
+
+            const bool nextIsIdentifier = index < expression.size()
+                                          && (expression[index].isLetter()
+                                              || expression[index] == QLatin1Char('_'));
+            if (hasDigit && !nextIsIdentifier) {
+                const QString text = expression.mid(start, index - start);
+                const qreal width = metrics.horizontalAdvance(text);
+                spans.append({text,
+                              start,
+                              index - start,
+                              QRectF(x - 4.0, textRect.top() + 1.0, width + 8.0, textRect.height() - 2.0),
+                              true});
+                x += width;
+                continue;
+            }
+        }
+
+        if (ch.isLetter() || ch == QLatin1Char('_')) {
+            const int start = index++;
+            while (index < expression.size() && (expression[index].isLetterOrNumber() || expression[index] == QLatin1Char('_')))
+                ++index;
+
+            const QString text = expression.mid(start, index - start);
+            const qreal width = metrics.horizontalAdvance(text);
+            spans.append({text, start, index - start, QRectF(x, textRect.top(), width, textRect.height()), false});
+            x += width;
+            continue;
+        }
+
+        if (ch.isSpace()) {
+            x += metrics.horizontalAdvance(ch);
+            ++index;
+            continue;
+        }
+
+        const QString text(ch);
+        const bool spacedOperator = ch == QLatin1Char('+')
+                                    || ch == QLatin1Char('-')
+                                    || ch == QLatin1Char('*')
+                                    || ch == QLatin1Char('/');
+        if (spacedOperator)
+            x += operatorGap;
+
+        const qreal width = metrics.horizontalAdvance(text);
+        spans.append({text, index, 1, QRectF(x, textRect.top(), width, textRect.height()), false});
+        x += width + (spacedOperator ? operatorGap : 0.0);
+        ++index;
+    }
+
+    return spans;
+}
+
+QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics)
+{
+    QVector<ExpressionNumberControl> controls;
+    const QVector<ExpressionTextSpan> spans = expressionTextSpans(variableRect, expression, metrics);
+    for (const ExpressionTextSpan &span : spans) {
+        if (span.number)
+            controls.append({span.text, span.start, span.length, span.rect});
+    }
+    return controls;
+}
+
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count)
 {
     if (index < 0 || count <= 0 || index >= count)
@@ -300,6 +404,20 @@ QSizeF defaultPreviewSize()
     return QSizeF(PrimitiveWidth, PrimitiveHeight);
 }
 
+QSizeF variablePreviewSize(const QString &name, const QString &expression)
+{
+    const int nameChars = qMax(3, name.trimmed().size());
+    const int expressionChars = qMax(1, expression.trimmed().size());
+    int operatorCount = 0;
+    for (const QChar ch : expression) {
+        if (ch == QLatin1Char('+') || ch == QLatin1Char('-') || ch == QLatin1Char('*') || ch == QLatin1Char('/'))
+            ++operatorCount;
+    }
+
+    const qreal textWidth = qMax<qreal>(nameChars * 7.0, expressionChars * 7.0 + operatorCount * 6.0 + 20.0);
+    return QSizeF(qMax(PrimitiveWidth, 54.0 + textWidth + 16.0), PrimitiveHeight);
+}
+
 QSizeF groupPreviewSize()
 {
     return QSizeF(GroupMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
@@ -319,7 +437,7 @@ QSizeF differencePreviewSize()
 QSizeF previewSizeForTool(const QString &tool)
 {
     if (isVariableToolName(tool))
-        return defaultPreviewSize();
+        return variablePreviewSize();
     if (tool == "cube" || tool == "sphere" || tool == "cylinder")
         return defaultPreviewSize();
     if (tool == "difference")
