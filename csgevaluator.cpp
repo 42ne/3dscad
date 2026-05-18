@@ -1,9 +1,12 @@
 #include "csgevaluator.h"
+#include "expression.h"
 #include "manifoldcsg.h"
 
 #include <algorithm>
 #include <functional>
 #include <numeric>
+#include <QHash>
+#include <QStringList>
 #include <QtMath>
 
 struct Box
@@ -544,6 +547,135 @@ static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
     return item;
 }
 
+static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHash<QString, qreal> &variables)
+{
+    ShapeNode evaluated = shape;
+    if (evaluated.parameterExpressions.isEmpty())
+        return evaluated;
+
+    for (int i = 0; i < evaluated.parameterExpressions.size(); ++i) {
+        const QString expression = evaluated.parameterExpressions[i].trimmed();
+        if (expression.isEmpty())
+            continue;
+
+        qreal value = 0.0;
+        if (!ExpressionSyntax::evaluate(expression, variables, &value))
+            continue;
+
+        value = qMax<qreal>(0.1, value);
+        if (evaluated.type == ShapeNode::Cube) {
+            if (i == 0)
+                evaluated.size.setX(static_cast<float>(value));
+            else if (i == 1)
+                evaluated.size.setY(static_cast<float>(value));
+            else if (i == 2)
+                evaluated.size.setZ(static_cast<float>(value));
+        } else if (evaluated.type == ShapeNode::Sphere) {
+            if (i == 0)
+                evaluated.radius = static_cast<float>(value);
+        } else if (evaluated.type == ShapeNode::Cylinder) {
+            if (i == 0)
+                evaluated.radius = static_cast<float>(value);
+            else if (i == 1)
+                evaluated.height = static_cast<float>(value);
+        }
+    }
+
+    return evaluated;
+}
+
+static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::TreeNode &node,
+                                                          const QHash<QString, qreal> &variables)
+{
+    SceneDocument::TreeNode evaluated = node;
+    if (evaluated.transformExpressions.isEmpty())
+        return evaluated;
+
+    for (int axis = 0; axis < evaluated.transformExpressions.size() && axis < 3; ++axis) {
+        const QString expression = evaluated.transformExpressions[axis].trimmed();
+        if (expression.isEmpty())
+            continue;
+
+        qreal value = 0.0;
+        if (!ExpressionSyntax::evaluate(expression, variables, &value))
+            continue;
+
+        if (evaluated.operation == SceneDocument::TreeNode::Translate) {
+            if (axis == 0)
+                evaluated.position.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.position.setY(static_cast<float>(value));
+            else
+                evaluated.position.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Rotate) {
+            if (axis == 0)
+                evaluated.rotation.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.rotation.setY(static_cast<float>(value));
+            else
+                evaluated.rotation.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Scale) {
+            value = qMax<qreal>(0.01, value);
+            if (axis == 0)
+                evaluated.scale.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.scale.setY(static_cast<float>(value));
+            else
+                evaluated.scale.setZ(static_cast<float>(value));
+        }
+    }
+
+    return evaluated;
+}
+
+static bool evaluateRangeExpression(const QString &rangeExpression,
+                                    const QHash<QString, qreal> &variables,
+                                    QVector<qreal> *values)
+{
+    if (!values)
+        return false;
+
+    values->clear();
+
+    const QString range = rangeExpression.trimmed();
+    if (!range.startsWith(QLatin1Char('[')) || !range.endsWith(QLatin1Char(']')))
+        return false;
+
+    const QStringList parts = range.mid(1, range.size() - 2).split(QLatin1Char(':'));
+    if (parts.size() != 2 && parts.size() != 3)
+        return false;
+
+    qreal start = 0.0;
+    qreal step = 1.0;
+    qreal end = 0.0;
+    if (!ExpressionSyntax::evaluate(parts[0].trimmed(), variables, &start))
+        return false;
+    if (parts.size() == 2) {
+        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &end))
+            return false;
+    } else {
+        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &step))
+            return false;
+        if (!ExpressionSyntax::evaluate(parts[2].trimmed(), variables, &end))
+            return false;
+    }
+
+    if (qFuzzyIsNull(step))
+        return false;
+
+    constexpr int MaxForIterations = 200;
+    const qreal epsilon = qAbs(step) * 0.0001 + 0.0001;
+    for (qreal value = start;
+         step > 0.0 ? value <= end + epsilon : value >= end - epsilon;
+         value += step) {
+        values->append(value);
+        if (values->size() >= MaxForIterations)
+            break;
+    }
+
+    return true;
+}
+
 static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDocument::TreeNode &group)
 {
     if (group.operation == SceneDocument::TreeNode::Translate)
@@ -602,6 +734,7 @@ static void appendTreeHelpers(CsgPreview *preview,
                               const SceneDocument &scene,
                               const SceneDocument::TreeNode &node,
                               ShapeNode::BooleanMode inheritedMode,
+                              const QHash<QString, qreal> &variables,
                               QVector<SceneDocument::TreeNode> groupStack = {})
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
@@ -612,7 +745,8 @@ static void appendTreeHelpers(CsgPreview *preview,
         if (!shape)
             return;
 
-        CsgRenderItem helper = renderItemFromShape(*shape, scene.indexOfShapeId(shape->id));
+        const ShapeNode evaluatedShape = shapeWithEvaluatedParameters(*shape, variables);
+        CsgRenderItem helper = renderItemFromShape(evaluatedShape, scene.indexOfShapeId(shape->id));
         helper.mesh = transformedMesh(helper.mesh, groupStack);
         helper.booleanMode = inheritedMode;
         helper.helper = true;
@@ -623,7 +757,28 @@ static void appendTreeHelpers(CsgPreview *preview,
     if (node.type == SceneDocument::TreeNode::Variable)
         return;
 
-    groupStack.append(node);
+    if (node.operation == SceneDocument::TreeNode::For) {
+        QVector<qreal> values;
+        const QString variableName = node.loopVariable.trimmed().isEmpty()
+                                         ? QStringLiteral("i")
+                                         : node.loopVariable.trimmed();
+        const QString rangeExpression = node.loopRangeExpression.trimmed().isEmpty()
+                                            ? QStringLiteral("[0 : 1 : 3]")
+                                            : node.loopRangeExpression.trimmed();
+        if (!evaluateRangeExpression(rangeExpression, variables, &values) || values.isEmpty())
+            return;
+
+        for (qreal value : values) {
+            QHash<QString, qreal> iterationVariables = variables;
+            iterationVariables[variableName] = value;
+            for (int i = 0; i < node.children.size(); ++i)
+                appendTreeHelpers(preview, scene, node.children[i], inheritedMode, iterationVariables, groupStack);
+        }
+        return;
+    }
+
+    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, variables);
+    groupStack.append(evaluatedNode);
     for (int i = 0; i < node.children.size(); ++i) {
         ShapeNode::BooleanMode childMode = inheritedMode;
         if (node.operation == SceneDocument::TreeNode::Difference && i > 0)
@@ -631,7 +786,7 @@ static void appendTreeHelpers(CsgPreview *preview,
         else if (node.operation == SceneDocument::TreeNode::Intersection)
             childMode = ShapeNode::Intersect;
 
-        appendTreeHelpers(preview, scene, node.children[i], childMode, groupStack);
+        appendTreeHelpers(preview, scene, node.children[i], childMode, variables, groupStack);
     }
 }
 
@@ -1023,7 +1178,12 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
 
             preview.mode = CsgPreview::ManifoldComputed;
             preview.items.append(item);
-            appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add);
+            QHash<QString, qreal> variables;
+            for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
+                if (child.type == SceneDocument::TreeNode::Variable)
+                    variables[child.variableName] = child.variableValue;
+            }
+            appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add, variables);
             preview.statusText = hasTreeBoolean
                                      ? "CSG preview: Manifold exact mesh"
                                      : hasForOperation
