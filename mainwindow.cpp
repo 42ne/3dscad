@@ -1843,9 +1843,9 @@ void MainWindow::applyCtrlParamHighlight()
         return;
     }
 
-    // Expression not found in code — fall back to normal highlight
-    m_ctrlHighlight.active = false;
-    highlightOpenScadSelection();
+    // Expression not found — code may not have been refreshed yet (selectShapeInSceneTree
+    // is called before refreshOpenScadCode inside refreshShapeList). Keep active so the
+    // next call from refreshOpenScadCode, which runs with the updated code, can apply it.
 }
 
 void MainWindow::highlightOpenScadSelection()
