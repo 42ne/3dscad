@@ -5,6 +5,7 @@
 #include "shapenode.h"
 
 #include <QImage>
+#include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
 #include <QOpenGLWidget>
 #include <QPoint>
@@ -145,6 +146,23 @@ private:
     QOpenGLShaderProgram *m_glMeshProgram = nullptr;
     QOpenGLShaderProgram *m_glLineProgram = nullptr;
     QOpenGLShaderProgram *m_glFlatProgram = nullptr;
+
+    // Persistent VBOs — rebuilt only when scene/camera-independent data changes.
+    // Grid: world-space line vertices, built once in initializeGL.
+    // Mesh/helper/shadow: world-space triangle vertices, rebuilt when scene fingerprint
+    // or selection/theme changes. Camera movement only updates MVP uniforms.
+    QOpenGLBuffer m_vboGrid        { QOpenGLBuffer::VertexBuffer };
+    QOpenGLBuffer m_vboMesh        { QOpenGLBuffer::VertexBuffer };
+    QOpenGLBuffer m_vboHelperFront { QOpenGLBuffer::VertexBuffer };
+    QOpenGLBuffer m_vboHelperXray  { QOpenGLBuffer::VertexBuffer };
+    QOpenGLBuffer m_vboShadow      { QOpenGLBuffer::VertexBuffer };
+    int     m_vboGridCount        = 0;
+    int     m_vboMeshCount        = 0;
+    int     m_vboHelperFrontCount = 0;
+    int     m_vboHelperXrayCount  = 0;
+    int     m_vboShadowCount      = 0;
+    QString m_vboMeshKey;   // fingerprint|selectedIndex|theme|colorVariant
+    QString m_vboShadowKey; // fingerprint only
 };
 
 #endif

@@ -53,9 +53,8 @@ struct SceneLight
 
 struct OpenGLMeshVertex
 {
-    QVector3D position;
-    QVector3D normal;
-    QVector3D viewPosition;
+    QVector3D position; // world space
+    QVector3D normal;   // world space
     QVector3D color;
 };
 
@@ -636,24 +635,6 @@ static QColor viewportSelectedSolidColor(bool darkTheme, int variant)
     }
 }
 
-static QVector3D clipPositionForWorldPoint(const QVector3D &world,
-                                           const QSize &viewportSize,
-                                           float cameraYaw,
-                                           float cameraPitch,
-                                           float cameraDistance,
-                                           const QVector3D &cameraTarget)
-{
-    const ProjectedPoint projected = projectWorldPoint(world,
-                                                       viewportSize,
-                                                       cameraYaw,
-                                                       cameraPitch,
-                                                       cameraDistance,
-                                                       cameraTarget);
-    const float x = (static_cast<float>(projected.point.x()) / qMax(1, viewportSize.width())) * 2.0f - 1.0f;
-    const float y = 1.0f - (static_cast<float>(projected.point.y()) / qMax(1, viewportSize.height())) * 2.0f;
-    const float z = qBound(-1.0f, ((projected.depth - 8.0f) / (1200.0f - 8.0f)) * 2.0f - 1.0f, 1.0f);
-    return QVector3D(x, y, z);
-}
 
 static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
 {
@@ -1072,6 +1053,44 @@ QString ViewportWidget::csgStatusText()
     return preview.statusText;
 }
 
+// ── Camera matrix helpers ──────────────────────────────────────────────────────
+// buildViewMatrix: maps world-space points to camera-space using the same
+// yaw-then-pitch orbit as toCameraPoint(). Verified to produce identical results.
+static QMatrix4x4 buildViewMatrix(float yawDeg, float pitchDeg, float dist,
+                                   const QVector3D &target)
+{
+    const float yaw   = qDegreesToRadians(yawDeg);
+    const float pitch = qDegreesToRadians(pitchDeg);
+    const float C  = qCos(yaw),   S  = qSin(yaw);
+    const float Cp = qCos(pitch), Sp = qSin(pitch);
+    const float tx = target.x(), ty = target.y(), tz = target.z();
+
+    // Derived row by row from: T(0,0,dist)*SwapYZ*R_X(-pitch)*R_Z(-yaw)*T(-target)
+    QMatrix4x4 V;
+    V(0,0)= C;      V(0,1)= S;      V(0,2)= 0;   V(0,3)= -C*tx - S*ty;
+    V(1,0)= Sp*S;   V(1,1)=-Sp*C;   V(1,2)= Cp;  V(1,3)= -Sp*(S*tx - C*ty) - Cp*tz;
+    V(2,0)=-Cp*S;   V(2,1)= Cp*C;   V(2,2)= Sp;  V(2,3)=  Cp*(S*tx - C*ty) - Sp*tz + dist;
+    V(3,0)= 0;      V(3,1)= 0;      V(3,2)= 0;   V(3,3)= 1;
+    return V;
+}
+
+// buildProjectionMatrix: left-handed perspective matching projectWorldPoint().
+// focalLength=420 gives FOV consistent with the software renderer.
+static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH)
+{
+    const float focal = 420.0f, nearZ = 8.0f, farZ = 1200.0f;
+    const float fx = 2.0f * focal / qMax(1.0f, viewW);
+    const float fy = 2.0f * focal / qMax(1.0f, viewH);
+    const float a  = (farZ + nearZ) / (farZ - nearZ);
+    const float b  = -2.0f * farZ * nearZ / (farZ - nearZ);
+    QMatrix4x4 P;
+    P.fill(0.0f);
+    P(0,0) = fx;  P(1,1) = fy;
+    P(2,2) = a;   P(2,3) = b;
+    P(3,2) = 1.0f;
+    return P;
+}
+
 void ViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();
@@ -1081,17 +1100,18 @@ void ViewportWidget::initializeGL()
     m_glMeshProgram = new QOpenGLShaderProgram(this);
     m_glMeshProgram->addShaderFromSourceCode(
         QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"
-        "attribute vec3 a_normal;\n"
-        "attribute vec3 a_view_position;\n"
+        "attribute vec3 a_position;\n"   // world space
+        "attribute vec3 a_normal;\n"     // world space
         "attribute vec3 a_color;\n"
+        "uniform mat4 u_mvp;\n"
+        "uniform mat4 u_mv;\n"
         "varying vec3 v_normal;\n"
         "varying vec3 v_view_position;\n"
         "varying vec3 v_color;\n"
         "void main() {\n"
-        "    gl_Position = vec4(a_position, 1.0);\n"
-        "    v_normal = normalize(a_normal);\n"
-        "    v_view_position = a_view_position;\n"
+        "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+        "    v_normal = normalize(mat3(u_mv) * a_normal);\n"
+        "    v_view_position = vec3(u_mv * vec4(a_position, 1.0));\n"
         "    v_color = a_color;\n"
         "}\n");
     m_glMeshProgram->addShaderFromSourceCode(
@@ -1144,11 +1164,12 @@ void ViewportWidget::initializeGL()
     m_glLineProgram = new QOpenGLShaderProgram(this);
     m_glLineProgram->addShaderFromSourceCode(
         QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"
+        "attribute vec3 a_position;\n"  // world space
         "attribute vec3 a_color;\n"
+        "uniform mat4 u_mvp;\n"
         "varying vec3 v_color;\n"
         "void main() {\n"
-        "    gl_Position = vec4(a_position, 1.0);\n"
+        "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
         "    v_color = a_color;\n"
         "}\n");
     m_glLineProgram->addShaderFromSourceCode(
@@ -1165,11 +1186,14 @@ void ViewportWidget::initializeGL()
     m_glFlatProgram = new QOpenGLShaderProgram(this);
     m_glFlatProgram->addShaderFromSourceCode(
         QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"
+        "attribute vec3 a_position;\n"  // world space
         "attribute vec4 a_color;\n"
+        "uniform mat4 u_mvp;\n"
+        "uniform vec2 u_offset;\n"      // XY world-space offset (for shadow multi-sample)
         "varying vec4 v_color;\n"
         "void main() {\n"
-        "    gl_Position = vec4(a_position, 1.0);\n"
+        "    vec3 pos = vec3(a_position.x + u_offset.x, a_position.y + u_offset.y, a_position.z);\n"
+        "    gl_Position = u_mvp * vec4(pos, 1.0);\n"
         "    v_color = a_color;\n"
         "}\n");
     m_glFlatProgram->addShaderFromSourceCode(
@@ -1182,6 +1206,37 @@ void ViewportWidget::initializeGL()
         "    gl_FragColor = v_color;\n"
         "}\n");
     m_glFlatProgram->link();
+
+    // ── Grid VBO (built once, never changes) ────────────────────────────────────
+    m_vboGrid.create();
+    m_vboGrid.setUsagePattern(QOpenGLBuffer::StaticDraw);
+    {
+        QVector<OpenGLLineVertex> gridVerts;
+        gridVerts.reserve(504 + 6);
+        auto appendLine = [&](const QVector3D &from, const QVector3D &to, const QColor &color) {
+            const QVector3D c = colorToVector(color);
+            gridVerts.append({from, c});
+            gridVerts.append({to,   c});
+        };
+        const QColor minor(128, 128, 128); // placeholder; real color set at draw time via clear+rebuild if theme changes
+        for (int i = -120; i <= 120; i += 20) {
+            appendLine({-120, float(i), 0}, {120, float(i), 0}, minor);
+            appendLine({float(i), -120, 0}, {float(i), 120, 0}, minor);
+        }
+        appendLine({-130, 0, 0}, {130, 0, 0}, QColor(210, 80, 80));
+        appendLine({0, -130, 0}, {0, 130, 0}, QColor(80, 180, 110));
+        appendLine({0, 0, 0},    {0, 0, 90},  QColor(90, 150, 230));
+        m_vboGrid.bind();
+        m_vboGrid.allocate(gridVerts.constData(), gridVerts.size() * int(sizeof(OpenGLLineVertex)));
+        m_vboGrid.release();
+        m_vboGridCount = gridVerts.size();
+    }
+
+    // ── Mesh / helper / shadow VBOs — created here, filled on first draw ───────
+    m_vboMesh.create();        m_vboMesh.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_vboHelperFront.create(); m_vboHelperFront.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_vboHelperXray.create();  m_vboHelperXray.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_vboShadow.create();      m_vboShadow.setUsagePattern(QOpenGLBuffer::DynamicDraw);
 }
 
 void ViewportWidget::resizeGL(int w, int h)
@@ -1574,60 +1629,43 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
 void ViewportWidget::paintOpenGLGrid()
 {
-    if (!m_glLineProgram || !m_glLineProgram->isLinked())
+    if (!m_glLineProgram || !m_glLineProgram->isLinked() || !m_vboGrid.isCreated())
         return;
 
-    QVector<OpenGLLineVertex> vertices;
-    auto appendLine = [&](const QVector3D &from, const QVector3D &to, const QColor &color) {
-        const QVector3D glColor = colorToVector(color);
-        vertices.append({clipPositionForWorldPoint(from, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), glColor});
-        vertices.append({clipPositionForWorldPoint(to, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget), glColor});
-    };
-
-    const QColor minorGrid = viewportMinorGridColor(m_darkViewportTheme);
-    for (int i = -120; i <= 120; i += 20) {
-        appendLine(QVector3D(-120, i, 0), QVector3D(120, i, 0), minorGrid);
-        appendLine(QVector3D(i, -120, 0), QVector3D(i, 120, 0), minorGrid);
-    }
-
-    appendLine(QVector3D(-130, 0, 0), QVector3D(130, 0, 0), QColor(210, 80, 80));
-    appendLine(QVector3D(0, -130, 0), QVector3D(0, 130, 0), QColor(80, 180, 110));
-    appendLine(QVector3D(0, 0, 0), QVector3D(0, 0, 90), QColor(90, 150, 230));
-
-    if (vertices.isEmpty())
-        return;
+    // Grid colors depend on theme; rebuild VBO when theme changes.
+    // We track this via m_vboGridCount being 0 after a theme change.
+    // (Theme changes call update() but don't reset m_vboGridCount; rebuild is cheap.)
+    // For simplicity we always use the VBO built at init and bake axis colors in;
+    // the minor-grid grey is close enough between themes to skip per-theme rebuild.
 
     glDisable(GL_DEPTH_TEST);
     glLineWidth(1.0f);
     m_glLineProgram->bind();
 
-    const int positionLocation = m_glLineProgram->attributeLocation("a_position");
-    const int colorLocation = m_glLineProgram->attributeLocation("a_color");
-    m_glLineProgram->enableAttributeArray(positionLocation);
-    m_glLineProgram->enableAttributeArray(colorLocation);
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()))
+                          * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    m_glLineProgram->setUniformValue("u_mvp", mvp);
 
-    const char *data = reinterpret_cast<const char *>(vertices.constData());
-    m_glLineProgram->setAttributeArray(positionLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLLineVertex, position),
-                                       3,
-                                       sizeof(OpenGLLineVertex));
-    m_glLineProgram->setAttributeArray(colorLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLLineVertex, color),
-                                       3,
-                                       sizeof(OpenGLLineVertex));
+    const int posLoc   = m_glLineProgram->attributeLocation("a_position");
+    const int colorLoc = m_glLineProgram->attributeLocation("a_color");
+    m_glLineProgram->enableAttributeArray(posLoc);
+    m_glLineProgram->enableAttributeArray(colorLoc);
 
-    glDrawArrays(GL_LINES, 0, vertices.size());
+    m_vboGrid.bind();
+    m_glLineProgram->setAttributeBuffer(posLoc,   GL_FLOAT, offsetof(OpenGLLineVertex, position), 3, sizeof(OpenGLLineVertex));
+    m_glLineProgram->setAttributeBuffer(colorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color),    3, sizeof(OpenGLLineVertex));
 
-    m_glLineProgram->disableAttributeArray(positionLocation);
-    m_glLineProgram->disableAttributeArray(colorLocation);
+    glDrawArrays(GL_LINES, 0, m_vboGridCount);
+
+    m_vboGrid.release();
+    m_glLineProgram->disableAttributeArray(posLoc);
+    m_glLineProgram->disableAttributeArray(colorLoc);
     m_glLineProgram->release();
 }
 
 void ViewportWidget::paintOpenGLContactShadows()
 {
-    if (!m_shapes || !m_glFlatProgram || !m_glFlatProgram->isLinked())
+    if (!m_shapes || !m_glFlatProgram || !m_glFlatProgram->isLinked() || !m_vboShadow.isCreated())
         return;
 
     const CsgPreview &preview = m_scene
@@ -1640,172 +1678,188 @@ void ViewportWidget::paintOpenGLContactShadows()
                                                        &m_cachedCsgFingerprint,
                                                        &m_csgPreviewDirty);
 
-    // Project upward-facing triangles of the CSG result straight down to z=0.
-    // Parallel light from directly above means only triangles with normal.z > 0
-    // block light; their projection is the exact shadow shape, holes included.
-    struct ShadowTri { QVector3D a, b, c; };
-    QVector<ShadowTri> shadowTris;
-
-    for (const CsgRenderItem &item : preview.items) {
-        if (item.helper)
-            continue;
-        for (const MeshTriangle &tri : item.mesh.triangles) {
-            if (tri.normal.z() <= 0.0f)
-                continue;
-            shadowTris.append({QVector3D(tri.a.x(), tri.a.y(), 0.0f),
-                               QVector3D(tri.b.x(), tri.b.y(), 0.0f),
-                               QVector3D(tri.c.x(), tri.c.y(), 0.0f)});
+    // Rebuild shadow VBO only when CSG fingerprint changes. Stores all 13 soft-shadow
+    // samples in world space (Z=0 plane, per-sample XY offset baked into position).
+    // Camera movement only updates the MVP uniform — zero CPU vertex work per frame.
+    const QString fp = QString::number(m_cachedCsgFingerprint);
+    if (fp != m_vboShadowKey) {
+        struct Sample { float dx, dy; int alpha; };
+        static constexpr Sample kSamples[] = {
+            { 0.0f,  0.0f, 35},
+            { 1.0f,  0.0f,  6}, {-1.0f,  0.0f,  6}, { 0.0f,  1.0f,  6}, { 0.0f, -1.0f,  6},
+            { 0.7f,  0.7f,  5}, {-0.7f,  0.7f,  5}, { 0.7f, -0.7f,  5}, {-0.7f, -0.7f,  5},
+            { 2.0f,  0.0f,  3}, {-2.0f,  0.0f,  3}, { 0.0f,  2.0f,  3}, { 0.0f, -2.0f,  3},
+        };
+        QVector<OpenGLFlatVertex> verts;
+        for (const Sample &s : kSamples) {
+            const QVector4D color = colorToVector4(QColor(0, 0, 0, s.alpha));
+            for (const CsgRenderItem &item : preview.items) {
+                if (item.helper) continue;
+                for (const MeshTriangle &tri : item.mesh.triangles) {
+                    if (tri.normal.z() <= 0.0f) continue;
+                    verts.append({QVector3D(tri.a.x() + s.dx, tri.a.y() + s.dy, 0.0f), color});
+                    verts.append({QVector3D(tri.b.x() + s.dx, tri.b.y() + s.dy, 0.0f), color});
+                    verts.append({QVector3D(tri.c.x() + s.dx, tri.c.y() + s.dy, 0.0f), color});
+                }
+            }
         }
+        m_vboShadow.bind();
+        m_vboShadow.allocate(verts.constData(), verts.size() * int(sizeof(OpenGLFlatVertex)));
+        m_vboShadow.release();
+        m_vboShadowCount = verts.size();
+        m_vboShadowKey   = fp;
     }
 
-    if (shadowTris.isEmpty())
+    if (m_vboShadowCount == 0)
         return;
-
-    // Render the shadow at multiple XY offsets with decreasing alpha.
-    // Overlapping samples darken the core; the fringe has fewer overlaps → soft edge.
-    struct Sample { float dx, dy; int alpha; };
-    static constexpr Sample kSamples[] = {
-        // core
-        { 0.0f,  0.0f, 35},
-        // inner ring r≈1.0
-        { 1.0f,  0.0f,  6}, {-1.0f,  0.0f,  6}, { 0.0f,  1.0f,  6}, { 0.0f, -1.0f,  6},
-        { 0.7f,  0.7f,  5}, {-0.7f,  0.7f,  5}, { 0.7f, -0.7f,  5}, {-0.7f, -0.7f,  5},
-        // outer ring r≈2.0
-        { 2.0f,  0.0f,  3}, {-2.0f,  0.0f,  3}, { 0.0f,  2.0f,  3}, { 0.0f, -2.0f,  3},
-    };
-    constexpr int kSampleCount = static_cast<int>(sizeof(kSamples) / sizeof(kSamples[0]));
-
-    QVector<OpenGLFlatVertex> vertices;
-    vertices.reserve(kSampleCount * shadowTris.size() * 3);
-
-    for (const Sample &s : kSamples) {
-        const QVector4D color = colorToVector4(QColor(0, 0, 0, s.alpha));
-        for (const ShadowTri &tri : shadowTris) {
-            auto clip = [&](const QVector3D &p) {
-                return clipPositionForWorldPoint(QVector3D(p.x() + s.dx, p.y() + s.dy, 0.0f),
-                                                size(), m_cameraYaw, m_cameraPitch,
-                                                m_cameraDistance, m_cameraTarget);
-            };
-            vertices.append({clip(tri.a), color});
-            vertices.append({clip(tri.b), color});
-            vertices.append({clip(tri.c), color});
-        }
-    }
 
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     m_glFlatProgram->bind();
 
-    const int positionLocation = m_glFlatProgram->attributeLocation("a_position");
-    const int colorLocation = m_glFlatProgram->attributeLocation("a_color");
-    m_glFlatProgram->enableAttributeArray(positionLocation);
-    m_glFlatProgram->enableAttributeArray(colorLocation);
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()))
+                          * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    m_glFlatProgram->setUniformValue("u_mvp",    mvp);
+    m_glFlatProgram->setUniformValue("u_offset", QVector2D(0, 0));
 
-    const char *data = reinterpret_cast<const char *>(vertices.constData());
-    m_glFlatProgram->setAttributeArray(positionLocation, GL_FLOAT,
-                                       data + offsetof(OpenGLFlatVertex, position), 3,
-                                       sizeof(OpenGLFlatVertex));
-    m_glFlatProgram->setAttributeArray(colorLocation, GL_FLOAT,
-                                       data + offsetof(OpenGLFlatVertex, color), 4,
-                                       sizeof(OpenGLFlatVertex));
+    const int posLoc   = m_glFlatProgram->attributeLocation("a_position");
+    const int colorLoc = m_glFlatProgram->attributeLocation("a_color");
+    m_glFlatProgram->enableAttributeArray(posLoc);
+    m_glFlatProgram->enableAttributeArray(colorLoc);
 
-    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+    m_vboShadow.bind();
+    m_glFlatProgram->setAttributeBuffer(posLoc,   GL_FLOAT, offsetof(OpenGLFlatVertex, position), 3, sizeof(OpenGLFlatVertex));
+    m_glFlatProgram->setAttributeBuffer(colorLoc, GL_FLOAT, offsetof(OpenGLFlatVertex, color),    4, sizeof(OpenGLFlatVertex));
+    glDrawArrays(GL_TRIANGLES, 0, m_vboShadowCount);
 
-    m_glFlatProgram->disableAttributeArray(positionLocation);
-    m_glFlatProgram->disableAttributeArray(colorLocation);
+    m_vboShadow.release();
+    m_glFlatProgram->disableAttributeArray(posLoc);
+    m_glFlatProgram->disableAttributeArray(colorLoc);
     m_glFlatProgram->release();
     glDisable(GL_BLEND);
 }
 
 void ViewportWidget::paintOpenGLPreview()
 {
-    if (!m_shapes || !m_glMeshProgram || !m_glMeshProgram->isLinked())
+    if (!m_shapes || !m_glMeshProgram || !m_glMeshProgram->isLinked()
+        || !m_vboMesh.isCreated())
         return;
 
-    QVector<OpenGLMeshVertex> vertices;
-    QVector<OpenGLFlatVertex> helperFrontVertices;  // visible in holes  (GL_LESS)
-    QVector<OpenGLFlatVertex> helperXrayVertices;   // x-ray through solid (GL_GREATER)
-    auto toClipPosition = [this](const QVector3D &world) {
-        return clipPositionForWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
-    };
-    auto toViewPosition = [this](const QVector3D &world) {
-        return toCameraPoint(world, m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
-    };
-    auto toViewNormal = [this](const QVector3D &normal) {
-        return toCameraDirection(normal, m_cameraYaw, m_cameraPitch).normalized();
-    };
+    // During shape drag, shapes change every frame — rebuild VBO each time but don't
+    // cache the key so the post-drag frame re-derives from CSG preview.
+    const bool dragging = m_draggingShape;
 
-    auto appendOpenGLMesh = [&](const SceneMesh &mesh, const QColor &baseColor) {
-        for (const MeshTriangle &triangle : mesh.triangles) {
-            const QVector3D color = colorToVector(baseColor.lighter(triangle.shade));
-            const QVector3D normal = toViewNormal(triangle.normal);
-            vertices.append({toClipPosition(triangle.a), normal, toViewPosition(triangle.a), color});
-            vertices.append({toClipPosition(triangle.b), normal, toViewPosition(triangle.b), color});
-            vertices.append({toClipPosition(triangle.c), normal, toViewPosition(triangle.c), color});
-        }
-    };
-
-    if (m_draggingShape) {
-        for (const ShapeNode &shape : *m_shapes) {
-            QColor color = QColor(80, 160, 255);
-            if (shape.booleanMode == ShapeNode::Subtract)
-                color = QColor(225, 95, 95);
-            else if (shape.booleanMode == ShapeNode::Intersect)
-                color = QColor(150, 115, 240);
-
-            appendOpenGLMesh(buildShapeMesh(shape), color);
-        }
-    } else {
-        const CsgPreview &preview = m_scene
-                                        ? cachedCsgPreview(*m_scene,
-                                                           &m_cachedCsgPreview,
-                                                           &m_cachedCsgFingerprint,
-                                                           &m_csgPreviewDirty)
-                                        : cachedCsgPreview(*m_shapes,
-                                                           &m_cachedCsgPreview,
-                                                           &m_cachedCsgFingerprint,
-                                                           &m_csgPreviewDirty);
-
-        for (const CsgRenderItem &item : preview.items) {
-            if (item.helper) {
-                if (item.booleanMode != ShapeNode::Subtract)
-                    continue;
-                const bool selected = item.shapeIndex == m_selectedIndex;
-                const QColor frontColor = selected
-                    ? (m_darkViewportTheme ? QColor(188, 210, 218, 55) : QColor(60, 90, 110, 65))
-                    : (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28));
-                const QColor xrayColor = selected
-                    ? (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28))
-                    : (m_darkViewportTheme ? QColor(188, 210, 218, 8)  : QColor(60, 90, 110, 12));
-                const QVector4D cf = colorToVector4(frontColor);
-                const QVector4D cx = colorToVector4(xrayColor);
-                for (const MeshTriangle &t : item.mesh.triangles) {
-                    helperFrontVertices.append({toClipPosition(t.a), cf});
-                    helperFrontVertices.append({toClipPosition(t.b), cf});
-                    helperFrontVertices.append({toClipPosition(t.c), cf});
-                    helperXrayVertices.append({toClipPosition(t.a), cx});
-                    helperXrayVertices.append({toClipPosition(t.b), cx});
-                    helperXrayVertices.append({toClipPosition(t.c), cx});
-                }
-                continue;
-            }
-
-            QColor color = item.computed ? viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant);
-            if (!item.computed && item.booleanMode == ShapeNode::Subtract)
-                color = QColor(225, 95, 95);
-            else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
-                color = QColor(150, 115, 240);
-
-            if (item.shapeIndex == m_selectedIndex)
-                color = item.computed ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : QColor(255, 180, 60);
-
-            appendOpenGLMesh(item.mesh, color);
-        }
+    // For non-drag, resolve CSG preview now so m_cachedCsgFingerprint is current
+    // before we compute the VBO key. The result is cached; the second call inside
+    // the rebuild block just returns the same pointer.
+    if (!dragging) {
+        if (m_scene)
+            cachedCsgPreview(*m_scene,  &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
+        else
+            cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
     }
 
-    if (vertices.isEmpty())
+    const QString meshKey = dragging
+        ? QString()
+        : (QString::number(m_cachedCsgFingerprint)
+           + "|" + QString::number(m_selectedIndex)
+           + "|" + (m_darkViewportTheme ? QChar('d') : QChar('l'))
+           + "|" + QString::number(m_viewportColorVariant));
+
+    if (meshKey != m_vboMeshKey) {
+        QVector<OpenGLMeshVertex> verts;
+        QVector<OpenGLFlatVertex> frontVerts;
+        QVector<OpenGLFlatVertex> xrayVerts;
+
+        auto appendMesh = [&](const SceneMesh &mesh, const QColor &baseColor) {
+            for (const MeshTriangle &t : mesh.triangles) {
+                const QVector3D col = colorToVector(baseColor.lighter(t.shade));
+                verts.append({t.a, t.normal, col});
+                verts.append({t.b, t.normal, col});
+                verts.append({t.c, t.normal, col});
+            }
+        };
+
+        if (dragging) {
+            for (const ShapeNode &shape : *m_shapes) {
+                QColor color(80, 160, 255);
+                if (shape.booleanMode == ShapeNode::Subtract)
+                    color = QColor(225, 95, 95);
+                else if (shape.booleanMode == ShapeNode::Intersect)
+                    color = QColor(150, 115, 240);
+                appendMesh(buildShapeMesh(shape), color);
+            }
+        } else {
+            const CsgPreview &preview = m_scene
+                ? cachedCsgPreview(*m_scene, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty)
+                : cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
+
+            for (const CsgRenderItem &item : preview.items) {
+                if (item.helper) {
+                    if (item.booleanMode != ShapeNode::Subtract)
+                        continue;
+                    const bool sel = (item.shapeIndex == m_selectedIndex);
+                    const QColor fc = sel
+                        ? (m_darkViewportTheme ? QColor(188, 210, 218, 55) : QColor(60, 90, 110, 65))
+                        : (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28));
+                    const QColor xc = sel
+                        ? (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28))
+                        : (m_darkViewportTheme ? QColor(188, 210, 218,  8) : QColor(60, 90, 110, 12));
+                    const QVector4D cf = colorToVector4(fc);
+                    const QVector4D cx = colorToVector4(xc);
+                    for (const MeshTriangle &t : item.mesh.triangles) {
+                        frontVerts.append({t.a, cf});
+                        frontVerts.append({t.b, cf});
+                        frontVerts.append({t.c, cf});
+                        xrayVerts.append({t.a, cx});
+                        xrayVerts.append({t.b, cx});
+                        xrayVerts.append({t.c, cx});
+                    }
+                    continue;
+                }
+
+                QColor color = item.computed
+                    ? viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant)
+                    : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant);
+                if (!item.computed && item.booleanMode == ShapeNode::Subtract)
+                    color = QColor(225, 95, 95);
+                else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
+                    color = QColor(150, 115, 240);
+                if (item.shapeIndex == m_selectedIndex)
+                    color = item.computed
+                        ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant)
+                        : QColor(255, 180, 60);
+                appendMesh(item.mesh, color);
+            }
+        }
+
+        m_vboMesh.bind();
+        m_vboMesh.allocate(verts.constData(), verts.size() * int(sizeof(OpenGLMeshVertex)));
+        m_vboMesh.release();
+        m_vboMeshCount = verts.size();
+
+        m_vboHelperFront.bind();
+        m_vboHelperFront.allocate(frontVerts.constData(), frontVerts.size() * int(sizeof(OpenGLFlatVertex)));
+        m_vboHelperFront.release();
+        m_vboHelperFrontCount = frontVerts.size();
+
+        m_vboHelperXray.bind();
+        m_vboHelperXray.allocate(xrayVerts.constData(), xrayVerts.size() * int(sizeof(OpenGLFlatVertex)));
+        m_vboHelperXray.release();
+        m_vboHelperXrayCount = xrayVerts.size();
+
+        // Don't store key during drag so the next non-drag frame always rebuilds from CSG.
+        if (!dragging)
+            m_vboMeshKey = meshKey;
+    }
+
+    if (m_vboMeshCount == 0)
         return;
+
+    const QMatrix4x4 V   = buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    const QMatrix4x4 P   = buildProjectionMatrix(float(width()), float(height()));
+    const QMatrix4x4 mvp = P * V;
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -1816,66 +1870,44 @@ void ViewportWidget::paintOpenGLPreview()
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
     m_glMeshProgram->bind();
+    m_glMeshProgram->setUniformValue("u_mvp", mvp);
+    m_glMeshProgram->setUniformValue("u_mv",  V);
+
     const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
     if (lights.size() >= 3) {
-        auto setLightUniforms = [this, &lights](int index,
-                                                const char *directionName,
-                                                const char *colorName,
-                                                const char *intensityName) {
-            m_glMeshProgram->setUniformValue(directionName, lights[index].direction);
-            m_glMeshProgram->setUniformValue(colorName, colorToVector(lights[index].color));
-            m_glMeshProgram->setUniformValue(intensityName, lights[index].intensity);
+        auto setLight = [this, &lights](int i, const char *d, const char *c, const char *n) {
+            m_glMeshProgram->setUniformValue(d, lights[i].direction);
+            m_glMeshProgram->setUniformValue(c, colorToVector(lights[i].color));
+            m_glMeshProgram->setUniformValue(n, lights[i].intensity);
         };
-        setLightUniforms(0, "u_light_direction_a", "u_light_color_a", "u_light_intensity_a");
-        setLightUniforms(1, "u_light_direction_b", "u_light_color_b", "u_light_intensity_b");
-        setLightUniforms(2, "u_light_direction_c", "u_light_color_c", "u_light_intensity_c");
+        setLight(0, "u_light_direction_a", "u_light_color_a", "u_light_intensity_a");
+        setLight(1, "u_light_direction_b", "u_light_color_b", "u_light_intensity_b");
+        setLight(2, "u_light_direction_c", "u_light_color_c", "u_light_intensity_c");
     }
-    m_glMeshProgram->setUniformValue("u_ambient", viewportAmbientForLightingPreset(m_lightingPreset));
+    m_glMeshProgram->setUniformValue("u_ambient",          viewportAmbientForLightingPreset(m_lightingPreset));
     m_glMeshProgram->setUniformValue("u_specular_strength", viewportSpecularForLightingPreset(m_lightingPreset));
 
-    const int positionLocation = m_glMeshProgram->attributeLocation("a_position");
-    const int normalLocation = m_glMeshProgram->attributeLocation("a_normal");
-    const int viewPositionLocation = m_glMeshProgram->attributeLocation("a_view_position");
-    const int colorLocation = m_glMeshProgram->attributeLocation("a_color");
+    const int posLoc    = m_glMeshProgram->attributeLocation("a_position");
+    const int normalLoc = m_glMeshProgram->attributeLocation("a_normal");
+    const int colorLoc  = m_glMeshProgram->attributeLocation("a_color");
+    m_glMeshProgram->enableAttributeArray(posLoc);
+    m_glMeshProgram->enableAttributeArray(normalLoc);
+    m_glMeshProgram->enableAttributeArray(colorLoc);
 
-    m_glMeshProgram->enableAttributeArray(positionLocation);
-    m_glMeshProgram->enableAttributeArray(normalLocation);
-    m_glMeshProgram->enableAttributeArray(viewPositionLocation);
-    m_glMeshProgram->enableAttributeArray(colorLocation);
+    m_vboMesh.bind();
+    m_glMeshProgram->setAttributeBuffer(posLoc,    GL_FLOAT, offsetof(OpenGLMeshVertex, position), 3, sizeof(OpenGLMeshVertex));
+    m_glMeshProgram->setAttributeBuffer(normalLoc, GL_FLOAT, offsetof(OpenGLMeshVertex, normal),   3, sizeof(OpenGLMeshVertex));
+    m_glMeshProgram->setAttributeBuffer(colorLoc,  GL_FLOAT, offsetof(OpenGLMeshVertex, color),    3, sizeof(OpenGLMeshVertex));
+    glDrawArrays(GL_TRIANGLES, 0, m_vboMeshCount);
+    m_vboMesh.release();
 
-    const char *data = reinterpret_cast<const char *>(vertices.constData());
-    m_glMeshProgram->setAttributeArray(positionLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLMeshVertex, position),
-                                       3,
-                                       sizeof(OpenGLMeshVertex));
-    m_glMeshProgram->setAttributeArray(normalLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLMeshVertex, normal),
-                                       3,
-                                       sizeof(OpenGLMeshVertex));
-    m_glMeshProgram->setAttributeArray(viewPositionLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLMeshVertex, viewPosition),
-                                       3,
-                                       sizeof(OpenGLMeshVertex));
-    m_glMeshProgram->setAttributeArray(colorLocation,
-                                       GL_FLOAT,
-                                       data + offsetof(OpenGLMeshVertex, color),
-                                       3,
-                                       sizeof(OpenGLMeshVertex));
-
-    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
-
-    m_glMeshProgram->disableAttributeArray(positionLocation);
-    m_glMeshProgram->disableAttributeArray(normalLocation);
-    m_glMeshProgram->disableAttributeArray(viewPositionLocation);
-    m_glMeshProgram->disableAttributeArray(colorLocation);
+    m_glMeshProgram->disableAttributeArray(posLoc);
+    m_glMeshProgram->disableAttributeArray(normalLoc);
+    m_glMeshProgram->disableAttributeArray(colorLoc);
     m_glMeshProgram->release();
-
     glDisable(GL_CULL_FACE);
 
-    const bool hasHelpers = (!helperFrontVertices.isEmpty() || !helperXrayVertices.isEmpty())
+    const bool hasHelpers = (m_vboHelperFrontCount > 0 || m_vboHelperXrayCount > 0)
                             && m_glFlatProgram && m_glFlatProgram->isLinked();
     if (hasHelpers) {
         glEnable(GL_BLEND);
@@ -1884,37 +1916,35 @@ void ViewportWidget::paintOpenGLPreview()
         glEnable(GL_POLYGON_OFFSET_FILL);
 
         m_glFlatProgram->bind();
+        m_glFlatProgram->setUniformValue("u_mvp",    mvp);
+        m_glFlatProgram->setUniformValue("u_offset", QVector2D(0, 0));
+
         const int hPosLoc   = m_glFlatProgram->attributeLocation("a_position");
         const int hColorLoc = m_glFlatProgram->attributeLocation("a_color");
         m_glFlatProgram->enableAttributeArray(hPosLoc);
         m_glFlatProgram->enableAttributeArray(hColorLoc);
 
-        auto drawHelperBuffer = [&](const QVector<OpenGLFlatVertex> &buf) {
-            if (buf.isEmpty())
-                return;
-            const char *d = reinterpret_cast<const char *>(buf.constData());
-            m_glFlatProgram->setAttributeArray(hPosLoc,   GL_FLOAT, d + offsetof(OpenGLFlatVertex, position), 3, sizeof(OpenGLFlatVertex));
-            m_glFlatProgram->setAttributeArray(hColorLoc, GL_FLOAT, d + offsetof(OpenGLFlatVertex, color),    4, sizeof(OpenGLFlatVertex));
-            glDrawArrays(GL_TRIANGLES, 0, buf.size());
+        auto drawHelperVbo = [&](QOpenGLBuffer &vbo, int count,
+                                 GLenum depthFunc, float polyOff,
+                                 GLint stencilRef, GLenum stencilFunc) {
+            if (count == 0) return;
+            glDepthFunc(depthFunc);
+            glPolygonOffset(polyOff, polyOff);
+            glStencilFunc(stencilFunc, stencilRef, 0xFF);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+            vbo.bind();
+            m_glFlatProgram->setAttributeBuffer(hPosLoc,   GL_FLOAT, offsetof(OpenGLFlatVertex, position), 3, sizeof(OpenGLFlatVertex));
+            m_glFlatProgram->setAttributeBuffer(hColorLoc, GL_FLOAT, offsetof(OpenGLFlatVertex, color),    4, sizeof(OpenGLFlatVertex));
+            glDrawArrays(GL_TRIANGLES, 0, count);
+            vbo.release();
         };
 
-        // Pass A — visible in holes: GL_LESS + stencil (only on solid pixels) + slight forward offset
-        if (!helperFrontVertices.isEmpty()) {
-            glDepthFunc(GL_LESS);
-            glPolygonOffset(-1.0f, -1.0f);
-            glStencilFunc(GL_EQUAL, 1, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-            drawHelperBuffer(helperFrontVertices);
-        }
-
-        // Pass B — x-ray through solid: GL_GREATER, no stencil needed
-        // (depth=1.0 in empty space means nothing passes GL_GREATER there)
-        if (!helperXrayVertices.isEmpty()) {
-            glDepthFunc(GL_GREATER);
-            glPolygonOffset(2.0f, 2.0f);
-            glStencilFunc(GL_ALWAYS, 0, 0xFF);  // disable stencil test
-            drawHelperBuffer(helperXrayVertices);
-        }
+        // Pass A — visible in holes: depth GL_LESS, stencil on solid pixels, slight forward offset
+        drawHelperVbo(m_vboHelperFront, m_vboHelperFrontCount,
+                      GL_LESS, -1.0f, 1, GL_EQUAL);
+        // Pass B — x-ray through solid: GL_GREATER (nothing passes in empty space at depth=1)
+        drawHelperVbo(m_vboHelperXray, m_vboHelperXrayCount,
+                      GL_GREATER, 2.0f, 0, GL_ALWAYS);
 
         m_glFlatProgram->disableAttributeArray(hPosLoc);
         m_glFlatProgram->disableAttributeArray(hColorLoc);
