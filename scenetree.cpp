@@ -2,6 +2,43 @@
 
 #include <functional>
 
+namespace {
+
+bool isValidIdentifier(const QString &name)
+{
+    if (name.isEmpty())
+        return false;
+
+    const QChar first = name.front();
+    if (!(first == QLatin1Char('_') || first.isLetter()))
+        return false;
+
+    for (const QChar ch : name) {
+        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
+            return false;
+    }
+
+    return true;
+}
+
+bool moduleNameExists(const SceneTree::TreeNode &node, const QString &name, int ignoredNodeId)
+{
+    if (node.type == SceneTree::TreeNode::Group
+        && node.operation == SceneTree::TreeNode::Module
+        && node.id != ignoredNodeId
+        && node.moduleName == name)
+        return true;
+
+    for (const SceneTree::TreeNode &child : node.children) {
+        if (moduleNameExists(child, name, ignoredNodeId))
+            return true;
+    }
+
+    return false;
+}
+
+} // namespace
+
 SceneTree::SceneTree()
 {
     m_root = makeGroupNode(TreeNode::Module);
@@ -72,7 +109,8 @@ bool SceneTree::removeGroupById(int groupId)
     return removed;
 }
 
-int SceneTree::addVariable(const QString &name, const QString &expression, qreal value, int insertIndex)
+int SceneTree::addVariable(const QString &name, const QString &expression, qreal value,
+                           int parentGroupId, bool isParameter, int insertIndex)
 {
     if (m_root.id <= 0)
         m_root = makeGroupNode(TreeNode::Module);
@@ -80,13 +118,41 @@ int SceneTree::addVariable(const QString &name, const QString &expression, qreal
     if (name.trimmed().isEmpty() || expression.trimmed().isEmpty())
         return 0;
 
+    TreeNode *parent = parentGroupId > 0 ? nodeById(&m_root, parentGroupId) : &m_root;
+    if (!parent || parent->type != TreeNode::Group)
+        return 0;
+
     TreeNode variable = makeVariableNode(name.trimmed(), expression.trimmed(), value);
+    variable.isParameter = isParameter;
     const int variableId = variable.id;
     const int boundedIndex = insertIndex < 0
-                                 ? m_root.children.size()
-                                 : qBound(0, insertIndex, m_root.children.size());
-    m_root.children.insert(boundedIndex, variable);
+                                 ? parent->children.size()
+                                 : qBound(0, insertIndex, parent->children.size());
+    parent->children.insert(boundedIndex, variable);
     return variableId;
+}
+
+bool SceneTree::setModuleName(int groupId, const QString &name)
+{
+    TreeNode *node = nodeById(groupId > 0 ? groupId : m_root.id);
+    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::Module)
+        return false;
+    const QString trimmed = name.trimmed();
+    if (!isValidIdentifier(trimmed))
+        return false;
+    if (moduleNameExists(m_root, trimmed, node->id))
+        return false;
+    node->moduleName = trimmed;
+    return true;
+}
+
+bool SceneTree::setVariableIsParameter(int variableId, bool isParameter)
+{
+    TreeNode *node = nodeById(variableId);
+    if (!node || node->type != TreeNode::Variable)
+        return false;
+    node->isParameter = isParameter;
+    return true;
 }
 
 bool SceneTree::removeVariableById(int variableId)
@@ -113,7 +179,10 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
     const TreeNode *node = nodeById(&m_root, nodeId);
     if (!node || containsNodeId(*node, parentGroupId))
         return false;
-    if (node->type == TreeNode::Variable && targetParent != &m_root)
+    // Variables may only live at root or directly inside a Module node.
+    if (node->type == TreeNode::Variable
+        && targetParent != &m_root
+        && targetParent->operation != TreeNode::Module)
         return false;
 
     QVector3D sourceParentWorldPosition;
@@ -135,6 +204,9 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
         m_root.children.append(movedNode);
         return false;
     }
+
+    if (movedNode.type == TreeNode::Variable)
+        movedNode.isParameter = targetParent != &m_root && targetParent->operation == TreeNode::Module;
 
     const int boundedIndex = insertIndex < 0
                                  ? targetParent->children.size()
@@ -499,6 +571,9 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
     node.id = m_nextNodeId++;
     node.type = TreeNode::Group;
     node.operation = operation;
+    // Root module keeps the default "scene_model"; new user-added modules get unique auto-names.
+    if (operation == TreeNode::Module && node.id > 1)
+        node.moduleName = QString("module_%1").arg(node.id);
     return node;
 }
 

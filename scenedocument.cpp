@@ -284,7 +284,18 @@ bool SceneDocument::removeGroupById(int groupId)
 
 int SceneDocument::addVariable(int insertIndex)
 {
-    return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0, insertIndex);
+    return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0, 0, false, insertIndex);
+}
+
+int SceneDocument::addVariableToModule(int moduleGroupId, int insertIndex)
+{
+    return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0,
+                              moduleGroupId, true, insertIndex);
+}
+
+bool SceneDocument::setModuleName(int groupId, const QString &name)
+{
+    return m_tree.setModuleName(groupId, name);
 }
 
 bool SceneDocument::removeVariableById(int variableId)

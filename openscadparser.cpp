@@ -41,6 +41,23 @@ static bool parseReal(const QString &text, qreal *value)
     return true;
 }
 
+static bool isValidIdentifier(const QString &name)
+{
+    if (name.isEmpty())
+        return false;
+
+    const QChar first = name.front();
+    if (!(first == QLatin1Char('_') || first.isLetter()))
+        return false;
+
+    for (const QChar ch : name) {
+        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
+            return false;
+    }
+
+    return true;
+}
+
 static bool parseVector3Value(const QString &text, QVector3D *vector)
 {
     const QStringList parts = text.split(',');
@@ -178,16 +195,34 @@ static SceneDocument::TreeNode makePrimitiveNode(const ShapeNode &shape, ParserS
     return node;
 }
 
-static bool isRootModuleLine(const QString &line)
+// Matches: module <name>(<optional params>) {
+// Captures: [1]=name, [2]=params content (may be empty)
+static bool isModuleDefinitionLine(const QString &line, QString *name, QString *params)
 {
-    static const QRegularExpression regex("^module\\s+scene_model\\s*\\(\\s*\\)\\s*\\{\\s*$");
-    return regex.match(line).hasMatch();
+    static const QRegularExpression regex(
+        "^module\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*\\{\\s*$");
+    const auto m = regex.match(line);
+    if (!m.hasMatch())
+        return false;
+    if (name)   *name   = m.captured(1).trimmed();
+    if (params) *params = m.captured(2).trimmed();
+    return true;
 }
 
-static bool isSceneModelCallLine(const QString &line)
+// Matches any top-level call: <ident>(<args>);
+static bool isModuleCallLine(const QString &line)
 {
-    static const QRegularExpression regex("^scene_model\\s*\\(\\s*\\)\\s*;\\s*$");
-    return regex.match(line).hasMatch();
+    static const QRegularExpression regex("^([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^)]*\\)\\s*;\\s*$");
+    const QRegularExpressionMatch match = regex.match(line);
+    if (!match.hasMatch())
+        return false;
+
+    static const QStringList reservedCalls = {
+        QStringLiteral("cube"),
+        QStringLiteral("sphere"),
+        QStringLiteral("cylinder")
+    };
+    return !reservedCalls.contains(match.captured(1));
 }
 
 static bool parseOperationLine(const QString &line,
@@ -448,16 +483,18 @@ static bool parseBlock(ParserState *state,
         if (line == QStringLiteral("}"))
             return stopAtBrace;
 
-        if (isSceneModelCallLine(line))
+        // Skip module call lines (e.g. "scene_model();" or "my_module();").
+        if (isModuleCallLine(line))
             continue;
 
         // ── Variable assignment ───────────────────────────────────────────
         QString variableName, variableExpression, variableError;
         qreal variableValue = 0.0;
         if (parseVariableLine(line, &variableName, &variableExpression, &variableValue, &variableError)) {
-            if (parent->operation != SceneDocument::TreeNode::Module) {
+            if (parent->type == SceneDocument::TreeNode::Group
+                && parent->operation != SceneDocument::TreeNode::Module) {
                 if (errorMessage)
-                    *errorMessage = QStringLiteral("Variables are currently supported only in scene_model() on line %1.").arg(current.number);
+                    *errorMessage = QStringLiteral("Variables must be at top scope or directly inside a module on line %1.").arg(current.number);
                 state->errorLine = current.number;
                 return false;
             }
@@ -592,6 +629,55 @@ bool OpenScadParser::parse(const QString &code, QVector<ShapeNode> *shapes, QStr
     return true;
 }
 
+static bool parseModuleParams(const QString &paramsStr,
+                              SceneDocument::TreeNode *moduleNode,
+                              ParserState *state,
+                              QHash<QString, qreal> *varValues,
+                              QString *errorMessage)
+{
+    if (paramsStr.trimmed().isEmpty())
+        return true;
+
+    const QStringList parts = splitAtTopLevelCommas(paramsStr);
+    for (const QString &part : parts) {
+        const int eq = part.indexOf('=');
+        if (eq < 0) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Module parameters must use name = expression syntax: %1").arg(part.trimmed());
+            return false;
+        }
+
+        const QString name = part.left(eq).trimmed();
+        const QString expr = part.mid(eq + 1).trimmed();
+        if (!isValidIdentifier(name) || expr.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Invalid module parameter: %1").arg(part.trimmed());
+            return false;
+        }
+
+        QString expressionError;
+        if (!ExpressionSyntax::validate(expr, &expressionError)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Invalid module parameter expression for %1: %2").arg(name, expressionError);
+            return false;
+        }
+
+        qreal value = 0.0;
+        if (!ExpressionSyntax::evaluate(expr, *varValues, &value)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Could not evaluate module parameter %1 = %2").arg(name, expr);
+            return false;
+        }
+
+        SceneDocument::TreeNode paramNode = makeVariableNode(name, expr, value, state);
+        paramNode.isParameter = true;
+        (*varValues)[name] = value;
+        moduleNode->children.append(paramNode);
+    }
+
+    return true;
+}
+
 bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *snapshot, QString *errorMessage, int *errorLine)
 {
     if (!snapshot)
@@ -600,27 +686,86 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
     ParserState state;
     state.lines = normalizedLines(code);
 
+    // Root is an implicit top-level container (operation=Module, never emitted directly).
     SceneDocument::TreeNode root = makeGroupNode(SceneDocument::TreeNode::Module, &state);
-    bool hasModuleWrapper = false;
-
-    if (!state.lines.isEmpty() && isRootModuleLine(state.lines.first().text)) {
-        hasModuleWrapper = true;
-        state.index = 1;
-    }
-
-    if (!parseBlock(&state, &root, hasModuleWrapper, errorMessage)) {
-        if (errorLine) *errorLine = state.errorLine;
-        return false;
-    }
 
     while (state.index < state.lines.size()) {
-        const ParsedLine current = state.lines[state.index++];
-        if (!isSceneModelCallLine(current.text)) {
+        const ParsedLine current = state.lines[state.index];
+        const QString &line = current.text;
+
+        // Skip module call lines at any point in the top-level.
+        if (isModuleCallLine(line)) {
+            ++state.index;
+            continue;
+        }
+
+        // Module definition: module name(params) {
+        QString modName, modParams;
+        if (isModuleDefinitionLine(line, &modName, &modParams)) {
+            ++state.index;
+
+            if (!isValidIdentifier(modName)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Invalid module name on line %1: %2").arg(current.number).arg(modName);
+                if (errorLine) *errorLine = current.number;
+                return false;
+            }
+
+            // The generated legacy/main scene_model wrapper is the implicit document root.
+            // Keeping it implicit preserves UI -> code -> UI tree structure.
+            if (modName == QStringLiteral("scene_model") && modParams.trimmed().isEmpty()) {
+                if (!parseBlock(&state, &root, true, errorMessage)) {
+                    if (errorLine) *errorLine = state.errorLine;
+                    return false;
+                }
+                continue;
+            }
+
+            const QHash<QString, qreal> outerVariables = state.variableValues;
+            SceneDocument::TreeNode moduleNode = makeGroupNode(SceneDocument::TreeNode::Module, &state);
+            moduleNode.moduleName = modName;
+
+            if (!parseModuleParams(modParams, &moduleNode, &state, &state.variableValues, errorMessage)) {
+                if (errorLine) *errorLine = current.number;
+                state.variableValues = outerVariables;
+                return false;
+            }
+
+            if (!parseBlock(&state, &moduleNode, true, errorMessage)) {
+                if (errorLine) *errorLine = state.errorLine;
+                state.variableValues = outerVariables;
+                return false;
+            }
+
+            state.variableValues = outerVariables;
+            root.children.append(moduleNode);
+            continue;
+        }
+
+        // Variable at top level (global scope).
+        QString variableName, variableExpression, variableError;
+        qreal variableValue = 0.0;
+        if (parseVariableLine(line, &variableName, &variableExpression, &variableValue, &variableError)) {
+            ++state.index;
+            qreal evaluatedValue = 0.0;
+            if (ExpressionSyntax::evaluate(variableExpression, state.variableValues, &evaluatedValue))
+                variableValue = evaluatedValue;
+            state.variableValues[variableName] = variableValue;
+            root.children.append(makeVariableNode(variableName, variableExpression, variableValue, &state));
+            continue;
+        }
+        if (!variableError.isEmpty()) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("Unsupported OpenSCAD syntax on line %1: %2").arg(current.number).arg(current.text);
+                *errorMessage = QStringLiteral("Invalid expression on line %1: %2").arg(current.number).arg(variableError);
             if (errorLine) *errorLine = current.number;
             return false;
         }
+
+        // Anything else at top level is an error.
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Unexpected statement at top level on line %1: %2").arg(current.number).arg(line);
+        if (errorLine) *errorLine = current.number;
+        return false;
     }
 
     applyBooleanModes(&root, &state.shapes, ShapeNode::Add);

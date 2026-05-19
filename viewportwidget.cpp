@@ -1104,15 +1104,14 @@ void ViewportWidget::initializeGL()
         "attribute vec3 a_normal;\n"     // world space
         "attribute vec3 a_color;\n"
         "uniform mat4 u_mvp;\n"
-        "uniform mat4 u_mv;\n"
-        "varying vec3 v_normal;\n"
-        "varying vec3 v_view_position;\n"
+        "varying vec3 v_normal;\n"       // world space — passed through unchanged
+        "varying vec3 v_world_pos;\n"    // world space — for view-direction in fragment
         "varying vec3 v_color;\n"
         "void main() {\n"
         "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-        "    v_normal = normalize(mat3(u_mv) * a_normal);\n"
-        "    v_view_position = vec3(u_mv * vec4(a_position, 1.0));\n"
-        "    v_color = a_color;\n"
+        "    v_normal    = a_normal;\n"
+        "    v_world_pos = a_position;\n"
+        "    v_color     = a_color;\n"
         "}\n");
     m_glMeshProgram->addShaderFromSourceCode(
         QOpenGLShader::Fragment,
@@ -1120,8 +1119,9 @@ void ViewportWidget::initializeGL()
         "precision mediump float;\n"
         "#endif\n"
         "varying vec3 v_normal;\n"
-        "varying vec3 v_view_position;\n"
+        "varying vec3 v_world_pos;\n"
         "varying vec3 v_color;\n"
+        "uniform vec3 u_camera_pos;\n"   // world space camera position
         "uniform vec3 u_light_direction_a;\n"
         "uniform vec3 u_light_direction_b;\n"
         "uniform vec3 u_light_direction_c;\n"
@@ -1135,7 +1135,7 @@ void ViewportWidget::initializeGL()
         "uniform float u_specular_strength;\n"
         "void main() {\n"
         "    vec3 n = normalize(v_normal);\n"
-        "    vec3 viewDir = normalize(-v_view_position);\n"
+        "    vec3 viewDir = normalize(u_camera_pos - v_world_pos);\n"
         "    vec3 lightA = normalize(u_light_direction_a);\n"
         "    vec3 lightB = normalize(u_light_direction_b);\n"
         "    vec3 lightC = normalize(u_light_direction_c);\n"
@@ -1143,7 +1143,7 @@ void ViewportWidget::initializeGL()
         "    float diffuseB = max(0.0, dot(n, lightB));\n"
         "    float diffuseC = max(0.0, dot(n, lightC));\n"
         "    vec3 reflectedView = reflect(-viewDir, n);\n"
-        "    float skyMix = clamp(reflectedView.y * 0.55 + 0.5, 0.0, 1.0);\n"
+        "    float skyMix = clamp(reflectedView.z * 0.55 + 0.5, 0.0, 1.0);\n"  // z=up in world
         "    vec3 environment = mix(vec3(0.18, 0.20, 0.22), vec3(0.58, 0.70, 0.82), skyMix);\n"
         "    float fresnel = pow(1.0 - max(0.0, dot(n, viewDir)), 3.0);\n"
         "    float specA = pow(max(0.0, dot(reflect(-lightA, n), viewDir)), 42.0);\n"
@@ -1863,18 +1863,25 @@ void ViewportWidget::paintOpenGLPreview()
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
+    // No face culling: faceNormal() uses a negated cross product (CW winding), and the
+    // view matrix swaps world Y↔Z (det=-1), making screen-space winding inconsistent
+    // across face orientations after perspective projection. Depth test alone correctly
+    // hides interior back-faces of closed solid meshes without needing culling.
+    glDisable(GL_CULL_FACE);
     glEnable(GL_STENCIL_TEST);
     glStencilFunc(GL_ALWAYS, 1, 0xFF);
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
+    // Camera world position: V maps world→view so V^-1 * origin = camera world pos.
+    const QVector3D cameraWorldPos = V.inverted().map(QVector3D(0.0f, 0.0f, 0.0f));
+
     m_glMeshProgram->bind();
-    m_glMeshProgram->setUniformValue("u_mvp", mvp);
-    m_glMeshProgram->setUniformValue("u_mv",  V);
+    m_glMeshProgram->setUniformValue("u_mvp",        mvp);
+    m_glMeshProgram->setUniformValue("u_camera_pos", cameraWorldPos);
 
     const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
     if (lights.size() >= 3) {
+        // Lights and normals are both in world space — pass directions unchanged.
         auto setLight = [this, &lights](int i, const char *d, const char *c, const char *n) {
             m_glMeshProgram->setUniformValue(d, lights[i].direction);
             m_glMeshProgram->setUniformValue(c, colorToVector(lights[i].color));
@@ -1905,7 +1912,6 @@ void ViewportWidget::paintOpenGLPreview()
     m_glMeshProgram->disableAttributeArray(normalLoc);
     m_glMeshProgram->disableAttributeArray(colorLoc);
     m_glMeshProgram->release();
-    glDisable(GL_CULL_FACE);
 
     const bool hasHelpers = (m_vboHelperFrontCount > 0 || m_vboHelperXrayCount > 0)
                             && m_glFlatProgram && m_glFlatProgram->isLinked();

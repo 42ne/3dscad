@@ -628,6 +628,27 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
     return evaluated;
 }
 
+static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::TreeNode &node,
+                                                          QHash<QString, qreal> variables)
+{
+    if (node.type != SceneDocument::TreeNode::Group
+        || node.operation != SceneDocument::TreeNode::Module)
+        return variables;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (child.type != SceneDocument::TreeNode::Variable)
+            continue;
+
+        qreal value = child.variableValue;
+        const QString expression = child.variableExpression.trimmed();
+        if (!expression.isEmpty())
+            ExpressionSyntax::evaluate(expression, variables, &value);
+        variables[child.variableName] = value;
+    }
+
+    return variables;
+}
+
 static bool evaluateRangeExpression(const QString &rangeExpression,
                                     const QHash<QString, qreal> &variables,
                                     QVector<qreal> *values)
@@ -777,7 +798,8 @@ static void appendTreeHelpers(CsgPreview *preview,
         return;
     }
 
-    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, variables);
+    const QHash<QString, qreal> localVariables = variablesWithModuleVariables(node, variables);
+    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
     for (int i = 0; i < node.children.size(); ++i) {
         ShapeNode::BooleanMode childMode = inheritedMode;
@@ -786,7 +808,7 @@ static void appendTreeHelpers(CsgPreview *preview,
         else if (node.operation == SceneDocument::TreeNode::Intersection)
             childMode = ShapeNode::Intersect;
 
-        appendTreeHelpers(preview, scene, node.children[i], childMode, variables, groupStack);
+        appendTreeHelpers(preview, scene, node.children[i], childMode, localVariables, groupStack);
     }
 }
 

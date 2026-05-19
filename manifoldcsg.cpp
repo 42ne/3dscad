@@ -131,6 +131,27 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
     return evaluated;
 }
 
+static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::TreeNode &node,
+                                                          QHash<QString, qreal> variables)
+{
+    if (node.type != SceneDocument::TreeNode::Group
+        || node.operation != SceneDocument::TreeNode::Module)
+        return variables;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (child.type != SceneDocument::TreeNode::Variable)
+            continue;
+
+        qreal value = child.variableValue;
+        const QString expression = child.variableExpression.trimmed();
+        if (!expression.isEmpty())
+            ExpressionSyntax::evaluate(expression, variables, &value);
+        variables[child.variableName] = value;
+    }
+
+    return variables;
+}
+
 static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::TreeNode &node)
 {
     if (node.operation == SceneDocument::TreeNode::Translate)
@@ -239,7 +260,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return result;
     }
 
-    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, variables);
+    const QHash<QString, qreal> localVariables = variablesWithModuleVariables(node, variables);
+    const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
 
     QVector<const SceneDocument::TreeNode *> geometryChildren;
     for (const SceneDocument::TreeNode &child : evaluatedNode.children) {
@@ -250,10 +272,10 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (geometryChildren.isEmpty())
         return {};
 
-    Manifold result = evaluateNode(*geometryChildren.first(), scene, variables);
+    Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
 
     for (int i = 1; i < geometryChildren.size(); ++i) {
-        const Manifold child = evaluateNode(*geometryChildren[i], scene, variables);
+        const Manifold child = evaluateNode(*geometryChildren[i], scene, localVariables);
 
         if (evaluatedNode.operation == SceneDocument::TreeNode::Union
             || evaluatedNode.operation == SceneDocument::TreeNode::Module

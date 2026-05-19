@@ -56,7 +56,9 @@ public:
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
     int addVariable(int insertIndex = -1);
+    int addVariableToModule(int moduleGroupId, int insertIndex = -1);
     bool removeVariableById(int variableId);
+    bool setModuleName(int groupId, const QString &name);
     bool updateVariableExpression(int variableId, const QString &expression);
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);

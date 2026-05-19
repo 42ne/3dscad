@@ -270,10 +270,11 @@ static QDoubleSpinBox *makeSpinBox()
     return box;
 }
 
-static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation)
+static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation,
+                                 const QString &moduleName = QString())
 {
     if (operation == SceneDocument::TreeNode::Module)
-        return "module scene_model";
+        return "module " + (moduleName.trimmed().isEmpty() ? QStringLiteral("scene_model") : moduleName.trimmed());
     if (operation == SceneDocument::TreeNode::Difference)
         return "difference()";
     if (operation == SceneDocument::TreeNode::Intersection)
@@ -334,16 +335,17 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
 
     if (node.type == SceneDocument::TreeNode::Variable) {
         auto *item = new QTreeWidgetItem(parent);
-        item->setText(0, QStringLiteral("%1 = %2").arg(node.variableName, node.variableExpression));
+        const QString prefix = node.isParameter ? QStringLiteral("param ") : QString();
+        item->setText(0, prefix + QStringLiteral("%1 = %2").arg(node.variableName, node.variableExpression));
         item->setData(0, ShapeIdRole, -1);
         item->setData(0, TreeNodeIdRole, node.id);
-        item->setForeground(0, QColor(122, 92, 36));
+        item->setForeground(0, node.isParameter ? QColor(60, 110, 170) : QColor(122, 92, 36));
         item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
         return item;
     }
 
     auto *groupItem = new QTreeWidgetItem(parent);
-    groupItem->setText(0, booleanGroupLabel(node.operation) + roleSuffix);
+    groupItem->setText(0, booleanGroupLabel(node.operation, node.moduleName) + roleSuffix);
     markGroupItem(groupItem, node);
     if (roleColor.isValid())
         groupItem->setForeground(0, roleColor);
@@ -1098,8 +1100,31 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 {
     if (isVariableTool(toolName)) {
         const int rootId = m_scene.treeRoot().id;
-        if (parentGroupId > 0 && parentGroupId != rootId)
+        // Variable dropped inside a Module node → becomes a module parameter.
+        const SceneDocument::TreeNode *parentNode =
+            parentGroupId > 0 ? m_scene.treeNodeById(parentGroupId) : nullptr;
+        const bool inModule = parentNode
+                              && parentNode->type == SceneDocument::TreeNode::Group
+                              && parentNode->operation == SceneDocument::TreeNode::Module;
+        if (parentGroupId > 0 && !inModule && parentGroupId != rootId)
             return;
+
+        if (inModule) {
+            // Add as module parameter.
+            struct AddModuleParamCommand : public QUndoCommand {
+                SceneDocument *scene; int moduleId; int insertIdx; std::function<void()> refresh;
+                int addedId = 0;
+                AddModuleParamCommand(SceneDocument *s, int mid, int idx, std::function<void()> r)
+                    : scene(s), moduleId(mid), insertIdx(idx), refresh(r) {}
+                void redo() override { addedId = scene->addVariableToModule(moduleId, insertIdx); if (refresh) refresh(); }
+                void undo() override { if (addedId > 0) { scene->removeVariableById(addedId); if (refresh) refresh(); } }
+                bool isValid() const { return scene && moduleId > 0; }
+            };
+            auto *cmd = new AddModuleParamCommand(&m_scene, parentGroupId, insertIndex, [this]() { refreshSceneViews(); });
+            if (!cmd->isValid()) { delete cmd; return; }
+            m_undoStack->push(cmd);
+            return;
+        }
 
         auto *command = new AddVariableCommand(&m_scene, insertIndex, [this]() {
             refreshSceneViews();
@@ -1116,7 +1141,9 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 
     SceneDocument::TreeNode::Operation operation;
     if (operationForTool(toolName, &operation)) {
-        if (operation == SceneDocument::TreeNode::Module && parentGroupId == 0)
+        // Modules can only be added at root level; other groups go into their parent.
+        if (operation == SceneDocument::TreeNode::Module && parentGroupId > 0
+            && parentGroupId != m_scene.treeRoot().id)
             return;
 
         auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, insertIndex, [this]() {
@@ -1677,10 +1704,14 @@ void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
 void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex)
 {
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
-    if (node && node->type == SceneDocument::TreeNode::Variable
-        && parentGroupId > 0
-        && parentGroupId != m_scene.treeRoot().id) {
-        return;
+    if (node && node->type == SceneDocument::TreeNode::Variable && parentGroupId > 0) {
+        const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentGroupId);
+        const bool targetIsRoot = parentGroupId == m_scene.treeRoot().id;
+        const bool targetIsModule = parentNode
+                                    && parentNode->type == SceneDocument::TreeNode::Group
+                                    && parentNode->operation == SceneDocument::TreeNode::Module;
+        if (!targetIsRoot && !targetIsModule)
+            return;
     }
 
     auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, insertIndex, [this]() {
