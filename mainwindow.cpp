@@ -418,11 +418,17 @@ void MainWindow::buildUi()
     m_openScadPreviewLabel->setWordWrap(true);
     m_openScadPreviewLabel->setText(QString("Preview file: %1").arg(QDir::toNativeSeparators(previewScadPath())));
 
+    m_parseErrorLabel = new QLabel;
+    m_parseErrorLabel->setWordWrap(true);
+    m_parseErrorLabel->setContentsMargins(4, 2, 4, 2);
+    m_parseErrorLabel->hide();
+
     auto *codePanel = new QWidget;
     auto *codeLayout = new QVBoxLayout(codePanel);
     codeLayout->setContentsMargins(0, 0, 0, 0);
     codeLayout->addWidget(m_codeEditor);
     codeLayout->addWidget(m_applyCodeButton);
+    codeLayout->addWidget(m_parseErrorLabel);
     codeLayout->addWidget(m_sendToOpenScadButton);
     codeLayout->addWidget(m_openScadPreviewLabel);
 
@@ -729,11 +735,25 @@ void MainWindow::applyOpenScadCode()
 {
     SceneDocument::Snapshot snapshot;
     QString errorMessage;
+    int errorLine = -1;
 
-    if (!OpenScadParser::parseScene(m_codeEditor->toPlainText(), &snapshot, &errorMessage)) {
-        QMessageBox::warning(this, "OpenSCAD parse error", errorMessage);
+    if (!OpenScadParser::parseScene(m_codeEditor->toPlainText(), &snapshot, &errorMessage, &errorLine)) {
+        m_parseErrorLabel->setText(QString("<span style='color:#d04040;'>%1</span>")
+                                       .arg(errorMessage.toHtmlEscaped()));
+        m_parseErrorLabel->show();
+
+        if (errorLine > 0) {
+            QTextCursor cursor(m_codeEditor->document());
+            cursor.movePosition(QTextCursor::Start);
+            cursor.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, errorLine - 1);
+            cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+            m_codeEditor->setTextCursor(cursor);
+            m_codeEditor->ensureCursorVisible();
+        }
         return;
     }
+
+    m_parseErrorLabel->hide();
 
     auto *command = new ReplaceSceneCommand(&m_scene, snapshot, [this]() {
         refreshSceneViews();

@@ -121,6 +121,7 @@ private:
     QPushButton *m_deleteGroupButton = nullptr;
     QLabel *m_csgStatusLabel = nullptr;
     QLabel *m_openScadPreviewLabel = nullptr;
+    QLabel *m_parseErrorLabel = nullptr;
 
     QDoubleSpinBox *m_posX = nullptr;
     QDoubleSpinBox *m_posY = nullptr;

@@ -10,8 +10,8 @@
 class OpenScadParser
 {
 public:
-    static bool parse(const QString &code, QVector<ShapeNode> *shapes, QString *errorMessage = nullptr);
-    static bool parseScene(const QString &code, SceneDocument::Snapshot *snapshot, QString *errorMessage = nullptr);
+    static bool parse(const QString &code, QVector<ShapeNode> *shapes, QString *errorMessage = nullptr, int *errorLine = nullptr);
+    static bool parseScene(const QString &code, SceneDocument::Snapshot *snapshot, QString *errorMessage = nullptr, int *errorLine = nullptr);
 
 private:
     static bool parseVector3(const QString &text, QVector3D *vector);
