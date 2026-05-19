@@ -115,6 +115,11 @@ void SceneTreeGraphicsWidget::setForLoopRangeAdjustedCallback(std::function<void
     m_forLoopRangeAdjustedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setCtrlReleasedCallback(std::function<void()> callback)
+{
+    m_ctrlReleasedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -247,6 +252,8 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
         updateActiveShapeParameterControl(QPointF(), false);
         updateActiveVariableNumberControl(QPointF(), false);
         updateActiveForLoopRangeControl(QPointF(), false);
+        if (m_ctrlReleasedCallback)
+            m_ctrlReleasedCallback();
     }
 
     QGraphicsView::keyReleaseEvent(event);

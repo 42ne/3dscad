@@ -30,6 +30,7 @@ public:
     void setShapeParameterHoveredCallback(std::function<void(int, int)> callback);
     void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
+    void setCtrlReleasedCallback(std::function<void()> callback);
     void setSelectedTreeNodeId(int nodeId);
     void refresh();
 
@@ -99,6 +100,7 @@ private:
     std::function<void(int, int)> m_shapeParameterHoveredCallback;
     std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
     std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;
+    std::function<void()> m_ctrlReleasedCallback;
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;

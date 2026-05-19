@@ -484,6 +484,10 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics->setForLoopRangeAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
         onGraphicsTreeForLoopRangeAdjusted(nodeId, start, length, delta);
     });
+    m_sceneTreeGraphics->setCtrlReleasedCallback([this]() {
+        m_ctrlHighlight.active = false;
+        highlightOpenScadSelection();
+    });
 
     auto *legacyTreePanel = new QWidget;
     auto *legacyTreeLayout = new QVBoxLayout(legacyTreePanel);
@@ -1234,6 +1238,16 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int
         const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
         newExpressions[axis] = newExpr;
 
+        if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+            m_ctrlHighlight.active       = true;
+            m_ctrlHighlight.nodeId       = groupId;
+            m_ctrlHighlight.expression   = newExpr;
+            m_ctrlHighlight.numberStart  = numberStart;
+            m_ctrlHighlight.numberLength = int(replacement.size());
+        } else {
+            m_ctrlHighlight.active = false;
+        }
+
         // Evaluate new expression to get numeric value
         QHash<QString, qreal> varValues;
         for (const SceneDocument::TreeNode &child : m_scene.treeRoot().children) {
@@ -1274,6 +1288,7 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int
         else                targetVector->setZ(adjustAxis(targetVector->z()));
         // Clear expression for this axis so numeric value takes over
         newExpressions[axis].clear();
+        m_ctrlHighlight.active = false;
     }
 
     const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
@@ -1326,6 +1341,16 @@ void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex
         return;
 
     const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
+
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_ctrlHighlight.active       = true;
+        m_ctrlHighlight.nodeId       = nodeId;
+        m_ctrlHighlight.expression   = newExpr;
+        m_ctrlHighlight.numberStart  = numberStart;
+        m_ctrlHighlight.numberLength = int(replacement.size());
+    } else {
+        m_ctrlHighlight.active = false;
+    }
 
     // Build variable context for re-evaluation.
     QHash<QString, qreal> varValues;
@@ -1397,6 +1422,17 @@ void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int
         return;
 
     expression.replace(start, length, replacement);
+
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_ctrlHighlight.active       = true;
+        m_ctrlHighlight.nodeId       = nodeId;
+        m_ctrlHighlight.expression   = expression;
+        m_ctrlHighlight.numberStart  = start;
+        m_ctrlHighlight.numberLength = int(replacement.size());
+    } else {
+        m_ctrlHighlight.active = false;
+    }
+
     auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression, [this]() {
         refreshSceneViews();
     });
@@ -1432,6 +1468,17 @@ void MainWindow::onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int l
         return;
 
     expression.replace(start, length, replacement);
+
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_ctrlHighlight.active       = true;
+        m_ctrlHighlight.nodeId       = nodeId;
+        m_ctrlHighlight.expression   = expression;
+        m_ctrlHighlight.numberStart  = start;
+        m_ctrlHighlight.numberLength = int(replacement.size());
+    } else {
+        m_ctrlHighlight.active = false;
+    }
+
     auto *command = new UpdateForLoopCommand(&m_scene, nodeId, SceneTreeGraphics::forLoopVariableName(*node), expression, [this]() {
         refreshSceneViews();
     });
@@ -1762,10 +1809,54 @@ void MainWindow::refreshOpenScadCode()
     writeOpenScadPreview(false);
 }
 
+void MainWindow::applyCtrlParamHighlight()
+{
+    const QString code = m_codeEditor->toPlainText();
+
+    for (const OpenScadGenerator::SourceRange &range : m_openScadSourceRanges) {
+        if (range.treeNodeId != m_ctrlHighlight.nodeId || range.length <= 0)
+            continue;
+
+        // Search within the node's range (capped to avoid matching children's code)
+        const int searchCap = qMin(range.length, 300);
+        const int exprPos = code.indexOf(m_ctrlHighlight.expression, range.start);
+        if (exprPos < 0 || exprPos >= range.start + searchCap)
+            break;
+
+        const int numStart = exprPos + m_ctrlHighlight.numberStart;
+        const int numLen   = m_ctrlHighlight.numberLength;
+        if (numStart + numLen > code.size())
+            break;
+
+        QTextCursor cursor(m_codeEditor->document());
+        cursor.setPosition(numStart);
+        cursor.setPosition(numStart + numLen, QTextCursor::KeepAnchor);
+
+        QTextCharFormat fmt;
+        fmt.setBackground(QColor(80, 180, 255, 140));
+        fmt.setFontUnderline(true);
+
+        QTextEdit::ExtraSelection sel;
+        sel.cursor = cursor;
+        sel.format = fmt;
+        m_codeEditor->setExtraSelections({sel});
+        return;
+    }
+
+    // Expression not found in code — fall back to normal highlight
+    m_ctrlHighlight.active = false;
+    highlightOpenScadSelection();
+}
+
 void MainWindow::highlightOpenScadSelection()
 {
     if (!m_codeEditor)
         return;
+
+    if (m_ctrlHighlight.active) {
+        applyCtrlParamHighlight();
+        return;
+    }
 
     const int selectedTreeNodeId = selectedTreeNodeIdForCodeHighlight();
     QTextEdit::ExtraSelection selection;
