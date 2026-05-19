@@ -192,6 +192,37 @@ Dragging:
 - The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, and contact shadows are drawn by shader paths while gizmo, helper overlays, text, CPU-side projection, and picking still reuse the software path.
 - Graphics-tree transform and primitive parameter controls can be adjusted with `Ctrl + mouse wheel`. Hovering editable controls provides viewport hints for the affected axis, rotation, scale, or primitive dimension.
 
+## Tools
+
+### sfxbuilder (`tools/sfxbuilder/`)
+
+A standalone Qt Widgets application that automates portable Windows packaging.
+It is built and run separately from the main app; it is not linked into the
+main binary.
+
+Key components:
+
+- `BuildWorker` (QObject, runs on a `QThread`) — executes the build pipeline:
+  1. Copies the source exe into a temporary staging directory.
+  2. Runs `windeployqt` to deploy Qt DLLs, plugins, and platform files.
+  3. Copies MinGW runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`,
+     `libwinpthread-1.dll`) from the Qt bin dir. `windeployqt` intentionally
+     omits these; without this step the resulting exe fails with
+     _"libgcc_s_seh-1.dll was not found"_ on machines without a MinGW
+     installation.
+  4. Optionally copies an extra file tree (e.g. `docs/sample_codes`) into the
+     staging directory at a configurable bundle-relative path.
+  5. Compresses the staging directory with `7z.exe` at maximum compression.
+  6. Concatenates the `7z.sfx` stub, a small UTF-8 config block, and the
+     archive into the final `<AppName>_portable.exe`.
+  7. Cleans up staging and temporary archive.
+
+- `MainWindow` — form with auto-detect logic for Qt bin dir and 7-Zip install
+  path, browse buttons for all inputs, a build button, and a log panel that
+  streams `BuildWorker` output.
+
+See [docs/sfxbuilder.md](docs/sfxbuilder.md) for end-user usage instructions.
+
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.

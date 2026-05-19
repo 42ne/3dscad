@@ -109,6 +109,30 @@ void BuildWorker::run()
         return;
     }
 
+    // ── MinGW runtime DLLs ───────────────────────────────────────────────────
+    emit log("\n==> Copying MinGW runtime DLLs");
+    const QStringList mingwDlls = {
+        "libgcc_s_seh-1.dll",
+        "libgcc_s_dw2-1.dll",   // 32-bit variant, skipped if absent
+        "libstdc++-6.dll",
+        "libwinpthread-1.dll"
+    };
+    int mingwCopied = 0;
+    for (const QString &dll : mingwDlls) {
+        const QString src = qtBinDir + "/" + dll;
+        if (!QFile::exists(src)) continue;
+        const QString dst = stageDir + "/" + dll;
+        QFile::remove(dst);
+        if (QFile::copy(src, dst)) {
+            emit log("  Copied " + dll);
+            ++mingwCopied;
+        } else {
+            emit log("  Warning: could not copy " + dll);
+        }
+    }
+    if (mingwCopied == 0)
+        emit log("  Warning: no MinGW runtime DLLs found in Qt bin dir");
+
     // ── Extra files (optional) ───────────────────────────────────────────────
     if (!extraSrcFolder.isEmpty() && QDir(extraSrcFolder).exists()) {
         emit log("\n==> Copying extra files from: " + extraSrcFolder);

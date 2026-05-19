@@ -134,6 +134,26 @@ With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks i
 
 The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, and contact shadows are drawn through OpenGL shader paths with depth testing. Gizmos, helper overlays, text, CPU-side projection, and the pick buffer still reuse the existing software path, so large performance gains are not expected yet.
 
+## Sample Scenes
+
+A collection of ready-made parametric OpenSCAD scenes is included under
+`docs/sample_codes/`. Each file uses only the round-trippable command subset so
+the scene can be loaded, edited visually, and written back as code. Examples
+include mechanical parts (pulley, pipe flange, fan, gear rack), furniture
+(armchair, dining table, bookshelf), architecture (castle tower, Japanese
+pagoda, spiral staircase), and decorative models (Saturn, snowflake, space
+station).
+
+## Distribution — Portable Build
+
+`tools/sfxbuilder` is a GUI tool that packs a compiled Windows `.exe` into a
+single self-extracting portable executable using `windeployqt` + 7-Zip SFX. It
+handles Qt DLLs, MinGW runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`,
+`libwinpthread-1.dll`), and an optional extra-files bundle (e.g.
+`docs/sample_codes`).
+
+See [docs/sfxbuilder.md](docs/sfxbuilder.md) for full usage instructions.
+
 ## Limitations
 
 - The OpenGL viewport path is still experimental and mixed with QPainter overlays; it does not yet use persistent VBO/index buffers or GPU picking.
