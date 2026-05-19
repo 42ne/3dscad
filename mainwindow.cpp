@@ -1239,11 +1239,17 @@ void MainWindow::onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int
         newExpressions[axis] = newExpr;
 
         if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-            m_ctrlHighlight.active       = true;
-            m_ctrlHighlight.nodeId       = groupId;
-            m_ctrlHighlight.expression   = newExpr;
-            m_ctrlHighlight.numberStart  = numberStart;
-            m_ctrlHighlight.numberLength = int(replacement.size());
+            // Generated: translate([X, Y, Z]) — build prefix up to the Nth value so
+            // the search is unique even when all three axes have the same numeric value.
+            QString contextPrefix = QStringLiteral("[");
+            for (int i = 0; i < axis; ++i)
+                contextPrefix += SceneTreeGraphics::transformAxisExpression(*group, i) + QStringLiteral(", ");
+            m_ctrlHighlight.active        = true;
+            m_ctrlHighlight.nodeId        = groupId;
+            m_ctrlHighlight.contextPrefix = contextPrefix;
+            m_ctrlHighlight.expression    = newExpr;
+            m_ctrlHighlight.numberStart   = numberStart;
+            m_ctrlHighlight.numberLength  = int(replacement.size());
         } else {
             m_ctrlHighlight.active = false;
         }
@@ -1343,11 +1349,27 @@ void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex
     const QString newExpr = currentExpr.left(numberStart) + replacement + currentExpr.mid(numberStart + numberLength);
 
     if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active       = true;
-        m_ctrlHighlight.nodeId       = nodeId;
-        m_ctrlHighlight.expression   = newExpr;
-        m_ctrlHighlight.numberStart  = numberStart;
-        m_ctrlHighlight.numberLength = int(replacement.size());
+        // Build a contextPrefix that uniquely identifies this parameter in the generated
+        // code so the highlight does not land on the wrong token when multiple parameters
+        // share the same numeric value (e.g. cube([20,20,20]) or translate([10,10,10])).
+        QString contextPrefix;
+        if (shape->type == ShapeNode::Cylinder) {
+            // Generated: cylinder(h=H, r=R, center=true)
+            contextPrefix = (paramIndex == 0) ? QStringLiteral(", r=") : QStringLiteral("h=");
+        } else if (shape->type == ShapeNode::Sphere) {
+            contextPrefix = QStringLiteral("r=");
+        } else {
+            // Cube: cube([X, Y, Z], center=true) — prefix accumulates preceding values
+            contextPrefix = QStringLiteral("[");
+            for (int i = 0; i < paramIndex && i < controls.size(); ++i)
+                contextPrefix += controls[i].expression + QStringLiteral(", ");
+        }
+        m_ctrlHighlight.active        = true;
+        m_ctrlHighlight.nodeId        = nodeId;
+        m_ctrlHighlight.contextPrefix = contextPrefix;
+        m_ctrlHighlight.expression    = newExpr;
+        m_ctrlHighlight.numberStart   = numberStart;
+        m_ctrlHighlight.numberLength  = int(replacement.size());
     } else {
         m_ctrlHighlight.active = false;
     }
@@ -1424,11 +1446,12 @@ void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int
     expression.replace(start, length, replacement);
 
     if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active       = true;
-        m_ctrlHighlight.nodeId       = nodeId;
-        m_ctrlHighlight.expression   = expression;
-        m_ctrlHighlight.numberStart  = start;
-        m_ctrlHighlight.numberLength = int(replacement.size());
+        m_ctrlHighlight.active        = true;
+        m_ctrlHighlight.nodeId        = nodeId;
+        m_ctrlHighlight.contextPrefix = QString(); // variable expression is unique in its range
+        m_ctrlHighlight.expression    = expression;
+        m_ctrlHighlight.numberStart   = start;
+        m_ctrlHighlight.numberLength  = int(replacement.size());
     } else {
         m_ctrlHighlight.active = false;
     }
@@ -1470,11 +1493,12 @@ void MainWindow::onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int l
     expression.replace(start, length, replacement);
 
     if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active       = true;
-        m_ctrlHighlight.nodeId       = nodeId;
-        m_ctrlHighlight.expression   = expression;
-        m_ctrlHighlight.numberStart  = start;
-        m_ctrlHighlight.numberLength = int(replacement.size());
+        m_ctrlHighlight.active        = true;
+        m_ctrlHighlight.nodeId        = nodeId;
+        m_ctrlHighlight.contextPrefix = QString(); // full range expression is unique in for-loop range
+        m_ctrlHighlight.expression    = expression;
+        m_ctrlHighlight.numberStart   = start;
+        m_ctrlHighlight.numberLength  = int(replacement.size());
     } else {
         m_ctrlHighlight.active = false;
     }
@@ -1817,12 +1841,16 @@ void MainWindow::applyCtrlParamHighlight()
         if (range.treeNodeId != m_ctrlHighlight.nodeId || range.length <= 0)
             continue;
 
-        // Search within the node's range (capped to avoid matching children's code)
+        // Search within the node's range (capped to avoid matching children's code).
+        // Prefix + expression together uniquely identify the token even when the same
+        // numeric value appears in multiple parameters (e.g. cube([20,20,20])).
         const int searchCap = qMin(range.length, 300);
-        const int exprPos = code.indexOf(m_ctrlHighlight.expression, range.start);
-        if (exprPos < 0 || exprPos >= range.start + searchCap)
+        const QString needle = m_ctrlHighlight.contextPrefix + m_ctrlHighlight.expression;
+        const int hitPos = code.indexOf(needle, range.start);
+        if (hitPos < 0 || hitPos >= range.start + searchCap)
             break;
 
+        const int exprPos = hitPos + m_ctrlHighlight.contextPrefix.size();
         const int numStart = exprPos + m_ctrlHighlight.numberStart;
         const int numLen   = m_ctrlHighlight.numberLength;
         if (numStart + numLen > code.size())

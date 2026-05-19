@@ -87,11 +87,12 @@ private:
     void applyCtrlParamHighlight();
 
     struct CtrlParamHighlight {
-        bool    active      = false;
-        int     nodeId      = 0;
-        QString expression;       // full expression containing the number
-        int     numberStart = 0;  // offset of number within expression
-        int     numberLength = 0; // length of number in expression
+        bool    active        = false;
+        int     nodeId        = 0;
+        QString contextPrefix; // unique text immediately before expression in generated code
+        QString expression;    // full expression containing the number
+        int     numberStart   = 0;  // offset of number within expression
+        int     numberLength  = 0;  // length of number in expression
     } m_ctrlHighlight;
     bool writeOpenScadPreview(bool notify);
 
