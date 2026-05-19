@@ -287,10 +287,10 @@ int SceneDocument::addVariable(int insertIndex)
     return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0, 0, false, insertIndex);
 }
 
-int SceneDocument::addVariableToModule(int moduleGroupId, int insertIndex)
+int SceneDocument::addVariableToModule(int moduleGroupId, bool isParameter, int insertIndex)
 {
     return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0,
-                              moduleGroupId, true, insertIndex);
+                              moduleGroupId, isParameter, insertIndex);
 }
 
 bool SceneDocument::setModuleName(int groupId, const QString &name)
@@ -463,9 +463,9 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
         reEvaluateTransformExpressionsInNode(&child, varValues);
 }
 
-bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex)
+bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex, bool moduleParameterZone)
 {
-    const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex);
+    const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex, moduleParameterZone);
     if (!moved)
         return false;
 

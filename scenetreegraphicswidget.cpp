@@ -156,7 +156,11 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
     }
 
     const QList<QGraphicsItem *> toolbarItems = m_graphicsScene->items();
-    drawNode(m_scene->treeRoot(), QPointF(TreeX, TreeY), 0);
+    QPointF topLeft(TreeX, TreeY);
+    for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children) {
+        const QRectF childRect = drawNode(child, topLeft, 0);
+        topLeft.ry() += childRect.height() + ChildGap * 2.0;
+    }
 
     const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
     for (QGraphicsItem *item : allItems) {
@@ -383,17 +387,43 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const qreal headerHeight = transformGroup ? 0.0 : GroupHeaderHeight;
     QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;
+    int moduleParameterCount = 0;
+    qreal moduleParameterSeparatorY = 0.0;
 
-    for (const SceneDocument::TreeNode &child : node.children) {
+    auto drawChild = [&](const SceneDocument::TreeNode &child) {
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
         children.append({childRect, previewToolForNode(child), child.id});
         maxChildWidth = qMax(maxChildWidth, childRect.width());
         childTopLeft.ry() += childRect.height() + ChildGap;
+    };
+
+    if (node.operation == SceneDocument::TreeNode::Module) {
+        const qreal labelSpace = 16.0;
+        childTopLeft.ry() += labelSpace;
+        for (const SceneDocument::TreeNode &child : node.children) {
+            if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
+                drawChild(child);
+                ++moduleParameterCount;
+            }
+        }
+        if (moduleParameterCount == 0)
+            childTopLeft.ry() += VariableHeight + ChildGap;
+        moduleParameterSeparatorY = childTopLeft.y() + ChildGap * 0.5;
+        childTopLeft.ry() += labelSpace + ChildGap;
+        for (const SceneDocument::TreeNode &child : node.children) {
+            if (!(child.type == SceneDocument::TreeNode::Variable && child.isParameter))
+                drawChild(child);
+        }
+    } else {
+        for (const SceneDocument::TreeNode &child : node.children)
+            drawChild(child);
     }
 
     qreal childrenHeight = children.isEmpty()
                                ? PrimitiveHeight
                                : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
+    if (node.operation == SceneDocument::TreeNode::Module)
+        childrenHeight = qMax(childrenHeight, VariableHeight * 2.0 + ChildGap * 5.0);
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
     const QSizeF size(qMax(minimumWidthForOperation(node.operation), headerWidth + maxChildWidth + GroupPadding * 2.0),
@@ -405,7 +435,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         if (!children.isEmpty())
             cutSeparatorY = children.first().rect.bottom() + ChildGap * 0.5;
     }
-    m_treeLayout.addGroup({rect, node.id, depth, node.operation, cutSeparatorY, children});
+    m_treeLayout.addGroup({rect, node.id, depth, node.operation, cutSeparatorY, moduleParameterSeparatorY, moduleParameterCount, children});
 
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
@@ -421,6 +451,25 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           m_activeForLoopNodeId,
                           m_activeForLoopNumberStart)
         .renderGroup(node, rect, depth, cutSeparatorY);
+
+    if (node.operation == SceneDocument::TreeNode::Module) {
+        auto *paramsLabel = m_graphicsScene->addSimpleText(QStringLiteral("parameters"));
+        paramsLabel->setBrush(QColor(84, 95, 116));
+        paramsLabel->setPos(rect.left() + GroupPadding, rect.top() + GroupHeaderHeight + 4.0);
+        paramsLabel->setZValue(depth * 10.0 + 8.0);
+
+        auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
+        bodyLabel->setBrush(QColor(84, 95, 116));
+        bodyLabel->setPos(rect.left() + GroupPadding, moduleParameterSeparatorY + 4.0);
+        bodyLabel->setZValue(depth * 10.0 + 8.0);
+
+        auto *separator = m_graphicsScene->addLine(rect.left() + GroupPadding,
+                                                  moduleParameterSeparatorY,
+                                                  rect.right() - GroupPadding,
+                                                  moduleParameterSeparatorY,
+                                                  QPen(QColor(142, 151, 166), 1, Qt::DashLine));
+        separator->setZValue(depth * 10.0 + 7.0);
+    }
 
     const QString groupLabel = labelForOperation(node.operation);
     const QRectF handleRect = transformGroup
@@ -439,7 +488,9 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
                                                       toolName,
                                                       0,
                                                       false);
-        m_toolDroppedCallback(toolName, target.parentGroupId, target.insertIndex);
+        m_toolDroppedCallback(toolName,
+                              target.parentGroupId,
+                              target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
     }
 }
 
@@ -464,13 +515,20 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
     if (isRootOnlyTreeTool(previewTool))
         return freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
 
-    DropTarget target = m_treeLayout.dropTargetAt(scenePosition, effectivePreviewSize, movingNodeId);
+    DropTarget target = m_treeLayout.dropTargetAt(scenePosition,
+                                                  effectivePreviewSize,
+                                                  movingNodeId,
+                                                  isVariableToolName(previewTool));
     if (!target.zoneRect.isValid())
         target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
 
     if (isVariableToolName(previewTool) && m_scene) {
         const int rootId = m_scene->treeRoot().id;
-        if (target.parentGroupId > 0 && target.parentGroupId != rootId)
+        const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
+        const bool targetIsModule = targetNode
+                                    && targetNode->type == SceneDocument::TreeNode::Group
+                                    && targetNode->operation == SceneDocument::TreeNode::Module;
+        if (target.parentGroupId > 0 && target.parentGroupId != rootId && !targetIsModule)
             return DropTarget();
     }
 
@@ -497,7 +555,9 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
                                                       previewTool,
                                                       nodeId,
                                                       false);
-        m_treeNodeDroppedCallback(nodeId, target.parentGroupId, target.insertIndex);
+        m_treeNodeDroppedCallback(nodeId,
+                                  target.parentGroupId,
+                                  target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
     }
 }
 

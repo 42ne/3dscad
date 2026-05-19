@@ -188,7 +188,7 @@ private:
 class MoveTreeNodeCommand : public QUndoCommand
 {
 public:
-    MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged);
+    MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged, bool moduleParameterZone = false);
 
     bool isValid() const;
     void undo() override;

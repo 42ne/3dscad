@@ -209,10 +209,10 @@ static bool isModuleDefinitionLine(const QString &line, QString *name, QString *
     return true;
 }
 
-// Matches any top-level call: <ident>(<args>);
-static bool isModuleCallLine(const QString &line)
+// Matches any module-style call: <ident>(<args>);
+static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QString *args = nullptr)
 {
-    static const QRegularExpression regex("^([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^)]*\\)\\s*;\\s*$");
+    static const QRegularExpression regex("^([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*;\\s*$");
     const QRegularExpressionMatch match = regex.match(line);
     if (!match.hasMatch())
         return false;
@@ -222,7 +222,14 @@ static bool isModuleCallLine(const QString &line)
         QStringLiteral("sphere"),
         QStringLiteral("cylinder")
     };
-    return !reservedCalls.contains(match.captured(1));
+    if (reservedCalls.contains(match.captured(1)))
+        return false;
+
+    if (name)
+        *name = match.captured(1).trimmed();
+    if (args)
+        *args = match.captured(2).trimmed();
+    return true;
 }
 
 static bool parseOperationLine(const QString &line,
@@ -483,8 +490,8 @@ static bool parseBlock(ParserState *state,
         if (line == QStringLiteral("}"))
             return stopAtBrace;
 
-        // Skip module call lines (e.g. "scene_model();" or "my_module();").
-        if (isModuleCallLine(line))
+        // Nested module calls are not tree nodes yet; keep parsing surrounding supported code.
+        if (parseModuleCallLine(line))
             continue;
 
         // ── Variable assignment ───────────────────────────────────────────
@@ -688,13 +695,16 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
     // Root is an implicit top-level container (operation=Module, never emitted directly).
     SceneDocument::TreeNode root = makeGroupNode(SceneDocument::TreeNode::Module, &state);
+    QHash<QString, QString> pendingModuleCallArguments;
 
     while (state.index < state.lines.size()) {
         const ParsedLine current = state.lines[state.index];
         const QString &line = current.text;
 
-        // Skip module call lines at any point in the top-level.
-        if (isModuleCallLine(line)) {
+        // Preserve top-level module call arguments until real ModuleCall nodes exist.
+        QString callName, callArgs;
+        if (parseModuleCallLine(line, &callName, &callArgs)) {
+            pendingModuleCallArguments[callName] = callArgs;
             ++state.index;
             continue;
         }
@@ -724,6 +734,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             const QHash<QString, qreal> outerVariables = state.variableValues;
             SceneDocument::TreeNode moduleNode = makeGroupNode(SceneDocument::TreeNode::Module, &state);
             moduleNode.moduleName = modName;
+            moduleNode.moduleCallArguments = pendingModuleCallArguments.value(modName);
 
             if (!parseModuleParams(modParams, &moduleNode, &state, &state.variableValues, errorMessage)) {
                 if (errorLine) *errorLine = current.number;
@@ -738,6 +749,8 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             }
 
             state.variableValues = outerVariables;
+            if (pendingModuleCallArguments.contains(modName))
+                moduleNode.moduleCallArguments = pendingModuleCallArguments.value(modName);
             root.children.append(moduleNode);
             continue;
         }
@@ -766,6 +779,14 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             *errorMessage = QStringLiteral("Unexpected statement at top level on line %1: %2").arg(current.number).arg(line);
         if (errorLine) *errorLine = current.number;
         return false;
+    }
+
+    for (SceneDocument::TreeNode &child : root.children) {
+        if (child.type == SceneDocument::TreeNode::Group
+            && child.operation == SceneDocument::TreeNode::Module
+            && pendingModuleCallArguments.contains(child.moduleName)) {
+            child.moduleCallArguments = pendingModuleCallArguments.value(child.moduleName);
+        }
     }
 
     applyBooleanModes(&root, &state.shapes, ShapeNode::Add);

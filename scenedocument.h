@@ -56,12 +56,12 @@ public:
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
     int addVariable(int insertIndex = -1);
-    int addVariableToModule(int moduleGroupId, int insertIndex = -1);
+    int addVariableToModule(int moduleGroupId, bool isParameter = true, int insertIndex = -1);
     bool removeVariableById(int variableId);
     bool setModuleName(int groupId, const QString &name);
     bool updateVariableExpression(int variableId, const QString &expression);
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
-    bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1);
+    bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
 
 private:

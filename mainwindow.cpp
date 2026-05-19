@@ -47,6 +47,16 @@
 static constexpr int ShapeIdRole = Qt::UserRole;
 static constexpr int TreeNodeIdRole = Qt::UserRole + 1;
 static constexpr int GroupOperationRole = Qt::UserRole + 2;
+static constexpr int ModuleParameterInsertSentinel = -100000;
+
+static bool decodeModuleParameterInsertIndex(int *insertIndex)
+{
+    if (!insertIndex || *insertIndex > ModuleParameterInsertSentinel)
+        return false;
+
+    *insertIndex = -ModuleParameterInsertSentinel - *insertIndex;
+    return true;
+}
 
 static bool isStandaloneNumericToken(const QString &expression, int start, int length)
 {
@@ -1098,6 +1108,8 @@ void MainWindow::onViewportGroupRotationDragFinished(int groupId)
 
 void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex)
 {
+    const bool moduleParameterZone = decodeModuleParameterInsertIndex(&insertIndex);
+
     if (isVariableTool(toolName)) {
         const int rootId = m_scene.treeRoot().id;
         // Variable dropped inside a Module node → becomes a module parameter.
@@ -1110,17 +1122,17 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
             return;
 
         if (inModule) {
-            // Add as module parameter.
+            // Add into the module parameter strip or regular module body.
             struct AddModuleParamCommand : public QUndoCommand {
-                SceneDocument *scene; int moduleId; int insertIdx; std::function<void()> refresh;
+                SceneDocument *scene; int moduleId; int insertIdx; bool parameter; std::function<void()> refresh;
                 int addedId = 0;
-                AddModuleParamCommand(SceneDocument *s, int mid, int idx, std::function<void()> r)
-                    : scene(s), moduleId(mid), insertIdx(idx), refresh(r) {}
-                void redo() override { addedId = scene->addVariableToModule(moduleId, insertIdx); if (refresh) refresh(); }
+                AddModuleParamCommand(SceneDocument *s, int mid, int idx, bool isParameter, std::function<void()> r)
+                    : scene(s), moduleId(mid), insertIdx(idx), parameter(isParameter), refresh(r) {}
+                void redo() override { addedId = scene->addVariableToModule(moduleId, parameter, insertIdx); if (refresh) refresh(); }
                 void undo() override { if (addedId > 0) { scene->removeVariableById(addedId); if (refresh) refresh(); } }
                 bool isValid() const { return scene && moduleId > 0; }
             };
-            auto *cmd = new AddModuleParamCommand(&m_scene, parentGroupId, insertIndex, [this]() { refreshSceneViews(); });
+            auto *cmd = new AddModuleParamCommand(&m_scene, parentGroupId, insertIndex, moduleParameterZone, [this]() { refreshSceneViews(); });
             if (!cmd->isValid()) { delete cmd; return; }
             m_undoStack->push(cmd);
             return;
@@ -1703,6 +1715,7 @@ void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)
 
 void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex)
 {
+    const bool moduleParameterZone = decodeModuleParameterInsertIndex(&insertIndex);
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
     if (node && node->type == SceneDocument::TreeNode::Variable && parentGroupId > 0) {
         const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentGroupId);
@@ -1716,7 +1729,7 @@ void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIn
 
     auto *command = new MoveTreeNodeCommand(&m_scene, nodeId, parentGroupId, insertIndex, [this]() {
         refreshSceneViews();
-    });
+    }, moduleParameterZone);
 
     if (!command->isValid()) {
         delete command;

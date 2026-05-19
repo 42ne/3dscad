@@ -123,8 +123,11 @@ void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &sc
     *code += "\n";
     if (hasImplicitModule)
         *code += "scene_model();\n";
-    for (const SceneDocument::TreeNode *mod : moduleChildren)
-        *code += mod->moduleName.trimmed() + "();\n";
+    for (const SceneDocument::TreeNode *mod : moduleChildren) {
+        const QString name = mod->moduleName.trimmed();
+        const QString args = mod->moduleCallArguments.trimmed();
+        *code += QString("%1(%2);\n").arg(name, args);
+    }
 }
 
 void OpenScadGenerator::appendTreeNode(QString *code,

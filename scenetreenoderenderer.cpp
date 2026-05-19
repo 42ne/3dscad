@@ -566,7 +566,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
     const qreal transformHeaderWidth = transformHeaderWidthForNode(node);
-    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, node.children.isEmpty(), true, true, false, transformValues, activeAxis, activeNumberStart, transformHeaderWidth, node.transformExpressions, node.loopVariable, node.loopRangeExpression, activeForLoopStart));
+    const bool showEmptyText = node.operation != SceneDocument::TreeNode::Module && node.children.isEmpty();
+    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, showEmptyText, true, true, false, transformValues, activeAxis, activeNumberStart, transformHeaderWidth, node.transformExpressions, node.loopVariable, node.loopRangeExpression, activeForLoopStart));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),

@@ -463,7 +463,12 @@ void UpdateForLoopCommand::redo()
         m_onChanged();
 }
 
-MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged)
+MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene,
+                                         int nodeId,
+                                         int parentGroupId,
+                                         int insertIndex,
+                                         std::function<void()> onChanged,
+                                         bool moduleParameterZone)
     : QUndoCommand("Move tree node")
     , m_scene(scene)
     , m_onChanged(onChanged)
@@ -472,7 +477,7 @@ MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int p
         return;
 
     m_oldSnapshot = m_scene->snapshot();
-    m_valid = m_scene->moveTreeNode(nodeId, parentGroupId, insertIndex);
+    m_valid = m_scene->moveTreeNode(nodeId, parentGroupId, insertIndex, moduleParameterZone);
     if (m_valid)
         m_newSnapshot = m_scene->snapshot();
 

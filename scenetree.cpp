@@ -167,7 +167,7 @@ bool SceneTree::removeVariableById(int variableId)
     return detachNodeById(&m_root, variableId);
 }
 
-bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
+bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool moduleParameterZone)
 {
     if (nodeId <= 0 || m_root.id == nodeId)
         return false;
@@ -206,7 +206,9 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex)
     }
 
     if (movedNode.type == TreeNode::Variable)
-        movedNode.isParameter = targetParent != &m_root && targetParent->operation == TreeNode::Module;
+        movedNode.isParameter = targetParent != &m_root
+                                && targetParent->operation == TreeNode::Module
+                                && moduleParameterZone;
 
     const int boundedIndex = insertIndex < 0
                                  ? targetParent->children.size()

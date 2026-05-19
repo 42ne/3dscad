@@ -27,6 +27,8 @@ public:
         int depth = 0;
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         qreal cutSeparatorY = 0.0;
+        qreal moduleParameterSeparatorY = 0.0;
+        int moduleParameterCount = 0;
         QVector<ChildLayout> children;
     };
 
@@ -42,6 +44,7 @@ public:
         bool hasTarget = false;
         int parentGroupId = 0;
         int insertIndex = -1;
+        bool moduleParameterZone = false;
         QRectF zoneRect;
         QRectF sourceRect;
         QRectF sourceGroupRect;
@@ -63,7 +66,8 @@ public:
 
     DropTarget dropTargetAt(const QPointF &scenePosition,
                             const QSizeF &previewSize = QSizeF(),
-                            int movingNodeId = 0) const;
+                            int movingNodeId = 0,
+                            bool variableDrop = false) const;
 
 private:
     void buildSourcePreview(const GroupHitArea *sourceArea,

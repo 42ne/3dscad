@@ -91,6 +91,7 @@ void cancelTargetPreview(SceneTreeLayout::DropTarget *target)
     target->hasTarget = false;
     target->parentGroupId = 0;
     target->insertIndex = -1;
+    target->moduleParameterZone = false;
     target->zoneRect = QRectF();
     target->placeholderRect = QRectF();
     target->slotMarkerRect = QRectF();
@@ -149,7 +150,10 @@ const QVector<SceneTreeLayout::GroupHitArea> &SceneTreeLayout::groupHitAreas() c
     return m_groupHitAreas;
 }
 
-SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePosition, const QSizeF &previewSize, int movingNodeId) const
+SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePosition,
+                                                          const QSizeF &previewSize,
+                                                          int movingNodeId,
+                                                          bool variableDrop) const
 {
     DropTarget target;
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
@@ -208,8 +212,50 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
 
     target.zoneRect = contentRect;
     target.insertIndex = insertionIndexForY(candidateChildRects, scenePosition.y());
+
+    if (bestArea->operation == SceneDocument::TreeNode::Module
+        && bestArea->moduleParameterSeparatorY > 0.0
+        && variableDrop) {
+        const int parameterCount = qBound(0, bestArea->moduleParameterCount, candidateChildren.size());
+        const bool parameterZone = scenePosition.y() < bestArea->moduleParameterSeparatorY;
+        target.moduleParameterZone = parameterZone;
+
+        QVector<QRectF> zoneChildRects;
+        if (parameterZone) {
+            for (int i = 0; i < parameterCount && i < candidateChildren.size(); ++i)
+                zoneChildRects.append(candidateChildren[i].rect);
+            target.zoneRect = QRectF(contentRect.left(),
+                                     contentRect.top(),
+                                     contentRect.width(),
+                                     qMax<qreal>(PrimitiveHeight, bestArea->moduleParameterSeparatorY - contentRect.top()));
+            target.insertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+        } else {
+            for (int i = parameterCount; i < candidateChildren.size(); ++i)
+                zoneChildRects.append(candidateChildren[i].rect);
+            target.zoneRect = QRectF(contentRect.left(),
+                                     bestArea->moduleParameterSeparatorY,
+                                     contentRect.width(),
+                                     qMax<qreal>(PrimitiveHeight, contentRect.bottom() - bestArea->moduleParameterSeparatorY));
+            target.insertIndex = parameterCount + insertionIndexForY(zoneChildRects, scenePosition.y());
+        }
+
+        candidateChildRects = zoneChildRects;
+    }
+
     target.placeholderRect = placeholderRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex, effectivePreviewSize);
+    if (bestArea->operation == SceneDocument::TreeNode::Module
+        && bestArea->moduleParameterSeparatorY > 0.0
+        && variableDrop
+        && !target.moduleParameterZone
+        && target.placeholderRect.top() < bestArea->moduleParameterSeparatorY)
+        target.placeholderRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
     target.slotMarkerRect = slotMarkerRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex);
+    if (bestArea->operation == SceneDocument::TreeNode::Module
+        && bestArea->moduleParameterSeparatorY > 0.0
+        && variableDrop
+        && !target.moduleParameterZone
+        && target.slotMarkerRect.top() < bestArea->moduleParameterSeparatorY)
+        target.slotMarkerRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
     target.previewChildren = childrenShiftedFromIndex(candidateChildren,
                                                      target.insertIndex,
                                                      effectivePreviewSize.height() + ChildGap);
