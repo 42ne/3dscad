@@ -37,6 +37,7 @@ private slots:
     void deleteSelectedGroup();
     void applyOpenScadCode();
     void sendToOpenScad();
+    void loadExample(const QString &filePath);
 
     void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
     void showSceneTreeContextMenu(const QPoint &position);
@@ -81,6 +82,8 @@ private:
     void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
     void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);
     QString previewScadPath() const;
+    QString examplesPath() const;
+    void populateExamplesMenu(QMenu *menu);
     bool writeOpenScadPreview(bool notify);
 
 private:

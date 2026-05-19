@@ -17,6 +17,7 @@
 #include <QDoubleSpinBox>
 #include <QDir>
 #include <QDropEvent>
+#include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -393,6 +394,10 @@ void MainWindow::buildUi()
     m_redoAction = m_undoStack->createRedoAction(this, "Redo");
     m_undoAction->setShortcut(QKeySequence::Undo);
     m_redoAction->setShortcut(QKeySequence::Redo);
+
+    auto *fileMenu = menuBar()->addMenu("File");
+    auto *examplesMenu = fileMenu->addMenu("Open Example");
+    populateExamplesMenu(examplesMenu);
 
     auto *editMenu = menuBar()->addMenu("Edit");
     editMenu->addAction(m_undoAction);
@@ -1803,6 +1808,54 @@ void MainWindow::refreshCsgStatus()
 QString MainWindow::previewScadPath() const
 {
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("openscad_preview.scad");
+}
+
+QString MainWindow::examplesPath() const
+{
+    // Walk up from the exe until we find a directory that contains docs/sample_codes
+    QDir dir(QCoreApplication::applicationDirPath());
+    for (int i = 0; i < 6; ++i) {
+        QDir candidate(dir.absoluteFilePath("docs/sample_codes"));
+        if (candidate.exists())
+            return candidate.absolutePath();
+        if (!dir.cdUp())
+            break;
+    }
+    return QString();
+}
+
+void MainWindow::populateExamplesMenu(QMenu *menu)
+{
+    const QString path = examplesPath();
+    if (path.isEmpty()) {
+        menu->addAction("(no examples found)")->setEnabled(false);
+        return;
+    }
+
+    const QStringList files = QDir(path).entryList({"*.scad"}, QDir::Files, QDir::Name);
+    if (files.isEmpty()) {
+        menu->addAction("(no .scad files)")->setEnabled(false);
+        return;
+    }
+
+    for (const QString &fileName : files) {
+        const QString filePath = QDir(path).absoluteFilePath(fileName);
+        QAction *action = menu->addAction(QFileInfo(fileName).completeBaseName());
+        connect(action, &QAction::triggered, this, [this, filePath]() {
+            loadExample(filePath);
+        });
+    }
+}
+
+void MainWindow::loadExample(const QString &filePath)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Open Example", QString("Cannot open:\n%1").arg(filePath));
+        return;
+    }
+    m_codeEditor->setPlainText(QString::fromUtf8(file.readAll()));
+    applyOpenScadCode();
 }
 
 bool MainWindow::writeOpenScadPreview(bool notify)
