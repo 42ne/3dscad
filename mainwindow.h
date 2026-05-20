@@ -58,8 +58,6 @@ private slots:
     void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
     void onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId, int start, int length, qreal delta);
     void onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
-    void onGraphicsTreeModuleRenameRequested(int groupId, const QString &newName);
-    void onGraphicsTreeVariableRenameRequested(int nodeId, const QString &newName);
 
 private:
     void buildUi();

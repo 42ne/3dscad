@@ -325,6 +325,7 @@ void MainWindow::buildUi()
         onGraphicsTreeVariableRenameRequested(variableId, newName);
     });
 
+
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;
     m_csgStatusLabel->setWordWrap(true);
