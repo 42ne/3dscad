@@ -92,6 +92,7 @@ private:
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
+    void updateInlineInputGeometry();
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
@@ -152,6 +153,7 @@ private:
 
     SceneTreeInlineTextInput *m_inlineInput     = nullptr;
     bool                      m_inlineInputActive = false;
+    QRectF                    m_inlineInputSceneRect;
 
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;

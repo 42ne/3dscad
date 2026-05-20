@@ -626,6 +626,7 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
 void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
+    updateInlineInputGeometry();
     // Clear hover state when the canvas scrolls (positions shift under the cursor).
     const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
     m_hoveredScrollRect = QRectF();
@@ -655,6 +656,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
 void SceneTreeGraphicsWidget::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
+    updateInlineInputGeometry();
     updateToolbarOverlay();
 }
 
@@ -693,6 +695,7 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 
     const qreal factor = event->angleDelta().y() > 0 ? 1.12 : 1.0 / 1.12;
     scale(factor, factor);
+    updateInlineInputGeometry();
     updateToolbarOverlay();
     event->accept();
 }
@@ -2038,17 +2041,15 @@ void SceneTreeGraphicsWidget::startInlineRename(int nodeId,
     if (!m_inlineInput)
         return;
 
-    // Convert scene rect to viewport coordinates.
-    const QRectF viewRectF = mapFromScene(sceneRect).boundingRect();
-    const QRect viewRect   = viewRectF.toAlignedRect();
-
     m_inlineInputActive = true;
+    m_inlineInputSceneRect = sceneRect;
 
     m_inlineInput->startEditing(
-        viewRect,
+        mapFromScene(sceneRect).boundingRect(),
         currentName,
         [this, nodeId, isModule](const QString &newName) {
             m_inlineInputActive = false;
+            m_inlineInputSceneRect = QRectF();
             if (newName.isEmpty() || newName == (isModule
                     ? (m_scene ? m_scene->treeNodeById(nodeId) ?
                            m_scene->treeNodeById(nodeId)->moduleName : QString() : QString())
@@ -2065,7 +2066,17 @@ void SceneTreeGraphicsWidget::startInlineRename(int nodeId,
         },
         [this]() {
             m_inlineInputActive = false;
+            m_inlineInputSceneRect = QRectF();
         });
+}
+
+void SceneTreeGraphicsWidget::updateInlineInputGeometry()
+{
+    if (!m_inlineInput || !m_inlineInputActive || !m_inlineInputSceneRect.isValid())
+        return;
+
+    m_inlineInput->reposition(mapFromScene(m_inlineInputSceneRect).boundingRect());
+    m_inlineInput->raise();
 }
 
 QRectF SceneTreeGraphicsWidget::groupRectForNode(int groupId) const
