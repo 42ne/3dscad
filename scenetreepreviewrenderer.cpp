@@ -184,7 +184,11 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target)
 
 void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, const QString &previewTool)
 {
-    if (target.previewGroupRect.isValid()) {
+    // Only draw the target-group preview when there is an active drop target;
+    // otherwise interpolation can leave a stale phantom group rectangle visible
+    // while animating away from a now-invalid position (e.g. VAR dragged over
+    // a union group where it is not allowed).
+    if (target.previewGroupRect.isValid() && target.hasTarget) {
         const SceneDocument::TreeNode::Operation operation = operationForTargetPreview(target, m_document, m_layout);
         if (operation == SceneDocument::TreeNode::Module) {
             addModuleTargetPreview(target);

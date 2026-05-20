@@ -1118,8 +1118,18 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
         const bool targetIsScene = targetNode
                                    && targetNode->type == SceneDocument::TreeNode::Group
                                    && targetNode->operation == SceneDocument::TreeNode::Scene;
-        if (target.parentGroupId > 0 && target.parentGroupId != rootId && !targetIsModule && !targetIsScene)
-            return DropTarget();
+        if (target.parentGroupId > 0 && target.parentGroupId != rootId && !targetIsModule && !targetIsScene) {
+            // Reject the drop target but preserve source preview data so the
+            // animation can smoothly show the source group collapsing rather
+            // than freezing on a phantom union rectangle.
+            DropTarget noTarget;
+            noTarget.sourceGroupRect    = target.sourceGroupRect;
+            noTarget.sourceGroupOperation = target.sourceGroupOperation;
+            noTarget.sourceCutSeparatorY = target.sourceCutSeparatorY;
+            noTarget.sourceChildren     = target.sourceChildren;
+            noTarget.sourceRect         = target.sourceRect;
+            return noTarget;
+        }
     }
 
     if (previewTool == QStringLiteral("call") && m_scene) {
