@@ -1199,8 +1199,12 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
         selectShapeInSceneTree(node->shapeId);
         m_viewport->setSelectedIndex(m_scene.selectedIndex());
         m_viewport->setSelectedGroupId(0);
-    } else if (node->type == SceneDocument::TreeNode::Variable
-               || node->type == SceneDocument::TreeNode::ModuleCall) {
+    } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
+        m_scene.setSelectedShapeId(-1);
+        selectTreeNodeInSceneTree(node->id);
+        m_viewport->setSelectedIndex(-1);
+        m_viewport->setSelectedGroupId(node->shapeId);
+    } else if (node->type == SceneDocument::TreeNode::Variable) {
         m_scene.setSelectedShapeId(-1);
         selectTreeNodeInSceneTree(node->id);
         m_viewport->setSelectedIndex(-1);

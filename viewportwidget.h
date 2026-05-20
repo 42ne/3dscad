@@ -10,6 +10,7 @@
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QString>
+#include <QTimer>
 #include <QVector>
 #include <QVector2D>
 
@@ -92,6 +93,7 @@ private:
     void drawTreeShapeParameterPreview(QPainter &painter) const;
     void updateViewportControls();
     bool canUseOpenGLRenderBackend() const;
+    void updateSelectionPulseTimer();
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
     QVector3D transformOriginForGroup(int groupId) const;
     QVector3D worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const;
@@ -112,6 +114,8 @@ private:
     int m_lightingPreset = 0;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
+    int m_selectionPulseFrame = 0;
+    QTimer m_selectionPulseTimer;
     int m_treeTransformPreviewGroupId = 0;
     int m_treeTransformPreviewAxis = -1;
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;

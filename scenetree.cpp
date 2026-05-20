@@ -133,7 +133,10 @@ bool SceneTree::removeGroupById(int groupId)
     const TreeNode *node = nodeById(groupId);
     const bool wasModule = node && node->type == TreeNode::Group && node->operation == TreeNode::Module;
 
-    const bool removed = detachNodeById(&m_root, groupId);
+    TreeNode removedModule;
+    const bool removed = wasModule
+                             ? detachNodeById(&m_root, groupId, &removedModule)
+                             : detachNodeById(&m_root, groupId);
     if (removed) {
         if (wasModule)
             removeModuleCallForModule(groupId);

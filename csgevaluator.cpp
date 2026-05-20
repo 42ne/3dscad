@@ -779,9 +779,6 @@ static void appendTreeHelpers(CsgPreview *preview,
                               QVector<SceneDocument::TreeNode> groupStack = {})
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
-        if (inheritedMode == ShapeNode::Add)
-            return;
-
         const ShapeNode *shape = scene.shapeById(node.shapeId);
         if (!shape)
             return;

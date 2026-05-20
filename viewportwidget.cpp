@@ -10,6 +10,7 @@
 #include <QPainterPath>
 #include <QPolygonF>
 #include <QOpenGLShaderProgram>
+#include <QSet>
 #include <QVector4D>
 #include <QWheelEvent>
 #include <QtMath>
@@ -635,6 +636,61 @@ static QColor viewportSelectedSolidColor(bool darkTheme, int variant)
     }
 }
 
+static void collectPrimitiveShapeIds(const SceneDocument::TreeNode &node, QSet<int> *shapeIds)
+{
+    if (!shapeIds)
+        return;
+
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        shapeIds->insert(node.shapeId);
+        return;
+    }
+
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectPrimitiveShapeIds(child, shapeIds);
+}
+
+static QSet<int> selectedViewportShapeIds(const SceneDocument *scene,
+                                          const QVector<ShapeNode> *shapes,
+                                          int selectedIndex,
+                                          int selectedGroupId)
+{
+    QSet<int> shapeIds;
+    if (scene && selectedGroupId > 0) {
+        if (const SceneDocument::TreeNode *group = scene->treeNodeById(selectedGroupId))
+            collectPrimitiveShapeIds(*group, &shapeIds);
+    } else if (shapes && selectedIndex >= 0 && selectedIndex < shapes->size()) {
+        shapeIds.insert(shapes->at(selectedIndex).id);
+    }
+    return shapeIds;
+}
+
+static bool itemBelongsToSelection(const CsgRenderItem &item,
+                                   const QVector<ShapeNode> *shapes,
+                                   const QSet<int> &selectedShapeIds)
+{
+    if (item.shapeIndex < 0 || !shapes || item.shapeIndex >= shapes->size())
+        return false;
+
+    return selectedShapeIds.contains(shapes->at(item.shapeIndex).id);
+}
+
+static QColor dimmedViewportColor(QColor color)
+{
+    color.setRed(clampColorChannel(color.red() * 0.58f));
+    color.setGreen(clampColorChannel(color.green() * 0.58f));
+    color.setBlue(clampColorChannel(color.blue() * 0.58f));
+    return color;
+}
+
+static QColor pulsedViewportColor(QColor color, float pulse)
+{
+    return QColor(clampColorChannel(color.red() * pulse),
+                  clampColorChannel(color.green() * pulse),
+                  clampColorChannel(color.blue() * pulse),
+                  color.alpha());
+}
+
 
 static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
 {
@@ -936,8 +992,14 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         m_lightingPreset = qMax(0, index);
         update();
     });
+    m_selectionPulseTimer.setInterval(80);
+    connect(&m_selectionPulseTimer, &QTimer::timeout, this, [this]() {
+        ++m_selectionPulseFrame;
+        update();
+    });
 
     updateViewportControls();
+    updateSelectionPulseTimer();
 }
 
 void ViewportWidget::setScene(const SceneDocument *scene)
@@ -945,6 +1007,7 @@ void ViewportWidget::setScene(const SceneDocument *scene)
     m_scene = scene;
     m_shapes = scene ? &scene->shapes() : nullptr;
     invalidateCsgPreview();
+    updateSelectionPulseTimer();
     update();
 }
 
@@ -953,6 +1016,7 @@ void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
     m_scene = nullptr;
     m_shapes = shapes;
     invalidateCsgPreview();
+    updateSelectionPulseTimer();
     update();
 }
 
@@ -961,6 +1025,8 @@ void ViewportWidget::setSelectedIndex(int index)
     m_selectedIndex = index;
     if (index >= 0)
         m_selectedGroupId = 0;
+    m_vboMeshKey.clear();
+    updateSelectionPulseTimer();
     update();
 }
 
@@ -969,6 +1035,8 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     m_selectedGroupId = groupId;
     if (groupId > 0)
         m_selectedIndex = -1;
+    m_vboMeshKey.clear();
+    updateSelectionPulseTimer();
     update();
 }
 
@@ -1005,11 +1073,13 @@ void ViewportWidget::setRenderBackend(RenderBackend backend)
 
     if (m_renderBackend == backend) {
         updateViewportControls();
+        updateSelectionPulseTimer();
         return;
     }
 
     m_renderBackend = backend;
     updateViewportControls();
+    updateSelectionPulseTimer();
     update();
 }
 
@@ -1455,6 +1525,11 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
+        const QSet<int> selectedShapeIds = selectedViewportShapeIds(m_scene,
+                                                                    m_shapes,
+                                                                    m_selectedIndex,
+                                                                    m_selectedGroupId);
+        const bool hasViewportSelection = !selectedShapeIds.isEmpty();
         QVector<Triangle2D> triangles;
         QVector<Triangle2D> translucentHelperTriangles;
         QVector<Line2D> backgroundHelperLines;
@@ -1472,13 +1547,16 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 else if (shape.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
 
-                if (i == m_selectedIndex) {
+                const bool selected = selectedShapeIds.contains(shape.id);
+                if (selected) {
                     if (shape.booleanMode == ShapeNode::Subtract)
                         color = QColor(255, 125, 80);
                     else if (shape.booleanMode == ShapeNode::Intersect)
                         color = QColor(185, 145, 255);
                     else
                         color = QColor(255, 180, 60);
+                } else if (hasViewportSelection) {
+                    color = dimmedViewportColor(color);
                 }
 
                 appendMesh(triangles, buildShapeMesh(shape), color, i);
@@ -1495,6 +1573,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                                                &m_csgPreviewDirty);
             csgStatus = preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
+                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds);
                 QColor color = QColor(80, 160, 255);
                 if (item.booleanMode == ShapeNode::Subtract)
                     color = QColor(225, 95, 95);
@@ -1504,13 +1583,15 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 if (item.computed)
                     color = viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant);
 
-                if (item.shapeIndex == m_selectedIndex) {
+                if (selected) {
                     if (item.booleanMode == ShapeNode::Subtract)
                         color = QColor(255, 125, 80);
                     else if (item.booleanMode == ShapeNode::Intersect)
                         color = QColor(185, 145, 255);
                     else
                         color = item.computed ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : QColor(255, 180, 60);
+                } else if (hasViewportSelection) {
+                    color = dimmedViewportColor(color);
                 }
 
                 if (item.helper) {
@@ -1518,7 +1599,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                         continue;
 
                     if (item.booleanMode == ShapeNode::Subtract) {
-                        const bool selectedCut = item.shapeIndex == m_selectedIndex;
+                        const bool selectedCut = selected;
                         QColor cutColor = selectedCut
                                               ? (m_darkViewportTheme ? QColor(188, 210, 218, 58) : QColor(190, 205, 212, 82))
                                               : (m_darkViewportTheme ? QColor(188, 210, 218, 14) : QColor(190, 205, 212, 22));
@@ -1529,14 +1610,10 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                         appendProjectedHull(cutHelperOutlines, item.mesh, cutEdgeColor);
                         if (selectedCut)
                             appendCutFeatureEdges(foregroundHelperLines, item.mesh, cutEdgeColor);
-                    } else if (item.shapeIndex == m_selectedIndex) {
-                        QColor selectedColor = color.lighter(115);
+                    } else if (selected) {
+                        QColor selectedColor = QColor(255, 190, 70).lighter(115);
                         selectedColor.setAlpha(170);
                         appendWireframe(foregroundHelperLines, item.mesh, selectedColor);
-                    } else {
-                        QColor quietColor = color.lighter(95);
-                        quietColor.setAlpha(42);
-                        appendWireframe(backgroundHelperLines, item.mesh, quietColor);
                     }
                 } else if (drawSceneMeshes) {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
@@ -1760,10 +1837,22 @@ void ViewportWidget::paintOpenGLPreview()
             cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
     }
 
+    const QSet<int> selectedShapeIds = selectedViewportShapeIds(m_scene,
+                                                                m_shapes,
+                                                                m_selectedIndex,
+                                                                m_selectedGroupId);
+    const bool hasViewportSelection = !selectedShapeIds.isEmpty();
+    const int pulseBucket = hasViewportSelection ? (m_selectionPulseFrame % 40) : 0;
+    const float pulse = hasViewportSelection
+                            ? 1.0f + 0.13f * qSin(static_cast<float>(pulseBucket) * 0.35f)
+                            : 1.0f;
+
     const QString meshKey = dragging
         ? QString()
         : (QString::number(m_cachedCsgFingerprint)
            + "|" + QString::number(m_selectedIndex)
+           + "|" + QString::number(m_selectedGroupId)
+           + "|" + QString::number(pulseBucket)
            + "|" + (m_darkViewportTheme ? QChar('d') : QChar('l'))
            + "|" + QString::number(m_viewportColorVariant));
 
@@ -1788,6 +1877,10 @@ void ViewportWidget::paintOpenGLPreview()
                     color = QColor(225, 95, 95);
                 else if (shape.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
+                if (selectedShapeIds.contains(shape.id))
+                    color = pulsedViewportColor(QColor(255, 180, 60), pulse);
+                else if (hasViewportSelection)
+                    color = dimmedViewportColor(color);
                 appendMesh(buildShapeMesh(shape), color);
             }
         } else {
@@ -1796,15 +1889,16 @@ void ViewportWidget::paintOpenGLPreview()
                 : cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
 
             for (const CsgRenderItem &item : preview.items) {
+                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds);
                 if (item.helper) {
-                    if (item.booleanMode != ShapeNode::Subtract)
+                    if (item.booleanMode != ShapeNode::Subtract && !selected)
                         continue;
-                    const bool sel = (item.shapeIndex == m_selectedIndex);
+                    const bool sel = selected;
                     const QColor fc = sel
-                        ? (m_darkViewportTheme ? QColor(188, 210, 218, 55) : QColor(60, 90, 110, 65))
+                        ? pulsedViewportColor(QColor(255, 188, 72, 92), pulse)
                         : (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28));
                     const QColor xc = sel
-                        ? (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28))
+                        ? pulsedViewportColor(QColor(255, 188, 72, 34), pulse)
                         : (m_darkViewportTheme ? QColor(188, 210, 218,  8) : QColor(60, 90, 110, 12));
                     const QVector4D cf = colorToVector4(fc);
                     const QVector4D cx = colorToVector4(xc);
@@ -1826,10 +1920,12 @@ void ViewportWidget::paintOpenGLPreview()
                     color = QColor(225, 95, 95);
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
-                if (item.shapeIndex == m_selectedIndex)
+                if (selected)
                     color = item.computed
-                        ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant)
-                        : QColor(255, 180, 60);
+                        ? pulsedViewportColor(viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant), pulse)
+                        : pulsedViewportColor(QColor(255, 180, 60), pulse);
+                else if (hasViewportSelection)
+                    color = dimmedViewportColor(color);
                 appendMesh(item.mesh, color);
             }
         }
@@ -2263,6 +2359,17 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
     return true;
+}
+
+void ViewportWidget::updateSelectionPulseTimer()
+{
+    const bool hasSelection = (m_selectedIndex >= 0 || m_selectedGroupId > 0) && m_shapes;
+    const bool shouldPulse = hasSelection && m_renderBackend == OpenGLRenderBackend;
+    if (shouldPulse && !m_selectionPulseTimer.isActive()) {
+        m_selectionPulseTimer.start();
+    } else if (!shouldPulse && m_selectionPulseTimer.isActive()) {
+        m_selectionPulseTimer.stop();
+    }
 }
 
 void ViewportWidget::updateViewportControls()
