@@ -254,6 +254,12 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     setFocus();
     m_lastMousePosition = event->pos();
 
+    if (event->button() == Qt::RightButton && itemAt(event->pos()) == nullptr) {
+        handleTreeNodeSelected(0);
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && itemAt(event->pos()) == nullptr) {
         m_panning = true;
         m_lastPanPoint = event->pos();

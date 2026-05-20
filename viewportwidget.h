@@ -48,6 +48,7 @@ public:
 
 signals:
     void shapeClicked(int index);
+    void emptyClicked();
     void shapeDragStarted(int index);
     void shapeDragged(int index, const QVector3D &delta);
     void shapeDragFinished(int index);
@@ -127,12 +128,14 @@ private:
     QVector3D m_cameraTarget;
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
+    QPoint m_emptyClickStartPosition;
     QVector3D m_lastDragDelta;
     QVector3D m_lastRotationDelta;
     QVector2D m_rotationDragScreenTangent;
     bool m_draggingShape = false;
     bool m_draggingGroup = false;
     bool m_panningViewport = false;
+    bool m_emptyClickCandidate = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
     int m_dragGroupId = 0;

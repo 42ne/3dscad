@@ -542,6 +542,7 @@ void MainWindow::buildUi()
         m_viewport->setSelectedGroupId(0);
         refreshProperties();
     });
+    connect(m_viewport, &ViewportWidget::emptyClicked, this, &MainWindow::clearSelection);
     connect(m_viewport, &ViewportWidget::shapeDragStarted, this, &MainWindow::onViewportShapeDragStarted);
     connect(m_viewport, &ViewportWidget::shapeDragged, this, &MainWindow::onViewportShapeDragged);
     connect(m_viewport, &ViewportWidget::shapeDragFinished, this, &MainWindow::onViewportShapeDragFinished);
@@ -743,6 +744,8 @@ void MainWindow::showSceneTreeContextMenu(const QPoint &position)
     QTreeWidgetItem *item = m_shapeTree->itemAt(position);
     if (item)
         m_shapeTree->setCurrentItem(item);
+    else
+        clearSelection();
 
     const bool hasItem = item != nullptr;
     const bool isShape = hasItem && item->data(0, ShapeIdRole).toInt() >= 0;
@@ -1039,8 +1042,10 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
 {
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
-    if (!node)
+    if (!node) {
+        clearSelection();
         return;
+    }
 
     if (node->type == SceneDocument::TreeNode::Primitive) {
         m_scene.setSelectedShapeId(node->shapeId);
@@ -1587,6 +1592,33 @@ void MainWindow::selectTreeNodeInSceneTree(int treeNodeId)
     if (m_sceneTreeGraphics)
         m_sceneTreeGraphics->setSelectedTreeNodeId(selectedItem ? selectedItem->data(0, TreeNodeIdRole).toInt() : 0);
     highlightOpenScadSelection();
+}
+
+void MainWindow::clearSelection()
+{
+    m_scene.setSelectedShapeId(-1);
+    m_ctrlHighlight = CtrlParamHighlight();
+
+    if (m_shapeTree) {
+        m_shapeTree->blockSignals(true);
+        m_shapeTree->setCurrentItem(nullptr);
+        m_shapeTree->clearSelection();
+        m_shapeTree->blockSignals(false);
+    }
+
+    if (m_sceneTreeGraphics)
+        m_sceneTreeGraphics->setSelectedTreeNodeId(0);
+
+    if (m_viewport) {
+        m_viewport->setSelectedIndex(-1);
+        m_viewport->setSelectedGroupId(0);
+        m_viewport->setTreeTransformControlPreview(0, SceneDocument::TreeNode::Union, -1);
+        m_viewport->setTreeShapeParameterPreview(-1, -1);
+        m_viewport->update();
+    }
+
+    highlightOpenScadSelection();
+    refreshProperties();
 }
 
 int MainWindow::selectedTreeNodeIdForCodeHighlight() const

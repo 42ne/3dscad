@@ -72,6 +72,7 @@ private:
     void highlightOpenScadSelection();
     void selectShapeInSceneTree(int shapeId);
     void selectTreeNodeInSceneTree(int treeNodeId);
+    void clearSelection();
     int selectedTreeNodeIdForCodeHighlight() const;
     int selectedTreeGroupId() const;
     int selectedDirectGroupId() const;

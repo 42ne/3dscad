@@ -2615,6 +2615,7 @@ bool ViewportWidget::isRotationDragMode(DragMode dragMode) const
 void ViewportWidget::mousePressEvent(QMouseEvent *event)
 {
     m_lastMousePosition = event->pos();
+    m_emptyClickCandidate = false;
 
     if (event->button() == Qt::RightButton) {
         m_panningViewport = true;
@@ -2716,8 +2717,13 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
         }
     }
 
-    if (shapeIndex < 0)
+    if (shapeIndex < 0) {
+        if (event->button() == Qt::LeftButton) {
+            m_emptyClickCandidate = true;
+            m_emptyClickStartPosition = event->pos();
+        }
         return;
+    }
 
     emit shapeClicked(shapeIndex);
 
@@ -2780,6 +2786,11 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     if (event->buttons() & Qt::LeftButton) {
+        if (m_emptyClickCandidate
+            && (event->pos() - m_emptyClickStartPosition).manhattanLength() > 3) {
+            m_emptyClickCandidate = false;
+        }
+
         const QPoint delta = event->pos() - m_lastMousePosition;
         m_cameraYaw = normalizedDegrees(m_cameraYaw - delta.x() * 0.45f);
         m_cameraPitch = normalizedDegrees(m_cameraPitch + delta.y() * 0.35f);
@@ -2799,6 +2810,7 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton && (m_draggingShape || m_draggingGroup)) {
+        m_emptyClickCandidate = false;
         const int shapeIndex = m_dragShapeIndex;
         const int groupId = m_dragGroupId;
         const bool wasDraggingGroup = m_draggingGroup;
@@ -2820,6 +2832,14 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
             else
                 emit shapeDragFinished(shapeIndex);
         }
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton && m_emptyClickCandidate) {
+        const bool clickedWithoutDrag = (event->pos() - m_emptyClickStartPosition).manhattanLength() <= 3;
+        m_emptyClickCandidate = false;
+        if (clickedWithoutDrag)
+            emit emptyClicked();
     }
 }
 
