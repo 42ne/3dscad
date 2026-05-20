@@ -193,11 +193,6 @@ void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &sc
             if (ranges)
                 ranges->append({call->id, start, code->size() - start});
         }
-    } else if (!moduleChildren.isEmpty()) {
-        // Fallback for old documents that have no explicit ModuleCall nodes.
-        *code += "\n";
-        for (const SceneDocument::TreeNode *mod : moduleChildren)
-            *code += moduleCallStatement(*mod);
     }
 }
 

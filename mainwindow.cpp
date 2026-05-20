@@ -385,6 +385,16 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
         return item;
     }
 
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        auto *item = new QTreeWidgetItem(parent);
+        item->setText(0, QStringLiteral("CALL %1").arg(node.moduleName) + roleSuffix);
+        item->setData(0, ShapeIdRole, -1);
+        item->setData(0, TreeNodeIdRole, node.id);
+        item->setForeground(0, QColor(32, 90, 145));
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+        return item;
+    }
+
     auto *groupItem = new QTreeWidgetItem(parent);
     groupItem->setText(0, booleanGroupLabel(node.operation, node.moduleName) + roleSuffix);
     markGroupItem(groupItem, node);

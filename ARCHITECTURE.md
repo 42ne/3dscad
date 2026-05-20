@@ -17,24 +17,24 @@ It stores:
 
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
-It also contains an explicit `TreeNode` hierarchy with group, primitive, and variable nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
-The service root is a non-deletable `Module` tree node used as the generated `scene_model` module root. User-visible boolean operation nodes are `Union`, `Difference`, and `Intersection`; `Module` is also reserved in the graphics palette for future nested module work.
+It also contains an explicit `TreeNode` hierarchy with scene, module, module-call, group, primitive, for-loop, and variable nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
+The service root is a non-deletable internal container. Its user-visible children are the permanent `scene` container and top-level OpenSCAD `module` declarations. User geometry lives in `scene`; module declarations live at root level and become geometry only through explicit `ModuleCall` nodes.
 Group `TreeNode` entries store position, rotation, and scale transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`/`scale`, and Manifold CSG applies the same transform after evaluating the group operation.
-Transform groups are edited directly in the graphics tree through compact controls; the Properties dock remains available for legacy/simple property editing. Edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
-Variable `TreeNode` entries are first-stage scaffolding for future parameterization. They currently live only as direct children of the root module, store a generated unique name plus expression text, are emitted as assignment lines, and are ignored by geometry/CSG evaluation.
-`ExpressionSyntax` is a small expression-syntax validator used by the parser for variable assignment text. It accepts numbers, identifiers, `+`, `-`, `*`, `/`, parentheses, and unary `+/-`. It does not yet evaluate expressions or connect them to primitive/transform parameters.
+Transform groups are edited directly in the graphics tree through compact controls. Edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
+Variable `TreeNode` entries live in the scene container, in module parameter sections, or directly inside module bodies. They store a generated unique name plus expression text and are emitted as assignment lines or module parameters.
+`ExpressionSyntax` is a small expression-syntax validator/evaluator used by parser, generator-facing controls, and preview. It accepts numbers, identifiers, `+`, `-`, `*`, `/`, parentheses, and unary `+/-`.
 Selected groups can also be moved from the viewport axis gizmo and rotated from the viewport rotation rings. Viewport group dragging updates the group transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
-The document model exposes tree operations used by the UI layer: add group, remove group by promoting children, add/remove root variables, and move a tree node to another group. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
+The document model exposes tree operations used by the UI layer: add group, remove group by promoting children, add/remove variables in valid zones, add/remove module calls, and move a tree node to another valid container. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
-`MainWindow` owns the Qt UI, undo stack, property panel, scene tree, code editor, and coordination between scene, code, and viewport.
+`MainWindow` owns the Qt UI, undo stack, scene tree, code editor, and coordination between scene, code, graphics tree, and viewport.
 
 The scene tree is a `QTreeWidget` projection of the internal boolean tree. Primitive rows select the corresponding `ShapeNode`; group rows are selectable targets for creating, deleting, and moving explicit operation groups. A context menu exposes the same core group actions near the selected node.
 For clarity, children of `difference()` groups are labeled as `base` or `cut`, and children of `intersection()` groups are labeled as `mask`.
-The properties panel derives the selected primitive's displayed tree role from `SceneDocument::TreeNode`; the legacy `ShapeNode::booleanMode` is synchronized after tree moves and is no longer rewritten by unrelated parameter edits.
+The legacy `ShapeNode::booleanMode` is synchronized after tree moves and is no longer rewritten by unrelated parameter edits.
 
-`SceneTreeGraphicsWidget` is the experimental graphical tree editor. It is a `QGraphicsView`/`QGraphicsScene` projection of the same `SceneDocument::TreeNode` hierarchy, not a second document model. It draws an embedded palette for primitives, operation groups, transform containers, root variables, nested rectangles for the tree, dedicated base/cut regions for `difference`, object icons plus stable numbers for primitives, and a dark grid canvas. Root variable cards expose numeric literals in their assignment expressions as small wheel-adjustable controls. Palette drag/drop creates new tree nodes; dragging existing nodes moves them to a target group with an explicit insert index. Right-click selection is used for now so selection does not conflict with left-button drag/move.
+`SceneTreeGraphicsWidget` is the experimental graphical tree editor. It is a `QGraphicsView`/`QGraphicsScene` projection of the same `SceneDocument::TreeNode` hierarchy, not a second document model. It draws an embedded palette for primitives, operation groups, transform containers, variables, modules, nested rectangles for the tree, dedicated base/cut regions for `difference`, object icons plus stable numbers for primitives, and a dark grid canvas. Variable cards expose numeric literals in their assignment expressions as small wheel-adjustable controls. Module declaration cards expose a non-code call handle; dragging that handle creates a real `ModuleCall` node while leaving the handle in place. Palette drag/drop creates new tree nodes; dragging existing nodes moves them to a target group with an explicit insert index. Right-click selection is used for now so selection does not conflict with left-button drag/move.
 The graphics widget maintains transient hit-area metadata for each drawn group so drag preview can compute source and target containers, future child order, container expansion, `difference` base/cut placement, and self-drop suppression without mutating the document during mouse move. For moved nodes, the widget renders a snapshot of the source node under the cursor, shows a reserved slot at the source location, and separately previews the target container after insertion. Palette drags preview the real node that will be inserted. Active drags are marked with a green dashed focus outline, using an ellipse for primitives and a rounded rectangle for operation groups.
-Graphics-tree selection flows back through `MainWindow`, which updates the classic tree, viewport selection, Properties dock, and OpenSCAD code highlight. The widget intentionally avoids `Q_OBJECT`; callbacks are plain `std::function` hooks to keep it easy to isolate while the graphics tree is being developed.
+Graphics-tree selection flows back through `MainWindow`, which updates the classic tree, viewport selection, and OpenSCAD code highlight. The widget intentionally avoids `Q_OBJECT`; callbacks are plain `std::function` hooks to keep it easy to isolate while the graphics tree is being developed.
 
 `ViewportWidget` owns interactive viewing, picking, and viewport-local display controls:
 
@@ -59,19 +59,23 @@ CSG preview routes through tree-based Manifold evaluation whenever the tree cont
 
 Node kinds:
 
-- group: `Module`, `Union`, `Difference`, `Intersection`
+- container/declaration: `Scene`, `Module`
+- call: `ModuleCall`
+- group: `Union`, `Difference`, `Intersection`, `Translate`, `Rotate`, `Scale`, `For`
 - primitive: shape reference by stable `shapeId`
-- variable: root-module assignment scaffold with generated name and numeric value
+- variable: scene assignment, module-local assignment, or module parameter with generated name and expression text
 
 Generated boolean structure:
 
-- the document root is emitted as `module scene_model() { ... }` followed by `scene_model();`
-- variable nodes are emitted as assignment lines inside `scene_model`, currently before/among other root children according to tree order
-- plain shapes are emitted as module children or inside `union()`
-- subtract shapes generate `difference()`
-- intersect shapes generate `intersection()`
+- scene variables and scene children are emitted at top level.
+- module declarations are emitted at top level and are not implicitly called.
+- module calls are emitted only where real `ModuleCall` nodes appear.
+- variable nodes are emitted as assignment lines or module parameters according to their parent zone.
+- plain shapes are emitted directly or inside supported groups.
+- subtract shapes generate `difference()` structure; the first child is the base and later children are cuts.
+- intersect shapes generate `intersection()` structure.
 
-`OpenScadParser` parses the generated subset back into a `SceneDocument::Snapshot`, including the module wrapper, root variable assignments with simple expressions, boolean groups, transform groups, and primitive nodes. Applying generated code restores the explicit document tree instead of flattening the scene back to only `ShapeNode` data. It does not yet bind variables to primitive or transform parameters. It is not a general OpenSCAD parser.
+`OpenScadParser` parses the generated subset back into a `SceneDocument::Snapshot`, including top-level scene variables, top-level module declarations with parameters, explicit module calls, boolean groups, transform groups, for loops, and primitive nodes. Applying generated code restores the explicit document tree instead of flattening the scene back to only `ShapeNode` data. It is not a general OpenSCAD parser; the current round-trippable syntax contract is documented in `docs/openscad_subset.md`.
 
 ## Undo/Redo
 
@@ -81,6 +85,13 @@ Undo commands live in `scenecommands.*`:
 - `DeleteShapeCommand`
 - `AddVariableCommand`
 - `RemoveVariableCommand`
+- `AddModuleCommand`
+- `RemoveModuleCommand`
+- `AddModuleCallCommand`
+- `RemoveModuleCallCommand`
+- `UpdateModuleCallArgumentCommand`
+- `UpdateForLoopCommand`
+- `UpdateGroupTransformCommand`
 - `UpdateShapeCommand`
 - `ReplaceSceneCommand`, which can restore a parsed `SceneDocument::Snapshot` for generated-code roundtrip
 
@@ -176,11 +187,13 @@ Dragging:
 - `Shift + drag` supports plane dragging.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.
-- Graphics-tree palette dragging creates primitives or operation groups through the same undoable commands used by the classic tree/buttons.
-- Graphics-tree `VAR` palette dragging creates a variable only in the root module. Variable nodes can be selected, deleted, and have individual numeric literals adjusted with `Ctrl` + mouse wheel, but they are not yet renamed or used as parameter sources.
+- Graphics-tree palette dragging creates primitives or operation groups through undoable commands.
+- Graphics-tree `VAR` palette dragging creates variables in valid scene/module zones. Variable nodes can be selected, deleted, and have individual numeric literals adjusted with `Ctrl` + mouse wheel, but they are not yet renamed.
+- Dragging a module declaration's call handle creates a real `ModuleCall` node in a valid scene, group, for-loop, or module-body target. The handle itself is UI-only and is not emitted as OpenSCAD.
+- `ModuleCall` nodes can be selected, deleted, moved between valid containers, adjusted through module argument controls, and highlighted in the viewport as their own call instances.
 - Graphics-tree existing-node dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Graphics-tree drops include an insert index so new and moved nodes can land before, between, or after siblings instead of always appending.
-- Graphics-tree right-click selection keeps selection separate from drag/move and updates the viewport, Properties dock, classic tree, and generated-code highlight.
+- Graphics-tree right-click selection keeps selection separate from drag/move and updates the viewport, classic tree, and generated-code highlight.
 - Graphics-tree keyboard handling maps `Delete` and `Backspace` to the same delete commands used elsewhere in the UI.
 - Graphics-tree background dragging pans a bounded virtual canvas; scroll bars are hidden but still used internally by `QGraphicsView`.
 - Graphics-tree drag preview is visual-only: it reserves source and target slots, previews container growth, removes the moved node from the source-container preview, prevents a group from being previewed as dropped into itself, and suppresses fallback target overlays when there is no real drop target during a move.
@@ -230,9 +243,9 @@ See [docs/sfxbuilder.md](docs/sfxbuilder.md) for end-user usage instructions.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
-- Variable nodes are intentionally minimal: only root-module placement, expression syntax validation, and generated assignment output are implemented; rename, scope, expression evaluation, and parameter binding are future work.
+- Variable and module-parameter support intentionally follows a smaller scope model than full OpenSCAD; rename UI and broader language semantics are future work.
 - The graphics tree is still a preview/editor prototype; classic tree remains available until insertion, explicit reordering affordances, group deletion ergonomics, and difference base/cut editing feel complete there.
-- Parser and generator are coupled to a narrow generated subset.
+- Parser and generator are coupled to the narrow subset documented in `docs/openscad_subset.md`.
 
 ## Recommended Next Work
 

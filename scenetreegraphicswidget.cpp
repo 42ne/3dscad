@@ -608,7 +608,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         callTemplate.shapeId = node.id;
         callTemplate.moduleName = node.moduleName;
         SceneTreeNodeRenderer(m_graphicsScene,
-                              0,
+                              -1,
                               nullptr,
                               0,
                               -1,
@@ -860,6 +860,8 @@ bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition,
     int length = 0;
     SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
     if (!transformControlAt(scenePosition, &groupId, &operation, &axis, &start, &length))
+        return false;
+    if (start < 0 || length <= 0)
         return false;
 
     m_transformValueAdjustedCallback(groupId, axis, start, length, static_cast<qreal>(wheelSteps));
@@ -1159,14 +1161,26 @@ void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
         message = controlDown
                       ? QStringLiteral("Use mouse wheel to change this for range number")
                       : QStringLiteral("Hold Ctrl and use mouse wheel to change this for range number");
-    } else if (transformControlAt(scenePosition, &groupId, &operation, &axis)) {
+    } else {
+        int transformNumberStart = -1;
+        int transformNumberLength = 0;
+        if (transformControlAt(scenePosition,
+                               &groupId,
+                               &operation,
+                               &axis,
+                               &transformNumberStart,
+                               &transformNumberLength)
+            && transformNumberStart >= 0
+            && transformNumberLength > 0) {
         static const char *AxisNames[] = {"X", "Y", "Z"};
         const QString axisName = QString::fromLatin1(AxisNames[axis]);
-        key = QStringLiteral("transform:%1:%2").arg(groupId).arg(axis);
+        key = QStringLiteral("transform:%1:%2").arg(groupId).arg(transformNumberStart);
         message = controlDown
                       ? QStringLiteral("Use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName)
                       : QStringLiteral("Hold Ctrl and use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName);
-    } else {
+        }
+    }
+    if (key.isEmpty()) {
         int variableNodeId = 0;
         int numberStart = -1;
         int numberLength = 0;
@@ -1229,7 +1243,10 @@ void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &sceneP
     int numberStart = -1;
     int numberLength = 0;
     SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-    if (!enabled || !transformControlAt(scenePosition, &groupId, &operation, &axis, &numberStart, &numberLength)) {
+    if (!enabled
+        || !transformControlAt(scenePosition, &groupId, &operation, &axis, &numberStart, &numberLength)
+        || numberStart < 0
+        || numberLength <= 0) {
         groupId = 0;
         axis = -1;
         numberStart = -1;

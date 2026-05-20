@@ -13,18 +13,18 @@ The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport.
 Implemented:
 
 - Scene tree with cube, sphere, and cylinder primitives.
-- Scene tree displays the generated boolean structure as a root `module scene_model` with `union`, `difference`, and `intersection` groups.
-- The document root is a non-deletable `module scene_model` group, so dropping a top-level group no longer creates an accidental implicit wrapper.
+- Scene tree displays a permanent `scene` container plus top-level OpenSCAD `module` declarations.
+- The document root is an internal non-deletable container; user geometry is placed in `scene`, while module declarations stay at root level.
 - `SceneDocument` has an explicit tree-node hierarchy that is updated incrementally for add/delete/boolean-mode changes.
-- The scene tree has an initial `VAR` node type for root-module variables. Variables are currently scaffold declarations only: they can be added to the root module, get unique names like `var1`, can be deleted, and are emitted as OpenSCAD assignment lines.
-- Variable declarations preserve simple expression text such as `2*a+10-5`; expressions are syntax-checked but not yet bound to primitive or transform parameters.
+- The scene tree has a `VAR` node type for scene variables, module parameters, and module-local variables. Variables get unique names like `var1`, can be deleted, are emitted as OpenSCAD assignment lines or module parameters, and can drive supported primitive/transform expressions.
+- Variable declarations preserve simple expression text such as `2*a+10-5`; supported expressions are syntax-checked and evaluated for tree rendering and preview.
 - Group tree nodes store position, rotation, and scale transforms for transform-container editing.
 - `SceneDocument` exposes group operations for add/remove/move, with undo/redo commands ready for UI wiring.
 - The scene tree can create explicit `union`, `difference`, and `intersection` groups and move tree nodes between them.
 - Experimental graphics tree preview based on `QGraphicsScene`, shown beside the classic tree.
 - The graphics tree has an in-scene palette for cube, sphere, cylinder, union, difference, intersection, transform tools, `VAR`, and module tools.
 - Graphics-tree drag/drop can add new primitives/groups and move existing tree nodes between groups with explicit insertion positions.
-- Graphics-tree selection is synchronized with the classic tree, 3D viewport selection, Properties dock, and generated OpenSCAD code highlight.
+- Graphics-tree selection is synchronized with the classic tree, 3D viewport selection, and generated OpenSCAD code highlight.
 - Graphics-tree `VAR` nodes display assignment expressions and allow direct `Ctrl` + mouse wheel adjustment of individual numeric literals.
 - Graphics-tree primitives use shape icons plus stable object numbers instead of text-only cards.
 - Graphics-tree groups use operation icons, nested panels, and dedicated `difference` base/cut regions with reserved cut-space even when empty.
@@ -36,11 +36,13 @@ Implemented:
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
-- The properties panel shows the selected primitive's effective tree role, and transform/parameter edits no longer overwrite that role.
+- The old Properties dock has been removed; supported primitive, transform, variable, for-loop, and module-call edits happen directly in the graphics tree or viewport.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
 - Selected primitives and groups can be moved from the viewport with axis gizmo arrows and rotated with the gizmo rings.
 - Graphics-tree transform containers support `translate`, `rotate`, and `scale`; their compact controls can be adjusted with `Ctrl + mouse wheel`.
 - Primitive size/radius/height controls are also exposed in the graphics tree and show viewport hints while editing.
+- Module declarations have a non-code `call handle`. Dragging it creates a real `ModuleCall` node in `scene`, transform/boolean/for groups, or another module body; the handle itself remains in the declaration.
+- `ModuleCall` nodes are selectable, highlighted in the viewport as specific call instances, adjustable through module parameter controls, movable, and deletable.
 - Scene-tree drag/drop defers model updates until after Qt finishes the drop event to avoid transient disappearing rows.
 - Moving nodes between groups preserves their world position for translation-only group transforms.
 - OpenSCAD generation and Manifold CSG preview read the explicit document tree.
@@ -49,10 +51,10 @@ Implemented:
 - CSG preview also uses the explicit tree when group transforms are present, so transformed plain `union()` groups move as a unit.
 - Shape properties for position, rotation, size, radius, height, and boolean mode.
 - Undo/redo for add, delete, property changes, viewport drag, and code apply.
-- OpenSCAD generation for the supported scene subset, wrapped as `module scene_model()` plus a call.
-- OpenSCAD generation includes root-module variable declarations, for example `var1 = 0;` or `var2 = 2*var1+10;`. Variables are not yet usable as primitive or transform parameters.
+- OpenSCAD generation for the supported scene subset, with top-level variables, module declarations, explicit module calls, groups, transforms, for loops, and primitives.
+- OpenSCAD generation includes variable declarations and module parameters, for example `var1 = 0;` or `module part(r = 10) { ... }`.
 - OpenSCAD source mapping highlights the currently selected tree node in the code editor.
-- Parser for the generated OpenSCAD subset, including the no-parameter module wrapper, simple variable assignment lines, boolean groups, transform groups, primitives, and module call.
+- Parser for the supported generated OpenSCAD subset, including variable assignment lines, module definitions with parameters, module calls, boolean groups, transform groups, for loops, and primitives.
 - Interactive viewport orbit/zoom and right-button viewport panning.
 - Depth-tested triangle rendering.
 - In-viewport controls for OpenGL/software rendering, dark/light theme, and material color variants.
@@ -154,11 +156,23 @@ handles Qt DLLs, MinGW runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`,
 
 See [docs/sfxbuilder.md](docs/sfxbuilder.md) for full usage instructions.
 
+## Supported OpenSCAD Subset
+
+The visual tree is intentionally round-tripped through a small OpenSCAD subset:
+top-level scene variables, top-level module declarations, explicit module calls,
+boolean groups, transform groups, for loops, and cube/sphere/cylinder
+primitives. Module declarations do not create geometry by themselves; use the
+module card's non-code call handle in the graphics tree, or write an explicit
+`module_name(...);` call in supported code.
+
+See [docs/openscad_subset.md](docs/openscad_subset.md) for the current syntax
+contract and known limitations for correct tree reconstruction.
+
 ## Limitations
 
 - The OpenGL viewport path is still experimental and mixed with QPainter overlays; it does not yet use persistent VBO/index buffers or GPU picking.
 - OpenSCAD parser supports only the generated subset, but `Apply code` now restores the explicit tree structure for supported generated code instead of flattening back to shapes only.
-- Variables are currently first-stage scaffolding: no rename UI, no global/local scope model, no expression evaluation UI, and no parameter binding yet.
+- Variables and module parameters support simple arithmetic expressions, but the UI still has no rename flow and the scope model is intentionally smaller than full OpenSCAD.
 - Manifold is currently an optional local build, not a vendored/submodule dependency.
 - Mesh approximate fallback is not exact.
 - Box CSG only handles axis-aligned cubes.

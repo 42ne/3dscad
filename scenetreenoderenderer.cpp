@@ -533,6 +533,13 @@ public:
         painter->setOpacity(m_opacity);
 
         const QColor accent(38, 108, 148);
+        if (m_selected) {
+            paintRoundedPanel(painter,
+                              m_rect.adjusted(-3.0, -3.0, 3.0, 3.0),
+                              5.0,
+                              QPen(QColor(255, 193, 56), 2.2),
+                              Qt::NoBrush);
+        }
 
         // CALL badge
         const qreal badgeH = 13.0;
