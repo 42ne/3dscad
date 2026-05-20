@@ -10,17 +10,14 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QComboBox>
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDockWidget>
-#include <QDoubleSpinBox>
 #include <QDir>
 #include <QDropEvent>
 #include <QFile>
 #include <QFileInfo>
-#include <QFormLayout>
-#include <QGroupBox>
+#include <QHash>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -29,6 +26,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSplitter>
+#include <QStringList>
 #include <QTextEdit>
 #include <QTextCharFormat>
 #include <QTextCursor>
@@ -88,6 +86,46 @@ static QString adjustedNumericToken(const QString &expression,
     if (precision == 0 && replacement == QStringLiteral("-0"))
         replacement = QStringLiteral("0");
     return replacement;
+}
+
+static QStringList splitAtTopLevelCommas(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
+            --depth;
+        else if (ch == QLatin1Char(',') && depth == 0) {
+            const QString part = text.mid(start, i - start).trimmed();
+            if (!part.isEmpty())
+                result.append(part);
+            start = i + 1;
+        }
+    }
+    const QString tail = text.mid(start).trimmed();
+    if (!tail.isEmpty())
+        result.append(tail);
+    return result;
+}
+
+static QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+{
+    QHash<QString, QString> result;
+    for (const QString &part : splitAtTopLevelCommas(arguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal <= 0)
+            continue;
+
+        const QString name = part.left(equal).trimmed();
+        const QString expression = part.mid(equal + 1).trimmed();
+        if (!name.isEmpty() && !expression.isEmpty())
+            result[name] = expression;
+    }
+    return result;
 }
 
 static float normalizedRotationDegrees(float value)
@@ -271,15 +309,6 @@ MainWindow::MainWindow(QWidget *parent)
     refreshProperties();
 }
 
-static QDoubleSpinBox *makeSpinBox()
-{
-    auto *box = new QDoubleSpinBox;
-    box->setRange(-10000.0, 10000.0);
-    box->setDecimals(2);
-    box->setSingleStep(1.0);
-    return box;
-}
-
 static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation,
                                  const QString &moduleName = QString())
 {
@@ -368,37 +397,6 @@ static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
     return groupItem;
 }
 
-static bool findEffectiveBooleanMode(const SceneDocument::TreeNode &node,
-                                     int shapeId,
-                                     ShapeNode::BooleanMode inheritedMode,
-                                     ShapeNode::BooleanMode *mode)
-{
-    if (node.type == SceneDocument::TreeNode::Primitive) {
-        if (node.shapeId == shapeId) {
-            *mode = inheritedMode;
-            return true;
-        }
-
-        return false;
-    }
-
-    if (node.type == SceneDocument::TreeNode::Variable)
-        return false;
-
-    for (int i = 0; i < node.children.size(); ++i) {
-        ShapeNode::BooleanMode childMode = inheritedMode;
-        if (node.operation == SceneDocument::TreeNode::Difference && i > 0)
-            childMode = ShapeNode::Subtract;
-        else if (node.operation == SceneDocument::TreeNode::Intersection)
-            childMode = ShapeNode::Intersect;
-
-        if (findEffectiveBooleanMode(node.children[i], shapeId, childMode, mode))
-            return true;
-    }
-
-    return false;
-}
-
 void MainWindow::buildUi()
 {
     setWindowTitle("OpenSCAD Visual Editor Prototype");
@@ -459,11 +457,6 @@ void MainWindow::buildUi()
     auto *leftPanel = new QWidget;
     auto *leftLayout = new QVBoxLayout(leftPanel);
 
-    m_deleteShapeButton = new QPushButton("Delete selected");
-    m_deleteGroupButton = new QPushButton("Delete group");
-    m_deleteShapeButton->setEnabled(false);
-    m_deleteGroupButton->setEnabled(false);
-
     auto *shapeTree = new SceneTreeWidget;
     shapeTree->onTreeNodeDroppedOnGroup = [this](int nodeId, int parentGroupId) {
         moveTreeNodeToGroup(nodeId, parentGroupId);
@@ -501,6 +494,9 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics->setVariableNumberAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
         onGraphicsTreeVariableNumberAdjusted(nodeId, start, length, delta);
     });
+    m_sceneTreeGraphics->setModuleCallArgumentAdjustedCallback([this](int moduleCallId, int parameterVariableId, int start, int length, qreal delta) {
+        onGraphicsTreeModuleCallArgumentAdjusted(moduleCallId, parameterVariableId, start, length, delta);
+    });
     m_sceneTreeGraphics->setForLoopRangeAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
         onGraphicsTreeForLoopRangeAdjusted(nodeId, start, length, delta);
     });
@@ -528,8 +524,6 @@ void MainWindow::buildUi()
     treeSplitter->setStretchFactor(1, 5);
     treeSplitter->setSizes({115, 520});
 
-    leftLayout->addWidget(m_deleteShapeButton);
-    leftLayout->addWidget(m_deleteGroupButton);
     leftLayout->addWidget(treeSplitter, 1);
     m_csgStatusLabel = new QLabel;
     m_csgStatusLabel->setWordWrap(true);
@@ -538,8 +532,6 @@ void MainWindow::buildUi()
     leftDock->setWidget(leftPanel);
     addDockWidget(Qt::LeftDockWidgetArea, leftDock);
 
-    connect(m_deleteShapeButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedShape);
-    connect(m_deleteGroupButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedGroup);
     connect(m_applyCodeButton, &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
     connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
@@ -567,78 +559,6 @@ void MainWindow::buildUi()
     connect(m_shapeTree, &QTreeWidget::customContextMenuRequested,
             this, &MainWindow::showSceneTreeContextMenu);
 
-    // Right dock: properties
-    auto *rightDock = new QDockWidget("Properties", this);
-    auto *rightPanel = new QWidget;
-    auto *rightLayout = new QVBoxLayout(rightPanel);
-
-    auto *transformBox = new QGroupBox("Transform");
-    auto *transformLayout = new QFormLayout(transformBox);
-
-    m_posX = makeSpinBox();
-    m_posY = makeSpinBox();
-    m_posZ = makeSpinBox();
-
-    m_rotX = makeSpinBox();
-    m_rotY = makeSpinBox();
-    m_rotZ = makeSpinBox();
-
-    transformLayout->addRow("Position X", m_posX);
-    transformLayout->addRow("Position Y", m_posY);
-    transformLayout->addRow("Position Z", m_posZ);
-
-    transformLayout->addRow("Rotation X", m_rotX);
-    transformLayout->addRow("Rotation Y", m_rotY);
-    transformLayout->addRow("Rotation Z", m_rotZ);
-
-    auto *shapeBox = new QGroupBox("Shape parameters");
-    auto *shapeLayout = new QFormLayout(shapeBox);
-
-    m_sizeX = makeSpinBox();
-    m_sizeY = makeSpinBox();
-    m_sizeZ = makeSpinBox();
-
-    m_radius = makeSpinBox();
-    m_height = makeSpinBox();
-    m_booleanMode = new QComboBox;
-    m_booleanMode->addItem("Add solid", ShapeNode::Add);
-    m_booleanMode->addItem("Subtract hole", ShapeNode::Subtract);
-    m_booleanMode->addItem("Intersect mask", ShapeNode::Intersect);
-
-    m_sizeX->setMinimum(0.1);
-    m_sizeY->setMinimum(0.1);
-    m_sizeZ->setMinimum(0.1);
-    m_radius->setMinimum(0.1);
-    m_height->setMinimum(0.1);
-
-    shapeLayout->addRow("Size X", m_sizeX);
-    shapeLayout->addRow("Size Y", m_sizeY);
-    shapeLayout->addRow("Size Z", m_sizeZ);
-    shapeLayout->addRow("Radius", m_radius);
-    shapeLayout->addRow("Height", m_height);
-    shapeLayout->addRow("Tree role", m_booleanMode);
-
-    rightLayout->addWidget(transformBox);
-    rightLayout->addWidget(shapeBox);
-    rightLayout->addStretch();
-
-    rightDock->setWidget(rightPanel);
-    addDockWidget(Qt::RightDockWidgetArea, rightDock);
-
-    QList<QDoubleSpinBox *> boxes = {
-        m_posX, m_posY, m_posZ,
-        m_rotX, m_rotY, m_rotZ,
-        m_sizeX, m_sizeY, m_sizeZ,
-        m_radius, m_height
-    };
-
-    for (QDoubleSpinBox *box : boxes) {
-        connect(box, qOverload<double>(&QDoubleSpinBox::valueChanged),
-                this, &MainWindow::onPropertyChanged);
-    }
-
-    connect(m_booleanMode, qOverload<int>(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onBooleanModeChanged);
 }
 
 void MainWindow::addCube()
@@ -859,78 +779,6 @@ void MainWindow::showSceneTreeContextMenu(const QPoint &position)
         deleteSelectedShape();
     else if (selectedAction == deleteGroupAction)
         deleteSelectedGroup();
-}
-
-void MainWindow::onPropertyChanged()
-{
-    if (m_updatingProperties)
-        return;
-
-    const ShapeNode *selectedShape = m_scene.selectedShape();
-    if (!selectedShape) {
-        const int groupId = selectedDirectGroupId();
-        if (groupId <= 0)
-            return;
-
-        const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
-        if (!group || group->type != SceneDocument::TreeNode::Group)
-            return;
-
-        QVector3D position(m_posX->value(), m_posY->value(), m_posZ->value());
-        QVector3D rotation(m_rotX->value(), m_rotY->value(), m_rotZ->value());
-        QVector3D scale = group->scale;
-        if (group->operation == SceneDocument::TreeNode::Translate)
-            rotation = group->rotation;
-        else if (group->operation == SceneDocument::TreeNode::Rotate)
-            position = group->position;
-
-        auto *command = new UpdateGroupTransformCommand(
-            &m_scene,
-            groupId,
-            position,
-            rotation,
-            scale,
-            [this]() {
-                refreshSceneViews();
-            });
-
-        if (!command->isValid()) {
-            delete command;
-            return;
-        }
-
-        m_undoStack->push(command);
-        return;
-    }
-
-    ShapeNode updatedShape = *selectedShape;
-    updatedShape.size = QVector3D(m_sizeX->value(), m_sizeY->value(), m_sizeZ->value());
-
-    updatedShape.radius = m_radius->value();
-    updatedShape.height = m_height->value();
-
-    auto *command = new UpdateShapeCommand(&m_scene, *selectedShape, updatedShape, [this]() {
-        refreshSceneViews();
-    });
-
-    if (!command->isValid()) {
-        delete command;
-        return;
-    }
-
-    m_undoStack->push(command);
-}
-
-void MainWindow::onBooleanModeChanged(int index)
-{
-    if (m_updatingProperties || index < 0)
-        return;
-
-    const ShapeNode *selectedShape = m_scene.selectedShape();
-    if (!selectedShape)
-        return;
-
-    changeShapeBooleanMode(selectedShape->id, static_cast<ShapeNode::BooleanMode>(m_booleanMode->itemData(index).toInt()));
 }
 
 void MainWindow::onViewportShapeDragStarted(int index)
@@ -1542,6 +1390,69 @@ void MainWindow::onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int
     m_undoStack->push(command);
 }
 
+void MainWindow::onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId,
+                                                          int parameterVariableId,
+                                                          int start,
+                                                          int length,
+                                                          qreal delta)
+{
+    if (moduleCallId <= 0 || parameterVariableId <= 0 || start < 0 || length <= 0 || qFuzzyIsNull(delta))
+        return;
+
+    const SceneDocument::TreeNode *callNode = m_scene.treeNodeById(moduleCallId);
+    const SceneDocument::TreeNode *parameterNode = m_scene.treeNodeById(parameterVariableId);
+    if (!callNode || callNode->type != SceneDocument::TreeNode::ModuleCall
+        || !parameterNode || parameterNode->type != SceneDocument::TreeNode::Variable
+        || !parameterNode->isParameter) {
+        return;
+    }
+
+    const QHash<QString, QString> overrides = parseNamedArgumentExpressions(callNode->moduleCallArguments);
+    QString expression = overrides.value(parameterNode->variableName,
+                                         parameterNode->variableExpression.trimmed().isEmpty()
+                                             ? QString::number(parameterNode->variableValue)
+                                             : parameterNode->variableExpression.trimmed());
+    if (start + length > expression.size())
+        return;
+
+    const QString numberText = expression.mid(start, length);
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0 ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal step = precision > 0 ? 0.1 : 1.0;
+    const bool standaloneNumber = isStandaloneNumericToken(expression, start, length);
+    QString replacement = adjustedNumericToken(expression, start, length, delta, step, 0.0, !standaloneNumber);
+    if (replacement.isEmpty())
+        return;
+
+    expression.replace(start, length, replacement);
+
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_ctrlHighlight.active        = true;
+        m_ctrlHighlight.nodeId        = moduleCallId;
+        m_ctrlHighlight.contextPrefix = QString();
+        m_ctrlHighlight.expression    = expression;
+        m_ctrlHighlight.numberStart   = start;
+        m_ctrlHighlight.numberLength  = int(replacement.size());
+    } else {
+        m_ctrlHighlight.active = false;
+    }
+
+    auto *command = new UpdateModuleCallArgumentCommand(&m_scene,
+                                                        moduleCallId,
+                                                        parameterNode->variableName,
+                                                        expression,
+                                                        [this]() {
+                                                            refreshSceneViews();
+                                                        });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
 void MainWindow::onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta)
 {
     if (nodeId <= 0 || start < 0 || length <= 0 || qFuzzyIsNull(delta))
@@ -1763,154 +1674,8 @@ void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIn
     m_undoStack->push(command);
 }
 
-void MainWindow::changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode)
-{
-    const ShapeNode *shape = m_scene.shapeById(shapeId);
-    if (!shape)
-        return;
-
-    ShapeNode::BooleanMode effectiveMode = shape->booleanMode;
-    findEffectiveBooleanMode(m_scene.treeRoot(), shapeId, ShapeNode::Add, &effectiveMode);
-    if (effectiveMode == booleanMode && shape->booleanMode == booleanMode)
-        return;
-
-    ShapeNode updatedShape = *shape;
-    updatedShape.booleanMode = booleanMode;
-
-    auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape, [this]() {
-        refreshSceneViews();
-    });
-
-    if (!command->isValid()) {
-        delete command;
-        return;
-    }
-
-    m_undoStack->push(command);
-}
-
 void MainWindow::refreshProperties()
 {
-    const bool hasShapeSelection = m_scene.hasSelection();
-    const int selectedGroupId = selectedDirectGroupId();
-    const SceneDocument::TreeNode *selectedGroup = selectedGroupId > 0 ? m_scene.treeNodeById(selectedGroupId) : nullptr;
-    const bool hasGroupSelection = selectedGroup && selectedGroup->type == SceneDocument::TreeNode::Group;
-    const int selectedTreeNodeId = m_shapeTree && m_shapeTree->currentItem()
-                                      ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
-                                      : 0;
-    const SceneDocument::TreeNode *selectedTreeNode = selectedTreeNodeId > 0 ? m_scene.treeNodeById(selectedTreeNodeId) : nullptr;
-    const bool hasVariableSelection = selectedTreeNode && selectedTreeNode->type == SceneDocument::TreeNode::Variable;
-    const bool hasPropertiesSelection = hasShapeSelection || hasGroupSelection;
-    const bool translateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Translate;
-    const bool rotateGroupSelected = hasGroupSelection && selectedGroup->operation == SceneDocument::TreeNode::Rotate;
-    const bool hasTransformSelection = translateGroupSelected || rotateGroupSelected;
-
-    QList<QDoubleSpinBox *> transformBoxes = {
-        m_posX, m_posY, m_posZ,
-        m_rotX, m_rotY, m_rotZ
-    };
-    QList<QDoubleSpinBox *> positionBoxes = {m_posX, m_posY, m_posZ};
-    QList<QDoubleSpinBox *> rotationBoxes = {m_rotX, m_rotY, m_rotZ};
-    QList<QDoubleSpinBox *> shapeBoxes = {
-        m_sizeX, m_sizeY, m_sizeZ,
-        m_radius, m_height
-    };
-
-    for (QDoubleSpinBox *box : transformBoxes)
-        box->setEnabled(hasTransformSelection);
-
-    if (translateGroupSelected) {
-        for (QDoubleSpinBox *box : rotationBoxes)
-            box->setEnabled(false);
-    } else if (rotateGroupSelected) {
-        for (QDoubleSpinBox *box : positionBoxes)
-            box->setEnabled(false);
-    }
-
-    for (QDoubleSpinBox *box : shapeBoxes)
-        box->setEnabled(hasShapeSelection);
-
-    m_deleteShapeButton->setEnabled(hasShapeSelection || hasVariableSelection);
-    m_deleteGroupButton->setEnabled(selectedGroupId > 0 && selectedGroupId != m_scene.treeRoot().id);
-    m_booleanMode->setEnabled(hasShapeSelection);
-
-    if (!hasPropertiesSelection)
-        return;
-
-    m_updatingProperties = true;
-
-    QList<QDoubleSpinBox *> allBoxes = transformBoxes + shapeBoxes;
-    for (QDoubleSpinBox *box : allBoxes)
-        box->blockSignals(true);
-    m_booleanMode->blockSignals(true);
-
-    if (hasGroupSelection) {
-        m_posX->setValue(hasTransformSelection ? selectedGroup->position.x() : 0.0);
-        m_posY->setValue(hasTransformSelection ? selectedGroup->position.y() : 0.0);
-        m_posZ->setValue(hasTransformSelection ? selectedGroup->position.z() : 0.0);
-
-        m_rotX->setValue(hasTransformSelection ? selectedGroup->rotation.x() : 0.0);
-        m_rotY->setValue(hasTransformSelection ? selectedGroup->rotation.y() : 0.0);
-        m_rotZ->setValue(hasTransformSelection ? selectedGroup->rotation.z() : 0.0);
-
-        m_sizeX->setValue(0.0);
-        m_sizeY->setValue(0.0);
-        m_sizeZ->setValue(0.0);
-        m_radius->setValue(0.1);
-        m_height->setValue(0.1);
-        m_booleanMode->setCurrentIndex(-1);
-
-        for (QDoubleSpinBox *box : allBoxes)
-            box->blockSignals(false);
-        m_booleanMode->blockSignals(false);
-
-        m_updatingProperties = false;
-        return;
-    }
-
-    const ShapeNode *s = m_scene.selectedShape();
-    if (!s) {
-        for (QDoubleSpinBox *box : allBoxes)
-            box->blockSignals(false);
-        m_booleanMode->blockSignals(false);
-        m_updatingProperties = false;
-        return;
-    }
-
-    m_posX->setValue(0.0);
-    m_posY->setValue(0.0);
-    m_posZ->setValue(0.0);
-
-    m_rotX->setValue(0.0);
-    m_rotY->setValue(0.0);
-    m_rotZ->setValue(0.0);
-
-    m_sizeX->setValue(s->size.x());
-    m_sizeY->setValue(s->size.y());
-    m_sizeZ->setValue(s->size.z());
-
-    m_radius->setValue(s->radius);
-    m_height->setValue(s->height);
-    ShapeNode::BooleanMode effectiveMode = s->booleanMode;
-    findEffectiveBooleanMode(m_scene.treeRoot(), s->id, ShapeNode::Add, &effectiveMode);
-    m_booleanMode->setCurrentIndex(m_booleanMode->findData(effectiveMode));
-
-    for (QDoubleSpinBox *box : allBoxes)
-        box->blockSignals(false);
-    m_booleanMode->blockSignals(false);
-
-    m_updatingProperties = false;
-
-    bool cube = s->type == ShapeNode::Cube;
-    bool sphere = s->type == ShapeNode::Sphere;
-    bool cylinder = s->type == ShapeNode::Cylinder;
-
-    m_sizeX->setEnabled(cube);
-    m_sizeY->setEnabled(cube);
-    m_sizeZ->setEnabled(cube);
-
-    m_radius->setEnabled(sphere || cylinder);
-    m_height->setEnabled(cylinder);
 }
 
 void MainWindow::refreshOpenScadCode()

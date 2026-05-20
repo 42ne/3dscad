@@ -13,6 +13,8 @@ class QGraphicsItem;
 class QKeyEvent;
 class QMouseEvent;
 class QPainter;
+class QResizeEvent;
+class QShowEvent;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -29,6 +31,7 @@ public:
     void setShapeParameterAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setShapeParameterHoveredCallback(std::function<void(int, int)> callback);
     void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
+    void setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setCtrlReleasedCallback(std::function<void()> callback);
     void setSelectedTreeNodeId(int nodeId);
@@ -41,6 +44,8 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
 private:
@@ -85,6 +90,7 @@ private:
     void clearDropPreview();
     void setTreeItemsVisible(bool visible);
     void updateSceneRect(const QRectF &toolbarRect);
+    void centerToolbarHorizontallyOnNextEvent();
     QString labelForPrimitive(int shapeId) const;
     ShapeNode::Type typeForPrimitive(int shapeId) const;
 
@@ -103,6 +109,7 @@ private:
     std::function<void(int, int, int, int, qreal)> m_shapeParameterAdjustedCallback;
     std::function<void(int, int)> m_shapeParameterHoveredCallback;
     std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
+    std::function<void(int, int, int, int, qreal)> m_moduleCallArgumentAdjustedCallback;
     std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;
     std::function<void()> m_ctrlReleasedCallback;
     int m_selectedTreeNodeId = 0;
@@ -123,8 +130,10 @@ private:
     QString m_lastControlTooltipKey;
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
+    QRectF m_lastToolbarRect;
     bool m_panning = false;
     bool m_dragActive = false;
+    bool m_initialToolbarCentered = false;
 };
 
 #endif

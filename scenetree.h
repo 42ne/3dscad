@@ -67,7 +67,7 @@ public:
     TreeNode *nodeById(int id);
 
     int sceneNodeId() const;
-    int addModuleCall(int moduleGroupId, int insertIndex = -1);
+    int addModuleCall(int moduleGroupId, int insertIndex = -1, const QString &arguments = QString());
     bool removeModuleCallForModule(int moduleGroupId);
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
@@ -117,7 +117,7 @@ private:
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
     TreeNode makeVariableNode(const QString &name, const QString &expression, qreal value);
-    TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName);
+    TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName, const QString &arguments = QString());
 
 private:
     TreeNode m_root;

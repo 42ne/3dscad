@@ -236,9 +236,11 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool mo
     const TreeNode *node = nodeById(&m_root, nodeId);
     if (!node || containsNodeId(*node, parentGroupId))
         return false;
-    // Variables may only live at root, Scene, or directly inside a Module node.
+    if (targetParent == &m_root
+        && (node->type != TreeNode::Group || node->operation != TreeNode::Module))
+        return false;
+    // Variables may only live in Scene or directly inside a Module node.
     if (node->type == TreeNode::Variable
-        && targetParent != &m_root
         && targetParent->operation != TreeNode::Module
         && targetParent->operation != TreeNode::Scene)
         return false;
@@ -372,7 +374,7 @@ int SceneTree::sceneNodeId() const
     return node ? node->id : 0;
 }
 
-int SceneTree::addModuleCall(int moduleGroupId, int insertIndex)
+int SceneTree::addModuleCall(int moduleGroupId, int insertIndex, const QString &arguments)
 {
     TreeNode *scene = sceneNode();
     if (!scene)
@@ -382,7 +384,7 @@ int SceneTree::addModuleCall(int moduleGroupId, int insertIndex)
     if (!moduleNode || moduleNode->type != TreeNode::Group || moduleNode->operation != TreeNode::Module)
         return 0;
 
-    TreeNode call = makeModuleCallNode(moduleGroupId, moduleNode->moduleName);
+    TreeNode call = makeModuleCallNode(moduleGroupId, moduleNode->moduleName, arguments);
     const int callId = call.id;
     const int boundedIndex = insertIndex < 0
                                  ? scene->children.size()
@@ -688,12 +690,13 @@ SceneTree::TreeNode SceneTree::makeVariableNode(const QString &name, const QStri
     return node;
 }
 
-SceneTree::TreeNode SceneTree::makeModuleCallNode(int moduleGroupId, const QString &moduleName)
+SceneTree::TreeNode SceneTree::makeModuleCallNode(int moduleGroupId, const QString &moduleName, const QString &arguments)
 {
     TreeNode node;
     node.id = m_nextNodeId++;
     node.type = TreeNode::ModuleCall;
     node.shapeId = moduleGroupId;   // references the Module Group by id
     node.moduleName = moduleName;
+    node.moduleCallArguments = arguments.trimmed();
     return node;
 }

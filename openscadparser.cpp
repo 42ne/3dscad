@@ -187,13 +187,17 @@ static SceneDocument::TreeNode makeVariableNode(const QString &name, const QStri
     return node;
 }
 
-static SceneDocument::TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName, ParserState *state)
+static SceneDocument::TreeNode makeModuleCallNode(int moduleGroupId,
+                                                  const QString &moduleName,
+                                                  const QString &arguments,
+                                                  ParserState *state)
 {
     SceneDocument::TreeNode node;
     node.id = state->nextTreeNodeId++;
     node.type = SceneDocument::TreeNode::ModuleCall;
     node.shapeId = moduleGroupId;
     node.moduleName = moduleName;
+    node.moduleCallArguments = arguments.trimmed();
     return node;
 }
 
@@ -710,8 +714,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
     SceneDocument::TreeNode root = makeGroupNode(SceneDocument::TreeNode::Module, &state);
     // Scene holds top-level variables and standalone primitives.
     SceneDocument::TreeNode sceneNode = makeGroupNode(SceneDocument::TreeNode::Scene, &state);
-    QHash<QString, QString> pendingModuleCallArguments;
-    QVector<QString> moduleCallOrder; // preserves the order in which call statements appeared
+    QVector<QPair<QString, QString>> moduleCalls; // preserves explicit call order: name, args
 
     while (state.index < state.lines.size()) {
         const ParsedLine current = state.lines[state.index];
@@ -720,9 +723,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         // Collect top-level module call statements — they become ModuleCall nodes in Scene.
         QString callName, callArgs;
         if (parseModuleCallLine(line, &callName, &callArgs)) {
-            if (!pendingModuleCallArguments.contains(callName))
-                moduleCallOrder.append(callName);
-            pendingModuleCallArguments[callName] = callArgs;
+            moduleCalls.append({callName, callArgs});
             ++state.index;
             continue;
         }
@@ -751,7 +752,6 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             const QHash<QString, qreal> outerVariables = state.variableValues;
             SceneDocument::TreeNode moduleNode = makeGroupNode(SceneDocument::TreeNode::Module, &state);
             moduleNode.moduleName = modName;
-            moduleNode.moduleCallArguments = pendingModuleCallArguments.value(modName);
 
             if (!parseModuleParams(modParams, &moduleNode, &state, &state.variableValues, errorMessage)) {
                 if (errorLine) *errorLine = current.number;
@@ -766,8 +766,6 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             }
 
             state.variableValues = outerVariables;
-            if (pendingModuleCallArguments.contains(modName))
-                moduleNode.moduleCallArguments = pendingModuleCallArguments.value(modName);
             root.children.append(moduleNode);
             continue;
         }
@@ -866,9 +864,10 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
     // Create ModuleCall nodes in sceneNode in the order the calls appeared.
     // First, emit calls that were explicitly present (in call order).
     QSet<QString> emittedCalls;
-    for (const QString &callName : moduleCallOrder) {
+    for (const auto &call : moduleCalls) {
+        const QString &callName = call.first;
         if (SceneDocument::TreeNode *mod = moduleByName.value(callName, nullptr)) {
-            sceneNode.children.append(makeModuleCallNode(mod->id, callName, &state));
+            sceneNode.children.append(makeModuleCallNode(mod->id, callName, call.second, &state));
             emittedCalls.insert(callName);
         }
     }
@@ -877,7 +876,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         if (child.type == SceneDocument::TreeNode::Group
             && child.operation == SceneDocument::TreeNode::Module
             && !emittedCalls.contains(child.moduleName)) {
-            sceneNode.children.append(makeModuleCallNode(child.id, child.moduleName, &state));
+            sceneNode.children.append(makeModuleCallNode(child.id, child.moduleName, QString(), &state));
         }
     }
 

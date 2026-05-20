@@ -3,6 +3,7 @@
 
 #include <QHash>
 #include <QSet>
+#include <QStringList>
 
 namespace {
 
@@ -48,6 +49,66 @@ bool isValidIdentifier(const QString &name)
     }
 
     return true;
+}
+
+QStringList splitAtTopLevelCommas(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
+            --depth;
+        else if (ch == QLatin1Char(',') && depth == 0) {
+            result.append(text.mid(start, i - start).trimmed());
+            start = i + 1;
+        }
+    }
+    const QString tail = text.mid(start).trimmed();
+    if (!tail.isEmpty())
+        result.append(tail);
+    return result;
+}
+
+QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+{
+    QHash<QString, QString> result;
+    for (const QString &part : splitAtTopLevelCommas(arguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal <= 0)
+            continue;
+
+        const QString name = part.left(equal).trimmed();
+        const QString expression = part.mid(equal + 1).trimmed();
+        if (isValidIdentifier(name) && !expression.isEmpty())
+            result[name] = expression;
+    }
+    return result;
+}
+
+QString buildNamedArgumentExpressions(const QHash<QString, QString> &arguments, const QStringList &order)
+{
+    QStringList parts;
+    QSet<QString> emitted;
+    for (const QString &name : order) {
+        const QString expression = arguments.value(name).trimmed();
+        if (!expression.isEmpty()) {
+            parts.append(QStringLiteral("%1 = %2").arg(name, expression));
+            emitted.insert(name);
+        }
+    }
+    for (auto it = arguments.constBegin(); it != arguments.constEnd(); ++it) {
+        if (emitted.contains(it.key()))
+            continue;
+
+        const QString expression = it.value().trimmed();
+        if (!expression.isEmpty())
+            parts.append(QStringLiteral("%1 = %2").arg(it.key(), expression));
+    }
+    return parts.join(QStringLiteral(", "));
 }
 
 } // namespace
@@ -351,6 +412,46 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
     reEvaluateDependentVariables(variableId);
     reEvaluateDependentExpressions();
 
+    return true;
+}
+
+bool SceneDocument::updateModuleCallArgument(int moduleCallId, const QString &parameterName, const QString &expression)
+{
+    TreeNode *callNode = m_tree.nodeById(moduleCallId);
+    if (!callNode || callNode->type != TreeNode::ModuleCall)
+        return false;
+
+    const TreeNode *moduleNode = m_tree.nodeById(callNode->shapeId);
+    if (!moduleNode || moduleNode->type != TreeNode::Group || moduleNode->operation != TreeNode::Module)
+        return false;
+
+    const QString name = parameterName.trimmed();
+    const QString trimmed = expression.trimmed();
+    if (!isValidIdentifier(name) || trimmed.isEmpty())
+        return false;
+
+    QString expressionError;
+    if (!ExpressionSyntax::validate(trimmed, &expressionError))
+        return false;
+
+    QStringList parameterOrder;
+    bool knownParameter = false;
+    for (const TreeNode &child : moduleNode->children) {
+        if (child.type == TreeNode::Variable && child.isParameter) {
+            parameterOrder.append(child.variableName);
+            if (child.variableName == name)
+                knownParameter = true;
+        }
+    }
+    if (!knownParameter)
+        return false;
+
+    QHash<QString, QString> arguments = parseNamedArgumentExpressions(callNode->moduleCallArguments);
+    if (arguments.value(name) == trimmed)
+        return false;
+
+    arguments[name] = trimmed;
+    callNode->moduleCallArguments = buildNamedArgumentExpressions(arguments, parameterOrder);
     return true;
 }
 

@@ -54,6 +54,30 @@ static QStringList moduleParameterArgs(const SceneDocument::TreeNode &moduleNode
     return args;
 }
 
+static QStringList splitAtTopLevelCommas(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
+            --depth;
+        else if (ch == QLatin1Char(',') && depth == 0) {
+            const QString part = text.mid(start, i - start).trimmed();
+            if (!part.isEmpty())
+                result.append(part);
+            start = i + 1;
+        }
+    }
+    const QString tail = text.mid(start).trimmed();
+    if (!tail.isEmpty())
+        result.append(tail);
+    return result;
+}
+
 // Return the module signature string "name(p1=e1, p2=e2)".
 static QString moduleSignature(const SceneDocument::TreeNode &moduleNode)
 {
@@ -70,8 +94,18 @@ static QString moduleCallStatement(const SceneDocument::TreeNode &moduleNode)
     const QString name = moduleNode.moduleName.trimmed().isEmpty()
                              ? QStringLiteral("scene_model")
                              : moduleNode.moduleName.trimmed();
-    const QStringList args = moduleParameterArgs(moduleNode);
+    const QStringList args = moduleNode.moduleCallArguments.trimmed().isEmpty()
+                                 ? QStringList()
+                                 : splitAtTopLevelCommas(moduleNode.moduleCallArguments);
     return args.isEmpty() ? name + "();\n" : name + "(" + args.join(", ") + ");\n";
+}
+
+static QString moduleCallStatement(const SceneDocument::TreeNode &moduleNode,
+                                   const SceneDocument::TreeNode &callNode)
+{
+    SceneDocument::TreeNode call = moduleNode;
+    call.moduleCallArguments = callNode.moduleCallArguments;
+    return moduleCallStatement(call);
 }
 
 void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &scene, QVector<SourceRange> *ranges)
@@ -152,7 +186,7 @@ void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &sc
             const SceneDocument::TreeNode *modGroup = scene.treeNodeById(call->shapeId);
             if (modGroup && modGroup->type == SceneDocument::TreeNode::Group
                 && modGroup->operation == SceneDocument::TreeNode::Module) {
-                *code += moduleCallStatement(*modGroup);
+                *code += moduleCallStatement(*modGroup, *call);
             } else {
                 *code += call->moduleName + "();\n";
             }
@@ -199,7 +233,7 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         const SceneDocument::TreeNode *modGroup = scene.treeNodeById(node.shapeId);
         if (modGroup && modGroup->type == SceneDocument::TreeNode::Group
             && modGroup->operation == SceneDocument::TreeNode::Module) {
-            *code += indent + moduleCallStatement(*modGroup);
+            *code += indent + moduleCallStatement(*modGroup, node);
         } else {
             *code += indent + node.moduleName + "();\n";
         }

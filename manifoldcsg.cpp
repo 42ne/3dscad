@@ -142,7 +142,8 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
 }
 
 static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::TreeNode &node,
-                                                          QHash<QString, qreal> variables)
+                                                          QHash<QString, qreal> variables,
+                                                          const QHash<QString, QString> &argumentOverrides = {})
 {
     if (node.type != SceneDocument::TreeNode::Group)
         return variables;
@@ -156,13 +157,55 @@ static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::T
             continue;
 
         qreal value = child.variableValue;
-        const QString expression = child.variableExpression.trimmed();
+        const QString expression = child.isParameter && argumentOverrides.contains(child.variableName)
+                                       ? argumentOverrides.value(child.variableName).trimmed()
+                                       : child.variableExpression.trimmed();
         if (!expression.isEmpty())
             ExpressionSyntax::evaluate(expression, variables, &value);
         variables[child.variableName] = value;
     }
 
     return variables;
+}
+
+static QStringList splitAtTopLevelCommas(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
+            --depth;
+        else if (ch == QLatin1Char(',') && depth == 0) {
+            const QString part = text.mid(start, i - start).trimmed();
+            if (!part.isEmpty())
+                result.append(part);
+            start = i + 1;
+        }
+    }
+    const QString tail = text.mid(start).trimmed();
+    if (!tail.isEmpty())
+        result.append(tail);
+    return result;
+}
+
+static QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+{
+    QHash<QString, QString> result;
+    for (const QString &part : splitAtTopLevelCommas(arguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal <= 0)
+            continue;
+
+        const QString name = part.left(equal).trimmed();
+        const QString expression = part.mid(equal + 1).trimmed();
+        if (!name.isEmpty() && !expression.isEmpty())
+            result[name] = expression;
+    }
+    return result;
 }
 
 static QHash<QString, qreal> topLevelVariables(const SceneDocument::TreeNode &root)
@@ -244,7 +287,8 @@ static bool evaluateRangeExpression(const QString &rangeExpression,
 
 static Manifold evaluateNode(const SceneDocument::TreeNode &node,
                              const SceneDocument &scene,
-                             QHash<QString, qreal> variables)
+                             QHash<QString, qreal> variables,
+                             const QHash<QString, QString> &moduleArgumentOverrides = {})
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = scene.shapeById(node.shapeId);
@@ -263,7 +307,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
             || module->operation != SceneDocument::TreeNode::Module)
             return {};
 
-        return evaluateNode(*module, scene, variables);
+        return evaluateNode(*module, scene, variables, parseNamedArgumentExpressions(node.moduleCallArguments));
     }
 
     if (node.operation == SceneDocument::TreeNode::For) {
@@ -299,7 +343,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return result;
     }
 
-    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables);
+    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
 
     QVector<const SceneDocument::TreeNode *> geometryChildren;

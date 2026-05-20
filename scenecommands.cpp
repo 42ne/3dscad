@@ -416,6 +416,53 @@ void UpdateVariableExpressionCommand::redo()
         m_onChanged();
 }
 
+UpdateModuleCallArgumentCommand::UpdateModuleCallArgumentCommand(SceneDocument *scene,
+                                                                 int moduleCallId,
+                                                                 const QString &parameterName,
+                                                                 const QString &expression,
+                                                                 std::function<void()> onChanged)
+    : QUndoCommand("Update module call argument")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateModuleCallArgument(moduleCallId, parameterName, expression);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool UpdateModuleCallArgumentCommand::isValid() const
+{
+    return m_valid;
+}
+
+void UpdateModuleCallArgumentCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void UpdateModuleCallArgumentCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
 UpdateForLoopCommand::UpdateForLoopCommand(SceneDocument *scene,
                                            int groupId,
                                            const QString &loopVariable,

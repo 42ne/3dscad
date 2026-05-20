@@ -7,16 +7,21 @@
 
 #include <QGraphicsScene>
 #include <QFontMetricsF>
+#include <QHash>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QToolTip>
+#include <QTimer>
 #include <QWheelEvent>
+#include <QStringList>
 
 using namespace SceneTreeGraphics;
 
 namespace {
+
+constexpr qreal InitialToolbarTopGap = 16.0;
 
 bool isRootOnlyTreeTool(const QString &tool)
 {
@@ -36,6 +41,46 @@ SceneTreeLayout::DropTarget freeFloatingDropTarget(const QPointF &scenePosition,
         target.hasTarget = true;
     }
     return target;
+}
+
+QStringList splitAtTopLevelCommas(const QString &text)
+{
+    QStringList result;
+    int depth = 0;
+    int start = 0;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar ch = text[i];
+        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
+            ++depth;
+        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
+            --depth;
+        else if (ch == QLatin1Char(',') && depth == 0) {
+            const QString part = text.mid(start, i - start).trimmed();
+            if (!part.isEmpty())
+                result.append(part);
+            start = i + 1;
+        }
+    }
+    const QString tail = text.mid(start).trimmed();
+    if (!tail.isEmpty())
+        result.append(tail);
+    return result;
+}
+
+QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+{
+    QHash<QString, QString> result;
+    for (const QString &part : splitAtTopLevelCommas(arguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal <= 0)
+            continue;
+
+        const QString name = part.left(equal).trimmed();
+        const QString expression = part.mid(equal + 1).trimmed();
+        if (!name.isEmpty() && !expression.isEmpty())
+            result[name] = expression;
+    }
+    return result;
 }
 
 } // namespace
@@ -110,6 +155,11 @@ void SceneTreeGraphicsWidget::setVariableNumberAdjustedCallback(std::function<vo
     m_variableNumberAdjustedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback)
+{
+    m_moduleCallArgumentAdjustedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
 {
     m_forLoopRangeAdjustedCallback = callback;
@@ -133,8 +183,10 @@ void SceneTreeGraphicsWidget::refresh()
 {
     resetGraphicsScene();
     const QRectF toolbarRect = drawToolbar();
+    m_lastToolbarRect = toolbarRect;
     drawTreeOrPlaceholder();
     updateSceneRect(toolbarRect);
+    centerToolbarHorizontallyOnNextEvent();
 }
 
 void SceneTreeGraphicsWidget::resetGraphicsScene()
@@ -265,6 +317,18 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
     QGraphicsView::keyReleaseEvent(event);
 }
 
+void SceneTreeGraphicsWidget::resizeEvent(QResizeEvent *event)
+{
+    QGraphicsView::resizeEvent(event);
+    centerToolbarHorizontallyOnNextEvent();
+}
+
+void SceneTreeGraphicsWidget::showEvent(QShowEvent *event)
+{
+    QGraphicsView::showEvent(event);
+    centerToolbarHorizontallyOnNextEvent();
+}
+
 void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 {
     if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
@@ -393,11 +457,13 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
     if (m_scene) {
         const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node.shapeId);
         if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
+            const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node.moduleCallArguments);
             for (const SceneDocument::TreeNode &child : modGroup->children) {
                 if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
-                    const QString expr = child.variableExpression.trimmed().isEmpty()
-                                             ? QString::number(child.variableValue)
-                                             : child.variableExpression.trimmed();
+                    const QString expr = overrides.value(child.variableName,
+                                                         child.variableExpression.trimmed().isEmpty()
+                                                             ? QString::number(child.variableValue)
+                                                             : child.variableExpression.trimmed());
                     params.append({child.id, child.variableName, expr});
                 }
             }
@@ -618,6 +684,22 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
                                                       previewTool,
                                                       nodeId,
                                                       false);
+        if (!target.hasTarget) {
+            if (!target.zoneRect.isValid())
+                return;
+
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId) : nullptr;
+            const bool moduleDeclaration = node
+                                           && node->type == SceneDocument::TreeNode::Group
+                                           && node->operation == SceneDocument::TreeNode::Module;
+            if (moduleDeclaration)
+                return;
+
+            if (m_treeNodeDeleteRequestedCallback)
+                m_treeNodeDeleteRequestedCallback(nodeId);
+            return;
+        }
+
         m_treeNodeDroppedCallback(nodeId,
                                   target.parentGroupId,
                                   target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
@@ -1136,11 +1218,13 @@ bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosit
                 continue;
 
             QVector<ModuleCallParam> params;
+            const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node->moduleCallArguments);
             for (const SceneDocument::TreeNode &pChild : modGroup->children) {
                 if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
-                    const QString expr = pChild.variableExpression.trimmed().isEmpty()
-                                             ? QString::number(pChild.variableValue)
-                                             : pChild.variableExpression.trimmed();
+                    const QString expr = overrides.value(pChild.variableName,
+                                                         pChild.variableExpression.trimmed().isEmpty()
+                                                             ? QString::number(pChild.variableValue)
+                                                             : pChild.variableExpression.trimmed());
                     params.append({pChild.id, pChild.variableName, expr});
                 }
             }
@@ -1171,7 +1255,7 @@ bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosit
 
 bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_variableNumberAdjustedCallback)
+    if (!m_scene || !m_moduleCallArgumentAdjustedCallback)
         return false;
 
     int moduleCallNodeId = 0;
@@ -1181,7 +1265,7 @@ bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePos
     if (!moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &paramVarNodeId, &start, &length))
         return false;
 
-    m_variableNumberAdjustedCallback(paramVarNodeId, start, length, wheelSteps);
+    m_moduleCallArgumentAdjustedCallback(moduleCallNodeId, paramVarNodeId, start, length, wheelSteps);
     updateActiveModuleCallParamControl(scenePosition, true);
     return true;
 }
@@ -1262,6 +1346,24 @@ void SceneTreeGraphicsWidget::updateSceneRect(const QRectF &toolbarRect)
         bounds.setHeight(260.0);
 
     m_graphicsScene->setSceneRect(bounds);
+}
+
+void SceneTreeGraphicsWidget::centerToolbarHorizontallyOnNextEvent()
+{
+    if (m_initialToolbarCentered || !m_lastToolbarRect.isValid())
+        return;
+
+    QTimer::singleShot(0, this, [this]() {
+        if (m_initialToolbarCentered || !m_lastToolbarRect.isValid())
+            return;
+        if (!viewport() || viewport()->width() <= 1 || viewport()->height() <= 1)
+            return;
+
+        const qreal viewportHalfHeight = viewport()->height() * 0.5;
+        const qreal targetCenterY = m_lastToolbarRect.top() - InitialToolbarTopGap + viewportHalfHeight;
+        centerOn(QPointF(m_lastToolbarRect.center().x(), targetCenterY));
+        m_initialToolbarCentered = true;
+    });
 }
 
 QString SceneTreeGraphicsWidget::labelForPrimitive(int shapeId) const

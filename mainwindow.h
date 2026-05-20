@@ -9,8 +9,6 @@
 
 class QTextEdit;
 class QLabel;
-class QDoubleSpinBox;
-class QComboBox;
 class QPushButton;
 class QAction;
 class QUndoStack;
@@ -41,8 +39,6 @@ private slots:
 
     void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
     void showSceneTreeContextMenu(const QPoint &position);
-    void onPropertyChanged();
-    void onBooleanModeChanged(int index);
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
     void onViewportShapeDragFinished(int index);
@@ -63,6 +59,7 @@ private slots:
     void onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
     void onGraphicsTreeShapeParameterHovered(int shapeId, int parameter);
     void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
+    void onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId, int start, int length, qreal delta);
     void onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
 
 private:
@@ -80,7 +77,6 @@ private:
     int selectedDirectGroupId() const;
     void addGroup(SceneDocument::TreeNode::Operation operation);
     void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
-    void changeShapeBooleanMode(int shapeId, ShapeNode::BooleanMode booleanMode);
     QString previewScadPath() const;
     QString examplesPath() const;
     void populateExamplesMenu(QMenu *menu);
@@ -101,7 +97,6 @@ private:
     QUndoStack *m_undoStack = nullptr;
     QAction *m_undoAction = nullptr;
     QAction *m_redoAction = nullptr;
-    bool m_updatingProperties = false;
     bool m_viewportDragActive = false;
     ShapeNode m_viewportDragStartShape;
     bool m_viewportGroupDragActive = false;
@@ -117,27 +112,10 @@ private:
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_sendToOpenScadButton = nullptr;
-    QPushButton *m_deleteShapeButton = nullptr;
-    QPushButton *m_deleteGroupButton = nullptr;
     QLabel *m_csgStatusLabel = nullptr;
     QLabel *m_openScadPreviewLabel = nullptr;
     QLabel *m_parseErrorLabel = nullptr;
 
-    QDoubleSpinBox *m_posX = nullptr;
-    QDoubleSpinBox *m_posY = nullptr;
-    QDoubleSpinBox *m_posZ = nullptr;
-
-    QDoubleSpinBox *m_rotX = nullptr;
-    QDoubleSpinBox *m_rotY = nullptr;
-    QDoubleSpinBox *m_rotZ = nullptr;
-
-    QDoubleSpinBox *m_sizeX = nullptr;
-    QDoubleSpinBox *m_sizeY = nullptr;
-    QDoubleSpinBox *m_sizeZ = nullptr;
-
-    QDoubleSpinBox *m_radius = nullptr;
-    QDoubleSpinBox *m_height = nullptr;
-    QComboBox *m_booleanMode = nullptr;
 };
 
 #endif
