@@ -261,6 +261,40 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class RenameModuleCommand : public QUndoCommand
+{
+public:
+    RenameModuleCommand(SceneDocument *scene, int groupId, const QString &newName, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class RenameVariableCommand : public QUndoCommand
+{
+public:
+    RenameVariableCommand(SceneDocument *scene, int variableId, const QString &newName, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 class UpdateGroupTransformCommand : public QUndoCommand
 {
 public:

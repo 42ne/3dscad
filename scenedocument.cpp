@@ -387,6 +387,26 @@ bool SceneDocument::setModuleName(int groupId, const QString &name)
     return m_tree.setModuleName(groupId, name);
 }
 
+bool SceneDocument::renameVariable(int variableId, const QString &newName)
+{
+    const TreeNode *existing = m_tree.nodeById(variableId);
+    if (!existing || existing->type != TreeNode::Variable)
+        return false;
+
+    const QString trimmed = newName.trimmed();
+    if (!isValidIdentifier(trimmed))
+        return false;
+
+    // Enforce uniqueness across the whole tree.
+    QSet<QString> names;
+    collectVariableNames(m_tree.root(), &names);
+    names.remove(existing->variableName);
+    if (names.contains(trimmed))
+        return false;
+
+    return m_tree.renameVariable(variableId, trimmed);
+}
+
 bool SceneDocument::removeVariableById(int variableId)
 {
     return m_tree.removeVariableById(variableId);

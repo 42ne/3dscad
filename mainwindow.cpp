@@ -517,6 +517,12 @@ void MainWindow::buildUi()
         m_ctrlHighlight.active = false;
         highlightOpenScadSelection();
     });
+    m_sceneTreeGraphics->setModuleRenameRequestedCallback([this](int groupId, const QString &newName) {
+        onGraphicsTreeModuleRenameRequested(groupId, newName);
+    });
+    m_sceneTreeGraphics->setVariableRenameRequestedCallback([this](int variableId, const QString &newName) {
+        onGraphicsTreeVariableRenameRequested(variableId, newName);
+    });
 
     auto *legacyTreePanel = new QWidget;
     auto *legacyTreeLayout = new QVBoxLayout(legacyTreePanel);
@@ -1277,6 +1283,30 @@ void MainWindow::onGraphicsTreeTransformControlHovered(int groupId, SceneDocumen
 {
     if (m_viewport)
         m_viewport->setTreeTransformControlPreview(groupId, operation, axis);
+}
+
+void MainWindow::onGraphicsTreeModuleRenameRequested(int groupId, const QString &newName)
+{
+    auto *command = new RenameModuleCommand(&m_scene, groupId, newName, [this]() {
+        refreshSceneViews();
+    });
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+    m_undoStack->push(command);
+}
+
+void MainWindow::onGraphicsTreeVariableRenameRequested(int variableId, const QString &newName)
+{
+    auto *command = new RenameVariableCommand(&m_scene, variableId, newName, [this]() {
+        refreshSceneViews();
+    });
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+    m_undoStack->push(command);
 }
 
 void MainWindow::onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta)

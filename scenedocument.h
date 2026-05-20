@@ -62,6 +62,7 @@ public:
     int addVariableToModule(int moduleGroupId, bool isParameter = true, int insertIndex = -1);
     bool removeVariableById(int variableId);
     bool setModuleName(int groupId, const QString &name);
+    bool renameVariable(int variableId, const QString &newName);
     bool updateVariableExpression(int variableId, const QString &expression);
     bool updateModuleCallArgument(int moduleCallId, const QString &parameterName, const QString &expression);
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);

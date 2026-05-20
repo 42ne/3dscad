@@ -199,6 +199,20 @@ bool SceneTree::setModuleName(int groupId, const QString &name)
     return true;
 }
 
+bool SceneTree::renameVariable(int variableId, const QString &newName)
+{
+    TreeNode *node = nodeById(variableId);
+    if (!node || node->type != TreeNode::Variable)
+        return false;
+    const QString trimmed = newName.trimmed();
+    if (!isValidIdentifier(trimmed))
+        return false;
+    if (node->variableName == trimmed)
+        return false;
+    node->variableName = trimmed;
+    return true;
+}
+
 bool SceneTree::setVariableIsParameter(int variableId, bool isParameter)
 {
     TreeNode *node = nodeById(variableId);

@@ -5,9 +5,11 @@
 #include "scenetreelayout.h"
 
 #include <QGraphicsView>
+#include <QRectF>
 #include <QVector>
 #include <functional>
 
+class QEvent;
 class QGraphicsScene;
 class QGraphicsItem;
 class QKeyEvent;
@@ -15,6 +17,7 @@ class QMouseEvent;
 class QPainter;
 class QResizeEvent;
 class QShowEvent;
+class SceneTreeInlineTextInput;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -35,6 +38,8 @@ public:
     void setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setCtrlReleasedCallback(std::function<void()> callback);
+    void setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback);
+    void setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback);
     void setSelectedTreeNodeId(int nodeId);
     void refresh();
 
@@ -44,10 +49,13 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
+    void scrollContentsBy(int dx, int dy) override;
 
 private:
     using ChildLayout = SceneTreeLayout::ChildLayout;
@@ -77,6 +85,12 @@ private:
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
+    void updateHoverHighlights(const QPointF &scenePosition);
+    QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
+    bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
+    void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
+    QRectF groupRectForNode(int groupId) const;
+    QRectF rectForChildNode(int nodeId) const;
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
     bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter, int *numberStart, int *numberLength) const;
     bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
@@ -115,6 +129,21 @@ private:
     std::function<void(int, int, int, int, qreal)> m_moduleCallArgumentAdjustedCallback;
     std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;
     std::function<void()> m_ctrlReleasedCallback;
+    std::function<void(int, const QString &)> m_moduleRenameRequestedCallback;
+    std::function<void(int, const QString &)> m_variableRenameRequestedCallback;
+
+    // Rename-zone hit testing — populated during drawNode / drawGroup.
+    struct RenameZone {
+        QRectF rect;
+        int    nodeId   = 0;
+        bool   isModule = false; // true = module group, false = variable
+        QString currentName;
+    };
+    QVector<RenameZone> m_renameZones;
+
+    SceneTreeInlineTextInput *m_inlineInput     = nullptr;
+    bool                      m_inlineInputActive = false;
+
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;
@@ -134,6 +163,8 @@ private:
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
+    QRectF m_hoveredScrollRect;
+    QRectF m_hoveredRenameRect;
     bool m_panning = false;
     bool m_dragActive = false;
     bool m_initialToolbarCentered = false;

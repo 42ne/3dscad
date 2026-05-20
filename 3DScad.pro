@@ -24,6 +24,7 @@ SOURCES += \
     scenecommands.cpp \
     scenetreegraphicshelpers.cpp \
     scenetreegraphicswidget.cpp \
+    scenetreeinlinetextinput.cpp \
     scenetreelayout.cpp \
     scenetreenoderenderer.cpp \
     scenetreepreviewrenderer.cpp \
@@ -43,6 +44,7 @@ HEADERS += \
     scenecommands.h \
     scenetreegraphicshelpers.h \
     scenetreegraphicswidget.h \
+    scenetreeinlinetextinput.h \
     scenetreelayout.h \
     scenetreenoderenderer.h \
     scenetreepreviewrenderer.h \

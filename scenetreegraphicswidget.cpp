@@ -1,12 +1,14 @@
 #include "scenetreegraphicswidget.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenetreeinlinetextinput.h"
 #include "scenetreelayout.h"
 #include "scenetreepreviewrenderer.h"
 #include "scenetreenoderenderer.h"
 #include "scenetreetoolbarrenderer.h"
 
-#include <QGraphicsScene>
+#include <QApplication>
 #include <QFontMetricsF>
+#include <QGraphicsScene>
 #include <QHash>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -102,6 +104,8 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setCursor(Qt::OpenHandCursor);
+
+    m_inlineInput = new SceneTreeInlineTextInput(this);
 }
 
 void SceneTreeGraphicsWidget::setSceneDocument(const SceneDocument *scene)
@@ -175,6 +179,16 @@ void SceneTreeGraphicsWidget::setCtrlReleasedCallback(std::function<void()> call
     m_ctrlReleasedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback)
+{
+    m_moduleRenameRequestedCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback)
+{
+    m_variableRenameRequestedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -200,6 +214,7 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     m_graphicsScene->clear();
     m_treeLayout.clear();
     m_treeItems.clear();
+    m_renameZones.clear();
 }
 
 void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
@@ -223,6 +238,33 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         if (!toolbarItems.contains(item))
             m_treeItems.append(item);
     }
+
+    // Hover overlays — drawn on top of all tree items.
+    const bool hasActiveScrollControl = m_activeTransformControlNodeId > 0
+                                        || m_activeShapeParameterNodeId > 0
+                                        || m_activeVariableNodeId > 0
+                                        || m_activeForLoopNodeId > 0
+                                        || m_activeModuleCallNodeId > 0;
+
+    auto addHoverOverlay = [this](const QRectF &rect,
+                                  const QColor &fill,
+                                  const QColor &border,
+                                  qreal inflate,
+                                  qreal radius) {
+        if (!rect.isValid() || rect.isEmpty())
+            return;
+        QPainterPath path;
+        path.addRoundedRect(rect.adjusted(-inflate, -inflate, inflate, inflate), radius, radius);
+        auto *item = m_graphicsScene->addPath(path, QPen(border, 1.5), QBrush(fill));
+        item->setZValue(180.0);
+        m_treeItems.append(item);
+    };
+
+    if (!hasActiveScrollControl)
+        addHoverOverlay(m_hoveredScrollRect,
+                        QColor(100, 215, 240, 45), QColor(65, 180, 210, 155), 2.5, 5.0);
+    addHoverOverlay(m_hoveredRenameRect,
+                    QColor(190, 160, 245, 40), QColor(145, 108, 215, 150), 2.0, 4.0);
 }
 
 void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &rect)
@@ -269,6 +311,12 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         m_panning = true;
         m_lastPanPoint = event->pos();
         setCursor(Qt::ClosedHandCursor);
+        // Clear hover highlights when a pan begins.
+        const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
+        m_hoveredScrollRect = QRectF();
+        m_hoveredRenameRect = QRectF();
+        if (changed)
+            refresh();
         event->accept();
         return;
     }
@@ -297,6 +345,8 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    updateHoverHighlights(scenePosition);
+
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -310,6 +360,50 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
     }
 
     QGraphicsView::mouseReleaseEvent(event);
+}
+
+void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        int renameNodeId = 0;
+        QRectF renameRect;
+        if (hoverRenameZoneAt(scenePos, &renameNodeId, &renameRect)) {
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(renameNodeId) : nullptr;
+            if (node) {
+                const bool isModule = node->type == SceneDocument::TreeNode::Group
+                                      && node->operation == SceneDocument::TreeNode::Module;
+                const QString currentName = isModule ? node->moduleName : node->variableName;
+                startInlineRename(renameNodeId, isModule, renameRect, currentName);
+                event->accept();
+                return;
+            }
+        }
+    }
+    QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
+{
+    QGraphicsView::leaveEvent(event);
+    const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
+    m_hoveredScrollRect = QRectF();
+    m_hoveredRenameRect = QRectF();
+    if (!m_panning)
+        setCursor(Qt::OpenHandCursor);
+    if (changed && !m_dragActive)
+        refresh();
+}
+
+void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
+{
+    QGraphicsView::scrollContentsBy(dx, dy);
+    // Clear hover state when the canvas scrolls (positions shift under the cursor).
+    const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
+    m_hoveredScrollRect = QRectF();
+    m_hoveredRenameRect = QRectF();
+    if (changed && !m_dragActive)
+        refresh();
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
@@ -430,6 +524,13 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               -1)
             .renderVariable(node, rect);
         addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
+
+        // Register rename zone for the variable name text (badge = 38px, name follows).
+        const QFontMetricsF metrics(font());
+        const qreal nameW = qMax(metrics.horizontalAdvance(node.variableName), 24.0);
+        m_renameZones.append({QRectF(rect.left() + 38.0, rect.top(), nameW, VariableHeight),
+                              node.id, false, node.variableName});
+
         return rect;
     }
 
@@ -626,6 +727,18 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           moduleCallTemplateRect,
                           moduleCallTemplateRect,
                           moduleCallTemplateRect.size());
+
+        // Register rename zone for the module name inside the call-handle card.
+        // The module name text starts at x = cardLeft + 42 (after the CALL badge).
+        {
+            const QFontMetricsF metrics(font());
+            const qreal nameW = qMax(metrics.horizontalAdvance(node.moduleName), 24.0);
+            m_renameZones.append({QRectF(moduleCallTemplateRect.left() + 42.0,
+                                         moduleCallTemplateRect.top(),
+                                         nameW,
+                                         VariableHeight),
+                                  node.id, true, node.moduleName});
+        }
 
         auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
         bodyLabel->setBrush(QColor(84, 95, 116));
@@ -1446,6 +1559,248 @@ void SceneTreeGraphicsWidget::updateActiveModuleCallParamControl(const QPointF &
     m_activeModuleCallNumberStart = start;
     if (!m_dragActive)
         refresh();
+}
+
+void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition)
+{
+    if (m_dragActive || m_inlineInputActive)
+        return;
+
+    const bool controlDown = QApplication::keyboardModifiers() & Qt::ControlModifier;
+
+    // --- Scroll zone hover (teal) ---
+    QRectF newScrollRect;
+    if (controlDown) {
+        // When Ctrl is held, active scroll controls have their own highlight; no extra glow.
+        newScrollRect = QRectF();
+    } else {
+        newScrollRect = hoverScrollZoneRect(scenePosition);
+    }
+
+    // --- Rename zone hover (lavender) ---
+    int renameNodeId = 0;
+    QRectF renameRect;
+    hoverRenameZoneAt(scenePosition, &renameNodeId, &renameRect);
+    const QRectF newRenameRect = renameNodeId > 0 ? renameRect : QRectF();
+
+    // Update cursor.
+    if (newRenameRect.isValid())
+        setCursor(Qt::IBeamCursor);
+    else if (newScrollRect.isValid())
+        setCursor(Qt::SizeVerCursor);
+    else
+        setCursor(Qt::OpenHandCursor);
+
+    if (newScrollRect == m_hoveredScrollRect && newRenameRect == m_hoveredRenameRect)
+        return;
+
+    m_hoveredScrollRect = newScrollRect;
+    m_hoveredRenameRect = newRenameRect;
+    refresh();
+}
+
+QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition) const
+{
+    // Check each type of scroll control and return the first rect that contains scenePosition.
+    {
+        int groupId = 0;
+        SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
+        int axis = -1, numStart = -1, numLen = -1;
+        if (transformControlAt(scenePosition, &groupId, &op, &axis, &numStart, &numLen) && numStart >= 0) {
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(groupId) : nullptr;
+            if (node) {
+                const QString expr = transformAxisExpression(*node, axis);
+                const qreal hw = transformHeaderWidthForNode(*node);
+                const QFontMetricsF metrics(font());
+                const auto controls = transformParameterNumberControls(
+                    groupRectForNode(groupId), axis, expr, metrics, hw);
+                for (const auto &ctl : controls) {
+                    if (ctl.start == numStart)
+                        return ctl.rect;
+                }
+            }
+        }
+    }
+    {
+        int shapeId = 0, nodeId2 = 0, param = -1, numStart = -1, numLen = -1;
+        if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId2, &param, &numStart, &numLen) && numStart >= 0) {
+            const ShapeNode *shape = (m_scene && shapeId > 0) ? m_scene->shapeById(shapeId) : nullptr;
+            if (shape && param >= 0) {
+                // Find the primitive card rect in the layout children.
+                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+                    for (const ChildLayout &child : area.children) {
+                        if (child.nodeId != nodeId2)
+                            continue;
+                        const auto paramControls = shapeParameterControls(*shape);
+                        if (param < paramControls.size()) {
+                            const QFontMetricsF metrics(font());
+                            const auto numCtrls = shapeParameterNumberControls(
+                                child.rect, param, paramControls.size(),
+                                paramControls[param].expression, metrics);
+                            for (const auto &ctl : numCtrls) {
+                                if (ctl.start == numStart)
+                                    return ctl.rect;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    {
+        int nodeId2 = 0, start = -1, length = 0;
+        if (variableNumberControlAt(scenePosition, &nodeId2, &start, &length) && start >= 0) {
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId2) : nullptr;
+            if (node) {
+                // Find the variable card rect via the layout children.
+                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+                    for (const ChildLayout &child : area.children) {
+                        if (child.nodeId != nodeId2)
+                            continue;
+                        const QFontMetricsF metrics(font());
+                        const qreal nameW = metrics.horizontalAdvance(node->variableName);
+                        const auto controls = expressionNumberControls(
+                            child.rect, node->variableExpression, metrics, nameW);
+                        for (const auto &ctl : controls) {
+                            if (ctl.start == start)
+                                return ctl.rect;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    {
+        int nodeId2 = 0, start = -1, length = 0;
+        if (forLoopRangeControlAt(scenePosition, &nodeId2, &start, &length) && start >= 0) {
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId2) : nullptr;
+            if (node) {
+                const QFontMetricsF metrics(font());
+                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+                    if (area.groupId == nodeId2) {
+                        const QString varName = forLoopVariableName(*node);
+                        const QString rangeExpr = forLoopRangeExpression(*node);
+                        const auto controls = forLoopRangeNumberControls(area.rect, varName, rangeExpr, metrics);
+                        for (const auto &ctl : controls) {
+                            if (ctl.start == start)
+                                return ctl.rect;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    {
+        int moduleCallId = 0, varId = 0, start = -1, length = 0;
+        if (moduleCallParamControlAt(scenePosition, &moduleCallId, &varId, &start, &length) && start >= 0) {
+            const SceneDocument::TreeNode *callNode = m_scene ? m_scene->treeNodeById(moduleCallId) : nullptr;
+            const SceneDocument::TreeNode *moduleNode = (callNode && m_scene)
+                                                            ? m_scene->treeNodeById(callNode->shapeId)
+                                                            : nullptr;
+            if (callNode && moduleNode) {
+                QVector<ModuleCallParam> params;
+                for (const SceneDocument::TreeNode &child : moduleNode->children) {
+                    if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
+                        params.append({child.id, child.variableName,
+                                       child.variableExpression.trimmed().isEmpty()
+                                           ? QString::number(child.variableValue)
+                                           : child.variableExpression.trimmed()});
+                    }
+                }
+                // Find the call card rect from treeLayout children.
+                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+                    for (const ChildLayout &child : area.children) {
+                        if (child.nodeId == moduleCallId) {
+                            const QFontMetricsF metrics(font());
+                            const auto controls = moduleCallParamControls(
+                                child.rect, moduleNode->moduleName, params, metrics);
+                            for (const auto &ctl : controls) {
+                                if (ctl.paramVarNodeId == varId && ctl.numberStart == start)
+                                    return ctl.rect;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return QRectF();
+}
+
+bool SceneTreeGraphicsWidget::hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const
+{
+    for (const RenameZone &zone : m_renameZones) {
+        // Inflate the hit area a little for usability.
+        if (zone.rect.adjusted(-2, -2, 2, 2).contains(scenePosition)) {
+            if (nodeId)   *nodeId   = zone.nodeId;
+            if (zoneRect) *zoneRect = zone.rect;
+            return true;
+        }
+    }
+    if (nodeId)   *nodeId   = 0;
+    if (zoneRect) *zoneRect = QRectF();
+    return false;
+}
+
+void SceneTreeGraphicsWidget::startInlineRename(int nodeId,
+                                                bool isModule,
+                                                const QRectF &sceneRect,
+                                                const QString &currentName)
+{
+    if (!m_inlineInput)
+        return;
+
+    // Convert scene rect to viewport coordinates.
+    const QRectF viewRectF = mapFromScene(sceneRect).boundingRect();
+    const QRect viewRect   = viewRectF.toAlignedRect();
+
+    m_inlineInputActive = true;
+
+    m_inlineInput->startEditing(
+        viewRect,
+        currentName,
+        [this, nodeId, isModule](const QString &newName) {
+            m_inlineInputActive = false;
+            if (newName.isEmpty() || newName == (isModule
+                    ? (m_scene ? m_scene->treeNodeById(nodeId) ?
+                           m_scene->treeNodeById(nodeId)->moduleName : QString() : QString())
+                    : (m_scene ? m_scene->treeNodeById(nodeId) ?
+                           m_scene->treeNodeById(nodeId)->variableName : QString() : QString())))
+                return;
+            if (isModule) {
+                if (m_moduleRenameRequestedCallback)
+                    m_moduleRenameRequestedCallback(nodeId, newName);
+            } else {
+                if (m_variableRenameRequestedCallback)
+                    m_variableRenameRequestedCallback(nodeId, newName);
+            }
+        },
+        [this]() {
+            m_inlineInputActive = false;
+        });
+}
+
+QRectF SceneTreeGraphicsWidget::groupRectForNode(int groupId) const
+{
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.groupId == groupId)
+            return area.rect;
+    }
+    return QRectF();
+}
+
+QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
+{
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        for (const ChildLayout &child : area.children) {
+            if (child.nodeId == nodeId)
+                return child.rect;
+        }
+    }
+    return QRectF();
 }
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)

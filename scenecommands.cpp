@@ -736,3 +736,89 @@ void UpdateGroupTransformCommand::redo()
     if (m_onChanged)
         m_onChanged();
 }
+
+RenameModuleCommand::RenameModuleCommand(SceneDocument *scene, int groupId, const QString &newName, std::function<void()> onChanged)
+    : QUndoCommand("Rename module")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->setModuleName(groupId, newName);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool RenameModuleCommand::isValid() const
+{
+    return m_valid;
+}
+
+void RenameModuleCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void RenameModuleCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+RenameVariableCommand::RenameVariableCommand(SceneDocument *scene, int variableId, const QString &newName, std::function<void()> onChanged)
+    : QUndoCommand("Rename variable")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->renameVariable(variableId, newName);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool RenameVariableCommand::isValid() const
+{
+    return m_valid;
+}
+
+void RenameVariableCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void RenameVariableCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}

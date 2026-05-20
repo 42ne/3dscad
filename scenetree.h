@@ -77,6 +77,7 @@ public:
                     int parentGroupId = 0, bool isParameter = false, int insertIndex = -1);
     bool removeVariableById(int variableId);
     bool setModuleName(int groupId, const QString &name);
+    bool renameVariable(int variableId, const QString &newName);
     bool setVariableIsParameter(int variableId, bool isParameter);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
