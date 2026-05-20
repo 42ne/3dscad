@@ -52,6 +52,7 @@ private slots:
     void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
     void onViewportGroupRotationDragFinished(int groupId);
     void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex);
+    void onGraphicsTreeModuleCallDropped(int moduleGroupId, int parentGroupId, int insertIndex);
     void onGraphicsTreeNodeSelected(int nodeId);
     void onGraphicsTreeNodeDeleteRequested(int nodeId);
     void onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);

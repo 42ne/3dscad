@@ -726,6 +726,8 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     QGraphicsItem *item = nullptr;
     if (isVariableToolName(tool)) {
         item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0);
+    } else if (tool == QStringLiteral("call")) {
+        item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0);
     } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true);
     } else {

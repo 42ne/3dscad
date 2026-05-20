@@ -56,6 +56,8 @@ public:
     bool takeShapeById(int id, ShapeNode *removedShape, int *removedIndex);
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
+    int addModuleCall(int moduleGroupId, int parentGroupId = 0, int insertIndex = -1, const QString &arguments = QString());
+    bool removeModuleCallById(int moduleCallId);
     int addVariable(int insertIndex = -1);
     int addVariableToModule(int moduleGroupId, bool isParameter = true, int insertIndex = -1);
     bool removeVariableById(int variableId);

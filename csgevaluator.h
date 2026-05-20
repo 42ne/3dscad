@@ -11,6 +11,7 @@ struct CsgRenderItem
 {
     SceneMesh mesh;
     int shapeIndex = -1;
+    int treeNodeId = 0;
     ShapeNode::BooleanMode booleanMode = ShapeNode::Add;
     bool computed = false;
     bool helper = false;

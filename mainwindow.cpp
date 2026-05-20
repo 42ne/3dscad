@@ -470,6 +470,9 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId, int insertIndex) {
         onGraphicsTreeToolDropped(toolName, parentGroupId, insertIndex);
     });
+    m_sceneTreeGraphics->setModuleCallDroppedCallback([this](int moduleGroupId, int parentGroupId, int insertIndex) {
+        onGraphicsTreeModuleCallDropped(moduleGroupId, parentGroupId, insertIndex);
+    });
     m_sceneTreeGraphics->setTreeNodeDroppedCallback([this](int nodeId, int parentGroupId, int insertIndex) {
         moveTreeNodeToGroup(nodeId, parentGroupId, insertIndex);
     });
@@ -1039,6 +1042,20 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
     m_undoStack->push(command);
 }
 
+void MainWindow::onGraphicsTreeModuleCallDropped(int moduleGroupId, int parentGroupId, int insertIndex)
+{
+    auto *command = new AddModuleCallCommand(&m_scene, moduleGroupId, parentGroupId, insertIndex, [this]() {
+        refreshSceneViews();
+    });
+
+    if (!command->isValid()) {
+        delete command;
+        return;
+    }
+
+    m_undoStack->push(command);
+}
+
 void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
 {
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
@@ -1056,7 +1073,7 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
         m_scene.setSelectedShapeId(-1);
         selectTreeNodeInSceneTree(node->id);
         m_viewport->setSelectedIndex(-1);
-        m_viewport->setSelectedGroupId(node->shapeId);
+        m_viewport->setSelectedGroupId(node->id);
     } else if (node->type == SceneDocument::TreeNode::Variable) {
         m_scene.setSelectedShapeId(-1);
         selectTreeNodeInSceneTree(node->id);
@@ -1081,9 +1098,19 @@ void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
     if (!node)
         return;
 
-    // ModuleCall nodes are auto-managed by their Module group; they cannot be deleted directly.
-    if (node->type == SceneDocument::TreeNode::ModuleCall)
+    if (node->type == SceneDocument::TreeNode::ModuleCall) {
+        auto *command = new RemoveModuleCallCommand(&m_scene, node->id, [this]() {
+            refreshSceneViews();
+        });
+
+        if (!command->isValid()) {
+            delete command;
+            return;
+        }
+
+        m_undoStack->push(command);
         return;
+    }
 
     if (node->type == SceneDocument::TreeNode::Primitive) {
         auto *command = new DeleteShapeCommand(&m_scene, node->shapeId, [this]() {
@@ -1684,13 +1711,9 @@ void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIn
         if (!targetIsRoot && !targetIsModule)
             return;
     }
-    // ModuleCall nodes can only be reordered within Scene.
     if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
         const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentGroupId);
-        const bool targetIsScene = parentNode
-                                   && parentNode->type == SceneDocument::TreeNode::Group
-                                   && parentNode->operation == SceneDocument::TreeNode::Scene;
-        if (!targetIsScene)
+        if (!parentNode || parentNode->type != SceneDocument::TreeNode::Group)
             return;
     }
 

@@ -327,6 +327,54 @@ void AddVariableCommand::redo()
         m_onChanged();
 }
 
+AddModuleCallCommand::AddModuleCallCommand(SceneDocument *scene,
+                                           int moduleGroupId,
+                                           int parentGroupId,
+                                           int insertIndex,
+                                           std::function<void()> onChanged)
+    : QUndoCommand("Add module call")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    const int callId = m_scene->addModuleCall(moduleGroupId, parentGroupId, insertIndex);
+    m_valid = callId > 0;
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool AddModuleCallCommand::isValid() const
+{
+    return m_valid;
+}
+
+void AddModuleCallCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void AddModuleCallCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
 RemoveVariableCommand::RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged)
     : QUndoCommand("Remove variable")
     , m_scene(scene)
@@ -360,6 +408,49 @@ void RemoveVariableCommand::undo()
 }
 
 void RemoveVariableCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+RemoveModuleCallCommand::RemoveModuleCallCommand(SceneDocument *scene, int moduleCallId, std::function<void()> onChanged)
+    : QUndoCommand("Remove module call")
+    , m_scene(scene)
+    , m_onChanged(onChanged)
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->removeModuleCallById(moduleCallId);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+bool RemoveModuleCallCommand::isValid() const
+{
+    return m_valid;
+}
+
+void RemoveModuleCallCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void RemoveModuleCallCommand::redo()
 {
     if (!m_scene || !m_valid)
         return;

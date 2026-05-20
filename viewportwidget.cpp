@@ -650,6 +650,11 @@ static void collectPrimitiveShapeIds(const SceneDocument::TreeNode &node, QSet<i
         collectPrimitiveShapeIds(child, shapeIds);
 }
 
+static bool selectionHasTreeNodeId(const SceneDocument *scene, int selectedGroupId)
+{
+    return scene && selectedGroupId > 0 && scene->treeNodeById(selectedGroupId);
+}
+
 static QSet<int> selectedViewportShapeIds(const SceneDocument *scene,
                                           const QVector<ShapeNode> *shapes,
                                           int selectedIndex,
@@ -667,8 +672,12 @@ static QSet<int> selectedViewportShapeIds(const SceneDocument *scene,
 
 static bool itemBelongsToSelection(const CsgRenderItem &item,
                                    const QVector<ShapeNode> *shapes,
-                                   const QSet<int> &selectedShapeIds)
+                                   const QSet<int> &selectedShapeIds,
+                                   int selectedTreeNodeId)
 {
+    if (selectedTreeNodeId > 0 && item.treeNodeId == selectedTreeNodeId)
+        return true;
+
     if (item.shapeIndex < 0 || !shapes || item.shapeIndex >= shapes->size())
         return false;
 
@@ -1531,7 +1540,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                                                     m_shapes,
                                                                     m_selectedIndex,
                                                                     m_selectedGroupId);
-        const bool hasViewportSelection = !selectedShapeIds.isEmpty();
+        const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
+        const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
         QVector<Triangle2D> triangles;
         QVector<Triangle2D> translucentHelperTriangles;
         QVector<Line2D> backgroundHelperLines;
@@ -1575,7 +1585,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                                                &m_csgPreviewDirty);
             csgStatus = preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
-                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds);
+                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 QColor color = QColor(80, 160, 255);
                 if (item.booleanMode == ShapeNode::Subtract)
                     color = QColor(225, 95, 95);
@@ -1843,7 +1853,8 @@ void ViewportWidget::paintOpenGLPreview()
                                                                 m_shapes,
                                                                 m_selectedIndex,
                                                                 m_selectedGroupId);
-    const bool hasViewportSelection = !selectedShapeIds.isEmpty();
+    const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
+    const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
     const int pulseBucket = hasViewportSelection ? (m_selectionPulseFrame % 40) : 0;
     const float pulse = hasViewportSelection
                             ? 1.0f + 0.13f * qSin(static_cast<float>(pulseBucket) * 0.35f)
@@ -1891,7 +1902,7 @@ void ViewportWidget::paintOpenGLPreview()
                 : cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
 
             for (const CsgRenderItem &item : preview.items) {
-                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds);
+                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 if (item.helper) {
                     if (item.booleanMode != ShapeNode::Subtract && !selected)
                         continue;

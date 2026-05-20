@@ -112,10 +112,6 @@ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int ins
                                  : qBound(0, insertIndex, parent->children.size());
     parent->children.insert(boundedIndex, group);
 
-    // Auto-create a ModuleCall node in Scene for every named Module group.
-    if (operation == TreeNode::Module)
-        addModuleCall(groupId);
-
     return groupId;
 }
 
@@ -244,11 +240,6 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool mo
         && targetParent->operation != TreeNode::Module
         && targetParent->operation != TreeNode::Scene)
         return false;
-    // ModuleCall nodes can only be reordered within the Scene container.
-    if (node->type == TreeNode::ModuleCall
-        && targetParent->operation != TreeNode::Scene)
-        return false;
-
     QVector3D sourceParentWorldPosition;
     QVector3D targetParentWorldPosition;
     if (!parentWorldPositionForNode(m_root, nodeId, QVector3D(), &sourceParentWorldPosition))
@@ -374,38 +365,61 @@ int SceneTree::sceneNodeId() const
     return node ? node->id : 0;
 }
 
-int SceneTree::addModuleCall(int moduleGroupId, int insertIndex, const QString &arguments)
+int SceneTree::addModuleCall(int moduleGroupId, int parentGroupId, int insertIndex, const QString &arguments)
 {
-    TreeNode *scene = sceneNode();
-    if (!scene)
-        return 0;
-
     const TreeNode *moduleNode = nodeById(moduleGroupId);
     if (!moduleNode || moduleNode->type != TreeNode::Group || moduleNode->operation != TreeNode::Module)
+        return 0;
+
+    TreeNode *parent = parentGroupId > 0 ? nodeById(parentGroupId) : sceneNode();
+    if (!parent || parent->type != TreeNode::Group || parent == &m_root)
+        return 0;
+    if (containsNodeId(*moduleNode, parent->id))
         return 0;
 
     TreeNode call = makeModuleCallNode(moduleGroupId, moduleNode->moduleName, arguments);
     const int callId = call.id;
     const int boundedIndex = insertIndex < 0
-                                 ? scene->children.size()
-                                 : qBound(0, insertIndex, scene->children.size());
-    scene->children.insert(boundedIndex, call);
+                                 ? parent->children.size()
+                                 : qBound(0, insertIndex, parent->children.size());
+    parent->children.insert(boundedIndex, call);
     return callId;
+}
+
+bool SceneTree::removeModuleCallById(int moduleCallId)
+{
+    if (moduleCallId <= 0)
+        return false;
+
+    const TreeNode *node = nodeById(moduleCallId);
+    if (!node || node->type != TreeNode::ModuleCall)
+        return false;
+
+    return detachNodeById(&m_root, moduleCallId);
 }
 
 bool SceneTree::removeModuleCallForModule(int moduleGroupId)
 {
-    TreeNode *scene = sceneNode();
-    if (!scene)
-        return false;
+    std::function<bool(TreeNode *)> removeCalls = [&](TreeNode *node) {
+        if (!node)
+            return false;
 
-    for (int i = 0; i < scene->children.size(); ++i) {
-        if (scene->children[i].type == TreeNode::ModuleCall && scene->children[i].shapeId == moduleGroupId) {
-            scene->children.removeAt(i);
-            return true;
+        bool removed = false;
+        for (int i = node->children.size() - 1; i >= 0; --i) {
+            TreeNode &child = node->children[i];
+            if (child.type == TreeNode::ModuleCall && child.shapeId == moduleGroupId) {
+                node->children.removeAt(i);
+                removed = true;
+                continue;
+            }
+
+            if (removeCalls(&child))
+                removed = true;
         }
-    }
-    return false;
+        return removed;
+    };
+
+    return removeCalls(&m_root);
 }
 
 SceneTree::Snapshot SceneTree::snapshot() const

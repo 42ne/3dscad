@@ -23,6 +23,7 @@ public:
 
     void setSceneDocument(const SceneDocument *scene);
     void setToolDroppedCallback(std::function<void(const QString &, int, int)> callback);
+    void setModuleCallDroppedCallback(std::function<void(int, int, int)> callback);
     void setTreeNodeDroppedCallback(std::function<void(int, int, int)> callback);
     void setTreeNodeSelectedCallback(std::function<void(int)> callback);
     void setTreeNodeDeleteRequestedCallback(std::function<void(int)> callback);
@@ -68,6 +69,7 @@ private:
                                    int movingNodeId,
                                    bool allowFreeFloatingInsertion) const;
     void handleToolDrop(const QString &toolName, const QPointF &scenePosition);
+    void handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
@@ -101,6 +103,7 @@ private:
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     std::function<void(const QString &, int, int)> m_toolDroppedCallback;
+    std::function<void(int, int, int)> m_moduleCallDroppedCallback;
     std::function<void(int, int, int)> m_treeNodeDroppedCallback;
     std::function<void(int)> m_treeNodeSelectedCallback;
     std::function<void(int)> m_treeNodeDeleteRequestedCallback;

@@ -141,6 +141,12 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Scale;
 }
 
+static bool isTopLevelModuleDeclaration(const SceneDocument::TreeNode &node)
+{
+    return node.type == SceneDocument::TreeNode::Group
+           && node.operation == SceneDocument::TreeNode::Module;
+}
+
 static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::TreeNode &node,
                                                           QHash<QString, qreal> variables,
                                                           const QHash<QString, QString> &argumentOverrides = {})
@@ -371,6 +377,28 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     return applyNodeTransform(result, evaluatedNode);
 }
 
+static Manifold evaluateDocumentGeometry(const SceneDocument &scene)
+{
+    const QHash<QString, qreal> variables = topLevelVariables(scene.treeRoot());
+    bool hasResult = false;
+    Manifold result;
+
+    for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
+        if (isTopLevelModuleDeclaration(child))
+            continue;
+
+        const Manifold childResult = evaluateNode(child, scene, variables);
+        if (!hasResult) {
+            result = childResult;
+            hasResult = true;
+        } else {
+            result += childResult;
+        }
+    }
+
+    return result;
+}
+
 static SceneMesh sceneMeshFromManifold(const Manifold &manifold)
 {
     SceneMesh mesh;
@@ -415,7 +443,7 @@ bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *
     if (!mesh)
         return false;
 
-    const Manifold result = evaluateNode(scene.treeRoot(), scene, topLevelVariables(scene.treeRoot()));
+    const Manifold result = evaluateDocumentGeometry(scene);
 
     if (result.Status() != Manifold::Error::NoError) {
         if (errorMessage)

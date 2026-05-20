@@ -538,11 +538,12 @@ static QVector<Box> subtractBox(const Box &source, const Box &cutter)
     return result;
 }
 
-static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex)
+static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex, int treeNodeId = 0)
 {
     CsgRenderItem item;
     item.mesh = buildShapeMesh(shape);
     item.shapeIndex = shapeIndex;
+    item.treeNodeId = treeNodeId;
     item.booleanMode = shape.booleanMode;
     return item;
 }
@@ -653,6 +654,12 @@ static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::T
     }
 
     return variables;
+}
+
+static bool isTopLevelModuleDeclaration(const SceneDocument::TreeNode &node)
+{
+    return node.type == SceneDocument::TreeNode::Group
+           && node.operation == SceneDocument::TreeNode::Module;
 }
 
 static QStringList splitAtTopLevelCommas(const QString &text)
@@ -820,7 +827,8 @@ static void appendTreeHelpers(CsgPreview *preview,
                               ShapeNode::BooleanMode inheritedMode,
                               const QHash<QString, qreal> &variables,
                               QVector<SceneDocument::TreeNode> groupStack = {},
-                              const QHash<QString, QString> &moduleArgumentOverrides = {})
+                              const QHash<QString, QString> &moduleArgumentOverrides = {},
+                              int ownerTreeNodeId = 0)
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = scene.shapeById(node.shapeId);
@@ -828,7 +836,9 @@ static void appendTreeHelpers(CsgPreview *preview,
             return;
 
         const ShapeNode evaluatedShape = shapeWithEvaluatedParameters(*shape, variables);
-        CsgRenderItem helper = renderItemFromShape(evaluatedShape, scene.indexOfShapeId(shape->id));
+        CsgRenderItem helper = renderItemFromShape(evaluatedShape,
+                                                   scene.indexOfShapeId(shape->id),
+                                                   ownerTreeNodeId > 0 ? ownerTreeNodeId : node.id);
         helper.mesh = transformedMesh(helper.mesh, groupStack);
         helper.booleanMode = inheritedMode;
         helper.helper = true;
@@ -849,7 +859,8 @@ static void appendTreeHelpers(CsgPreview *preview,
                               inheritedMode,
                               variables,
                               groupStack,
-                              parseNamedArgumentExpressions(node.moduleCallArguments));
+                              parseNamedArgumentExpressions(node.moduleCallArguments),
+                              node.id);
         }
         return;
     }
@@ -869,7 +880,7 @@ static void appendTreeHelpers(CsgPreview *preview,
             QHash<QString, qreal> iterationVariables = variables;
             iterationVariables[variableName] = value;
             for (int i = 0; i < node.children.size(); ++i)
-                appendTreeHelpers(preview, scene, node.children[i], inheritedMode, iterationVariables, groupStack);
+                appendTreeHelpers(preview, scene, node.children[i], inheritedMode, iterationVariables, groupStack, {}, ownerTreeNodeId);
         }
         return;
     }
@@ -878,13 +889,16 @@ static void appendTreeHelpers(CsgPreview *preview,
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
     for (int i = 0; i < node.children.size(); ++i) {
+        if (node.id == scene.treeRoot().id && isTopLevelModuleDeclaration(node.children[i]))
+            continue;
+
         ShapeNode::BooleanMode childMode = inheritedMode;
         if (node.operation == SceneDocument::TreeNode::Difference && i > 0)
             childMode = ShapeNode::Subtract;
         else if (node.operation == SceneDocument::TreeNode::Intersection)
             childMode = ShapeNode::Intersect;
 
-        appendTreeHelpers(preview, scene, node.children[i], childMode, localVariables, groupStack);
+        appendTreeHelpers(preview, scene, node.children[i], childMode, localVariables, groupStack, {}, ownerTreeNodeId);
     }
 }
 
@@ -1256,14 +1270,42 @@ static bool treeHasForOperation(const SceneDocument::TreeNode &node)
     return false;
 }
 
+static bool treeHasModuleCall(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::ModuleCall)
+        return true;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (treeHasModuleCall(child))
+            return true;
+    }
+
+    return false;
+}
+
+static bool treeHasModuleDeclarationChild(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::Module)
+        return true;
+    return false;
+}
+
 CsgPreview buildCsgPreview(const SceneDocument &scene)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
     const bool hasTreeBoolean = treeHasBooleanOperation(scene.treeRoot());
     const bool hasGroupTransform = treeHasGroupTransform(scene.treeRoot());
     const bool hasForOperation = treeHasForOperation(scene.treeRoot());
+    const bool hasModuleCall = treeHasModuleCall(scene.treeRoot());
+    bool hasModuleDeclaration = false;
+    for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
+        if (treeHasModuleDeclarationChild(child)) {
+            hasModuleDeclaration = true;
+            break;
+        }
+    }
 
-    if ((hasTreeBoolean || hasGroupTransform || hasForOperation) && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -1281,7 +1323,15 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
                                      ? "CSG preview: Manifold exact mesh"
                                      : hasForOperation
                                            ? "CSG preview: Manifold for-expanded mesh"
-                                           : "CSG preview: Manifold tree transform mesh";
+                                           : hasModuleCall
+                                                 ? "CSG preview: Manifold module-expanded mesh"
+                                                 : "CSG preview: Manifold tree transform mesh";
+            return preview;
+        }
+
+        if (hasModuleDeclaration && manifoldError.contains(QStringLiteral("empty"), Qt::CaseInsensitive)) {
+            CsgPreview preview;
+            preview.statusText = QStringLiteral("CSG preview: empty scene");
             return preview;
         }
 

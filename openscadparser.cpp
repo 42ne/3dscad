@@ -2,7 +2,6 @@
 #include "expression.h"
 
 #include <QRegularExpression>
-#include <QSet>
 #include <QStringList>
 
 namespace {
@@ -505,9 +504,11 @@ static bool parseBlock(ParserState *state,
         if (line == QStringLiteral("}"))
             return stopAtBrace;
 
-        // Nested module calls are not tree nodes yet; keep parsing surrounding supported code.
-        if (parseModuleCallLine(line))
+        QString callName, callArgs;
+        if (parseModuleCallLine(line, &callName, &callArgs)) {
+            parent->children.append(makeModuleCallNode(0, callName, callArgs, state));
             continue;
+        }
 
         // ── Variable assignment ───────────────────────────────────────────
         QString variableName, variableExpression, variableError;
@@ -702,6 +703,22 @@ static bool parseModuleParams(const QString &paramsStr,
     return true;
 }
 
+static void resolveModuleCallReferences(SceneDocument::TreeNode *node,
+                                        const QHash<QString, SceneDocument::TreeNode *> &moduleByName)
+{
+    if (!node)
+        return;
+
+    if (node->type == SceneDocument::TreeNode::ModuleCall) {
+        if (SceneDocument::TreeNode *module = moduleByName.value(node->moduleName, nullptr))
+            node->shapeId = module->id;
+        return;
+    }
+
+    for (SceneDocument::TreeNode &child : node->children)
+        resolveModuleCallReferences(&child, moduleByName);
+}
+
 bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *snapshot, QString *errorMessage, int *errorLine)
 {
     if (!snapshot)
@@ -812,8 +829,8 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale)
                 group.transformExpressions = transformExpressions;
-            root.children.append(group);
-            SceneDocument::TreeNode &child = root.children.last();
+            sceneNode.children.append(group);
+            SceneDocument::TreeNode &child = sceneNode.children.last();
             if (!parseBlock(&state, &child, true, errorMessage)) {
                 if (errorLine) *errorLine = state.errorLine;
                 return false;
@@ -863,22 +880,14 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
     // Create ModuleCall nodes in sceneNode in the order the calls appeared.
     // First, emit calls that were explicitly present (in call order).
-    QSet<QString> emittedCalls;
     for (const auto &call : moduleCalls) {
         const QString &callName = call.first;
-        if (SceneDocument::TreeNode *mod = moduleByName.value(callName, nullptr)) {
+        if (SceneDocument::TreeNode *mod = moduleByName.value(callName, nullptr))
             sceneNode.children.append(makeModuleCallNode(mod->id, callName, call.second, &state));
-            emittedCalls.insert(callName);
-        }
     }
-    // Then append a call for any module that had no explicit call statement.
-    for (SceneDocument::TreeNode &child : root.children) {
-        if (child.type == SceneDocument::TreeNode::Group
-            && child.operation == SceneDocument::TreeNode::Module
-            && !emittedCalls.contains(child.moduleName)) {
-            sceneNode.children.append(makeModuleCallNode(child.id, child.moduleName, QString(), &state));
-        }
-    }
+
+    resolveModuleCallReferences(&root, moduleByName);
+    resolveModuleCallReferences(&sceneNode, moduleByName);
 
     // Insert the Scene container as the first root child.
     root.children.prepend(sceneNode);

@@ -361,6 +361,16 @@ bool SceneDocument::removeGroupById(int groupId)
     return removed;
 }
 
+int SceneDocument::addModuleCall(int moduleGroupId, int parentGroupId, int insertIndex, const QString &arguments)
+{
+    return m_tree.addModuleCall(moduleGroupId, parentGroupId, insertIndex, arguments);
+}
+
+bool SceneDocument::removeModuleCallById(int moduleCallId)
+{
+    return m_tree.removeModuleCallById(moduleCallId);
+}
+
 int SceneDocument::addVariable(int insertIndex)
 {
     return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0, 0, false, insertIndex);

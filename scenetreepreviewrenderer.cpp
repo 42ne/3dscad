@@ -154,6 +154,8 @@ QString SceneTreePreviewRenderer::previewToolForNode(const SceneDocument::TreeNo
 {
     if (node.type == SceneDocument::TreeNode::Variable)
         return QStringLiteral("var");
+    if (node.type == SceneDocument::TreeNode::ModuleCall)
+        return QStringLiteral("call");
     if (node.type != SceneDocument::TreeNode::Primitive)
         return labelForOperation(node.operation);
 

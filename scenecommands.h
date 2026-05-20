@@ -134,10 +134,48 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class AddModuleCallCommand : public QUndoCommand
+{
+public:
+    AddModuleCallCommand(SceneDocument *scene,
+                         int moduleGroupId,
+                         int parentGroupId,
+                         int insertIndex,
+                         std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 class RemoveVariableCommand : public QUndoCommand
 {
 public:
     RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged);
+
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+private:
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
+class RemoveModuleCallCommand : public QUndoCommand
+{
+public:
+    RemoveModuleCallCommand(SceneDocument *scene, int moduleCallId, std::function<void()> onChanged);
 
     bool isValid() const;
     void undo() override;

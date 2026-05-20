@@ -115,6 +115,11 @@ void SceneTreeGraphicsWidget::setToolDroppedCallback(std::function<void(const QS
     m_toolDroppedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setModuleCallDroppedCallback(std::function<void(int, int, int)> callback)
+{
+    m_moduleCallDroppedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setTreeNodeDroppedCallback(std::function<void(int, int, int)> callback)
 {
     m_treeNodeDroppedCallback = callback;
@@ -503,6 +508,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     qreal maxChildWidth = 0.0;
     int moduleParameterCount = 0;
     qreal moduleParameterSeparatorY = 0.0;
+    qreal moduleCallTemplateLabelY = 0.0;
+    qreal moduleBodyLabelY = 0.0;
+    QRectF moduleCallTemplateRect;
+    QVector<ModuleCallParam> moduleCallTemplateParams;
 
     auto drawChild = [&](const SceneDocument::TreeNode &child) {
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
@@ -523,6 +532,22 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         if (moduleParameterCount == 0)
             childTopLeft.ry() += VariableHeight + ChildGap;
         moduleParameterSeparatorY = childTopLeft.y() + ChildGap * 0.5;
+
+        for (const SceneDocument::TreeNode &child : node.children) {
+            if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
+                const QString expr = child.variableExpression.trimmed().isEmpty()
+                                         ? QString::number(child.variableValue)
+                                         : child.variableExpression.trimmed();
+                moduleCallTemplateParams.append({child.id, child.variableName, expr});
+            }
+        }
+        childTopLeft.ry() += 16.0 + ChildGap;
+        moduleCallTemplateLabelY = moduleParameterSeparatorY + 4.0;
+        moduleCallTemplateRect = QRectF(childTopLeft, moduleCallPreviewSize(node.moduleName, moduleCallTemplateParams));
+        maxChildWidth = qMax(maxChildWidth, moduleCallTemplateRect.width());
+        childTopLeft.ry() += moduleCallTemplateRect.height() + ChildGap;
+
+        moduleBodyLabelY = childTopLeft.y() + 4.0;
         childTopLeft.ry() += labelSpace + ChildGap;
         for (const SceneDocument::TreeNode &child : node.children) {
             if (!(child.type == SceneDocument::TreeNode::Variable && child.isParameter))
@@ -572,9 +597,39 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         paramsLabel->setPos(rect.left() + GroupPadding, rect.top() + GroupHeaderHeight + 4.0);
         paramsLabel->setZValue(depth * 10.0 + 8.0);
 
+        auto *callLabel = m_graphicsScene->addSimpleText(QStringLiteral("call handle"));
+        callLabel->setBrush(QColor(84, 95, 116));
+        callLabel->setPos(rect.left() + GroupPadding, moduleCallTemplateLabelY);
+        callLabel->setZValue(depth * 10.0 + 8.0);
+
+        SceneDocument::TreeNode callTemplate;
+        callTemplate.id = 0;
+        callTemplate.type = SceneDocument::TreeNode::ModuleCall;
+        callTemplate.shapeId = node.id;
+        callTemplate.moduleName = node.moduleName;
+        SceneTreeNodeRenderer(m_graphicsScene,
+                              0,
+                              nullptr,
+                              0,
+                              -1,
+                              -1,
+                              0,
+                              -1,
+                              -1,
+                              0,
+                              -1,
+                              0,
+                              -1)
+            .renderModuleCall(callTemplate, moduleCallTemplateRect, moduleCallTemplateParams);
+        addNodeDragHandle(-node.id,
+                          QStringLiteral("call"),
+                          moduleCallTemplateRect,
+                          moduleCallTemplateRect,
+                          moduleCallTemplateRect.size());
+
         auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
         bodyLabel->setBrush(QColor(84, 95, 116));
-        bodyLabel->setPos(rect.left() + GroupPadding, moduleParameterSeparatorY + 4.0);
+        bodyLabel->setPos(rect.left() + GroupPadding, moduleBodyLabelY);
         bodyLabel->setZValue(depth * 10.0 + 8.0);
 
         auto *separator = m_graphicsScene->addLine(rect.left() + GroupPadding,
@@ -611,12 +666,46 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
     }
 }
 
+void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition)
+{
+    if (!m_moduleCallDroppedCallback || moduleGroupId <= 0 || !m_scene)
+        return;
+
+    const SceneDocument::TreeNode *module = m_scene->treeNodeById(moduleGroupId);
+    if (!module || module->type != SceneDocument::TreeNode::Group
+        || module->operation != SceneDocument::TreeNode::Module) {
+        return;
+    }
+
+    QVector<ModuleCallParam> params;
+    for (const SceneDocument::TreeNode &child : module->children) {
+        if (child.type != SceneDocument::TreeNode::Variable || !child.isParameter)
+            continue;
+        const QString expression = child.variableExpression.trimmed().isEmpty()
+                                       ? QString::number(child.variableValue)
+                                       : child.variableExpression.trimmed();
+        params.append({child.id, child.variableName, expression});
+    }
+
+    const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                  moduleCallPreviewSize(module->moduleName, params),
+                                                  QStringLiteral("call"),
+                                                  0,
+                                                  false);
+    if (!target.hasTarget)
+        return;
+
+    m_moduleCallDroppedCallback(moduleGroupId,
+                                target.parentGroupId,
+                                target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+}
+
 QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNode &node) const
 {
     if (node.type == SceneDocument::TreeNode::Variable)
         return QStringLiteral("var");
     if (node.type == SceneDocument::TreeNode::ModuleCall)
-        return QStringLiteral("var"); // same height as var for drop-slot sizing
+        return QStringLiteral("call");
     if (node.type != SceneDocument::TreeNode::Primitive)
         return labelForOperation(node.operation);
 
@@ -654,15 +743,31 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
             return DropTarget();
     }
 
-    // ModuleCall nodes can only be reordered within the Scene container.
+    if (previewTool == QStringLiteral("call") && m_scene) {
+        const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
+        if (!targetNode || targetNode->type != SceneDocument::TreeNode::Group)
+            return DropTarget();
+
+        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+            if (area.groupId != target.parentGroupId
+                || area.operation != SceneDocument::TreeNode::Module
+                || area.moduleParameterSeparatorY <= 0.0) {
+                continue;
+            }
+
+            if (scenePosition.y() < area.moduleParameterSeparatorY)
+                return DropTarget();
+
+            target.insertIndex = qMax(target.insertIndex, area.moduleParameterCount);
+            break;
+        }
+    }
+
     if (movingNodeId > 0 && m_scene) {
         const SceneDocument::TreeNode *movingNode = m_scene->treeNodeById(movingNodeId);
         if (movingNode && movingNode->type == SceneDocument::TreeNode::ModuleCall) {
             const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
-            const bool targetIsScene = targetNode
-                                       && targetNode->type == SceneDocument::TreeNode::Group
-                                       && targetNode->operation == SceneDocument::TreeNode::Scene;
-            if (!targetIsScene)
+            if (!targetNode || targetNode->type != SceneDocument::TreeNode::Group)
                 return DropTarget();
         }
     }
@@ -672,6 +777,11 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
 
 void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scenePosition)
 {
+    if (nodeId < 0) {
+        handleModuleCallTemplateDrop(-nodeId, scenePosition);
+        return;
+    }
+
     if (m_treeNodeDroppedCallback) {
         QSizeF previewSize = defaultPreviewSize();
         QString previewTool;
@@ -679,9 +789,27 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
             const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
             if (node) {
                 previewTool = previewToolForNode(*node);
-                previewSize = node->type == SceneDocument::TreeNode::Variable
-                                  ? variablePreviewSize(node->variableName, node->variableExpression)
-                                  : previewSizeForTool(previewTool);
+                if (node->type == SceneDocument::TreeNode::Variable) {
+                    previewSize = variablePreviewSize(node->variableName, node->variableExpression);
+                } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
+                    QVector<ModuleCallParam> params;
+                    const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
+                    if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
+                        const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node->moduleCallArguments);
+                        for (const SceneDocument::TreeNode &paramNode : modGroup->children) {
+                            if (paramNode.type != SceneDocument::TreeNode::Variable || !paramNode.isParameter)
+                                continue;
+                            const QString expression = overrides.value(paramNode.variableName,
+                                                                       paramNode.variableExpression.trimmed().isEmpty()
+                                                                           ? QString::number(paramNode.variableValue)
+                                                                           : paramNode.variableExpression.trimmed());
+                            params.append({paramNode.id, paramNode.variableName, expression});
+                        }
+                    }
+                    previewSize = moduleCallPreviewSize(node->moduleName, params);
+                } else {
+                    previewSize = previewSizeForTool(previewTool);
+                }
             }
         }
 
