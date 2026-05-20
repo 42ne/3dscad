@@ -31,9 +31,6 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTimer>
-#include <QTreeWidget>
-#include <QTreeWidgetItem>
-#include <QTreeWidgetItemIterator>
 #include <QUndoStack>
 #include <QVBoxLayout>
 
@@ -42,9 +39,6 @@
 
 // ---------------- MainWindow ----------------
 
-static constexpr int ShapeIdRole = Qt::UserRole;
-static constexpr int TreeNodeIdRole = Qt::UserRole + 1;
-static constexpr int GroupOperationRole = Qt::UserRole + 2;
 static constexpr int ModuleParameterInsertSentinel = -100000;
 
 static bool decodeModuleParameterInsertIndex(int *insertIndex)
@@ -213,93 +207,6 @@ static bool isVariableTool(const QString &toolName)
     return toolName == QStringLiteral("var") || toolName == QStringLiteral("variable");
 }
 
-class SceneTreeWidget : public QTreeWidget
-{
-public:
-    explicit SceneTreeWidget(QWidget *parent = nullptr)
-        : QTreeWidget(parent)
-    {
-        setDragEnabled(true);
-        setAcceptDrops(true);
-        setDropIndicatorShown(true);
-        setDragDropMode(QAbstractItemView::DragDrop);
-        setDefaultDropAction(Qt::CopyAction);
-    }
-
-    std::function<void(int, int)> onTreeNodeDroppedOnGroup;
-
-protected:
-    void dragEnterEvent(QDragEnterEvent *event) override
-    {
-        event->setDropAction(Qt::CopyAction);
-        event->accept();
-    }
-
-    void dragMoveEvent(QDragMoveEvent *event) override
-    {
-        if (dropTarget(event->pos()).nodeId > 0) {
-            event->setDropAction(Qt::CopyAction);
-            event->accept();
-        } else {
-            event->ignore();
-        }
-    }
-
-    void dropEvent(QDropEvent *event) override
-    {
-        const DropTarget target = dropTarget(event->pos());
-        if (target.nodeId <= 0) {
-            event->ignore();
-            return;
-        }
-
-        event->setDropAction(Qt::CopyAction);
-        event->accept();
-
-        QTimer::singleShot(0, this, [this, target]() {
-            if (onTreeNodeDroppedOnGroup)
-                onTreeNodeDroppedOnGroup(target.nodeId, target.parentGroupId);
-        });
-    }
-
-private:
-    struct DropTarget
-    {
-        int nodeId = 0;
-        int parentGroupId = 0;
-    };
-
-    DropTarget dropTarget(const QPoint &position) const
-    {
-        DropTarget target;
-        const QList<QTreeWidgetItem *> selected = selectedItems();
-        if (selected.size() != 1)
-            return target;
-
-        const int nodeId = selected.first()->data(0, TreeNodeIdRole).toInt();
-        if (nodeId <= 0)
-            return target;
-
-        QTreeWidgetItem *targetItem = itemAt(position);
-        if (!targetItem)
-            return target;
-
-        if (targetItem->data(0, ShapeIdRole).toInt() >= 0)
-            targetItem = targetItem->parent();
-
-        if (!targetItem)
-            return target;
-
-        const QVariant operationData = targetItem->data(0, GroupOperationRole);
-        if (!operationData.isValid())
-            return target;
-
-        target.nodeId = nodeId;
-        target.parentGroupId = targetItem->data(0, TreeNodeIdRole).toInt();
-        return target;
-    }
-};
-
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
@@ -307,104 +214,6 @@ MainWindow::MainWindow(QWidget *parent)
     refreshOpenScadCode();
     refreshCsgStatus();
     refreshProperties();
-}
-
-static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation,
-                                 const QString &moduleName = QString())
-{
-    if (operation == SceneDocument::TreeNode::Module)
-        return "module " + (moduleName.trimmed().isEmpty() ? QStringLiteral("scene_model") : moduleName.trimmed());
-    if (operation == SceneDocument::TreeNode::Difference)
-        return "difference()";
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return "intersection()";
-    if (operation == SceneDocument::TreeNode::Translate)
-        return "translate";
-    if (operation == SceneDocument::TreeNode::Rotate)
-        return "rotate";
-    if (operation == SceneDocument::TreeNode::Scale)
-        return "scale";
-    if (operation == SceneDocument::TreeNode::For)
-        return "for";
-    if (operation == SceneDocument::TreeNode::Scene)
-        return "scene";
-    return "union()";
-}
-
-static void markGroupItem(QTreeWidgetItem *item, const SceneDocument::TreeNode &node)
-{
-    QFont font = item->font(0);
-    font.setBold(true);
-    item->setFont(0, font);
-    item->setData(0, ShapeIdRole, -1);
-    item->setData(0, TreeNodeIdRole, node.id);
-    item->setData(0, GroupOperationRole, node.operation);
-    item->setForeground(0, QColor(82, 82, 82));
-    item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
-}
-
-static QTreeWidgetItem *appendBooleanTreeItem(QTreeWidgetItem *parent,
-                                              const SceneDocument::TreeNode &node,
-                                              const SceneDocument &scene,
-                                              SceneDocument::TreeNode::Operation parentOperation = SceneDocument::TreeNode::Union,
-                                              int childIndex = 0)
-{
-    QString roleSuffix;
-    QColor roleColor;
-    if (parentOperation == SceneDocument::TreeNode::Difference) {
-        roleSuffix = childIndex == 0 ? " (base)" : " (cut)";
-        roleColor = childIndex == 0 ? QColor(45, 90, 145) : QColor(145, 80, 45);
-    } else if (parentOperation == SceneDocument::TreeNode::Intersection) {
-        roleSuffix = " (mask)";
-        roleColor = QColor(85, 95, 145);
-    }
-
-    if (node.type == SceneDocument::TreeNode::Primitive) {
-        const ShapeNode *shape = scene.shapeById(node.shapeId);
-        if (!shape)
-            return nullptr;
-
-        auto *item = new QTreeWidgetItem(parent);
-        item->setText(0, shape->name + roleSuffix);
-        item->setData(0, ShapeIdRole, shape->id);
-        item->setData(0, TreeNodeIdRole, node.id);
-        if (roleColor.isValid())
-            item->setForeground(0, roleColor);
-        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-        return item;
-    }
-
-    if (node.type == SceneDocument::TreeNode::Variable) {
-        auto *item = new QTreeWidgetItem(parent);
-        const QString prefix = node.isParameter ? QStringLiteral("param ") : QString();
-        item->setText(0, prefix + QStringLiteral("%1 = %2").arg(node.variableName, node.variableExpression));
-        item->setData(0, ShapeIdRole, -1);
-        item->setData(0, TreeNodeIdRole, node.id);
-        item->setForeground(0, node.isParameter ? QColor(60, 110, 170) : QColor(122, 92, 36));
-        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-        return item;
-    }
-
-    if (node.type == SceneDocument::TreeNode::ModuleCall) {
-        auto *item = new QTreeWidgetItem(parent);
-        item->setText(0, QStringLiteral("CALL %1").arg(node.moduleName) + roleSuffix);
-        item->setData(0, ShapeIdRole, -1);
-        item->setData(0, TreeNodeIdRole, node.id);
-        item->setForeground(0, QColor(32, 90, 145));
-        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-        return item;
-    }
-
-    auto *groupItem = new QTreeWidgetItem(parent);
-    groupItem->setText(0, booleanGroupLabel(node.operation, node.moduleName) + roleSuffix);
-    markGroupItem(groupItem, node);
-    if (roleColor.isValid())
-        groupItem->setForeground(0, roleColor);
-
-    for (int i = 0; i < node.children.size(); ++i)
-        appendBooleanTreeItem(groupItem, node.children[i], scene, node.operation, i);
-
-    return groupItem;
 }
 
 void MainWindow::buildUi()
@@ -467,14 +276,6 @@ void MainWindow::buildUi()
     auto *leftPanel = new QWidget;
     auto *leftLayout = new QVBoxLayout(leftPanel);
 
-    auto *shapeTree = new SceneTreeWidget;
-    shapeTree->onTreeNodeDroppedOnGroup = [this](int nodeId, int parentGroupId) {
-        moveTreeNodeToGroup(nodeId, parentGroupId);
-    };
-    m_shapeTree = shapeTree;
-    m_shapeTree->setHeaderHidden(true);
-    m_shapeTree->setContextMenuPolicy(Qt::CustomContextMenu);
-
     m_sceneTreeGraphics = new SceneTreeGraphicsWidget;
     m_sceneTreeGraphics->setSceneDocument(&m_scene);
     m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId, int insertIndex) {
@@ -524,26 +325,7 @@ void MainWindow::buildUi()
         onGraphicsTreeVariableRenameRequested(variableId, newName);
     });
 
-    auto *legacyTreePanel = new QWidget;
-    auto *legacyTreeLayout = new QVBoxLayout(legacyTreePanel);
-    legacyTreeLayout->setContentsMargins(0, 0, 0, 0);
-    legacyTreeLayout->addWidget(new QLabel("Scene tree:"));
-    legacyTreeLayout->addWidget(m_shapeTree);
-
-    auto *graphicsTreePanel = new QWidget;
-    auto *graphicsTreeLayout = new QVBoxLayout(graphicsTreePanel);
-    graphicsTreeLayout->setContentsMargins(0, 0, 0, 0);
-    graphicsTreeLayout->addWidget(new QLabel("Graphics tree preview:"));
-    graphicsTreeLayout->addWidget(m_sceneTreeGraphics);
-
-    auto *treeSplitter = new QSplitter(Qt::Vertical);
-    treeSplitter->addWidget(legacyTreePanel);
-    treeSplitter->addWidget(graphicsTreePanel);
-    treeSplitter->setStretchFactor(0, 1);
-    treeSplitter->setStretchFactor(1, 5);
-    treeSplitter->setSizes({115, 520});
-
-    leftLayout->addWidget(treeSplitter, 1);
+    leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;
     m_csgStatusLabel->setWordWrap(true);
     leftLayout->addWidget(m_csgStatusLabel);
@@ -574,10 +356,6 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::groupRotationDragStarted, this, &MainWindow::onViewportGroupRotationDragStarted);
     connect(m_viewport, &ViewportWidget::groupRotated, this, &MainWindow::onViewportGroupRotated);
     connect(m_viewport, &ViewportWidget::groupRotationDragFinished, this, &MainWindow::onViewportGroupRotationDragFinished);
-    connect(m_shapeTree, &QTreeWidget::currentItemChanged,
-            this, &MainWindow::onSceneTreeSelectionChanged);
-    connect(m_shapeTree, &QTreeWidget::customContextMenuRequested,
-            this, &MainWindow::showSceneTreeContextMenu);
 
 }
 
@@ -633,58 +411,6 @@ void MainWindow::addIntersectionGroup()
     addGroup(SceneDocument::TreeNode::Intersection);
 }
 
-void MainWindow::deleteSelectedShape()
-{
-    if (m_shapeTree && m_shapeTree->currentItem()) {
-        const int nodeId = m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
-        const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
-        if (node && node->type == SceneDocument::TreeNode::Variable) {
-            auto *command = new RemoveVariableCommand(&m_scene, nodeId, [this]() {
-                refreshSceneViews();
-            });
-
-            if (!command->isValid()) {
-                delete command;
-                return;
-            }
-
-            m_undoStack->push(command);
-            return;
-        }
-    }
-
-    auto *command = new DeleteShapeCommand(&m_scene, m_scene.selectedShapeId(), [this]() {
-        refreshSceneViews();
-    });
-
-    if (!command->isValid()) {
-        delete command;
-        return;
-    }
-
-    m_undoStack->push(command);
-}
-
-void MainWindow::deleteSelectedGroup()
-{
-    if (!m_shapeTree || !m_shapeTree->currentItem()
-        || !m_shapeTree->currentItem()->data(0, GroupOperationRole).isValid()) {
-        return;
-    }
-
-    const int groupId = m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
-    auto *command = new RemoveGroupCommand(&m_scene, groupId, [this]() {
-        refreshSceneViews();
-    });
-
-    if (!command->isValid()) {
-        delete command;
-        return;
-    }
-
-    m_undoStack->push(command);
-}
-
 void MainWindow::applyOpenScadCode()
 {
     SceneDocument::Snapshot snapshot;
@@ -735,72 +461,6 @@ void MainWindow::sendToOpenScad()
         QString("Saved the current model to:\n\n%1\n\n"
                 "The path was copied to the clipboard. Open this file in OpenSCAD and enable automatic reload/preview there.")
             .arg(nativePath));
-}
-
-void MainWindow::onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous)
-{
-    Q_UNUSED(previous);
-
-    const int shapeId = current ? current->data(0, ShapeIdRole).toInt() : -1;
-    const int groupId = current && current->data(0, GroupOperationRole).isValid()
-                            ? current->data(0, TreeNodeIdRole).toInt()
-                            : 0;
-    const int treeNodeId = current ? current->data(0, TreeNodeIdRole).toInt() : 0;
-    m_scene.setSelectedShapeId(shapeId);
-    m_viewport->setSelectedIndex(m_scene.selectedIndex());
-    m_viewport->setSelectedGroupId(groupId);
-    if (m_sceneTreeGraphics)
-        m_sceneTreeGraphics->setSelectedTreeNodeId(treeNodeId);
-    highlightOpenScadSelection();
-    refreshProperties();
-}
-
-void MainWindow::showSceneTreeContextMenu(const QPoint &position)
-{
-    if (!m_shapeTree)
-        return;
-
-    QTreeWidgetItem *item = m_shapeTree->itemAt(position);
-    if (item)
-        m_shapeTree->setCurrentItem(item);
-    else
-        clearSelection();
-
-    const bool hasItem = item != nullptr;
-    const bool isShape = hasItem && item->data(0, ShapeIdRole).toInt() >= 0;
-    const int groupId = hasItem && item->data(0, GroupOperationRole).isValid()
-                            ? item->data(0, TreeNodeIdRole).toInt()
-                            : selectedTreeGroupId();
-    const bool canDeleteGroup = hasItem
-                                && item->data(0, GroupOperationRole).isValid()
-                                && groupId > 0
-                                && groupId != m_scene.treeRoot().id;
-
-    QMenu menu(this);
-    QAction *addUnionAction = menu.addAction("Add union group");
-    QAction *addDifferenceAction = menu.addAction("Add difference group");
-    QAction *addIntersectionAction = menu.addAction("Add intersection group");
-    menu.addSeparator();
-    QAction *deleteShapeAction = menu.addAction("Delete shape");
-    QAction *deleteGroupAction = menu.addAction("Delete group");
-
-    deleteShapeAction->setEnabled(isShape);
-    deleteGroupAction->setEnabled(canDeleteGroup);
-
-    QAction *selectedAction = menu.exec(m_shapeTree->viewport()->mapToGlobal(position));
-    if (!selectedAction)
-        return;
-
-    if (selectedAction == addUnionAction)
-        addGroup(SceneDocument::TreeNode::Union);
-    else if (selectedAction == addDifferenceAction)
-        addGroup(SceneDocument::TreeNode::Difference);
-    else if (selectedAction == addIntersectionAction)
-        addGroup(SceneDocument::TreeNode::Intersection);
-    else if (selectedAction == deleteShapeAction)
-        deleteSelectedShape();
-    else if (selectedAction == deleteGroupAction)
-        deleteSelectedGroup();
 }
 
 void MainWindow::onViewportShapeDragStarted(int index)
@@ -1100,9 +760,6 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
         selectTreeNodeInSceneTree(node->id);
         m_viewport->setSelectedGroupId(node->id);
     }
-
-    if (m_sceneTreeGraphics)
-        m_sceneTreeGraphics->setSelectedTreeNodeId(nodeId);
 
     refreshProperties();
     m_viewport->update();
@@ -1574,24 +1231,8 @@ void MainWindow::onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int l
 
 void MainWindow::refreshShapeList()
 {
-    const int selectedShapeId = m_scene.selectedShapeId();
-    const int selectedTreeNodeId = (selectedShapeId < 0 && m_shapeTree && m_shapeTree->currentItem())
-                                       ? m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt()
-                                       : 0;
-
-    m_shapeTree->blockSignals(true);
-    m_shapeTree->clear();
-
-    appendBooleanTreeItem(m_shapeTree->invisibleRootItem(), m_scene.treeRoot(), m_scene);
-    m_shapeTree->expandAll();
     if (m_sceneTreeGraphics)
         m_sceneTreeGraphics->refresh();
-
-    m_shapeTree->blockSignals(false);
-    if (selectedShapeId >= 0)
-        selectShapeInSceneTree(selectedShapeId);
-    else
-        selectTreeNodeInSceneTree(selectedTreeNodeId);
 
     refreshOpenScadCode();
     m_viewport->update();
@@ -1609,55 +1250,34 @@ void MainWindow::refreshSceneViews()
 
 void MainWindow::selectShapeInSceneTree(int shapeId)
 {
-    if (!m_shapeTree)
-        return;
-
-    m_shapeTree->blockSignals(true);
-
-    QTreeWidgetItem *selectedItem = nullptr;
+    int nodeId = 0;
     if (shapeId >= 0) {
-        QTreeWidgetItemIterator it(m_shapeTree);
-        while (*it) {
-            if ((*it)->data(0, ShapeIdRole).toInt() == shapeId) {
-                selectedItem = *it;
-                break;
+        // Find the Primitive tree node that references this shapeId
+        std::function<int(const SceneDocument::TreeNode &)> findNode =
+            [&](const SceneDocument::TreeNode &n) -> int {
+            if (n.type == SceneDocument::TreeNode::Primitive && n.shapeId == shapeId)
+                return n.id;
+            for (const auto &child : n.children) {
+                const int found = findNode(child);
+                if (found > 0)
+                    return found;
             }
-            ++it;
-        }
+            return 0;
+        };
+        nodeId = findNode(m_scene.treeRoot());
     }
 
-    m_shapeTree->setCurrentItem(selectedItem);
-    m_shapeTree->blockSignals(false);
-
+    m_selectedTreeNodeId = nodeId;
     if (m_sceneTreeGraphics)
-        m_sceneTreeGraphics->setSelectedTreeNodeId(selectedItem ? selectedItem->data(0, TreeNodeIdRole).toInt() : 0);
+        m_sceneTreeGraphics->setSelectedTreeNodeId(nodeId);
     highlightOpenScadSelection();
 }
 
 void MainWindow::selectTreeNodeInSceneTree(int treeNodeId)
 {
-    if (!m_shapeTree)
-        return;
-
-    m_shapeTree->blockSignals(true);
-
-    QTreeWidgetItem *selectedItem = nullptr;
-    if (treeNodeId > 0) {
-        QTreeWidgetItemIterator it(m_shapeTree);
-        while (*it) {
-            if ((*it)->data(0, TreeNodeIdRole).toInt() == treeNodeId) {
-                selectedItem = *it;
-                break;
-            }
-            ++it;
-        }
-    }
-
-    m_shapeTree->setCurrentItem(selectedItem);
-    m_shapeTree->blockSignals(false);
-
+    m_selectedTreeNodeId = treeNodeId;
     if (m_sceneTreeGraphics)
-        m_sceneTreeGraphics->setSelectedTreeNodeId(selectedItem ? selectedItem->data(0, TreeNodeIdRole).toInt() : 0);
+        m_sceneTreeGraphics->setSelectedTreeNodeId(treeNodeId);
     highlightOpenScadSelection();
 }
 
@@ -1665,13 +1285,7 @@ void MainWindow::clearSelection()
 {
     m_scene.setSelectedShapeId(-1);
     m_ctrlHighlight = CtrlParamHighlight();
-
-    if (m_shapeTree) {
-        m_shapeTree->blockSignals(true);
-        m_shapeTree->setCurrentItem(nullptr);
-        m_shapeTree->clearSelection();
-        m_shapeTree->blockSignals(false);
-    }
+    m_selectedTreeNodeId = 0;
 
     if (m_sceneTreeGraphics)
         m_sceneTreeGraphics->setSelectedTreeNodeId(0);
@@ -1690,38 +1304,47 @@ void MainWindow::clearSelection()
 
 int MainWindow::selectedTreeNodeIdForCodeHighlight() const
 {
-    if (!m_shapeTree || !m_shapeTree->currentItem())
-        return 0;
-
-    return m_shapeTree->currentItem()->data(0, TreeNodeIdRole).toInt();
+    return m_selectedTreeNodeId;
 }
 
 int MainWindow::selectedTreeGroupId() const
 {
-    if (!m_shapeTree || !m_shapeTree->currentItem())
+    if (m_selectedTreeNodeId <= 0)
         return 0;
 
-    QTreeWidgetItem *item = m_shapeTree->currentItem();
-    if (item->data(0, GroupOperationRole).isValid())
-        return item->data(0, TreeNodeIdRole).toInt();
-
-    item = item->parent();
-    if (!item || !item->data(0, GroupOperationRole).isValid())
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(m_selectedTreeNodeId);
+    if (!node)
         return 0;
 
-    return item->data(0, TreeNodeIdRole).toInt();
+    // If the selected node is itself a group, return its own ID.
+    if (node->type == SceneDocument::TreeNode::Group)
+        return m_selectedTreeNodeId;
+
+    // Otherwise find the closest parent group via tree traversal.
+    std::function<int(const SceneDocument::TreeNode &)> findParent =
+        [&](const SceneDocument::TreeNode &parent) -> int {
+        for (const auto &child : parent.children) {
+            if (child.id == m_selectedTreeNodeId)
+                return parent.id;
+            const int found = findParent(child);
+            if (found > 0)
+                return found;
+        }
+        return 0;
+    };
+    return findParent(m_scene.treeRoot());
 }
 
 int MainWindow::selectedDirectGroupId() const
 {
-    if (!m_shapeTree || !m_shapeTree->currentItem())
+    if (m_selectedTreeNodeId <= 0)
         return 0;
 
-    QTreeWidgetItem *item = m_shapeTree->currentItem();
-    if (!item->data(0, GroupOperationRole).isValid())
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(m_selectedTreeNodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Group)
         return 0;
 
-    return item->data(0, TreeNodeIdRole).toInt();
+    return m_selectedTreeNodeId;
 }
 
 void MainWindow::addGroup(SceneDocument::TreeNode::Operation operation)

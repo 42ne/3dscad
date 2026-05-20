@@ -12,8 +12,6 @@ class QLabel;
 class QPushButton;
 class QAction;
 class QUndoStack;
-class QTreeWidget;
-class QTreeWidgetItem;
 class ViewportWidget;
 class SceneTreeGraphicsWidget;
 
@@ -31,14 +29,10 @@ private slots:
     void addUnionGroup();
     void addDifferenceGroup();
     void addIntersectionGroup();
-    void deleteSelectedShape();
-    void deleteSelectedGroup();
     void applyOpenScadCode();
     void sendToOpenScad();
     void loadExample(const QString &filePath);
 
-    void onSceneTreeSelectionChanged(QTreeWidgetItem *current, QTreeWidgetItem *previous);
-    void showSceneTreeContextMenu(const QPoint &position);
     void onViewportShapeDragStarted(int index);
     void onViewportShapeDragged(int index, const QVector3D &delta);
     void onViewportShapeDragFinished(int index);
@@ -64,6 +58,8 @@ private slots:
     void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
     void onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId, int start, int length, qreal delta);
     void onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
+    void onGraphicsTreeModuleRenameRequested(int groupId, const QString &newName);
+    void onGraphicsTreeVariableRenameRequested(int nodeId, const QString &newName);
 
 private:
     void buildUi();
@@ -111,8 +107,8 @@ private:
     QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
 
     ViewportWidget *m_viewport = nullptr;
-    QTreeWidget *m_shapeTree = nullptr;
     SceneTreeGraphicsWidget *m_sceneTreeGraphics = nullptr;
+    int m_selectedTreeNodeId = 0;
     QTextEdit *m_codeEditor = nullptr;
     QPushButton *m_applyCodeButton = nullptr;
     QPushButton *m_sendToOpenScadButton = nullptr;
