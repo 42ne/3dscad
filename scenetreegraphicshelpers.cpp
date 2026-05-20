@@ -930,18 +930,10 @@ void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
 
 QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
 {
-    QPainterPath path;
-    SceneDocument::TreeNode::Operation operation;
-    if (operationForToolName(tool, &operation) || isVariableToolName(tool)) {
-        path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
-        return path;
-    }
+    Q_UNUSED(tool);
 
-    const QRectF iconRect(rect.left() + 20.0,
-                          rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
-                          PrimitiveIconSize,
-                          PrimitiveIconSize);
-    path.addEllipse(iconRect.adjusted(-6.0, -6.0, 6.0, 6.0));
+    QPainterPath path;
+    path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
     return path;
 }
 
@@ -964,30 +956,26 @@ QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene,
                                      const QRectF &rect,
                                      qreal zValue)
 {
-    const qreal y = rect.top();
-    const qreal left = rect.left() - 10.0;
-    const qreal right = rect.right() + 10.0;
-    const qreal arrow = 8.0;
+    const qreal centerY = rect.isValid() ? rect.center().y() : rect.top();
+    const qreal tipX = rect.left() - 7.0;
+    const qreal baseX = tipX - 12.0;
+    const qreal halfHeight = 7.0;
 
     QPainterPath path;
-    path.moveTo(left, y);
-    path.lineTo(right - arrow, y);
-    path.moveTo(right - arrow, y - arrow * 0.55);
-    path.lineTo(right, y);
-    path.lineTo(right - arrow, y + arrow * 0.55);
-    path.moveTo(left, y - 4.0);
-    path.lineTo(left + 8.0, y);
-    path.lineTo(left, y + 4.0);
+    path.moveTo(tipX, centerY);
+    path.lineTo(baseX, centerY - halfHeight);
+    path.lineTo(baseX, centerY + halfHeight);
+    path.closeSubpath();
 
     auto *marker = scene->addPath(path,
-                                  QPen(QColor(74, 190, 116, 185), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
-                                  Qt::NoBrush);
+                                  QPen(QColor(38, 145, 82, 210), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
+                                  QBrush(QColor(74, 190, 116, 205)));
     marker->setZValue(zValue);
     appendPreviewItem(items, marker);
 
     auto *shadow = scene->addPath(path,
-                                  QPen(QColor(0, 0, 0, 55), 6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
-                                  Qt::NoBrush);
+                                  QPen(QColor(0, 0, 0, 55), 4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin),
+                                  QBrush(QColor(0, 0, 0, 35)));
     shadow->setZValue(zValue - 0.1);
     appendPreviewItem(items, shadow);
     return marker;

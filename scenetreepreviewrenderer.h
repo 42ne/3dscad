@@ -30,9 +30,11 @@ private:
     void addExpandedGroupPreviews(const DropTarget &target);
     void addSourceGroupPreview(const DropTarget &target);
     void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);
+    bool addModuleTargetPreview(const DropTarget &target);
     void addPreviewExistingNode(int nodeId, const QRectF &rect);
     void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);
     void addPreviewChildren(const QVector<ChildLayout> &children, const QRectF &excludedRect = QRectF());
+    const GroupHitArea *groupAreaForId(int groupId) const;
     QString previewToolForNode(const SceneDocument::TreeNode &node) const;
 
 private:

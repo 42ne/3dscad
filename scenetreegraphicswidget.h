@@ -17,6 +17,7 @@ class QMouseEvent;
 class QPainter;
 class QResizeEvent;
 class QShowEvent;
+class QTimer;
 class SceneTreeInlineTextInput;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
@@ -63,6 +64,8 @@ private:
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
     QRectF drawToolbar();
+    void clearToolbar();
+    void updateToolbarOverlay();
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
@@ -103,10 +106,14 @@ private:
     void updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled);
     void updateActiveModuleCallParamControl(const QPointF &scenePosition, bool enabled);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
+    void finishDropPreview();
     void clearDropPreview();
+    void startDropPreviewAnimation(const DropTarget &target, const QString &previewTool, int movingNodeId, qreal durationMs);
+    void advanceDropPreviewAnimation();
+    void renderDropPreviewFrame(const DropTarget &target);
+    void scheduleDropCommit(std::function<void()> action);
     void setTreeItemsVisible(bool visible);
-    void updateSceneRect(const QRectF &toolbarRect);
-    void centerToolbarHorizontallyOnNextEvent();
+    void updateSceneRect();
     QString labelForPrimitive(int shapeId) const;
     ShapeNode::Type typeForPrimitive(int shapeId) const;
 
@@ -115,7 +122,9 @@ private:
     const SceneDocument *m_scene = nullptr;
     SceneTreeLayout m_treeLayout;
     QVector<QGraphicsItem *> m_treeItems;
+    QVector<QGraphicsItem *> m_toolbarItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
+    QTimer *m_dropPreviewAnimationTimer = nullptr;
     std::function<void(const QString &, int, int)> m_toolDroppedCallback;
     std::function<void(int, int, int)> m_moduleCallDroppedCallback;
     std::function<void(int, int, int)> m_treeNodeDroppedCallback;
@@ -165,9 +174,18 @@ private:
     QRectF m_lastToolbarRect;
     QRectF m_hoveredScrollRect;
     QRectF m_hoveredRenameRect;
+    DropTarget m_dropPreviewStartTarget;
+    DropTarget m_dropPreviewTarget;
+    DropTarget m_dropPreviewCurrentTarget;
+    QString m_dropPreviewTool;
+    int m_dropPreviewMovingNodeId = 0;
+    qreal m_dropPreviewProgress = 0.0;
+    qreal m_dropPreviewDurationMs = 180.0;
     bool m_panning = false;
     bool m_dragActive = false;
-    bool m_initialToolbarCentered = false;
+    bool m_dropPreviewActive = false;
+    bool m_dropPreviewFinishing = false;
+    bool m_treeItemsVisible = true;
 };
 
 #endif

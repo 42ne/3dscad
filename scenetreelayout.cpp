@@ -116,6 +116,17 @@ QVector<SceneTreeLayout::ChildLayout> childrenShiftedFromIndex(const QVector<Sce
     return shiftedChildren;
 }
 
+qreal moduleBodyContentTop(qreal parameterSeparatorY)
+{
+    return parameterSeparatorY
+           + 16.0
+           + ChildGap
+           + VariableHeight
+           + ChildGap
+           + 16.0
+           + ChildGap;
+}
+
 void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
 {
     if (!target || qFuzzyIsNull(dy))
@@ -212,12 +223,13 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
 
     target.zoneRect = contentRect;
     target.insertIndex = insertionIndexForY(candidateChildRects, scenePosition.y());
+    QVector<QRectF> placementChildRects = candidateChildRects;
+    int placementInsertIndex = target.insertIndex;
 
     if (bestArea->operation == SceneDocument::TreeNode::Module
-        && bestArea->moduleParameterSeparatorY > 0.0
-        && variableDrop) {
+        && bestArea->moduleParameterSeparatorY > 0.0) {
         const int parameterCount = qBound(0, bestArea->moduleParameterCount, candidateChildren.size());
-        const bool parameterZone = scenePosition.y() < bestArea->moduleParameterSeparatorY;
+        const bool parameterZone = variableDrop && scenePosition.y() < bestArea->moduleParameterSeparatorY;
         target.moduleParameterZone = parameterZone;
 
         QVector<QRectF> zoneChildRects;
@@ -228,28 +240,31 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                      contentRect.top(),
                                      contentRect.width(),
                                      qMax<qreal>(PrimitiveHeight, bestArea->moduleParameterSeparatorY - contentRect.top()));
-            target.insertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+            placementInsertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+            target.insertIndex = placementInsertIndex;
         } else {
             for (int i = parameterCount; i < candidateChildren.size(); ++i)
                 zoneChildRects.append(candidateChildren[i].rect);
+            const qreal bodyContentTop = moduleBodyContentTop(bestArea->moduleParameterSeparatorY);
             target.zoneRect = QRectF(contentRect.left(),
-                                     bestArea->moduleParameterSeparatorY,
+                                     bodyContentTop,
                                      contentRect.width(),
-                                     qMax<qreal>(PrimitiveHeight, contentRect.bottom() - bestArea->moduleParameterSeparatorY));
-            target.insertIndex = parameterCount + insertionIndexForY(zoneChildRects, scenePosition.y());
+                                     qMax<qreal>(PrimitiveHeight, contentRect.bottom() - bodyContentTop));
+            placementInsertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+            target.insertIndex = parameterCount + placementInsertIndex;
         }
 
-        candidateChildRects = zoneChildRects;
+        placementChildRects = zoneChildRects;
     }
 
-    target.placeholderRect = placeholderRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex, effectivePreviewSize);
+    target.placeholderRect = placeholderRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex, effectivePreviewSize);
     if (bestArea->operation == SceneDocument::TreeNode::Module
         && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop
         && !target.moduleParameterZone
         && target.placeholderRect.top() < bestArea->moduleParameterSeparatorY)
         target.placeholderRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
-    target.slotMarkerRect = slotMarkerRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex);
+    target.slotMarkerRect = slotMarkerRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex);
     if (bestArea->operation == SceneDocument::TreeNode::Module
         && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop

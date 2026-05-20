@@ -2,9 +2,13 @@
 #include "scenetreegraphicshelpers.h"
 
 #include <QBrush>
+#include <QGraphicsItem>
 #include <QGraphicsScene>
+#include <QPainterPath>
 #include <QPen>
 #include <QStringList>
+#include <QtGlobal>
+#include <cmath>
 
 using namespace SceneTreeGraphics;
 
@@ -28,22 +32,82 @@ QStringList paletteTools()
     };
 }
 
+constexpr qreal OverlayMargin = 12.0;
+constexpr qreal OverlayTopGap = 10.0;
+constexpr qreal OverlayPadding = 8.0;
+constexpr qreal OverlayZ = 10000.0;
+constexpr qreal MinToolbarScale = 0.90;
+constexpr qreal MaxToolbarScale = 1.08;
+
+qreal visualScaleForViewportScale(qreal viewportScale)
+{
+    if (viewportScale <= 0.0)
+        return 1.0;
+    return qBound(MinToolbarScale, std::pow(viewportScale, 0.12), MaxToolbarScale);
+}
+
+int columnCountForWidth(qreal viewportWidth, int toolCount, qreal toolbarScale)
+{
+    const qreal toolSide = ToolSize * toolbarScale;
+    const qreal gap = ToolGap * toolbarScale;
+    const qreal available = qMax<qreal>(toolSide, viewportWidth - OverlayMargin * 2.0 - OverlayPadding * 2.0);
+    const int columns = qMax(1, static_cast<int>((available + gap) / (toolSide + gap)));
+    return qMin(toolCount, columns);
+}
+
 } // namespace
 
-SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene)
+SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene, QVector<QGraphicsItem *> *toolbarItems)
     : m_scene(scene)
+    , m_toolbarItems(toolbarItems)
 {
 }
 
 QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                         PreviewFinishedCallback onPreviewFinished,
-                                        ToolDroppedCallback onDropped)
+                                        ToolDroppedCallback onDropped,
+                                        const QPointF &viewportTopLeft,
+                                        qreal viewportWidth,
+                                        qreal viewportScale)
 {
     const QStringList tools = paletteTools();
-    const QRectF rect = toolbarRect(tools.size());
+    if (tools.isEmpty() || !m_scene)
+        return QRectF();
 
-    addSoftShadow(m_scene, rect, -4.0);
-    addRoundedPanel(m_scene, rect, CornerRadius, QPen(QColor(166, 174, 186)), QBrush(QColor(232, 235, 239)), -3.0);
+    const qreal safeViewportScale = qMax<qreal>(0.001, std::abs(viewportScale));
+    const qreal toolbarScale = visualScaleForViewportScale(safeViewportScale);
+    const qreal toolSide = ToolSize * toolbarScale;
+    const qreal gap = ToolGap * toolbarScale;
+    const int columns = columnCountForWidth(viewportWidth, tools.size(), toolbarScale);
+    const int rows = (tools.size() + columns - 1) / columns;
+    const qreal panelWidth = columns * toolSide + (columns - 1) * gap + OverlayPadding * 2.0;
+    const qreal panelHeight = rows * toolSide + (rows - 1) * gap + OverlayPadding * 2.0;
+
+    const auto scenePointFromViewportPixels = [viewportTopLeft, safeViewportScale](qreal x, qreal y) {
+        return viewportTopLeft + QPointF(x / safeViewportScale, y / safeViewportScale);
+    };
+    const QPointF panelTopLeft = scenePointFromViewportPixels(OverlayMargin, OverlayTopGap);
+    const QRectF rect(panelTopLeft, QSizeF(panelWidth / safeViewportScale, panelHeight / safeViewportScale));
+    const QRectF panelLocalRect(0.0, 0.0, panelWidth, panelHeight);
+
+    QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(2.0, 2.0),
+                                             Qt::NoPen,
+                                             QBrush(QColor(0, 0, 0, 42)));
+    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setPos(panelTopLeft);
+    shadow->setZValue(OverlayZ - 2.0);
+    shadow->setOpacity(0.55);
+    trackToolbarItem(shadow);
+
+    QPainterPath panelPath;
+    panelPath.addRoundedRect(panelLocalRect, CornerRadius, CornerRadius);
+    QGraphicsItem *panel = m_scene->addPath(panelPath,
+                                            QPen(QColor(226, 232, 240, 120), 1.0),
+                                            QBrush(QColor(238, 242, 247, 118)));
+    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setPos(panelTopLeft);
+    panel->setZValue(OverlayZ - 1.0);
+    trackToolbarItem(panel);
 
     for (int i = 0; i < tools.size(); ++i) {
         auto *tool = createPaletteToolItem(tools[i],
@@ -51,17 +115,22 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                            onPreviewMoved,
                                            onPreviewFinished,
                                            onDropped);
-        tool->setPos(ToolbarX + i * (ToolSize + ToolGap), ToolbarY);
+        const int column = i % columns;
+        const int row = i / columns;
+        tool->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        tool->setScale(toolbarScale);
+        tool->setZValue(OverlayZ);
+        tool->setPos(scenePointFromViewportPixels(OverlayMargin + OverlayPadding + column * (toolSide + gap),
+                                                  OverlayTopGap + OverlayPadding + row * (toolSide + gap)));
         m_scene->addItem(tool);
+        trackToolbarItem(tool);
     }
 
     return rect;
 }
 
-QRectF SceneTreeToolbarRenderer::toolbarRect(int toolCount) const
+void SceneTreeToolbarRenderer::trackToolbarItem(QGraphicsItem *item) const
 {
-    return QRectF(ToolbarX - 6.0,
-                  ToolbarY - 6.0,
-                  toolCount * ToolSize + (toolCount - 1) * ToolGap + 12.0,
-                  ToolSize + 12.0);
+    if (m_toolbarItems && item)
+        m_toolbarItems->append(item);
 }
