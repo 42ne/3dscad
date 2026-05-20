@@ -1156,13 +1156,13 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 
     SceneDocument::TreeNode::Operation operation;
     if (operationForTool(toolName, &operation)) {
-        // Groups don't live inside the Scene container; redirect to root.
-        if (parentGroupId > 0 && parentGroupId == m_scene.sceneNodeId())
+        if (operation == SceneDocument::TreeNode::Module) {
+            if (parentGroupId > 0 && parentGroupId != m_scene.treeRoot().id)
+                return;
             parentGroupId = 0;
-        // Modules can only be added at root level; other groups go into their parent.
-        if (operation == SceneDocument::TreeNode::Module && parentGroupId > 0
-            && parentGroupId != m_scene.treeRoot().id)
-            return;
+        } else if (parentGroupId <= 0 || parentGroupId == m_scene.treeRoot().id) {
+            parentGroupId = m_scene.sceneNodeId();
+        }
 
         auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, insertIndex, [this]() {
             refreshSceneViews();

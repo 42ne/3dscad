@@ -509,8 +509,10 @@ static bool parseBlock(ParserState *state,
         QString variableName, variableExpression, variableError;
         qreal variableValue = 0.0;
         if (parseVariableLine(line, &variableName, &variableExpression, &variableValue, &variableError)) {
-            if (parent->type == SceneDocument::TreeNode::Group
-                && parent->operation != SceneDocument::TreeNode::Module) {
+            const bool allowedScope = parent->type == SceneDocument::TreeNode::Group
+                                      && (parent->operation == SceneDocument::TreeNode::Module
+                                          || parent->operation == SceneDocument::TreeNode::Scene);
+            if (!allowedScope) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("Variables must be at top scope or directly inside a module on line %1.").arg(current.number);
                 state->errorLine = current.number;

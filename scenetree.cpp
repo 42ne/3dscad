@@ -96,8 +96,13 @@ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int ins
     if (!parent || parent->type != TreeNode::Group)
         return 0;
 
-    // Groups don't live inside the Scene container; redirect to root.
-    if (parent->operation == TreeNode::Scene)
+    if (operation != TreeNode::Module && parentNodeId <= 0) {
+        parent = sceneNode();
+        if (!parent)
+            parent = &m_root;
+    }
+
+    if (operation == TreeNode::Module && parent->operation == TreeNode::Scene)
         parent = &m_root;
 
     TreeNode group = makeGroupNode(operation);

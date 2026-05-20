@@ -628,11 +628,14 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
     return evaluated;
 }
 
-static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::TreeNode &node,
+static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::TreeNode &node,
                                                           QHash<QString, qreal> variables)
 {
-    if (node.type != SceneDocument::TreeNode::Group
-        || node.operation != SceneDocument::TreeNode::Module)
+    if (node.type != SceneDocument::TreeNode::Group)
+        return variables;
+
+    if (node.operation != SceneDocument::TreeNode::Module
+        && node.operation != SceneDocument::TreeNode::Scene)
         return variables;
 
     for (const SceneDocument::TreeNode &child : node.children) {
@@ -646,6 +649,23 @@ static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::T
         variables[child.variableName] = value;
     }
 
+    return variables;
+}
+
+static QHash<QString, qreal> topLevelVariables(const SceneDocument::TreeNode &root)
+{
+    QHash<QString, qreal> variables;
+    for (const SceneDocument::TreeNode &child : root.children) {
+        if (child.type == SceneDocument::TreeNode::Variable) {
+            variables[child.variableName] = child.variableValue;
+        } else if (child.type == SceneDocument::TreeNode::Group
+                   && child.operation == SceneDocument::TreeNode::Scene) {
+            for (const SceneDocument::TreeNode &sceneChild : child.children) {
+                if (sceneChild.type == SceneDocument::TreeNode::Variable)
+                    variables[sceneChild.variableName] = sceneChild.variableValue;
+            }
+        }
+    }
     return variables;
 }
 
@@ -778,6 +798,15 @@ static void appendTreeHelpers(CsgPreview *preview,
     if (node.type == SceneDocument::TreeNode::Variable)
         return;
 
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        const SceneDocument::TreeNode *module = scene.treeNodeById(node.shapeId);
+        if (module && module->type == SceneDocument::TreeNode::Group
+            && module->operation == SceneDocument::TreeNode::Module) {
+            appendTreeHelpers(preview, scene, *module, inheritedMode, variables, groupStack);
+        }
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::For) {
         QVector<qreal> values;
         const QString variableName = node.loopVariable.trimmed().isEmpty()
@@ -798,7 +827,7 @@ static void appendTreeHelpers(CsgPreview *preview,
         return;
     }
 
-    const QHash<QString, qreal> localVariables = variablesWithModuleVariables(node, variables);
+    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
     for (int i = 0; i < node.children.size(); ++i) {
@@ -1200,12 +1229,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
 
             preview.mode = CsgPreview::ManifoldComputed;
             preview.items.append(item);
-            QHash<QString, qreal> variables;
-            for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
-                if (child.type == SceneDocument::TreeNode::Variable)
-                    variables[child.variableName] = child.variableValue;
-            }
-            appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add, variables);
+            appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add, topLevelVariables(scene.treeRoot()));
             preview.statusText = hasTreeBoolean
                                      ? "CSG preview: Manifold exact mesh"
                                      : hasForOperation

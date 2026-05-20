@@ -131,11 +131,24 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
     return evaluated;
 }
 
-static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::TreeNode &node,
+static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
+{
+    return operation == SceneDocument::TreeNode::Union
+           || operation == SceneDocument::TreeNode::Module
+           || operation == SceneDocument::TreeNode::Scene
+           || operation == SceneDocument::TreeNode::Translate
+           || operation == SceneDocument::TreeNode::Rotate
+           || operation == SceneDocument::TreeNode::Scale;
+}
+
+static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::TreeNode &node,
                                                           QHash<QString, qreal> variables)
 {
-    if (node.type != SceneDocument::TreeNode::Group
-        || node.operation != SceneDocument::TreeNode::Module)
+    if (node.type != SceneDocument::TreeNode::Group)
+        return variables;
+
+    if (node.operation != SceneDocument::TreeNode::Module
+        && node.operation != SceneDocument::TreeNode::Scene)
         return variables;
 
     for (const SceneDocument::TreeNode &child : node.children) {
@@ -149,6 +162,23 @@ static QHash<QString, qreal> variablesWithModuleVariables(const SceneDocument::T
         variables[child.variableName] = value;
     }
 
+    return variables;
+}
+
+static QHash<QString, qreal> topLevelVariables(const SceneDocument::TreeNode &root)
+{
+    QHash<QString, qreal> variables;
+    for (const SceneDocument::TreeNode &child : root.children) {
+        if (child.type == SceneDocument::TreeNode::Variable) {
+            variables[child.variableName] = child.variableValue;
+        } else if (child.type == SceneDocument::TreeNode::Group
+                   && child.operation == SceneDocument::TreeNode::Scene) {
+            for (const SceneDocument::TreeNode &sceneChild : child.children) {
+                if (sceneChild.type == SceneDocument::TreeNode::Variable)
+                    variables[sceneChild.variableName] = sceneChild.variableValue;
+            }
+        }
+    }
     return variables;
 }
 
@@ -227,6 +257,15 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (node.type == SceneDocument::TreeNode::Variable)
         return {};
 
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        const SceneDocument::TreeNode *module = scene.treeNodeById(node.shapeId);
+        if (!module || module->type != SceneDocument::TreeNode::Group
+            || module->operation != SceneDocument::TreeNode::Module)
+            return {};
+
+        return evaluateNode(*module, scene, variables);
+    }
+
     if (node.operation == SceneDocument::TreeNode::For) {
         QVector<qreal> values;
         const QString variableName = node.loopVariable.trimmed().isEmpty()
@@ -260,7 +299,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return result;
     }
 
-    const QHash<QString, qreal> localVariables = variablesWithModuleVariables(node, variables);
+    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
 
     QVector<const SceneDocument::TreeNode *> geometryChildren;
@@ -277,11 +316,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     for (int i = 1; i < geometryChildren.size(); ++i) {
         const Manifold child = evaluateNode(*geometryChildren[i], scene, localVariables);
 
-        if (evaluatedNode.operation == SceneDocument::TreeNode::Union
-            || evaluatedNode.operation == SceneDocument::TreeNode::Module
-            || evaluatedNode.operation == SceneDocument::TreeNode::Translate
-            || evaluatedNode.operation == SceneDocument::TreeNode::Rotate
-            || evaluatedNode.operation == SceneDocument::TreeNode::Scale)
+        if (isUnionLikeOperation(evaluatedNode.operation))
             result += child;
         else if (evaluatedNode.operation == SceneDocument::TreeNode::Difference)
             result -= child;
@@ -336,13 +371,7 @@ bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *
     if (!mesh)
         return false;
 
-    QHash<QString, qreal> variables;
-    for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
-        if (child.type == SceneDocument::TreeNode::Variable)
-            variables[child.variableName] = child.variableValue;
-    }
-
-    const Manifold result = evaluateNode(scene.treeRoot(), scene, variables);
+    const Manifold result = evaluateNode(scene.treeRoot(), scene, topLevelVariables(scene.treeRoot()));
 
     if (result.Status() != Manifold::Error::NoError) {
         if (errorMessage)
