@@ -631,7 +631,9 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     m_hoveredScrollRect = QRectF();
     m_hoveredRenameRect = QRectF();
     if (changed && !m_dragActive)
-        refresh();
+        refresh(); // refresh() already calls updateToolbarOverlay()
+    else
+        updateToolbarOverlay();
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
@@ -693,12 +695,6 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
     scale(factor, factor);
     updateToolbarOverlay();
     event->accept();
-}
-
-void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
-{
-    QGraphicsView::scrollContentsBy(dx, dy);
-    updateToolbarOverlay();
 }
 
 QRectF SceneTreeGraphicsWidget::drawToolbar()
