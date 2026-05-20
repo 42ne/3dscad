@@ -503,6 +503,125 @@ private:
 };
 
 
+class ModuleCallCardItem final : public QGraphicsItem
+{
+public:
+    ModuleCallCardItem(const QRectF &rect,
+                       const QString &moduleName,
+                       const QVector<ModuleCallParam> &params,
+                       bool selected,
+                       int activeParamVarNodeId,
+                       int activeNumberStart,
+                       qreal opacity,
+                       qreal zValue)
+        : m_rect(rect)
+        , m_moduleName(moduleName)
+        , m_params(params)
+        , m_selected(selected)
+        , m_activeParamVarNodeId(activeParamVarNodeId)
+        , m_activeNumberStart(activeNumberStart)
+        , m_opacity(opacity)
+    {
+        setZValue(zValue);
+    }
+
+    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setOpacity(m_opacity);
+
+        const QColor accent(38, 108, 148);
+
+        // CALL badge
+        const qreal badgeH = 13.0;
+        const QRectF badgeRect(m_rect.left() + 6.0,
+                               m_rect.top() + (VariableHeight - badgeH) * 0.5,
+                               32.0,
+                               badgeH);
+        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(QColor(255, 255, 255, 150)));
+        {
+            painter->save();
+            QFont badgeFont = painter->font();
+            badgeFont.setBold(true);
+            badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
+            painter->setFont(badgeFont);
+            painter->setPen(accent.darker(130));
+            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("CALL"));
+            painter->restore();
+        }
+
+        const QFontMetricsF metrics(painter->font());
+        const QColor nameColor = m_selected ? QColor(30, 90, 155) : QColor(32, 80, 118);
+        const QColor punctColor(60, 60, 80);
+        const QColor paramNameColor(70, 80, 60);
+
+        qreal x = m_rect.left() + 42.0;
+        const QString nameOpen = m_moduleName + QStringLiteral("(");
+        painter->setPen(nameColor);
+        painter->drawText(QRectF(x, m_rect.top(), metrics.horizontalAdvance(nameOpen), VariableHeight),
+                          Qt::AlignLeft | Qt::AlignVCenter, nameOpen);
+        x += metrics.horizontalAdvance(nameOpen);
+
+        if (m_params.isEmpty()) {
+            painter->setPen(punctColor);
+            painter->drawText(QRectF(x, m_rect.top(), 10.0, VariableHeight),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+        } else {
+            for (int i = 0; i < m_params.size(); ++i) {
+                const QString nameEq = m_params[i].name + QStringLiteral(" = ");
+                painter->setPen(paramNameColor);
+                painter->drawText(QRectF(x, m_rect.top(), metrics.horizontalAdvance(nameEq), VariableHeight),
+                                  Qt::AlignLeft | Qt::AlignVCenter, nameEq);
+                x += metrics.horizontalAdvance(nameEq);
+
+                const QRectF exprRect(x, m_rect.top(), m_rect.right() - x, VariableHeight);
+                const QVector<ExpressionTextSpan> spans =
+                    expressionSpansInTextRect(exprRect, m_params[i].expression, metrics);
+                for (const ExpressionTextSpan &span : spans) {
+                    if (span.number) {
+                        const bool active = m_params[i].varNodeId == m_activeParamVarNodeId
+                                            && span.start == m_activeNumberStart;
+                        paintRoundedPanel(painter, span.rect, 4.0,
+                                          QPen(active ? QColor(220, 156, 26) : accent.darker(125), active ? 2 : 1),
+                                          QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 110)));
+                    }
+                }
+                painter->setPen(QColor(24, 60, 95));
+                for (const ExpressionTextSpan &span : spans)
+                    painter->drawText(span.rect, Qt::AlignCenter, span.text);
+
+                qreal exprAdvance = metrics.horizontalAdvance(m_params[i].expression);
+                for (const QChar &c : m_params[i].expression)
+                    if (c == '+' || c == '-' || c == '*' || c == '/')
+                        exprAdvance += 6.0;
+                x += exprAdvance;
+
+                if (i < m_params.size() - 1) {
+                    const QString sep = QStringLiteral(", ");
+                    painter->setPen(punctColor);
+                    painter->drawText(QRectF(x, m_rect.top(), metrics.horizontalAdvance(sep), VariableHeight),
+                                      Qt::AlignLeft | Qt::AlignVCenter, sep);
+                    x += metrics.horizontalAdvance(sep);
+                }
+            }
+            painter->setPen(punctColor);
+            painter->drawText(QRectF(x, m_rect.top(), 10.0, VariableHeight),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+        }
+    }
+
+private:
+    QRectF m_rect;
+    QString m_moduleName;
+    QVector<ModuleCallParam> m_params;
+    bool m_selected = false;
+    int m_activeParamVarNodeId = 0;
+    int m_activeNumberStart = -1;
+    qreal m_opacity = 1.0;
+};
+
 } // namespace
 
 SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
@@ -517,7 +636,10 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
                                              int activeVariableNodeId,
                                              int activeVariableNumberStart,
                                              int activeForLoopNodeId,
-                                             int activeForLoopNumberStart)
+                                             int activeForLoopNumberStart,
+                                             int activeModuleCallNodeId,
+                                             int activeModuleCallVarNodeId,
+                                             int activeModuleCallNumberStart)
     : m_scene(scene)
     , m_selectedNodeId(selectedNodeId)
     , m_activeTransformNodeId(activeTransformNodeId)
@@ -530,6 +652,9 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
     , m_activeVariableNumberStart(activeVariableNumberStart)
     , m_activeForLoopNodeId(activeForLoopNodeId)
     , m_activeForLoopNumberStart(activeForLoopNumberStart)
+    , m_activeModuleCallNodeId(activeModuleCallNodeId)
+    , m_activeModuleCallVarNodeId(activeModuleCallVarNodeId)
+    , m_activeModuleCallNumberStart(activeModuleCallNumberStart)
     , m_onSelected(std::move(onSelected))
 {
 }
@@ -550,6 +675,16 @@ void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, 
     m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression, node.id == m_selectedNodeId, activeNumberStart, 1.0, 5.0));
 }
 
+void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
+                                             const QRectF &rect,
+                                             const QVector<SceneTreeGraphics::ModuleCallParam> &params)
+{
+    const int activeVarNodeId = node.id == m_activeModuleCallNodeId ? m_activeModuleCallVarNodeId : 0;
+    const int activeNumStart = node.id == m_activeModuleCallNodeId ? m_activeModuleCallNumberStart : -1;
+    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0));
+    m_scene->addItem(createTreeNodeSelectionItem(node.id, rect, 5.0, m_onSelected));
+}
+
 void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         const QRectF &rect,
                                         int depth,
@@ -566,7 +701,9 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
     const qreal transformHeaderWidth = transformHeaderWidthForNode(node);
-    const bool showEmptyText = node.operation != SceneDocument::TreeNode::Module && node.children.isEmpty();
+    const bool showEmptyText = node.operation != SceneDocument::TreeNode::Module
+                               && node.operation != SceneDocument::TreeNode::Scene
+                               && node.children.isEmpty();
     m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, showEmptyText, true, true, false, transformValues, activeAxis, activeNumberStart, transformHeaderWidth, node.transformExpressions, node.loopVariable, node.loopRangeExpression, activeForLoopStart));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,

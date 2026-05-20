@@ -2,6 +2,7 @@
 #define SCENETREENODERENDERER_H
 
 #include "scenedocument.h"
+#include "scenetreegraphicshelpers.h"
 #include "shapenode.h"
 
 #include <QRectF>
@@ -28,7 +29,10 @@ public:
                           int activeVariableNodeId = 0,
                           int activeVariableNumberStart = -1,
                           int activeForLoopNodeId = 0,
-                          int activeForLoopNumberStart = -1);
+                          int activeForLoopNumberStart = -1,
+                          int activeModuleCallNodeId = 0,
+                          int activeModuleCallVarNodeId = 0,
+                          int activeModuleCallNumberStart = -1);
 
     void renderPrimitive(const SceneDocument::TreeNode &node,
                          const QRectF &rect,
@@ -37,6 +41,10 @@ public:
 
     void renderVariable(const SceneDocument::TreeNode &node,
                         const QRectF &rect);
+
+    void renderModuleCall(const SceneDocument::TreeNode &node,
+                          const QRectF &rect,
+                          const QVector<SceneTreeGraphics::ModuleCallParam> &params = {});
 
     void renderGroup(const SceneDocument::TreeNode &node,
                      const QRectF &rect,
@@ -69,6 +77,9 @@ private:
     int m_activeVariableNumberStart = -1;
     int m_activeForLoopNodeId = 0;
     int m_activeForLoopNumberStart = -1;
+    int m_activeModuleCallNodeId = 0;
+    int m_activeModuleCallVarNodeId = 0;
+    int m_activeModuleCallNumberStart = -1;
     NodeSelectedCallback m_onSelected;
 };
 

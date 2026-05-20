@@ -2,6 +2,7 @@
 #include "expression.h"
 
 #include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 
 namespace {
@@ -183,6 +184,16 @@ static SceneDocument::TreeNode makeVariableNode(const QString &name, const QStri
     node.variableName = name;
     node.variableExpression = expression;
     node.variableValue = value;
+    return node;
+}
+
+static SceneDocument::TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName, ParserState *state)
+{
+    SceneDocument::TreeNode node;
+    node.id = state->nextTreeNodeId++;
+    node.type = SceneDocument::TreeNode::ModuleCall;
+    node.shapeId = moduleGroupId;
+    node.moduleName = moduleName;
     return node;
 }
 
@@ -695,15 +706,20 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
     // Root is an implicit top-level container (operation=Module, never emitted directly).
     SceneDocument::TreeNode root = makeGroupNode(SceneDocument::TreeNode::Module, &state);
+    // Scene holds top-level variables and standalone primitives.
+    SceneDocument::TreeNode sceneNode = makeGroupNode(SceneDocument::TreeNode::Scene, &state);
     QHash<QString, QString> pendingModuleCallArguments;
+    QVector<QString> moduleCallOrder; // preserves the order in which call statements appeared
 
     while (state.index < state.lines.size()) {
         const ParsedLine current = state.lines[state.index];
         const QString &line = current.text;
 
-        // Preserve top-level module call arguments until real ModuleCall nodes exist.
+        // Collect top-level module call statements — they become ModuleCall nodes in Scene.
         QString callName, callArgs;
         if (parseModuleCallLine(line, &callName, &callArgs)) {
+            if (!pendingModuleCallArguments.contains(callName))
+                moduleCallOrder.append(callName);
             pendingModuleCallArguments[callName] = callArgs;
             ++state.index;
             continue;
@@ -721,10 +737,9 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 return false;
             }
 
-            // The generated legacy/main scene_model wrapper is the implicit document root.
-            // Keeping it implicit preserves UI -> code -> UI tree structure.
+            // The generated legacy/main scene_model wrapper is flattened into the Scene container.
             if (modName == QStringLiteral("scene_model") && modParams.trimmed().isEmpty()) {
-                if (!parseBlock(&state, &root, true, errorMessage)) {
+                if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
                     if (errorLine) *errorLine = state.errorLine;
                     return false;
                 }
@@ -755,7 +770,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             continue;
         }
 
-        // Variable at top level (global scope).
+        // Variable at top level (global scope) → goes into the Scene container.
         QString variableName, variableExpression, variableError;
         qreal variableValue = 0.0;
         if (parseVariableLine(line, &variableName, &variableExpression, &variableValue, &variableError)) {
@@ -764,7 +779,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             if (ExpressionSyntax::evaluate(variableExpression, state.variableValues, &evaluatedValue))
                 variableValue = evaluatedValue;
             state.variableValues[variableName] = variableValue;
-            root.children.append(makeVariableNode(variableName, variableExpression, variableValue, &state));
+            sceneNode.children.append(makeVariableNode(variableName, variableExpression, variableValue, &state));
             continue;
         }
         if (!variableError.isEmpty()) {
@@ -774,20 +789,98 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             return false;
         }
 
-        // Anything else at top level is an error.
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Unexpected statement at top level on line %1: %2").arg(current.number).arg(line);
-        if (errorLine) *errorLine = current.number;
-        return false;
+        // Direct top-level group / transform / for (no module wrapper).
+        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+        QVector3D transformVector;
+        QStringList transformExpressions;
+        QString loopVariable, loopRangeExpression;
+        if (parseOperationLine(line, &operation, &transformVector, state.variableValues,
+                               &transformExpressions, &loopVariable, &loopRangeExpression)) {
+            ++state.index;
+            SceneDocument::TreeNode group = makeGroupNode(operation, &state);
+            if (operation == SceneDocument::TreeNode::Translate)
+                group.position = transformVector;
+            else if (operation == SceneDocument::TreeNode::Rotate)
+                group.rotation = transformVector;
+            else if (operation == SceneDocument::TreeNode::Scale)
+                group.scale = transformVector;
+            else if (operation == SceneDocument::TreeNode::For) {
+                group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
+                group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
+            }
+            if (operation == SceneDocument::TreeNode::Translate
+                || operation == SceneDocument::TreeNode::Rotate
+                || operation == SceneDocument::TreeNode::Scale)
+                group.transformExpressions = transformExpressions;
+            root.children.append(group);
+            SceneDocument::TreeNode &child = root.children.last();
+            if (!parseBlock(&state, &child, true, errorMessage)) {
+                if (errorLine) *errorLine = state.errorLine;
+                return false;
+            }
+            continue;
+        }
+
+        // Direct top-level primitive (cube / sphere / cylinder) → goes into Scene container.
+        ShapeNode shape;
+        QString primitiveError;
+        if (parsePrimitiveLine(line, &shape, &state, &primitiveError)) {
+            ++state.index;
+            state.shapes.append(shape);
+            sceneNode.children.append(makePrimitiveNode(shape, &state));
+            continue;
+        }
+        if (!primitiveError.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = primitiveError.arg(current.number);
+            if (errorLine) *errorLine = current.number;
+            return false;
+        }
+
+        // Known keyword that none of the above matched — hard error.
+        if (startsWithKnownKeyword(line)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Unsupported or malformed syntax on line %1: %2").arg(current.number).arg(line);
+            if (errorLine) *errorLine = current.number;
+            return false;
+        }
+
+        // Completely unknown at top level — skip transparently (same as parseBlock).
+        ++state.index;
+        if (line.endsWith('{')) {
+            SceneDocument::TreeNode dummy = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+            parseBlock(&state, &dummy, true, errorMessage);
+        }
     }
 
+    // Build a name→moduleNode map for fast lookup.
+    QHash<QString, SceneDocument::TreeNode *> moduleByName;
+    for (SceneDocument::TreeNode &child : root.children) {
+        if (child.type == SceneDocument::TreeNode::Group
+            && child.operation == SceneDocument::TreeNode::Module)
+            moduleByName[child.moduleName] = &child;
+    }
+
+    // Create ModuleCall nodes in sceneNode in the order the calls appeared.
+    // First, emit calls that were explicitly present (in call order).
+    QSet<QString> emittedCalls;
+    for (const QString &callName : moduleCallOrder) {
+        if (SceneDocument::TreeNode *mod = moduleByName.value(callName, nullptr)) {
+            sceneNode.children.append(makeModuleCallNode(mod->id, callName, &state));
+            emittedCalls.insert(callName);
+        }
+    }
+    // Then append a call for any module that had no explicit call statement.
     for (SceneDocument::TreeNode &child : root.children) {
         if (child.type == SceneDocument::TreeNode::Group
             && child.operation == SceneDocument::TreeNode::Module
-            && pendingModuleCallArguments.contains(child.moduleName)) {
-            child.moduleCallArguments = pendingModuleCallArguments.value(child.moduleName);
+            && !emittedCalls.contains(child.moduleName)) {
+            sceneNode.children.append(makeModuleCallNode(child.id, child.moduleName, &state));
         }
     }
+
+    // Insert the Scene container as the first root child.
+    root.children.prepend(sceneNode);
 
     applyBooleanModes(&root, &state.shapes, ShapeNode::Add);
 

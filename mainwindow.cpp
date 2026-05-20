@@ -297,6 +297,8 @@ static QString booleanGroupLabel(SceneDocument::TreeNode::Operation operation,
         return "scale";
     if (operation == SceneDocument::TreeNode::For)
         return "for";
+    if (operation == SceneDocument::TreeNode::Scene)
+        return "scene";
     return "union()";
 }
 
@@ -1112,13 +1114,14 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 
     if (isVariableTool(toolName)) {
         const int rootId = m_scene.treeRoot().id;
+        const int sceneId = m_scene.sceneNodeId();
         // Variable dropped inside a Module node → becomes a module parameter.
         const SceneDocument::TreeNode *parentNode =
             parentGroupId > 0 ? m_scene.treeNodeById(parentGroupId) : nullptr;
         const bool inModule = parentNode
                               && parentNode->type == SceneDocument::TreeNode::Group
                               && parentNode->operation == SceneDocument::TreeNode::Module;
-        if (parentGroupId > 0 && !inModule && parentGroupId != rootId)
+        if (parentGroupId > 0 && !inModule && parentGroupId != rootId && parentGroupId != sceneId)
             return;
 
         if (inModule) {
@@ -1153,6 +1156,9 @@ void MainWindow::onGraphicsTreeToolDropped(const QString &toolName, int parentGr
 
     SceneDocument::TreeNode::Operation operation;
     if (operationForTool(toolName, &operation)) {
+        // Groups don't live inside the Scene container; redirect to root.
+        if (parentGroupId > 0 && parentGroupId == m_scene.sceneNodeId())
+            parentGroupId = 0;
         // Modules can only be added at root level; other groups go into their parent.
         if (operation == SceneDocument::TreeNode::Module && parentGroupId > 0
             && parentGroupId != m_scene.treeRoot().id)
@@ -1193,7 +1199,8 @@ void MainWindow::onGraphicsTreeNodeSelected(int nodeId)
         selectShapeInSceneTree(node->shapeId);
         m_viewport->setSelectedIndex(m_scene.selectedIndex());
         m_viewport->setSelectedGroupId(0);
-    } else if (node->type == SceneDocument::TreeNode::Variable) {
+    } else if (node->type == SceneDocument::TreeNode::Variable
+               || node->type == SceneDocument::TreeNode::ModuleCall) {
         m_scene.setSelectedShapeId(-1);
         selectTreeNodeInSceneTree(node->id);
         m_viewport->setSelectedIndex(-1);
@@ -1215,6 +1222,10 @@ void MainWindow::onGraphicsTreeNodeDeleteRequested(int nodeId)
 {
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
     if (!node)
+        return;
+
+    // ModuleCall nodes are auto-managed by their Module group; they cannot be deleted directly.
+    if (node->type == SceneDocument::TreeNode::ModuleCall)
         return;
 
     if (node->type == SceneDocument::TreeNode::Primitive) {
@@ -1724,6 +1735,15 @@ void MainWindow::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIn
                                     && parentNode->type == SceneDocument::TreeNode::Group
                                     && parentNode->operation == SceneDocument::TreeNode::Module;
         if (!targetIsRoot && !targetIsModule)
+            return;
+    }
+    // ModuleCall nodes can only be reordered within Scene.
+    if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
+        const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentGroupId);
+        const bool targetIsScene = parentNode
+                                   && parentNode->type == SceneDocument::TreeNode::Group
+                                   && parentNode->operation == SceneDocument::TreeNode::Scene;
+        if (!targetIsScene)
             return;
     }
 

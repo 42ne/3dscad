@@ -206,6 +206,16 @@ void paintOperationIcon(QPainter *painter,
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
+    } else if (operation == SceneDocument::TreeNode::Scene) {
+        // Draw a small grid of dots to represent the top-level scene container.
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(accent.darker(150));
+        const qreal dotR = 2.0;
+        const qreal cx = center.x(), cy = center.y();
+        const qreal gap = 4.5;
+        for (int row = -1; row <= 1; ++row)
+            for (int col = -1; col <= 1; ++col)
+                painter->drawEllipse(QPointF(cx + col * gap, cy + row * gap), dotR, dotR);
     } else {
         painter->setPen(accent.darker(160));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
@@ -647,6 +657,52 @@ QSizeF variablePreviewSize(const QString &name, const QString &expression)
     return QSizeF(qMax(PrimitiveWidth, 62.0 + nameWidth + exprWidth), VariableHeight);
 }
 
+QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params)
+{
+    int textChars = qMax(2, moduleName.trimmed().size()) + 2;
+    for (int i = 0; i < params.size(); ++i) {
+        textChars += params[i].name.size() + 3;
+        textChars += qMax(1, params[i].expression.trimmed().size());
+        if (i < params.size() - 1)
+            textChars += 2;
+    }
+    const qreal textWidth = textChars * 7.0 + 8.0;
+    return QSizeF(qMax(PrimitiveWidth, 42.0 + textWidth), VariableHeight);
+}
+
+static qreal moduleCallExprAdvance(const QString &expr, const QFontMetricsF &metrics)
+{
+    qreal w = metrics.horizontalAdvance(expr);
+    for (const QChar &c : expr)
+        if (c == '+' || c == '-' || c == '*' || c == '/')
+            w += 6.0;
+    return w;
+}
+
+QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect,
+                                                        const QString &moduleName,
+                                                        const QVector<ModuleCallParam> &params,
+                                                        const QFontMetricsF &metrics)
+{
+    QVector<ModuleCallParamControl> controls;
+    if (params.isEmpty())
+        return controls;
+
+    qreal x = cardRect.left() + 42.0 + metrics.horizontalAdvance(moduleName + QStringLiteral("("));
+    for (int i = 0; i < params.size(); ++i) {
+        x += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
+        const QRectF exprRect(x, cardRect.top(), cardRect.right() - x, VariableHeight);
+        for (const ExpressionTextSpan &span : expressionSpansInTextRect(exprRect, params[i].expression, metrics)) {
+            if (span.number)
+                controls.append({params[i].varNodeId, span.start, span.length, span.rect});
+        }
+        x += moduleCallExprAdvance(params[i].expression, metrics);
+        if (i < params.size() - 1)
+            x += metrics.horizontalAdvance(QStringLiteral(", "));
+    }
+    return controls;
+}
+
 QSizeF groupPreviewSize()
 {
     return QSizeF(GroupMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
@@ -760,6 +816,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Rotate, "rotate", QColor(239, 229, 247), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scale, "scale", QColor(229, 241, 218), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
 };
 
 } // namespace

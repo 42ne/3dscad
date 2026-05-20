@@ -20,6 +20,19 @@ void collectVariableNames(const SceneDocument::TreeNode &node, QSet<QString> *na
         collectVariableNames(child, names);
 }
 
+// Recursively collects all Variable node values from the entire tree (global + module params).
+void collectAllVariableValues(const SceneDocument::TreeNode &node, QHash<QString, qreal> *values)
+{
+    if (!values)
+        return;
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        (*values)[node.variableName] = node.variableValue;
+        return;
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectAllVariableValues(child, values);
+}
+
 bool isValidIdentifier(const QString &name)
 {
     if (name.isEmpty())
@@ -56,7 +69,12 @@ int SceneDocument::shapeCount() const
 
 bool SceneDocument::isEmpty() const
 {
-    return m_shapes.isEmpty();
+    return m_tree.isEmpty();
+}
+
+int SceneDocument::sceneNodeId() const
+{
+    return m_tree.sceneNodeId();
 }
 
 int SceneDocument::selectedIndex() const
@@ -394,11 +412,9 @@ void SceneDocument::reEvaluateDependentVariables(int changedId)
 
 void SceneDocument::reEvaluateDependentExpressions()
 {
+    // Collect variable values from the entire tree (global scope + module parameters).
     QHash<QString, qreal> varValues;
-    for (const TreeNode &child : m_tree.root().children) {
-        if (child.type == TreeNode::Variable)
-            varValues[child.variableName] = child.variableValue;
-    }
+    collectAllVariableValues(m_tree.root(), &varValues);
 
     for (ShapeNode &shape : m_shapes) {
         if (shape.parameterExpressions.isEmpty())

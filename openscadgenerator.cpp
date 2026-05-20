@@ -40,93 +40,130 @@ static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
     return "union";
 }
 
-// Collect parameter variables and return the module signature string "name(p1=e1, p2=e2)".
-static QString moduleSignature(const SceneDocument::TreeNode &moduleNode)
+static QStringList moduleParameterArgs(const SceneDocument::TreeNode &moduleNode)
 {
-    QStringList params;
+    QStringList args;
     for (const SceneDocument::TreeNode &child : moduleNode.children) {
         if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
             const QString expr = child.variableExpression.trimmed().isEmpty()
                                      ? QString::number(child.variableValue)
                                      : child.variableExpression.trimmed();
-            params.append(QString("%1 = %2").arg(child.variableName, expr));
+            args.append(QString("%1 = %2").arg(child.variableName, expr));
         }
     }
+    return args;
+}
+
+// Return the module signature string "name(p1=e1, p2=e2)".
+static QString moduleSignature(const SceneDocument::TreeNode &moduleNode)
+{
+    const QStringList params = moduleParameterArgs(moduleNode);
     const QString name = moduleNode.moduleName.trimmed().isEmpty()
                              ? QStringLiteral("scene_model")
                              : moduleNode.moduleName.trimmed();
     return params.isEmpty() ? name + "()" : name + "(" + params.join(", ") + ")";
 }
 
+// Return the call statement "name(p1=v1, p2=v2);\n" using current parameter values.
+static QString moduleCallStatement(const SceneDocument::TreeNode &moduleNode)
+{
+    const QString name = moduleNode.moduleName.trimmed().isEmpty()
+                             ? QStringLiteral("scene_model")
+                             : moduleNode.moduleName.trimmed();
+    const QStringList args = moduleParameterArgs(moduleNode);
+    return args.isEmpty() ? name + "();\n" : name + "(" + args.join(", ") + ");\n";
+}
+
 void OpenScadGenerator::appendSceneModule(QString *code, const SceneDocument &scene, QVector<SourceRange> *ranges)
 {
-    // --- 1. Emit global variables (Variable children of root) ---
-    for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
-        if (child.type == SceneDocument::TreeNode::Variable) {
-            const int start = code->size();
-            const QString expr = child.variableExpression.trimmed().isEmpty()
-                                     ? QString::number(child.variableValue)
-                                     : child.variableExpression.trimmed();
-            *code += QString("%1 = %2;\n").arg(child.variableName, expr);
-            if (ranges)
-                ranges->append({child.id, start, code->size() - start});
-        }
-    }
-
-    // --- 2. Collect body children of root (non-Module, non-Variable) ---
+    // Collect children, flattening the Scene container inline at root level.
+    // Scene children (vars, primitives, ModuleCalls) are treated as if they were at root.
+    QVector<const SceneDocument::TreeNode *> globalVars;
     QVector<const SceneDocument::TreeNode *> bodyChildren;
     QVector<const SceneDocument::TreeNode *> moduleChildren;
+    QVector<const SceneDocument::TreeNode *> moduleCalls;
+
+    auto categorize = [&](const SceneDocument::TreeNode &child) {
+        if (child.type == SceneDocument::TreeNode::Variable)
+            globalVars.append(&child);
+        else if (child.type == SceneDocument::TreeNode::ModuleCall)
+            moduleCalls.append(&child);
+        else if (child.type == SceneDocument::TreeNode::Group
+                 && child.operation == SceneDocument::TreeNode::Module)
+            moduleChildren.append(&child);
+        else
+            bodyChildren.append(&child);
+    };
+
     for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
         if (child.type == SceneDocument::TreeNode::Group
-            && child.operation == SceneDocument::TreeNode::Module)
-            moduleChildren.append(&child);
-        else if (child.type != SceneDocument::TreeNode::Variable)
-            bodyChildren.append(&child);
-    }
-
-    // --- 3. If there are body children, wrap them in the implicit scene_model ---
-    const bool hasImplicitModule = !bodyChildren.isEmpty() || scene.treeRoot().children.isEmpty();
-    if (hasImplicitModule) {
-        if (!moduleChildren.isEmpty() || !scene.treeRoot().children.isEmpty())
-            *code += "\n";
-        const int moduleStart = code->size();
-        *code += "module scene_model() {\n";
-        if (bodyChildren.isEmpty()) {
-            *code += "    // Add shapes from the tree editor.\n";
+            && child.operation == SceneDocument::TreeNode::Scene) {
+            for (const SceneDocument::TreeNode &sceneChild : child.children)
+                categorize(sceneChild);
         } else {
-            for (const SceneDocument::TreeNode *child : bodyChildren)
-                appendTreeNode(code, *child, scene, "    ", ranges);
+            categorize(child);
         }
-        *code += "}\n";
-        if (ranges)
-            ranges->append({scene.treeRoot().id, moduleStart, code->size() - moduleStart});
     }
 
-    // --- 4. Emit each named Module child ---
+    // --- 1. Emit global variables ---
+    for (const SceneDocument::TreeNode *var : globalVars) {
+        const int start = code->size();
+        const QString expr = var->variableExpression.trimmed().isEmpty()
+                                 ? QString::number(var->variableValue)
+                                 : var->variableExpression.trimmed();
+        *code += QString("%1 = %2;\n").arg(var->variableName, expr);
+        if (ranges)
+            ranges->append({var->id, start, code->size() - start});
+    }
+
+    // --- 2. Emit named module definitions ---
     for (const SceneDocument::TreeNode *mod : moduleChildren) {
         *code += "\n";
         const int moduleStart = code->size();
         *code += QString("module %1 {\n").arg(moduleSignature(*mod));
-
         for (const SceneDocument::TreeNode &child : mod->children) {
             if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
-                continue; // params already in signature, not in body
+                continue;
             appendTreeNode(code, child, scene, "    ", ranges);
         }
-
         *code += "}\n";
         if (ranges)
             ranges->append({mod->id, moduleStart, code->size() - moduleStart});
     }
 
-    // --- 5. Calls ---
-    *code += "\n";
-    if (hasImplicitModule)
-        *code += "scene_model();\n";
-    for (const SceneDocument::TreeNode *mod : moduleChildren) {
-        const QString name = mod->moduleName.trimmed();
-        const QString args = mod->moduleCallArguments.trimmed();
-        *code += QString("%1(%2);\n").arg(name, args);
+    // --- 3. Emit body children directly at top level ---
+    if (!bodyChildren.isEmpty()) {
+        *code += "\n";
+        const int bodyStart = code->size();
+        for (const SceneDocument::TreeNode *child : bodyChildren)
+            appendTreeNode(code, *child, scene, "", ranges);
+        if (ranges)
+            ranges->append({scene.treeRoot().id, bodyStart, code->size() - bodyStart});
+    } else if (moduleChildren.isEmpty() && globalVars.isEmpty()) {
+        *code += "\n// Add shapes from the tree editor.\n";
+    }
+
+    // --- 4. Module calls from explicit ModuleCall nodes in Scene ---
+    if (!moduleCalls.isEmpty()) {
+        *code += "\n";
+        for (const SceneDocument::TreeNode *call : moduleCalls) {
+            const int start = code->size();
+            // Look up the referenced module group to get correct parameter values.
+            const SceneDocument::TreeNode *modGroup = scene.treeNodeById(call->shapeId);
+            if (modGroup && modGroup->type == SceneDocument::TreeNode::Group
+                && modGroup->operation == SceneDocument::TreeNode::Module) {
+                *code += moduleCallStatement(*modGroup);
+            } else {
+                *code += call->moduleName + "();\n";
+            }
+            if (ranges)
+                ranges->append({call->id, start, code->size() - start});
+        }
+    } else if (!moduleChildren.isEmpty()) {
+        // Fallback for old documents that have no explicit ModuleCall nodes.
+        *code += "\n";
+        for (const SceneDocument::TreeNode *mod : moduleChildren)
+            *code += moduleCallStatement(*mod);
     }
 }
 
@@ -158,9 +195,23 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
-    // Module nodes are emitted as top-level definitions by appendSceneModule;
-    // if one appears nested (shouldn't happen), fall through to generic group handling.
-    if (node.operation == SceneDocument::TreeNode::Module) {
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        const SceneDocument::TreeNode *modGroup = scene.treeNodeById(node.shapeId);
+        if (modGroup && modGroup->type == SceneDocument::TreeNode::Group
+            && modGroup->operation == SceneDocument::TreeNode::Module) {
+            *code += indent + moduleCallStatement(*modGroup);
+        } else {
+            *code += indent + node.moduleName + "();\n";
+        }
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    // Scene / Module nodes are emitted at the top level by appendSceneModule;
+    // if either appears nested (shouldn't happen), flatten children inline.
+    if (node.operation == SceneDocument::TreeNode::Scene
+        || node.operation == SceneDocument::TreeNode::Module) {
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent, ranges);
         if (ranges && code->size() > start)

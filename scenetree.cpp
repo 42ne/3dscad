@@ -42,6 +42,7 @@ bool moduleNameExists(const SceneTree::TreeNode &node, const QString &name, int 
 SceneTree::SceneTree()
 {
     m_root = makeGroupNode(TreeNode::Module);
+    m_root.children.append(makeGroupNode(TreeNode::Scene));
 }
 
 const SceneTree::TreeNode &SceneTree::root() const
@@ -65,7 +66,15 @@ int SceneTree::shapeCount() const
 
 bool SceneTree::isEmpty() const
 {
-    return m_root.children.isEmpty();
+    for (const TreeNode &child : m_root.children) {
+        if (child.type == TreeNode::Group && child.operation == TreeNode::Scene) {
+            if (!child.children.isEmpty())
+                return false;
+        } else {
+            return false;
+        }
+    }
+    return true;
 }
 
 const SceneTree::TreeNode *SceneTree::nodeById(int id) const
@@ -87,12 +96,21 @@ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int ins
     if (!parent || parent->type != TreeNode::Group)
         return 0;
 
+    // Groups don't live inside the Scene container; redirect to root.
+    if (parent->operation == TreeNode::Scene)
+        parent = &m_root;
+
     TreeNode group = makeGroupNode(operation);
     const int groupId = group.id;
     const int boundedIndex = insertIndex < 0
                                  ? parent->children.size()
                                  : qBound(0, insertIndex, parent->children.size());
     parent->children.insert(boundedIndex, group);
+
+    // Auto-create a ModuleCall node in Scene for every named Module group.
+    if (operation == TreeNode::Module)
+        addModuleCall(groupId);
+
     return groupId;
 }
 
@@ -101,8 +119,19 @@ bool SceneTree::removeGroupById(int groupId)
     if (groupId <= 0 || m_root.id == groupId)
         return false;
 
+    // The Scene container is permanent; it cannot be deleted.
+    const TreeNode *sn = sceneNode();
+    if (sn && sn->id == groupId)
+        return false;
+
+    // Check if this is a Module before detaching, so we can clean up its call node.
+    const TreeNode *node = nodeById(groupId);
+    const bool wasModule = node && node->type == TreeNode::Group && node->operation == TreeNode::Module;
+
     const bool removed = detachNodeById(&m_root, groupId);
     if (removed) {
+        if (wasModule)
+            removeModuleCallForModule(groupId);
         pruneEmptyGroups(&m_root);
     }
 
@@ -118,7 +147,15 @@ int SceneTree::addVariable(const QString &name, const QString &expression, qreal
     if (name.trimmed().isEmpty() || expression.trimmed().isEmpty())
         return 0;
 
-    TreeNode *parent = parentGroupId > 0 ? nodeById(&m_root, parentGroupId) : &m_root;
+    TreeNode *parent;
+    if (parentGroupId > 0) {
+        parent = nodeById(&m_root, parentGroupId);
+    } else if (!isParameter) {
+        parent = sceneNode();
+        if (!parent) parent = &m_root;
+    } else {
+        parent = &m_root;
+    }
     if (!parent || parent->type != TreeNode::Group)
         return 0;
 
@@ -143,6 +180,18 @@ bool SceneTree::setModuleName(int groupId, const QString &name)
     if (moduleNameExists(m_root, trimmed, node->id))
         return false;
     node->moduleName = trimmed;
+
+    // Sync the name in the corresponding ModuleCall node.
+    TreeNode *scene = sceneNode();
+    if (scene) {
+        for (TreeNode &child : scene->children) {
+            if (child.type == TreeNode::ModuleCall && child.shapeId == node->id) {
+                child.moduleName = trimmed;
+                break;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -179,10 +228,15 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool mo
     const TreeNode *node = nodeById(&m_root, nodeId);
     if (!node || containsNodeId(*node, parentGroupId))
         return false;
-    // Variables may only live at root or directly inside a Module node.
+    // Variables may only live at root, Scene, or directly inside a Module node.
     if (node->type == TreeNode::Variable
         && targetParent != &m_root
-        && targetParent->operation != TreeNode::Module)
+        && targetParent->operation != TreeNode::Module
+        && targetParent->operation != TreeNode::Scene)
+        return false;
+    // ModuleCall nodes can only be reordered within the Scene container.
+    if (node->type == TreeNode::ModuleCall
+        && targetParent->operation != TreeNode::Scene)
         return false;
 
     QVector3D sourceParentWorldPosition;
@@ -301,6 +355,47 @@ void SceneTree::clear()
 {
     m_nextNodeId = 1;
     m_root = makeGroupNode(TreeNode::Module);
+    m_root.children.append(makeGroupNode(TreeNode::Scene));
+}
+
+int SceneTree::sceneNodeId() const
+{
+    const TreeNode *node = sceneNode();
+    return node ? node->id : 0;
+}
+
+int SceneTree::addModuleCall(int moduleGroupId, int insertIndex)
+{
+    TreeNode *scene = sceneNode();
+    if (!scene)
+        return 0;
+
+    const TreeNode *moduleNode = nodeById(moduleGroupId);
+    if (!moduleNode || moduleNode->type != TreeNode::Group || moduleNode->operation != TreeNode::Module)
+        return 0;
+
+    TreeNode call = makeModuleCallNode(moduleGroupId, moduleNode->moduleName);
+    const int callId = call.id;
+    const int boundedIndex = insertIndex < 0
+                                 ? scene->children.size()
+                                 : qBound(0, insertIndex, scene->children.size());
+    scene->children.insert(boundedIndex, call);
+    return callId;
+}
+
+bool SceneTree::removeModuleCallForModule(int moduleGroupId)
+{
+    TreeNode *scene = sceneNode();
+    if (!scene)
+        return false;
+
+    for (int i = 0; i < scene->children.size(); ++i) {
+        if (scene->children[i].type == TreeNode::ModuleCall && scene->children[i].shapeId == moduleGroupId) {
+            scene->children.removeAt(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 SceneTree::Snapshot SceneTree::snapshot() const
@@ -484,36 +579,21 @@ bool SceneTree::appendPrimitiveToOperation(TreeNode::Operation operation, const 
     if (containsPrimitiveShapeId(m_root, primitiveNode.shapeId))
         return false;
 
-    if (m_root.id <= 0 || m_root.type != TreeNode::Group) {
+    if (m_root.id <= 0 || m_root.type != TreeNode::Group)
         m_root = makeGroupNode(TreeNode::Module);
-        m_root.children.append(primitiveNode);
-        return true;
-    }
 
-    if (m_root.operation == TreeNode::Module) {
-        if (operation == TreeNode::Union) {
+    // Union: add to the Scene container (creating it if absent).
+    if (operation == TreeNode::Union) {
+        TreeNode *scene = sceneNode();
+        if (scene) {
+            scene->children.append(primitiveNode);
+        } else {
             m_root.children.append(primitiveNode);
-            return true;
         }
-
-        for (TreeNode &child : m_root.children) {
-            if (child.type == TreeNode::Group && child.operation == operation) {
-                child.children.append(primitiveNode);
-                return true;
-            }
-        }
-
-        TreeNode group = makeGroupNode(operation);
-        group.children.append(primitiveNode);
-        m_root.children.append(group);
         return true;
     }
 
-    if (m_root.operation == operation) {
-        m_root.children.append(primitiveNode);
-        return true;
-    }
-
+    // Difference / Intersection: find an existing group at root or create one.
     for (TreeNode &child : m_root.children) {
         if (child.type == TreeNode::Group && child.operation == operation) {
             child.children.append(primitiveNode);
@@ -523,25 +603,26 @@ bool SceneTree::appendPrimitiveToOperation(TreeNode::Operation operation, const 
 
     TreeNode group = makeGroupNode(operation);
     group.children.append(primitiveNode);
-
-    if (operation == TreeNode::Intersection) {
-        TreeNode intersectionRoot = makeGroupNode(TreeNode::Intersection);
-        intersectionRoot.children.append(m_root);
-        intersectionRoot.children.append(group);
-        m_root = intersectionRoot;
-        return true;
-    }
-
-    if (m_root.operation == TreeNode::Difference) {
-        m_root.children.append(primitiveNode);
-        return true;
-    }
-
-    TreeNode differenceRoot = makeGroupNode(TreeNode::Difference);
-    differenceRoot.children.append(m_root);
-    differenceRoot.children.append(primitiveNode);
-    m_root = differenceRoot;
+    m_root.children.append(group);
     return true;
+}
+
+SceneTree::TreeNode *SceneTree::sceneNode()
+{
+    for (TreeNode &child : m_root.children) {
+        if (child.type == TreeNode::Group && child.operation == TreeNode::Scene)
+            return &child;
+    }
+    return nullptr;
+}
+
+const SceneTree::TreeNode *SceneTree::sceneNode() const
+{
+    for (const TreeNode &child : m_root.children) {
+        if (child.type == TreeNode::Group && child.operation == TreeNode::Scene)
+            return &child;
+    }
+    return nullptr;
 }
 
 void SceneTree::pruneEmptyGroups(TreeNode *node)
@@ -551,12 +632,12 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
 
     for (int i = node->children.size() - 1; i >= 0; --i) {
         TreeNode &child = node->children[i];
-        if (child.type == TreeNode::Group) {
-            pruneEmptyGroups(&child);
-            if (child.children.isEmpty()) {
-                node->children.removeAt(i);
-            }
-        }
+        if (child.type != TreeNode::Group)
+            continue;
+        pruneEmptyGroups(&child);
+        // Never remove the Scene container, even when empty.
+        if (child.operation != TreeNode::Scene && child.children.isEmpty())
+            node->children.removeAt(i);
     }
 
     if (node == &m_root
@@ -596,5 +677,15 @@ SceneTree::TreeNode SceneTree::makeVariableNode(const QString &name, const QStri
     node.variableName = name;
     node.variableExpression = expression;
     node.variableValue = value;
+    return node;
+}
+
+SceneTree::TreeNode SceneTree::makeModuleCallNode(int moduleGroupId, const QString &moduleName)
+{
+    TreeNode node;
+    node.id = m_nextNodeId++;
+    node.type = TreeNode::ModuleCall;
+    node.shapeId = moduleGroupId;   // references the Module Group by id
+    node.moduleName = moduleName;
     return node;
 }

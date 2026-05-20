@@ -22,7 +22,8 @@ public:
         enum Type {
             Primitive,
             Group,
-            Variable
+            Variable,
+            ModuleCall // calls a named module; shapeId = referenced module group id
         };
 
         enum Operation {
@@ -33,7 +34,8 @@ public:
             Translate,
             Rotate,
             Scale,
-            For
+            For,
+            Scene // top-level container; flattened in code generation, never emitted as a block
         };
 
         int id = 0;
@@ -63,6 +65,10 @@ public:
 
     const TreeNode *nodeById(int id) const;
     TreeNode *nodeById(int id);
+
+    int sceneNodeId() const;
+    int addModuleCall(int moduleGroupId, int insertIndex = -1);
+    bool removeModuleCallForModule(int moduleGroupId);
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
@@ -94,6 +100,8 @@ public:
 
 private:
     // Helper methods
+    TreeNode *sceneNode();
+    const TreeNode *sceneNode() const;
     TreeNode *nodeById(TreeNode *node, int id);
     const TreeNode *nodeById(const TreeNode *node, int id) const;
     bool containsNodeId(const TreeNode &node, int id) const;
@@ -109,6 +117,7 @@ private:
     TreeNode makeGroupNode(TreeNode::Operation operation);
     TreeNode makePrimitiveNode(int shapeId);
     TreeNode makeVariableNode(const QString &name, const QString &expression, qreal value);
+    TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName);
 
 private:
     TreeNode m_root;

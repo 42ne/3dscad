@@ -27,6 +27,7 @@ public:
     const TreeNode &treeRoot() const;
     int shapeCount() const;
     bool isEmpty() const;
+    int sceneNodeId() const;
 
     int selectedIndex() const;
     int selectedShapeId() const;

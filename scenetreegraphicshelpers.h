@@ -103,6 +103,19 @@ struct ExpressionTextSpan {
     bool number = false;
 };
 
+struct ModuleCallParam {
+    int varNodeId;
+    QString name;
+    QString expression;
+};
+
+struct ModuleCallParamControl {
+    int paramVarNodeId;
+    int numberStart;
+    int numberLength;
+    QRectF rect;
+};
+
 QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis);
 qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node);
 QRectF transformParameterControlRect(const QRectF &groupRect, int axis, qreal headerWidth = TransformHeaderWidth);
@@ -120,6 +133,8 @@ QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, co
 QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth);
 QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth);
 QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidth);
+QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params);
+QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect, const QString &moduleName, const QVector<ModuleCallParam> &params, const QFontMetricsF &metrics);
 const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operation);
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation);
 QString labelForOperation(SceneDocument::TreeNode::Operation operation);
