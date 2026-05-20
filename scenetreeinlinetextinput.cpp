@@ -10,15 +10,21 @@ SceneTreeInlineTextInput::SceneTreeInlineTextInput(QWidget *parent)
     setFrame(false);
     setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
-    // Slightly styled so it sits visually above the node card.
+    // Dark theme: black bg, amber/yellow text, thin amber border.
+    // Zero vertical padding so the widget hugs the font height.
     setStyleSheet(
         QStringLiteral("QLineEdit {"
-                       "  background: rgba(255,255,235,230);"
-                       "  color: #1a1a1a;"
-                       "  border: 1.5px solid rgba(145,108,215,180);"
-                       "  border-radius: 4px;"
-                       "  padding: 1px 4px;"
+                       "  background: #1a1a1a;"
+                       "  color: #ffc832;"
+                       "  border: 1px solid rgba(255, 185, 40, 180);"
+                       "  border-radius: 3px;"
+                       "  padding: 0px 4px;"
                        "}"));
+
+    // Fix the height to the font's cap-height + border so it is compact
+    // and independent of the platform's default QLineEdit size hints.
+    const int compactH = fontMetrics().height() + 4; // text + 1px top/bottom border+gap
+    setFixedHeight(compactH);
 }
 
 void SceneTreeInlineTextInput::startEditing(const QRect &viewRect,
@@ -31,8 +37,14 @@ void SceneTreeInlineTextInput::startEditing(const QRect &viewRect,
     m_editing     = true;
     m_committing  = false;
 
-    // Inflate slightly so the border doesn't clip the text.
-    setGeometry(viewRect.adjusted(-3, -2, 3, 2));
+    // Keep the fixed compact height; expand width by a few px so the
+    // border doesn't clip ascenders/descenders; centre vertically on the zone.
+    const int cy = viewRect.center().y();
+    const int h  = height(); // already fixed in constructor
+    setGeometry(QRect(viewRect.left() - 2,
+                      cy - h / 2,
+                      viewRect.width() + 4,
+                      h));
     setText(initialText);
     selectAll();
     show();
