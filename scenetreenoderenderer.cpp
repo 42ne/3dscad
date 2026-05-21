@@ -66,7 +66,7 @@ QRectF boundedVerticalLabelRect(qreal left, qreal top, qreal bottom, qreal width
 
 void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &iconRect)
 {
-    const QRectF badgeRect(iconRect.right() - 4.0, iconRect.top() + 1.0, 18.0, 18.0);
+    const QRectF badgeRect(iconRect.right() - 3.0, iconRect.top() + 1.0, 16.0, 16.0);
     painter->setPen(QPen(QColor(82, 111, 146), 1));
     painter->setBrush(QColor(244, 248, 252));
     painter->drawEllipse(badgeRect);
@@ -112,10 +112,11 @@ public:
                           QPen(QColor(86, 117, 150), 1),
                           QBrush(QColor(219, 231, 246)));
 
+        const qreal iconSize = PrimitiveIconSize - 2.0;
         const QRectF iconRect(m_rect.left() + 10.0,
-                              m_rect.top() + (PrimitiveHeight - PrimitiveIconSize) * 0.5,
-                              PrimitiveIconSize,
-                              PrimitiveIconSize);
+                              m_rect.top() + (PrimitiveHeight - iconSize) * 0.5,
+                              iconSize,
+                              iconSize);
         if (m_selected) {
             painter->setPen(QPen(QColor(255, 203, 87), 2, Qt::DashLine));
             painter->setBrush(QColor(255, 203, 87, 32));
@@ -141,7 +142,7 @@ public:
             painter->drawText(QRectF(rowRect.left(), rowRect.top(), 10.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter, control.label);
             painter->setPen(QColor(104, 122, 148));
-            painter->drawText(QRectF(rowRect.left() + 12.0, rowRect.top(), 10.0, rowRect.height()),
+            painter->drawText(QRectF(rowRect.left() + 13.0, rowRect.top(), 10.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("="));
 
             // Expression spans with number highlights.

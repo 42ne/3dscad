@@ -35,7 +35,7 @@ constexpr qreal TreeY = 92.0;
 constexpr qreal PrimitiveWidth = 112.0;      // was 132 — narrower primitive cards
 constexpr qreal PrimitiveHeight = 42.0;
 constexpr qreal PrimitiveCardWidth = 60.0;  // icon+badge area inside the card border
-constexpr qreal PrimitiveParamLabelArea = 24.0; // "X =" prefix before the expression
+constexpr qreal PrimitiveParamLabelArea = 28.0; // "X =" prefix before the expression
 constexpr qreal VariableHeight = 26.0;
 constexpr qreal PrimitiveIconSize = 34.0;
 constexpr qreal GroupMinWidth = 108.0;       // was 128

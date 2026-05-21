@@ -27,7 +27,7 @@ QFont sceneTreeGraphicsFont()
 {
     QFont font = QApplication::font();
     font.setFamily(QStringLiteral("Segoe UI"));
-    font.setPointSizeF(8.0);
+    font.setPointSizeF(7.25);
     return font;
 }
 
@@ -547,7 +547,7 @@ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int cou
     const qreal width = primitiveRect.right() - left - 4.0;
     const qreal gap = 2.0;
     const qreal availableHeight = PrimitiveHeight - 6.0;
-    const qreal rowHeight = qMin<qreal>(16.0, (availableHeight - gap * (count - 1)) / count);
+    const qreal rowHeight = qMin<qreal>(14.0, (availableHeight - gap * (count - 1)) / count);
     const qreal totalHeight = rowHeight * count + gap * (count - 1);
     const qreal top = primitiveRect.top() + (PrimitiveHeight - totalHeight) * 0.5 + index * (rowHeight + gap);
     return QRectF(left, top, width, rowHeight);
