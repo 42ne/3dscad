@@ -12,12 +12,14 @@ Supported at top level:
 
 - line comments that start with `//`
 - variable assignments, for example `flange_r = 52;`
+- vector variable assignments (stored for primitive lookup, not shown in tree), for example `body_size = [28, 28, 4];`
 - top-level module declarations, for example `module peg(r = 6) { ... }`
 - explicit module calls, for example `peg(r = 12);`
 - supported groups, transforms, for loops, and primitives
 
 The editor has an internal document root. Generated code does not wrap the
-scene in an automatic `scene_model()` module.
+scene in an automatic `scene_model()` module. Code that was previously wrapped
+in `scene_model() { ... }` is silently flattened into the scene root.
 
 Module declarations do not create scene geometry by themselves. A module is
 rendered only when a real module call exists in the scene tree. In the graphics
@@ -64,6 +66,33 @@ scale([1, 2, 1]) {
 }
 ```
 
+Transform parameters may be plain numbers **or expressions** (see the
+[Variables And Expressions](#variables-and-expressions) section below):
+
+```openscad
+wall = 2;
+offset = 10;
+
+translate([offset + wall, 0, 0]) {
+    cube([10, 10, 10], center=true);
+}
+
+rotate([0, 0, 45 * 2]) {
+    cylinder(h=20, r=5, center=true);
+}
+```
+
+Brace-free single-child shorthand is also accepted (OpenSCAD style):
+
+```openscad
+translate([10, 0, 0])
+    cylinder(h=20, r=3, center=true);
+
+rotate([0, 0, 90])
+translate([20, 0, 0])
+    sphere(r=5);
+```
+
 For loops:
 
 ```openscad
@@ -88,6 +117,33 @@ sphere(r=12);
 cylinder(h=30, r=8, center=true);
 ```
 
+Dimension arguments may also be expressions:
+
+```openscad
+wall = 3;
+inner_r = 10;
+
+cube([inner_r * 2, inner_r * 2, wall], center=true);
+sphere(r=inner_r + wall);
+cylinder(h=wall * 5, r=inner_r, center=true);
+```
+
+Additional accepted forms for each primitive:
+
+**Cube:**
+- `cube([x, y, z])` — `center=true` is optional; ignored by the parser
+- `cube(body_size)` or `cube(body_size, center=true)` — where `body_size` is a
+  previously-declared vector variable (`body_size = [28, 28, 4];`)
+
+**Sphere:**
+- `sphere(r=12)` — named argument
+- `sphere(12)` — positional argument treated as radius
+- `sphere(d=24)` — diameter; stored as the expression `24/2`
+
+**Cylinder:**
+- `cylinder(h=30, r=8, center=true)` — named arguments in any order
+- `cylinder(30, 8)` — positional `h`, `r` (third positional is `center`)
+
 The tree stores cube size, sphere radius, and cylinder height/radius as editable
 expressions when they fit the supported expression syntax.
 
@@ -95,11 +151,11 @@ expressions when they fit the supported expression syntax.
 
 Supported expression syntax:
 
-- decimal numbers
-- identifiers
+- decimal numbers (including negative via unary minus)
+- identifiers referencing previously-declared variables
 - binary `+`, `-`, `*`, `/`
 - unary `+` and `-`
-- parentheses
+- parentheses for grouping
 
 Examples:
 
@@ -109,6 +165,18 @@ outer_r = 20 + wall * 2;
 
 module peg(r = outer_r / 2) {
     cylinder(h=30, r=r, center=true);
+}
+```
+
+Expressions can appear in **any numeric position** — primitive dimensions,
+transform vector components, and variable definitions:
+
+```openscad
+a = 10;
+b = a * 2;
+
+translate([a + 3, 0, b / 4]) {
+    cube([a, b, a + b], center=true);
 }
 ```
 
@@ -147,8 +215,26 @@ translate([10, 0, 0]) {
 peg();
 ```
 
+Module parameters may have default values or be left without defaults
+(defaulting to `0` in the editor):
+
+```openscad
+module cap(thickness = 3, r) {
+    cylinder(h=thickness, r=r, center=true);
+}
+```
+
 The parser no longer creates fallback calls for modules. If a module declaration
 has no explicit call, it remains a reusable definition only.
+
+## Unknown And Unsupported Syntax
+
+Unknown single-line statements are silently skipped. Unknown blocks (e.g.
+`color(...) { ... }`) are transparently flattened — their primitive children
+are imported as if the wrapper was not present.
+
+Known keywords with unrecognised argument syntax (e.g. `cube` with a bad arg
+count, or `translate` without a valid vector) produce a hard error.
 
 ## Known Unsupported OpenSCAD
 
@@ -167,15 +253,15 @@ These constructs are outside the current round-trippable subset:
 - `polyhedron`, `import`, `surface`, `text`
 - arbitrary named arguments on primitives beyond the generated forms
 
-Unsupported code may be skipped or simplified by the parser. For reliable tree
-reconstruction, keep generated block structure and one statement/block header
-per line.
+For reliable tree reconstruction, keep generated block structure and one
+statement/block header per line.
 
 ## Practical Roundtrip Example
 
 ```openscad
 flange_r = 52;
 pipe_r = 22;
+wall = 2;
 
 module bolt(r = 4) {
     cylinder(h=18, r=r, center=true);
@@ -191,7 +277,7 @@ difference() {
 
     for (i = [0 : 5]) {
         rotate([0, 0, i * 60]) {
-            translate([40, 0, 0]) {
+            translate([flange_r - wall * 10, 0, 0]) {
                 bolt(r = 5);
             }
         }
