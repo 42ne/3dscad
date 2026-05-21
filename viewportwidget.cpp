@@ -482,14 +482,17 @@ static void drawDirectionLabel(QPainter *painter, const QPointF &anchor, const Q
     else
         direction = QPointF(0.0, -1.0);
 
-    const QPointF center = anchor + direction * 18.0;
-    const QRectF labelRect(center.x() - 9.0, center.y() - 9.0, 18.0, 18.0);
+    const QPointF center = anchor + direction * 20.0;
+    const QRectF labelRect(center.x() - 12.0, center.y() - 12.0, 24.0, 24.0);
     QFont labelFont = painter->font();
     labelFont.setBold(true);
-    labelFont.setPointSizeF(qMax<qreal>(8.0, labelFont.pointSizeF() + 1.0));
+    labelFont.setWeight(QFont::Black);
+    labelFont.setPointSizeF(qMax<qreal>(12.0, labelFont.pointSizeF() + 4.0));
     painter->setFont(labelFont);
 
-    painter->setPen(QPen(QColor(5, 8, 12, 220), 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->setPen(QPen(QColor(255, 255, 255, 190), 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->drawText(labelRect, Qt::AlignCenter, label);
+    painter->setPen(QPen(QColor(5, 8, 12, 235), 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter->drawText(labelRect, Qt::AlignCenter, label);
     painter->setPen(QColor(255, 248, 190, 245));
     painter->drawText(labelRect, Qt::AlignCenter, label);
