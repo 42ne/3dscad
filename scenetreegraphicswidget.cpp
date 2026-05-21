@@ -2251,7 +2251,12 @@ void SceneTreeGraphicsWidget::scheduleDropCommit(std::function<void()> action)
         return;
     }
 
-    QTimer::singleShot(static_cast<int>(ReleaseDropPreviewDurationMs), this, [this, action = std::move(action)]() mutable {
+    // Defer the actual scene mutation until the current mouse-release handler
+    // returns, so the QGraphicsItem that emitted the drop is not deleted while
+    // still executing.  Do not wait for the release preview animation here:
+    // keeping a transient preview alive during refresh/toolbar rebuilds can
+    // leave the tree canvas stuck in drag state.
+    QTimer::singleShot(0, this, [this, action = std::move(action)]() mutable {
         clearDropPreview();
         action();
     });
