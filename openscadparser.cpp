@@ -680,8 +680,37 @@ static bool parseBlock(ParserState *state,
                             state->errorLine = childLine.number;
                             return false;
                         } else if (ct.endsWith('{')) {
-                            if (!parseBlock(state, innermost, true, errorMessage))
-                                return false;
+                            // If the child line is a recognized operation/transform with block,
+                            // create a proper group node (e.g. translate([x,y,z]) { ... })
+                            SceneDocument::TreeNode::Operation childOp = SceneDocument::TreeNode::Union;
+                            QVector3D childVec;
+                            QStringList childExprs;
+                            QString childLoopVar, childLoopRange;
+                            if (parseOperationLine(ct, &childOp, &childVec, state->variableValues,
+                                                   &childExprs, &childLoopVar, &childLoopRange)) {
+                                SceneDocument::TreeNode childGroup = makeGroupNode(childOp, state);
+                                if (childOp == SceneDocument::TreeNode::Translate)
+                                    childGroup.position = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Rotate)
+                                    childGroup.rotation = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Scale)
+                                    childGroup.scale = childVec;
+                                else if (childOp == SceneDocument::TreeNode::For) {
+                                    childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
+                                    childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
+                                }
+                                if (childOp == SceneDocument::TreeNode::Translate
+                                    || childOp == SceneDocument::TreeNode::Rotate
+                                    || childOp == SceneDocument::TreeNode::Scale)
+                                    childGroup.transformExpressions = childExprs;
+                                innermost->children.append(childGroup);
+                                if (!parseBlock(state, &innermost->children.last(), true, errorMessage))
+                                    return false;
+                            } else {
+                                // Unknown block wrapper — flatten its contents into innermost
+                                if (!parseBlock(state, innermost, true, errorMessage))
+                                    return false;
+                            }
                         }
                         // else: unknown single-line child, skip
                     }
@@ -761,9 +790,18 @@ static bool parseModuleParams(const QString &paramsStr,
     for (const QString &part : parts) {
         const int eq = part.indexOf('=');
         if (eq < 0) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("Module parameters must use name = expression syntax: %1").arg(part.trimmed());
-            return false;
+            // Parameter without default value (e.g. module foo(x, y)) — default to 0.
+            const QString name = part.trimmed();
+            if (!isValidIdentifier(name)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("Invalid module parameter name: %1").arg(name);
+                return false;
+            }
+            SceneDocument::TreeNode paramNode = makeVariableNode(name, QStringLiteral("0"), 0.0, state);
+            paramNode.isParameter = true;
+            (*varValues)[name] = 0.0;
+            moduleNode->children.append(paramNode);
+            continue;
         }
 
         const QString name = part.left(eq).trimmed();
@@ -997,9 +1035,37 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                             if (errorLine) *errorLine = childLine.number;
                             return false;
                         } else if (ct.endsWith('{')) {
-                            if (!parseBlock(&state, innermost, true, errorMessage)) {
-                                if (errorLine) *errorLine = state.errorLine;
-                                return false;
+                            SceneDocument::TreeNode::Operation childOp = SceneDocument::TreeNode::Union;
+                            QVector3D childVec;
+                            QStringList childExprs;
+                            QString childLoopVar, childLoopRange;
+                            if (parseOperationLine(ct, &childOp, &childVec, state.variableValues,
+                                                   &childExprs, &childLoopVar, &childLoopRange)) {
+                                SceneDocument::TreeNode childGroup = makeGroupNode(childOp, &state);
+                                if (childOp == SceneDocument::TreeNode::Translate)
+                                    childGroup.position = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Rotate)
+                                    childGroup.rotation = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Scale)
+                                    childGroup.scale = childVec;
+                                else if (childOp == SceneDocument::TreeNode::For) {
+                                    childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
+                                    childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
+                                }
+                                if (childOp == SceneDocument::TreeNode::Translate
+                                    || childOp == SceneDocument::TreeNode::Rotate
+                                    || childOp == SceneDocument::TreeNode::Scale)
+                                    childGroup.transformExpressions = childExprs;
+                                innermost->children.append(childGroup);
+                                if (!parseBlock(&state, &innermost->children.last(), true, errorMessage)) {
+                                    if (errorLine) *errorLine = state.errorLine;
+                                    return false;
+                                }
+                            } else {
+                                if (!parseBlock(&state, innermost, true, errorMessage)) {
+                                    if (errorLine) *errorLine = state.errorLine;
+                                    return false;
+                                }
                             }
                         }
                     }

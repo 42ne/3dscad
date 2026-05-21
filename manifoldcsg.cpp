@@ -270,8 +270,19 @@ static bool evaluateRangeExpression(const QString &rangeExpression,
         return false;
 
     const QStringList parts = range.mid(1, range.size() - 2).split(QLatin1Char(':'));
-    if (parts.size() != 2 && parts.size() != 3)
-        return false;
+    if (parts.size() != 2 && parts.size() != 3) {
+        // Might be a comma-separated list: [45, 135, 225, 315]
+        const QStringList listParts = splitAtTopLevelCommas(range.mid(1, range.size() - 2));
+        if (listParts.size() < 1)
+            return false;
+        for (const QString &p : listParts) {
+            qreal v = 0.0;
+            if (!ExpressionSyntax::evaluate(p.trimmed(), variables, &v))
+                return false;
+            values->append(v);
+        }
+        return !values->isEmpty();
+    }
 
     qreal start = 0.0;
     qreal step = 1.0;
