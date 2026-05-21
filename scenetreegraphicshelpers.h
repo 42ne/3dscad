@@ -5,6 +5,7 @@
 #include "shapenode.h"
 
 #include <QColor>
+#include <QFont>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QPainterPath>
@@ -54,6 +55,7 @@ extern const QColor CanvasBackground;
 extern const QColor MinorGridColor;
 extern const QColor MajorGridColor;
 
+QFont sceneTreeGraphicsFont();
 void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width);
 QGraphicsScene *createTreeGraphicsScene(QObject *parent = nullptr);
 

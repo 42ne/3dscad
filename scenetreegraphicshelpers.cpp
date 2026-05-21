@@ -23,6 +23,14 @@ const QColor CanvasBackground(31, 41, 55);
 const QColor MinorGridColor(96, 106, 121);
 const QColor MajorGridColor(139, 150, 166);
 
+QFont sceneTreeGraphicsFont()
+{
+    QFont font = QApplication::font();
+    font.setFamily(QStringLiteral("Segoe UI"));
+    font.setPointSizeF(8.0);
+    return font;
+}
+
 void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width)
 {
     QVarLengthArray<QLineF, 128> lines;
@@ -390,7 +398,7 @@ qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node)
     if (!isTransformOperation(node.operation))
         return 0.0;
 
-    const QFontMetricsF metrics(QApplication::font());
+    const QFontMetricsF metrics(sceneTreeGraphicsFont());
     qreal maxExpressionWidth = 0.0;
     for (int axis = 0; axis < 3; ++axis) {
         const QString expression = transformAxisExpression(node, axis);
@@ -566,7 +574,7 @@ QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &prim
 
 QSizeF primitivePreviewSize(const ShapeNode &shape)
 {
-    const QFontMetricsF metrics(QApplication::font());
+    const QFontMetricsF metrics(sceneTreeGraphicsFont());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
     qreal maxExprWidth = 0.0;
     for (const auto &control : controls) {
@@ -644,7 +652,7 @@ QSizeF defaultPreviewSize()
 
 QSizeF variablePreviewSize(const QString &name, const QString &expression)
 {
-    const QFontMetricsF metrics(QApplication::font());
+    const QFontMetricsF metrics(sceneTreeGraphicsFont());
     const QString trimmedName = name.trimmed();
     const QString trimmedExpr = expression.trimmed();
 
@@ -667,7 +675,7 @@ static qreal moduleCallExprAdvance(const QString &expr, const QFontMetricsF &met
 
 QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params)
 {
-    const QFontMetricsF metrics(QApplication::font());
+    const QFontMetricsF metrics(sceneTreeGraphicsFont());
     // "moduleName(" + params + ")" — measure each piece with actual font
     qreal textWidth = metrics.horizontalAdvance(moduleName.trimmed() + QStringLiteral("()"));
     for (int i = 0; i < params.size(); ++i) {
