@@ -60,11 +60,14 @@ void appendSimpleText(QGraphicsScene *scene,
                       QVector<QGraphicsItem *> *items,
                       const QString &text,
                       const QPointF &pos,
-                      qreal zValue)
+                      qreal zValue,
+                      qreal maxRight = 0.0)
 {
     auto *label = scene->addSimpleText(text);
     label->setBrush(QColor(84, 95, 116));
     label->setPos(pos);
+    if (maxRight > pos.x() && label->boundingRect().width() > maxRight - pos.x())
+        label->setScale(qMax<qreal>(0.72, (maxRight - pos.x()) / label->boundingRect().width()));
     label->setZValue(zValue);
     appendPreviewItem(items, label);
 }
@@ -246,28 +249,37 @@ bool SceneTreePreviewRenderer::addModuleTargetPreview(const DropTarget &target)
         separatorY = qMax(separatorY, target.placeholderRect.bottom() + ChildGap * 0.5);
 
     const QVector<ModuleCallParam> params = moduleParamsForNode(*moduleNode);
-    const QRectF callRect(QPointF(target.previewGroupRect.left() + GroupPadding,
-                                  separatorY + 16.0 + ChildGap),
-                          moduleCallPreviewSize(moduleNode->moduleName, params));
+    const QSizeF callSize = moduleCallPreviewSize(moduleNode->moduleName, params);
+    const qreal maxCallTop = target.previewGroupRect.bottom() - GroupPadding - callSize.height();
+    const qreal callTop = qMin(separatorY + 16.0 + ChildGap, maxCallTop);
+    separatorY = qMin(separatorY, callTop - ChildGap);
+    const QRectF callRect(QPointF(target.previewGroupRect.left() + GroupPadding, callTop), callSize);
+    const qreal labelLeft = target.previewGroupRect.left() + 52.0;
+    const qreal labelRight = target.previewGroupRect.right() - GroupPadding;
     const qreal bodyLabelY = callRect.bottom() + ChildGap + 4.0;
     const qreal z = 60.0;
 
     appendSimpleText(m_scene,
                      m_previewItems,
                      QStringLiteral("parameters"),
-                     QPointF(target.previewGroupRect.left() + GroupPadding,
+                     QPointF(labelLeft,
                              target.previewGroupRect.top() + GroupHeaderHeight + 4.0),
-                     z);
+                     z,
+                     labelRight);
     appendSimpleText(m_scene,
                      m_previewItems,
                      QStringLiteral("call handle"),
-                     QPointF(target.previewGroupRect.left() + GroupPadding, separatorY + 4.0),
-                     z);
-    appendSimpleText(m_scene,
-                     m_previewItems,
-                     QStringLiteral("body"),
-                     QPointF(target.previewGroupRect.left() + GroupPadding, bodyLabelY),
-                     z);
+                     QPointF(target.previewGroupRect.left() + GroupPadding, qMax(separatorY + 4.0, callRect.top() - 17.0)),
+                     z,
+                     labelRight);
+    if (bodyLabelY + 14.0 <= target.previewGroupRect.bottom() - GroupPadding) {
+        appendSimpleText(m_scene,
+                         m_previewItems,
+                         QStringLiteral("body"),
+                         QPointF(target.previewGroupRect.left() + GroupPadding, bodyLabelY),
+                         z,
+                         labelRight);
+    }
 
     auto *separator = m_scene->addLine(target.previewGroupRect.left() + GroupPadding,
                                       separatorY,

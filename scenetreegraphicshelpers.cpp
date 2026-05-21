@@ -741,7 +741,7 @@ QSizeF previewSizeForTool(const QString &tool)
     if (tool == "intersection")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "module")
-        return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+        return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight * 2.0 + ChildGap * 2.0);
     if (tool == "for")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
@@ -1194,7 +1194,9 @@ public:
         painter->setBrush(Qt::white);
         painter->drawRect(boundingRect());
 
-        const QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
+        QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
+        if (m_label == QStringLiteral("module"))
+            glyphRect = QRectF(8.0, 6.0, 38.0, 40.0);
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         if (isVariableToolName(m_label)) {
             painter->setPen(QPen(QColor(115, 92, 38), 1.4));
