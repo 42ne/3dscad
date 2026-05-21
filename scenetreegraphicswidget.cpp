@@ -1078,6 +1078,11 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
                                                       toolName,
                                                       0,
                                                       false);
+        if (!target.hasTarget && !isRootOnlyTreeTool(toolName)) {
+            clearDropPreview();
+            return;
+        }
+
         scheduleDropCommit([this, toolName, target]() {
             if (m_toolDroppedCallback)
                 m_toolDroppedCallback(toolName,
@@ -2146,6 +2151,8 @@ QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)
 {
     m_dragActive = true;
+    if (m_thumbnailCache)
+        m_thumbnailCache->setSuspended(true);
 
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     const DropTarget target = dropTargetForToolAt(scenePosition,
@@ -2186,6 +2193,8 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     m_dropPreviewMovingNodeId = 0;
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout).clear();
     setTreeItemsVisible(true);
+    if (m_thumbnailCache)
+        m_thumbnailCache->setSuspended(false);
 }
 
 void SceneTreeGraphicsWidget::startDropPreviewAnimation(const DropTarget &target,

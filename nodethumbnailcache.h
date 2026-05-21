@@ -35,6 +35,8 @@ public:
     // Return cached thumbnail for nodeId, or a null QImage if not yet ready.
     QImage thumbnail(int nodeId) const;
 
+    void setSuspended(bool suspended);
+
 signals:
     // Emitted on the main thread after one or more thumbnails become available.
     void thumbnailsUpdated();
@@ -51,6 +53,7 @@ private:
     QHash<int, ShapeNode> m_lastRendered; // nodeId to shape that produced m_cache[id]
 
     QTimer *m_renderTimer = nullptr;
+    bool m_suspended = false;
 };
 
 #endif // NODETHUMBNAILCACHE_H

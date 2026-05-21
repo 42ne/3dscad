@@ -44,7 +44,7 @@ void NodeThumbnailCache::syncPrimitives(const QHash<int, ShapeNode> &nodeShapes)
         }
     }
 
-    if (anyDirty)
+    if (anyDirty && !m_suspended)
         m_renderTimer->start(RenderDelayMs); // (re-)start the debounce window
 }
 
@@ -53,8 +53,24 @@ QImage NodeThumbnailCache::thumbnail(int nodeId) const
     return m_cache.value(nodeId);
 }
 
+void NodeThumbnailCache::setSuspended(bool suspended)
+{
+    if (m_suspended == suspended)
+        return;
+
+    m_suspended = suspended;
+    if (m_suspended) {
+        m_renderTimer->stop();
+    } else if (!m_pending.isEmpty()) {
+        m_renderTimer->start(RenderDelayMs);
+    }
+}
+
 void NodeThumbnailCache::onRenderTimerTimeout()
 {
+    if (m_suspended)
+        return;
+
     if (m_pending.isEmpty())
         return;
 
