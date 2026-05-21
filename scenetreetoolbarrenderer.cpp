@@ -90,20 +90,20 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     const QRectF rect(panelTopLeft, QSizeF(panelWidth / safeViewportScale, panelHeight / safeViewportScale));
     const QRectF panelLocalRect(0.0, 0.0, panelWidth, panelHeight);
 
-    QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(2.0, 2.0),
+    QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(3.0, 4.0),
                                              Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, 42)));
+                                             QBrush(QColor(0, 0, 0, 96)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(OverlayZ - 2.0);
-    shadow->setOpacity(0.55);
+    shadow->setOpacity(0.70);
     trackToolbarItem(shadow);
 
     QPainterPath panelPath;
     panelPath.addRoundedRect(panelLocalRect, CornerRadius, CornerRadius);
     QGraphicsItem *panel = m_scene->addPath(panelPath,
-                                            QPen(QColor(226, 232, 240, 120), 1.0),
-                                            QBrush(QColor(238, 242, 247, 118)));
+                                            QPen(QColor(148, 163, 184, 82), 1.0),
+                                            QBrush(QColor(10, 16, 24, 178)));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     panel->setPos(panelTopLeft);
     panel->setZValue(OverlayZ - 1.0);
