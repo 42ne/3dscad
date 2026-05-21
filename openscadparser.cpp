@@ -19,7 +19,8 @@ struct ParserState
     int errorLine = -1;
     int nextShapeId = 1;
     int nextTreeNodeId = 1;
-    QHash<QString, qreal> variableValues;
+    QHash<QString, qreal>    variableValues;
+    QHash<QString, QVector3D> vectorVariableValues; // e.g. body_size = [28, 28, 4]
     QVector<ShapeNode> shapes;
 };
 
@@ -359,13 +360,28 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     if (extractCallArgs(line, "cube", &argsStr) && line.endsWith(';')) {
         // Accept cube([x, y, z]) and cube([x, y, z], center=...)
         static const QRegularExpression vecRe("^\\[([^\\]]+)\\]");
-        const QRegularExpressionMatch m = vecRe.match(argsStr);
-        if (!m.hasMatch()) {
+        QRegularExpressionMatch m = vecRe.match(argsStr);
+        QString vecInner;
+        if (m.hasMatch()) {
+            vecInner = m.captured(1);
+        } else {
+            // Might be a vector variable: cube(body_size, center=true)
+            const QString firstArg = splitAtTopLevelCommas(argsStr).value(0).trimmed();
+            if (state->vectorVariableValues.contains(firstArg)) {
+                const QVector3D v = state->vectorVariableValues[firstArg];
+                shape->id = state->nextShapeId++;
+                shape->type = ShapeNode::Cube;
+                shape->name = QStringLiteral("Cube %1").arg(shape->id);
+                shape->size = v;
+                shape->parameterExpressions = QStringList({
+                    QString::number(v.x()), QString::number(v.y()), QString::number(v.z())});
+                return true;
+            }
             if (errorMessage)
                 *errorMessage = QStringLiteral("cube on line %1: expected [x, y, z]");
             return false;
         }
-        const QStringList parts = splitAtTopLevelCommas(m.captured(1));
+        const QStringList parts = splitAtTopLevelCommas(vecInner);
         if (parts.size() != 3) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("cube on line %1: expected 3 components");
@@ -540,6 +556,25 @@ static bool parseBlock(ParserState *state,
         if (parseModuleCallLine(line, &callName, &callArgs)) {
             parent->children.append(makeModuleCallNode(0, callName, callArgs, state));
             continue;
+        }
+
+        // ── Vector variable (e.g. dims = [10, 5, 2]) — skip silently but store ──
+        {
+            static const QRegularExpression vecVarRe(
+                "^([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\[([^\\]]+)\\]\\s*;\\s*$");
+            const auto vm = vecVarRe.match(line);
+            if (vm.hasMatch()) {
+                const QStringList vparts = splitAtTopLevelCommas(vm.captured(2));
+                if (vparts.size() == 3) {
+                    qreal vx = 0, vy = 0, vz = 0;
+                    QString vxe, vye, vze;
+                    if (parseParamExpression(vparts[0].trimmed(), state->variableValues, &vx, &vxe)
+                        && parseParamExpression(vparts[1].trimmed(), state->variableValues, &vy, &vye)
+                        && parseParamExpression(vparts[2].trimmed(), state->variableValues, &vz, &vze))
+                        state->vectorVariableValues[vm.captured(1)] = QVector3D(vx, vy, vz);
+                }
+                continue;
+            }
         }
 
         // ── Variable assignment ───────────────────────────────────────────
@@ -917,6 +952,27 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             state.variableValues = outerVariables;
             root.children.append(moduleNode);
             continue;
+        }
+
+        // Vector variable at top level: body_size = [28, 28, 4];
+        // Store in vectorVariableValues so primitives can reference them by name.
+        {
+            static const QRegularExpression vecVarRe(
+                "^([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\[([^\\]]+)\\]\\s*;\\s*$");
+            const auto vm = vecVarRe.match(line);
+            if (vm.hasMatch()) {
+                ++state.index;
+                const QStringList vparts = splitAtTopLevelCommas(vm.captured(2));
+                if (vparts.size() == 3) {
+                    qreal vx = 0, vy = 0, vz = 0;
+                    QString vxe, vye, vze;
+                    if (parseParamExpression(vparts[0].trimmed(), state.variableValues, &vx, &vxe)
+                        && parseParamExpression(vparts[1].trimmed(), state.variableValues, &vy, &vye)
+                        && parseParamExpression(vparts[2].trimmed(), state.variableValues, &vz, &vze))
+                        state.vectorVariableValues[vm.captured(1)] = QVector3D(vx, vy, vz);
+                }
+                continue;
+            }
         }
 
         // Variable at top level (global scope) → goes into the Scene container.
