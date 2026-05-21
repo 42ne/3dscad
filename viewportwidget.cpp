@@ -1352,6 +1352,86 @@ void ViewportWidget::paintGL()
     painter.end();
 }
 
+// ── Static thumbnail renderer ────────────────────────────────────────────────
+// Builds a rasterised preview image of a scene without any UI chrome.
+// Designed to be called from a background thread (all state is local).
+QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbnailSize)
+{
+    const QColor bg(30, 32, 36);
+    QImage image(thumbnailSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(bg);
+
+    const CsgPreview preview = buildCsgPreview(scene);
+    if (preview.items.isEmpty())
+        return image;
+
+    // Compute bounding box from non-helper mesh items.
+    QVector3D bbMin( 1e9f,  1e9f,  1e9f);
+    QVector3D bbMax(-1e9f, -1e9f, -1e9f);
+    bool hasMesh = false;
+    for (const CsgRenderItem &item : preview.items) {
+        if (item.helper) continue;
+        for (const MeshTriangle &tri : item.mesh.triangles) {
+            for (const QVector3D *v : {&tri.a, &tri.b, &tri.c}) {
+                bbMin.setX(qMin(bbMin.x(), v->x()));
+                bbMin.setY(qMin(bbMin.y(), v->y()));
+                bbMin.setZ(qMin(bbMin.z(), v->z()));
+                bbMax.setX(qMax(bbMax.x(), v->x()));
+                bbMax.setY(qMax(bbMax.y(), v->y()));
+                bbMax.setZ(qMax(bbMax.z(), v->z()));
+                hasMesh = true;
+            }
+        }
+    }
+    if (!hasMesh)
+        return image;
+
+    const QVector3D cameraTarget = (bbMin + bbMax) * 0.5f;
+    const float extent = (bbMax - bbMin).length();
+    // focalLength is 420 (matches projectWorldPoint); scale distance so the
+    // scene fills ~70 % of the shorter thumbnail dimension.
+    const float shortSide = static_cast<float>(qMin(thumbnailSize.width(), thumbnailSize.height()));
+    const float cameraDistance = qMax(extent * 420.0f / (shortSide * 0.68f), 30.0f);
+
+    const float yaw   = -38.0f;
+    const float pitch = -26.0f;
+    const QVector<SceneLight> lights = viewportLightsForPreset(0);
+
+    auto project = [&](const QVector3D &world) {
+        return projectWorldPoint(world, thumbnailSize, yaw, pitch, cameraDistance, cameraTarget);
+    };
+
+    QVector<Triangle2D> triangles;
+    triangles.reserve(512);
+    for (const CsgRenderItem &item : preview.items) {
+        if (item.helper) continue;
+        const QColor baseColor = (item.booleanMode == ShapeNode::Subtract) ? QColor(75,  90, 195)
+                               : (item.booleanMode == ShapeNode::Intersect) ? QColor(155, 95, 215)
+                               :                                               QColor(82, 138, 212);
+        for (const MeshTriangle &mt : item.mesh.triangles) {
+            const ProjectedPoint a = project(mt.a);
+            const ProjectedPoint b = project(mt.b);
+            const ProjectedPoint c = project(mt.c);
+            Triangle2D tri;
+            tri.a      = a.point;  tri.depthA = a.depth;
+            tri.b      = b.point;  tri.depthB = b.depth;
+            tri.c      = c.point;  tri.depthC = c.depth;
+            tri.color  = litColor(baseColor.lighter(mt.shade), mt.normal, lights);
+            tri.shapeIndex = item.shapeIndex;
+            triangles.append(tri);
+        }
+    }
+
+    QPainter painter(&image);
+    QImage   rasterBuffer; // depth-rasterised triangle pixels (transparent bg)
+    QVector<float> depthBuffer;
+    drawTrianglesWithDepth(&painter, triangles, thumbnailSize,
+                           nullptr, &depthBuffer, &rasterBuffer);
+    painter.end();
+
+    return image;
+}
+
 void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 {
     if (drawSceneMeshes)

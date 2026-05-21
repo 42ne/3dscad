@@ -1,5 +1,5 @@
 
-QT += core gui widgets opengl
+QT += core gui widgets opengl concurrent
 
 CONFIG += c++17
 
@@ -16,6 +16,7 @@ contains(CONFIG, opengl_renderer) {
 
 SOURCES += \
     csgevaluator.cpp \
+    examplepreviewpopup.cpp \
     main.cpp \
     mainwindow.cpp \
     manifoldcsg.cpp \
@@ -36,6 +37,7 @@ SOURCES += \
 
 HEADERS += \
     csgevaluator.h \
+    examplepreviewpopup.h \
     expression.h \
     mainwindow.h \
     manifoldcsg.h \

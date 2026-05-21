@@ -46,6 +46,10 @@ public:
     void invalidateCsgPreview();
     QString csgStatusText();
 
+    // Render a standalone thumbnail image of the given scene (no grid, no UI).
+    // Intended for off-thread use: all data comes from the caller's SceneDocument.
+    static QImage renderThumbnail(const SceneDocument &scene, QSize size);
+
 signals:
     void shapeClicked(int index);
     void emptyClicked();

@@ -8,10 +8,13 @@
 #include "scenetreegraphicswidget.h"
 #include "viewportwidget.h"
 
+#include <QtConcurrent>
+
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDockWidget>
 #include <QDir>
 #include <QDropEvent>
@@ -263,6 +266,18 @@ void MainWindow::buildUi()
     auto *editMenu = menuBar()->addMenu("Edit");
     editMenu->addAction(m_undoAction);
     editMenu->addAction(m_redoAction);
+
+    // Example hover preview
+    m_examplePreview = new ExamplePreviewPopup;   // top-level window, no parent
+
+    m_exampleHoverTimer = new QTimer(this);
+    m_exampleHoverTimer->setSingleShot(true);
+    m_exampleHoverTimer->setInterval(900); // ms before preview appears
+    connect(m_exampleHoverTimer, &QTimer::timeout, this, &MainWindow::onExampleHoverTimeout);
+
+    m_thumbnailWatcher = new QFutureWatcher<QImage>(this);
+    connect(m_thumbnailWatcher, &QFutureWatcher<QImage>::finished,
+            this, &MainWindow::onExampleThumbnailReady);
 
     m_viewport = new ViewportWidget;
     m_viewport->setScene(&m_scene);
@@ -1584,11 +1599,77 @@ void MainWindow::populateExamplesMenu(QMenu *menu)
 
     for (const QString &fileName : files) {
         const QString filePath = QDir(path).absoluteFilePath(fileName);
-        QAction *action = menu->addAction(QFileInfo(fileName).completeBaseName());
+        const QString name = QFileInfo(fileName).completeBaseName();
+        QAction *action = menu->addAction(name);
+
         connect(action, &QAction::triggered, this, [this, filePath]() {
             loadExample(filePath);
         });
+
+        // Start the hover preview timer when this action is highlighted.
+        connect(action, &QAction::hovered, this, [this, filePath, name]() {
+            m_pendingPreviewFile = filePath;
+            m_pendingPreviewName = name;
+            m_pendingPreviewPos  = QCursor::pos();
+            m_exampleHoverTimer->start(); // restarts if already running
+        });
     }
+
+    // Hide preview when the menu closes.
+    connect(menu, &QMenu::aboutToHide, this, &MainWindow::hideExamplePreview);
+}
+
+void MainWindow::hideExamplePreview()
+{
+    m_exampleHoverTimer->stop();
+    if (m_thumbnailWatcher->isRunning())
+        m_thumbnailWatcher->cancel();
+    m_examplePreview->hidePopup();
+}
+
+void MainWindow::onExampleHoverTimeout()
+{
+    // Show a "loading" placeholder immediately so the user gets feedback.
+    m_examplePreview->setLoading(m_pendingPreviewName);
+    m_examplePreview->showAt(QCursor::pos());
+
+    // If a previous render is still running, let it finish — its result will be
+    // discarded in onExampleThumbnailReady if the file no longer matches.
+    if (m_thumbnailWatcher->isRunning())
+        return;
+
+    const QString filePath = m_pendingPreviewFile;
+    const QString name     = m_pendingPreviewName;
+
+    // Parse + build SceneDocument + render thumbnail — all in a worker thread.
+    QFuture<QImage> future = QtConcurrent::run([filePath]() -> QImage {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return QImage();
+        const QString code = QString::fromUtf8(file.readAll());
+
+        SceneDocument::Snapshot snapshot;
+        if (!OpenScadParser::parseScene(code, &snapshot, nullptr, nullptr))
+            return QImage();
+
+        SceneDocument scene;
+        scene.restoreSnapshot(snapshot);
+
+        return ViewportWidget::renderThumbnail(scene, QSize(280, 210));
+    });
+
+    m_thumbnailWatcher->setFuture(future);
+}
+
+void MainWindow::onExampleThumbnailReady()
+{
+    if (m_thumbnailWatcher->isCanceled())
+        return;
+
+    const QImage image = m_thumbnailWatcher->result();
+    // Only update if the popup is still visible (user hasn't moved away).
+    if (m_examplePreview->isVisible())
+        m_examplePreview->setImage(image, m_pendingPreviewName);
 }
 
 void MainWindow::loadExample(const QString &filePath)

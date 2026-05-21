@@ -1,9 +1,12 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "examplepreviewpopup.h"
 #include "openscadgenerator.h"
 #include "scenedocument.h"
 
+#include <QFutureWatcher>
+#include <QImage>
 #include <QMainWindow>
 #include <QVector>
 
@@ -12,6 +15,7 @@ class QTextEdit;
 class QLabel;
 class QPushButton;
 class QAction;
+class QTimer;
 class QUndoStack;
 class ViewportWidget;
 class SceneTreeGraphicsWidget;
@@ -24,6 +28,8 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
 
 private slots:
+    void onExampleHoverTimeout();
+    void onExampleThumbnailReady();
     void addCube();
     void addSphere();
     void addCylinder();
@@ -79,6 +85,7 @@ private:
     QString previewScadPath() const;
     QString examplesPath() const;
     void populateExamplesMenu(QMenu *menu);
+    void hideExamplePreview();
     void applyCtrlParamHighlight();
     void scrollCodeEditorToShowCursor(const QTextCursor &cursor);
 
@@ -105,6 +112,14 @@ private:
     QVector3D m_viewportDragStartGroupRotation;
     QVector3D m_viewportDragStartGroupScale;
     QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
+
+    // Example hover preview
+    ExamplePreviewPopup      *m_examplePreview      = nullptr;
+    QTimer                   *m_exampleHoverTimer   = nullptr;
+    QFutureWatcher<QImage>   *m_thumbnailWatcher    = nullptr;
+    QString                   m_pendingPreviewFile;
+    QPoint                    m_pendingPreviewPos;
+    QString                   m_pendingPreviewName;
 
     ViewportWidget *m_viewport = nullptr;
     SceneTreeGraphicsWidget *m_sceneTreeGraphics = nullptr;
