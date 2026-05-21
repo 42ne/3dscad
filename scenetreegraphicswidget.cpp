@@ -941,7 +941,26 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         childrenHeight = qMax(childrenHeight, VariableHeight * 2.0 + ChildGap * 5.0);
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
-    const QSizeF size(qMax(minimumWidthForOperation(node.operation), headerWidth + maxChildWidth + GroupPadding * 2.0),
+
+    // For a for-loop the header text can be much wider than the children.
+    // Measure it so the card is never narrower than the rendered range expression.
+    qreal forLoopHeaderMinWidth = 0.0;
+    if (node.operation == SceneDocument::TreeNode::For) {
+        const QFontMetricsF fm(font());
+        const QString varName   = forLoopVariableName(node);
+        const QString rangeExpr = forLoopRangeExpression(node);
+        const QString prefix    = QStringLiteral("for (%1 = ").arg(varName);
+        // 52 = badge area, 8 = right padding inside card
+        forLoopHeaderMinWidth = 52.0
+            + fm.horizontalAdvance(prefix)
+            + fm.horizontalAdvance(rangeExpr)
+            + fm.horizontalAdvance(QStringLiteral(")"))
+            + 8.0;
+    }
+
+    const QSizeF size(qMax(qMax(minimumWidthForOperation(node.operation),
+                                headerWidth + maxChildWidth + GroupPadding * 2.0),
+                           forLoopHeaderMinWidth),
                       headerHeight + GroupPadding * 2.0 + childrenHeight);
     const QRectF rect(topLeft, size);
     qreal cutSeparatorY = 0.0;
