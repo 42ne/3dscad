@@ -420,6 +420,34 @@ static void drawArrowHead(QPainter *painter,
     painter->drawPolygon(darkFace);
 }
 
+static void drawHaloLine(QPainter *painter,
+                         const QPointF &start,
+                         const QPointF &end,
+                         const QColor &color,
+                         qreal width,
+                         Qt::PenJoinStyle joinStyle = Qt::RoundJoin)
+{
+    painter->setPen(QPen(QColor(255, 255, 255, 185), width + 5.0, Qt::SolidLine, Qt::RoundCap, joinStyle));
+    painter->drawLine(start, end);
+    painter->setPen(QPen(QColor(3, 6, 10, 215), width + 2.2, Qt::SolidLine, Qt::RoundCap, joinStyle));
+    painter->drawLine(start, end);
+    painter->setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, joinStyle));
+    painter->drawLine(start, end);
+}
+
+static void drawHaloPolyline(QPainter *painter,
+                             const QPolygonF &points,
+                             const QColor &color,
+                             qreal width)
+{
+    painter->setPen(QPen(QColor(255, 255, 255, 175), width + 4.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->drawPolyline(points);
+    painter->setPen(QPen(QColor(3, 6, 10, 210), width + 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->drawPolyline(points);
+    painter->setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->drawPolyline(points);
+}
+
 static void drawValueLabel(QPainter *painter, const QPointF &anchor, const QString &text)
 {
     QFont labelFont = painter->font();
@@ -1808,10 +1836,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     for (const auto &axis : axes) {
                         const QPointF start = project(origin).point;
                         const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
-                        painter.setPen(QPen(QColor(5, 8, 12, 185), 7, Qt::SolidLine, Qt::RoundCap));
-                        painter.drawLine(start, end);
-                        painter.setPen(QPen(axis.second, 4.5, Qt::SolidLine, Qt::RoundCap));
-                        painter.drawLine(start, end);
+                        drawHaloLine(&painter, start, end, axis.second, 4.5);
                         drawArrowHead(&painter, start, end, axis.second);
                     }
                 }
@@ -1830,9 +1855,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                             ringPath << project(worldPoint).point;
                         }
 
-                        painter.setPen(QPen(ring.second, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
                         painter.setBrush(Qt::NoBrush);
-                        painter.drawPolyline(ringPath);
+                        drawHaloPolyline(&painter, ringPath, ring.second, 2.2);
                     }
                 }
             }
@@ -2333,10 +2357,7 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
         const float axisLength = scalePreview ? 42.0f : 34.0f;
         const QPointF negative = project(origin - worldAxis * axisLength);
         const QPointF positive = project(origin + worldAxis * axisLength);
-        painter.setPen(QPen(QColor(5, 8, 12, 190), 8, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(negative, positive);
-        painter.setPen(QPen(accent, 4, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(negative, positive);
+        drawHaloLine(&painter, negative, positive, accent, 4.0);
         drawArrowHead(&painter, center, positive, accent);
         drawArrowHead(&painter, center, negative, accent);
         drawDirectionLabel(&painter, positive, center, "+");
@@ -2362,10 +2383,7 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
         }
 
         if (arcPoints.size() >= 2) {
-            painter.setPen(QPen(QColor(5, 8, 12, 190), 7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawPolyline(QPolygonF(arcPoints));
-            painter.setPen(QPen(accent, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawPolyline(QPolygonF(arcPoints));
+            drawHaloPolyline(&painter, QPolygonF(arcPoints), accent, 3.0);
             drawArrowHead(&painter, arcPoints[1], arcPoints.first(), accent);
             drawArrowHead(&painter, arcPoints[arcPoints.size() - 2], arcPoints.last(), accent);
             const QPointF center = project(origin);
@@ -2429,10 +2447,7 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
         const QPointF positivePoint = project(positive);
         const QPointF centerPoint = project(center);
 
-        painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(negativePoint, positivePoint);
-        painter.setPen(QPen(accent, 2.6, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(negativePoint, positivePoint);
+        drawHaloLine(&painter, negativePoint, positivePoint, accent, 2.6);
         drawArrowHead(&painter, centerPoint, positivePoint, accent, 12.0f, 5.0f, 2.0);
         drawArrowHead(&painter, centerPoint, negativePoint, accent, 12.0f, 5.0f, 2.0);
         drawDirectionLabel(&painter, positivePoint, centerPoint, "+");
@@ -2474,10 +2489,7 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
                 circlePoints.append(project(transformed(QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f))));
             }
 
-            painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawPolyline(QPolygonF(circlePoints));
-            painter.setPen(QPen(accent, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawPolyline(QPolygonF(circlePoints));
+            drawHaloPolyline(&painter, QPolygonF(circlePoints), accent, 2.4);
 
             const QVector3D center = transformed(QVector3D());
             const QVector3D edge = transformed(QVector3D(radius, 0.0f, 0.0f));
@@ -2485,10 +2497,7 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
             const QPointF centerPoint = project(center);
             const QPointF edgePoint = project(edge);
             const QPointF inwardPoint = project(inward);
-            painter.setPen(QPen(QColor(5, 8, 12, 175), 5, Qt::SolidLine, Qt::RoundCap));
-            painter.drawLine(centerPoint, edgePoint);
-            painter.setPen(QPen(accent, 2.6, Qt::SolidLine, Qt::RoundCap));
-            painter.drawLine(centerPoint, edgePoint);
+            drawHaloLine(&painter, centerPoint, edgePoint, accent, 2.6);
             drawArrowHead(&painter, inwardPoint, edgePoint, accent, 12.0f, 5.0f, 2.0);
             drawArrowHead(&painter, inwardPoint, centerPoint, accent, 12.0f, 5.0f, 2.0);
             drawDirectionLabel(&painter, edgePoint, inwardPoint, "+");
