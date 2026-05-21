@@ -5,6 +5,7 @@
 #include "scenetreegraphicshelpers.h"
 #include "shapenode.h"
 
+#include <QImage>
 #include <QRectF>
 #include <QVector>
 #include <functional>
@@ -37,7 +38,8 @@ public:
     void renderPrimitive(const SceneDocument::TreeNode &node,
                          const QRectF &rect,
                          const QString &label,
-                         const ShapeNode *shape);
+                         const ShapeNode *shape,
+                         const QImage &thumbnail = QImage());
 
     void renderVariable(const SceneDocument::TreeNode &node,
                         const QRectF &rect);

@@ -18,6 +18,7 @@ SOURCES += \
     csgevaluator.cpp \
     examplepreviewpopup.cpp \
     main.cpp \
+    nodethumbnailcache.cpp \
     mainwindow.cpp \
     manifoldcsg.cpp \
     openscadgenerator.cpp \
@@ -38,6 +39,7 @@ SOURCES += \
 HEADERS += \
     csgevaluator.h \
     examplepreviewpopup.h \
+    nodethumbnailcache.h \
     expression.h \
     mainwindow.h \
     manifoldcsg.h \

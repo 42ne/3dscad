@@ -5,6 +5,7 @@
 #include <QFontMetricsF>
 #include <QGraphicsItem>
 #include <QGraphicsScene>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -43,7 +44,7 @@ void paintVerticalPillLabel(QPainter *painter, const QString &text, const QRectF
 void paintLabel(QPainter *painter, const QString &text, const QPointF &position, const QColor &color)
 {
     painter->setPen(color);
-    painter->drawText(QRectF(position, QSizeF(220.0, 24.0)), Qt::AlignLeft | Qt::AlignTop, text);
+    painter->drawText(QRectF(position, QSizeF(220.0, 16.0)), Qt::AlignLeft | Qt::AlignVCenter, text);
 }
 
 QColor translucent(const QColor &color, int alpha)
@@ -83,7 +84,8 @@ public:
                       int activeParamIndex,
                       int activeNumberStart,
                       qreal opacity,
-                      qreal zValue)
+                      qreal zValue,
+                      const QImage &thumbnail = QImage())
         : m_rect(rect)
         , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
@@ -91,6 +93,7 @@ public:
         , m_activeParamIndex(activeParamIndex)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_thumbnail(thumbnail)
     {
         setZValue(zValue);
     }
@@ -101,6 +104,7 @@ public:
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
+        painter->setFont(sceneTreeGraphicsFont());
 
         // Card border — covers only the icon area (left PrimitiveCardWidth pixels).
         const QRectF cardRect(m_rect.left(), m_rect.top(), PrimitiveCardWidth, m_rect.height());
@@ -118,7 +122,10 @@ public:
             painter->drawEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0));
         }
 
-        paintPrimitiveIcon(painter, m_shape.type, iconRect);
+        if (!m_thumbnail.isNull())
+            painter->drawImage(iconRect, m_thumbnail);
+        else
+            paintPrimitiveIcon(painter, m_shape.type, iconRect);
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
 
@@ -176,6 +183,7 @@ private:
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    QImage m_thumbnail;
 };
 
 class VariableCardItem final : public QGraphicsItem
@@ -206,6 +214,7 @@ public:
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
+        painter->setFont(sceneTreeGraphicsFont());
 
         // PAR uses indigo-blue palette; VAR uses amber palette.
         const QColor accent     = m_isParameter ? QColor(52, 88, 172)   : QColor(150, 116, 42);
@@ -237,14 +246,18 @@ public:
         // Name, = and expression
         const QFontMetricsF metrics(painter->font());
         const qreal nameW = metrics.horizontalAdvance(m_name);
+        const QRectF textLineRect(m_rect.left() + 38.0,
+                                  m_rect.top() + (VariableHeight - 16.0) * 0.5,
+                                  nameW,
+                                  16.0);
 
         painter->setPen(nameColor);
-        painter->drawText(QRectF(m_rect.left() + 38.0, m_rect.top(), nameW, VariableHeight),
+        painter->drawText(textLineRect,
                           Qt::AlignLeft | Qt::AlignVCenter,
                           m_name);
 
         painter->setPen(eqColor);
-        painter->drawText(QRectF(m_rect.left() + 38.0 + nameW + 4.0, m_rect.top(), 12.0, VariableHeight),
+        painter->drawText(QRectF(textLineRect.right() + 4.0, textLineRect.top(), 12.0, textLineRect.height()),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
 
@@ -321,6 +334,7 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setFont(sceneTreeGraphicsFont());
         const QColor fill = operationVisual(m_operation).fill;
 
         if (m_showShadow) {
@@ -541,6 +555,7 @@ public:
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
+        painter->setFont(sceneTreeGraphicsFont());
 
         const QColor accent(38, 108, 148);
         if (m_selected) {
@@ -675,11 +690,12 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
 void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
                                             const QRectF &rect,
                                             const QString &label,
-                                            const ShapeNode *shape)
+                                            const ShapeNode *shape,
+                                            const QImage &thumbnail)
 {
     const int activeParamIndex = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
     const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
-    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0));
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, thumbnail));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)

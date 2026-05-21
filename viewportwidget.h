@@ -48,7 +48,9 @@ public:
 
     // Render a standalone thumbnail image of the given scene (no grid, no UI).
     // Intended for off-thread use: all data comes from the caller's SceneDocument.
-    static QImage renderThumbnail(const SceneDocument &scene, QSize size);
+    // bgColor controls the empty-pixel fill (default dark, use card colour for tree icons).
+    static QImage renderThumbnail(const SceneDocument &scene, QSize size,
+                                  const QColor &bgColor = QColor(30, 32, 36));
 
 signals:
     void shapeClicked(int index);
