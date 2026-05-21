@@ -949,7 +949,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                ? PrimitiveHeight
                                : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
     if (node.operation == SceneDocument::TreeNode::Module)
-        childrenHeight = qMax(childrenHeight, VariableHeight * 2.0 + ChildGap * 5.0);
+        childrenHeight = qMax(childrenHeight + 10.0, VariableHeight * 2.0 + ChildGap * 7.0);
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
 
@@ -998,13 +998,19 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         .renderGroup(node, rect, depth, cutSeparatorY);
 
     if (node.operation == SceneDocument::TreeNode::Module) {
+        const qreal labelLeft = rect.left() + GroupPadding + PrimitiveIconSize + 10.0;
+        const qreal labelRight = rect.right() - GroupPadding;
         auto *paramsLabel = m_graphicsScene->addSimpleText(QStringLiteral("parameters"));
         paramsLabel->setBrush(QColor(84, 95, 116));
-        paramsLabel->setPos(rect.left() + GroupPadding, rect.top() + GroupHeaderHeight + 4.0);
+        if (paramsLabel->boundingRect().width() > labelRight - labelLeft)
+            paramsLabel->setScale(qMax<qreal>(0.72, (labelRight - labelLeft) / paramsLabel->boundingRect().width()));
+        paramsLabel->setPos(labelLeft, rect.top() + GroupHeaderHeight + 4.0);
         paramsLabel->setZValue(depth * 10.0 + 8.0);
 
         auto *callLabel = m_graphicsScene->addSimpleText(QStringLiteral("call handle"));
         callLabel->setBrush(QColor(84, 95, 116));
+        if (callLabel->boundingRect().width() > labelRight - (rect.left() + GroupPadding))
+            callLabel->setScale(qMax<qreal>(0.72, (labelRight - rect.left() - GroupPadding) / callLabel->boundingRect().width()));
         callLabel->setPos(rect.left() + GroupPadding, moduleCallTemplateLabelY);
         callLabel->setZValue(depth * 10.0 + 8.0);
 
@@ -1047,6 +1053,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
         auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
         bodyLabel->setBrush(QColor(84, 95, 116));
+        if (moduleBodyLabelY + bodyLabel->boundingRect().height() > rect.bottom() - GroupPadding)
+            moduleBodyLabelY = rect.bottom() - GroupPadding - bodyLabel->boundingRect().height();
         bodyLabel->setPos(rect.left() + GroupPadding, moduleBodyLabelY);
         bodyLabel->setZValue(depth * 10.0 + 8.0);
 

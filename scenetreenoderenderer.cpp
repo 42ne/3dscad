@@ -402,7 +402,13 @@ private:
         const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
         paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
-        const QRectF iconRect(m_rect.left() + 8.0, m_rect.top() + 6.0, PrimitiveIconSize, PrimitiveIconSize);
+        const qreal headerIconSize = m_operation == SceneDocument::TreeNode::Module
+                                         ? PrimitiveIconSize - 6.0
+                                         : PrimitiveIconSize;
+        const QRectF iconRect(m_rect.left() + 8.0,
+                              m_rect.top() + (m_operation == SceneDocument::TreeNode::Module ? 5.0 : 6.0),
+                              headerIconSize,
+                              headerIconSize);
         paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
 
         if (m_operation == SceneDocument::TreeNode::For) {
