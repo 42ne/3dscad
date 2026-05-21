@@ -15,8 +15,10 @@ class ExamplePreviewPopup : public QFrame
 public:
     explicit ExamplePreviewPopup(QWidget *parent = nullptr);
 
-    // Show at the given global position (popup appears to the right of pos).
-    void showAt(const QPoint &globalPos);
+    // Show to the right of the menu.
+    // menuRight  – global X of the menu's right edge
+    // cursorY    – global Y of the currently hovered item (for vertical alignment)
+    void showAt(int menuRight, int cursorY);
 
     // Show a "rendering..." placeholder.
     void setLoading(const QString &exampleName);

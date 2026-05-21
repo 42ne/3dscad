@@ -35,17 +35,18 @@ ExamplePreviewPopup::ExamplePreviewPopup(QWidget *parent)
     layout->addWidget(m_nameLabel);
 }
 
-void ExamplePreviewPopup::showAt(const QPoint &globalPos)
+void ExamplePreviewPopup::showAt(int menuRight, int cursorY)
 {
-    // Position the popup to the right and slightly below the cursor/menu.
     const QSize sz = sizeHint();
-    QPoint pos = globalPos + QPoint(12, -sz.height() / 2);
+    const int gap = 4;
+    QPoint pos(menuRight + gap, cursorY - sz.height() / 2);
 
     // Keep inside the primary screen.
     if (const QScreen *screen = QApplication::primaryScreen()) {
         const QRect available = screen->availableGeometry();
-        if (pos.x() + sz.width() > available.right())
-            pos.setX(globalPos.x() - sz.width() - 12);
+        // If it doesn't fit to the right, don't flip — just clamp X so it stays
+        // visible (the menu is already on screen so there's always room on one side).
+        pos.setX(qMin(pos.x(), available.right() - sz.width()));
         pos.setY(qBound(available.top(), pos.y(), available.bottom() - sz.height()));
     }
 

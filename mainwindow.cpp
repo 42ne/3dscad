@@ -1607,10 +1607,12 @@ void MainWindow::populateExamplesMenu(QMenu *menu)
         });
 
         // Start the hover preview timer when this action is highlighted.
-        connect(action, &QAction::hovered, this, [this, filePath, name]() {
+        connect(action, &QAction::hovered, this, [this, filePath, name, menu]() {
             m_pendingPreviewFile = filePath;
             m_pendingPreviewName = name;
-            m_pendingPreviewPos  = QCursor::pos();
+            // Right edge of the menu in global coordinates — used as popup's X anchor.
+            m_pendingMenuRight   = menu->mapToGlobal(menu->rect().topRight()).x();
+            m_pendingCursorY     = QCursor::pos().y();
             m_exampleHoverTimer->start(); // restarts if already running
         });
     }
@@ -1631,7 +1633,7 @@ void MainWindow::onExampleHoverTimeout()
 {
     // Show a "loading" placeholder immediately so the user gets feedback.
     m_examplePreview->setLoading(m_pendingPreviewName);
-    m_examplePreview->showAt(QCursor::pos());
+    m_examplePreview->showAt(m_pendingMenuRight, QCursor::pos().y());
 
     // If a previous render is still running, let it finish — its result will be
     // discarded in onExampleThumbnailReady if the file no longer matches.

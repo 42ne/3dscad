@@ -118,8 +118,9 @@ private:
     QTimer                   *m_exampleHoverTimer   = nullptr;
     QFutureWatcher<QImage>   *m_thumbnailWatcher    = nullptr;
     QString                   m_pendingPreviewFile;
-    QPoint                    m_pendingPreviewPos;
     QString                   m_pendingPreviewName;
+    int                       m_pendingMenuRight    = 0;  // global X of menu's right edge
+    int                       m_pendingCursorY      = 0;  // global Y at hover time
 
     ViewportWidget *m_viewport = nullptr;
     SceneTreeGraphicsWidget *m_sceneTreeGraphics = nullptr;
