@@ -3,7 +3,6 @@
 
 #include "shapenode.h"
 
-#include <QFutureWatcher>
 #include <QHash>
 #include <QImage>
 #include <QObject>
@@ -12,10 +11,14 @@
 #include <QTimer>
 #include <QVector>
 
-// Manages async thumbnail renders for scene tree primitive nodes.
+// Manages thumbnail renders for scene tree primitive nodes.
 // After syncPrimitives() detects a changed shape, rendering is deferred
 // by RenderDelayMs so fast edits (dragging parameters) don't trigger
-// constant re-renders.  Results arrive via thumbnailsUpdated().
+// constant re-renders. Results arrive via thumbnailsUpdated().
+//
+// Rendering happens on the GUI thread for now. The thumbnail path uses the
+// same CSG backend as the viewport, and running both concurrently is risky with
+// the optional Manifold backend, especially in 32-bit builds.
 class NodeThumbnailCache : public QObject
 {
     Q_OBJECT
@@ -26,7 +29,7 @@ public:
 
     // Compare current scene primitives with the last-rendered set.
     // Nodes with changed shapes are queued for re-render.
-    // nodeShapes: map from tree-node id → evaluated ShapeNode.
+    // nodeShapes: map from tree-node id to evaluated ShapeNode.
     void syncPrimitives(const QHash<int, ShapeNode> &nodeShapes);
 
     // Return cached thumbnail for nodeId, or a null QImage if not yet ready.
@@ -38,20 +41,16 @@ signals:
 
 private slots:
     void onRenderTimerTimeout();
-    void onRenderFinished();
 
 private:
     static constexpr int RenderDelayMs = 2000; // debounce: render 2 s after last change
-    static constexpr int RetryDelayMs  =  300; // retry delay when a render is in progress
 
     QSize m_size;
-    QHash<int, QImage>    m_cache;        // nodeId → ready thumbnail
-    QHash<int, ShapeNode> m_pending;      // nodeId → shape queued for render
-    QHash<int, ShapeNode> m_inProgress;   // nodeId → shape currently being rendered
-    QHash<int, ShapeNode> m_lastRendered; // nodeId → shape that produced m_cache[id]
+    QHash<int, QImage> m_cache;           // nodeId to ready thumbnail
+    QHash<int, ShapeNode> m_pending;      // nodeId to shape queued for render
+    QHash<int, ShapeNode> m_lastRendered; // nodeId to shape that produced m_cache[id]
 
     QTimer *m_renderTimer = nullptr;
-    QFutureWatcher<QVector<QPair<int, QImage>>> *m_watcher = nullptr;
 };
 
 #endif // NODETHUMBNAILCACHE_H
