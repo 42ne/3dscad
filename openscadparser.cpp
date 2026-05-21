@@ -446,6 +446,38 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     return false; // not a primitive line at all
 }
 
+// Like parseOperationLine but matches translate/rotate/scale WITHOUT a trailing "{".
+// Used to handle the OpenSCAD brace-free single-child shorthand:
+//   translate([x, y, 0])
+//     sphere(r=5);
+static bool parseBraceFreeOperationLine(const QString &line,
+                                        SceneDocument::TreeNode::Operation *operation,
+                                        QVector3D *vector,
+                                        const QHash<QString, qreal> &varValues,
+                                        QStringList *expressions)
+{
+    static const QRegularExpression translateRe("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression rotateRe("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression scaleRe("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+
+    QRegularExpressionMatch m = translateRe.match(line);
+    if (m.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Translate;
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+    }
+    m = rotateRe.match(line);
+    if (m.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Rotate;
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+    }
+    m = scaleRe.match(line);
+    if (m.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Scale;
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+    }
+    return false;
+}
+
 // Returns true if the line starts with a keyword we know how to parse.
 // Used to distinguish "known-but-invalid" from "completely unknown".
 static bool startsWithKnownKeyword(const QString &line)
@@ -594,6 +626,68 @@ static bool parseBlock(ParserState *state,
             if (errorMessage) *errorMessage = msg;
             state->errorLine = current.number;
             return false;
+        }
+
+        // ── Brace-free single-child transform (OpenSCAD shorthand) ──────────
+        // e.g.  translate([x, y, 0])
+        //         cylinder(h=1, r=2, center=true);
+        {
+            SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
+            QVector3D bfVec;
+            QStringList bfExprs;
+            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state->variableValues, &bfExprs)) {
+                SceneDocument::TreeNode bfGroup = makeGroupNode(bfOp, state);
+                if (bfOp == SceneDocument::TreeNode::Translate) bfGroup.position = bfVec;
+                else if (bfOp == SceneDocument::TreeNode::Rotate)  bfGroup.rotation = bfVec;
+                else if (bfOp == SceneDocument::TreeNode::Scale)   bfGroup.scale    = bfVec;
+                bfGroup.transformExpressions = bfExprs;
+                parent->children.append(bfGroup);
+                SceneDocument::TreeNode *innermost = &parent->children.last();
+
+                // Chain additional consecutive brace-free transforms
+                while (state->index < state->lines.size()) {
+                    const ParsedLine &peek = state->lines[state->index];
+                    SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
+                    QVector3D chainVec;
+                    QStringList chainExprs;
+                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state->variableValues, &chainExprs))
+                        break;
+                    ++state->index;
+                    SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, state);
+                    if (chainOp == SceneDocument::TreeNode::Translate) chainGroup.position = chainVec;
+                    else if (chainOp == SceneDocument::TreeNode::Rotate)  chainGroup.rotation = chainVec;
+                    else if (chainOp == SceneDocument::TreeNode::Scale)   chainGroup.scale    = chainVec;
+                    chainGroup.transformExpressions = chainExprs;
+                    innermost->children.append(chainGroup);
+                    innermost = &innermost->children.last();
+                }
+
+                // Parse the single following child statement into the innermost group
+                if (state->index < state->lines.size()) {
+                    const ParsedLine childLine = state->lines[state->index++];
+                    const QString &ct = childLine.text;
+                    QString cc, ca;
+                    if (parseModuleCallLine(ct, &cc, &ca)) {
+                        innermost->children.append(makeModuleCallNode(0, cc, ca, state));
+                    } else {
+                        ShapeNode cs;
+                        QString cpe;
+                        if (parsePrimitiveLine(ct, &cs, state, &cpe)) {
+                            state->shapes.append(cs);
+                            innermost->children.append(makePrimitiveNode(cs, state));
+                        } else if (!cpe.isEmpty()) {
+                            if (errorMessage) *errorMessage = cpe.arg(childLine.number);
+                            state->errorLine = childLine.number;
+                            return false;
+                        } else if (ct.endsWith('{')) {
+                            if (!parseBlock(state, innermost, true, errorMessage))
+                                return false;
+                        }
+                        // else: unknown single-line child, skip
+                    }
+                }
+                continue;
+            }
         }
 
         // ── Known keyword that none of the above caught — hard error ──────
@@ -852,6 +946,66 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 *errorMessage = primitiveError.arg(current.number);
             if (errorLine) *errorLine = current.number;
             return false;
+        }
+
+        // Brace-free single-child transform at top level.
+        {
+            SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
+            QVector3D bfVec;
+            QStringList bfExprs;
+            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state.variableValues, &bfExprs)) {
+                ++state.index;
+                SceneDocument::TreeNode bfGroup = makeGroupNode(bfOp, &state);
+                if (bfOp == SceneDocument::TreeNode::Translate) bfGroup.position = bfVec;
+                else if (bfOp == SceneDocument::TreeNode::Rotate)  bfGroup.rotation = bfVec;
+                else if (bfOp == SceneDocument::TreeNode::Scale)   bfGroup.scale    = bfVec;
+                bfGroup.transformExpressions = bfExprs;
+                sceneNode.children.append(bfGroup);
+                SceneDocument::TreeNode *innermost = &sceneNode.children.last();
+
+                while (state.index < state.lines.size()) {
+                    const ParsedLine &peek = state.lines[state.index];
+                    SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
+                    QVector3D chainVec;
+                    QStringList chainExprs;
+                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state.variableValues, &chainExprs))
+                        break;
+                    ++state.index;
+                    SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, &state);
+                    if (chainOp == SceneDocument::TreeNode::Translate) chainGroup.position = chainVec;
+                    else if (chainOp == SceneDocument::TreeNode::Rotate)  chainGroup.rotation = chainVec;
+                    else if (chainOp == SceneDocument::TreeNode::Scale)   chainGroup.scale    = chainVec;
+                    chainGroup.transformExpressions = chainExprs;
+                    innermost->children.append(chainGroup);
+                    innermost = &innermost->children.last();
+                }
+
+                if (state.index < state.lines.size()) {
+                    const ParsedLine childLine = state.lines[state.index++];
+                    const QString &ct = childLine.text;
+                    QString cc, ca;
+                    if (parseModuleCallLine(ct, &cc, &ca)) {
+                        innermost->children.append(makeModuleCallNode(0, cc, ca, &state));
+                    } else {
+                        ShapeNode cs;
+                        QString cpe;
+                        if (parsePrimitiveLine(ct, &cs, &state, &cpe)) {
+                            state.shapes.append(cs);
+                            innermost->children.append(makePrimitiveNode(cs, &state));
+                        } else if (!cpe.isEmpty()) {
+                            if (errorMessage) *errorMessage = cpe.arg(childLine.number);
+                            if (errorLine) *errorLine = childLine.number;
+                            return false;
+                        } else if (ct.endsWith('{')) {
+                            if (!parseBlock(&state, innermost, true, errorMessage)) {
+                                if (errorLine) *errorLine = state.errorLine;
+                                return false;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
         }
 
         // Known keyword that none of the above matched — hard error.
