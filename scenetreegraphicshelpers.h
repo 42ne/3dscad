@@ -39,7 +39,7 @@ constexpr qreal PrimitiveParamLabelArea = 28.0; // "X =" prefix before the expre
 constexpr qreal VariableHeight = 26.0;
 constexpr qreal PrimitiveIconSize = 34.0;
 constexpr qreal GroupMinWidth = 108.0;       // was 128
-constexpr qreal GroupModuleMinWidth = 116.0; // was 136
+constexpr qreal GroupModuleMinWidth = 150.0;
 constexpr qreal GroupWideMinWidth = 140.0;   // was 164
 constexpr qreal GroupHeaderHeight = 28.0;
 constexpr qreal TransformHeaderWidth = 94.0; // was 112 — shorter transform headers

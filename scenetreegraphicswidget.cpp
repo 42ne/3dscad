@@ -896,7 +896,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     int moduleParameterCount = 0;
     qreal moduleParameterSeparatorY = 0.0;
     qreal moduleCallTemplateLabelY = 0.0;
-    qreal moduleBodyLabelY = 0.0;
     QRectF moduleCallTemplateRect;
     QVector<ModuleCallParam> moduleCallTemplateParams;
 
@@ -934,7 +933,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         maxChildWidth = qMax(maxChildWidth, moduleCallTemplateRect.width());
         childTopLeft.ry() += moduleCallTemplateRect.height() + ChildGap;
 
-        moduleBodyLabelY = childTopLeft.y() + 4.0;
         childTopLeft.ry() += labelSpace + ChildGap;
         for (const SceneDocument::TreeNode &child : node.children) {
             if (!(child.type == SceneDocument::TreeNode::Variable && child.isParameter))
@@ -1011,7 +1009,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         callLabel->setBrush(QColor(84, 95, 116));
         if (callLabel->boundingRect().width() > labelRight - (rect.left() + GroupPadding))
             callLabel->setScale(qMax<qreal>(0.72, (labelRight - rect.left() - GroupPadding) / callLabel->boundingRect().width()));
-        callLabel->setPos(rect.left() + GroupPadding, moduleCallTemplateLabelY);
+        const qreal callLabelY = qMax(moduleCallTemplateLabelY,
+                                      moduleCallTemplateRect.top() - callLabel->boundingRect().height() - 3.0);
+        callLabel->setPos(rect.left() + GroupPadding, callLabelY);
         callLabel->setZValue(depth * 10.0 + 8.0);
 
         SceneDocument::TreeNode callTemplate;
@@ -1051,12 +1051,15 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                   node.id, true, node.moduleName});
         }
 
+        const qreal bodyTop = moduleCallTemplateRect.bottom() + ChildGap + 4.0;
         auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
         bodyLabel->setBrush(QColor(84, 95, 116));
-        if (moduleBodyLabelY + bodyLabel->boundingRect().height() > rect.bottom() - GroupPadding)
-            moduleBodyLabelY = rect.bottom() - GroupPadding - bodyLabel->boundingRect().height();
-        bodyLabel->setPos(rect.left() + GroupPadding, moduleBodyLabelY);
-        bodyLabel->setZValue(depth * 10.0 + 8.0);
+        if (bodyTop + bodyLabel->boundingRect().height() <= rect.bottom() - GroupPadding) {
+            bodyLabel->setPos(rect.left() + GroupPadding, bodyTop);
+            bodyLabel->setZValue(depth * 10.0 + 8.0);
+        } else {
+            delete bodyLabel;
+        }
 
         auto *separator = m_graphicsScene->addLine(rect.left() + GroupPadding,
                                                   moduleParameterSeparatorY,
