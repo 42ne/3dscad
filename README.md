@@ -132,6 +132,10 @@ mingw32-make
 Use `.\scripts\build-manifold.ps1 -Arch 32` for a 32-bit Qt kit or
 `.\scripts\build-manifold.ps1 -Arch 64` for a 64-bit Qt kit. The default is 64-bit.
 
+There is also a small GUI wrapper at `tools/manifoldbuilder` for running the
+same Manifold build script without typing the PowerShell command. See
+[docs/manifoldbuilder.md](docs/manifoldbuilder.md).
+
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 
 The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, and contact shadows are drawn through OpenGL shader paths with depth testing. Gizmos, helper overlays, text, CPU-side projection, and the pick buffer still reuse the existing software path, so large performance gains are not expected yet.

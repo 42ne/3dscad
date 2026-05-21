@@ -236,6 +236,25 @@ Key components:
 
 See [docs/sfxbuilder.md](docs/sfxbuilder.md) for end-user usage instructions.
 
+### manifoldbuilder (`tools/manifoldbuilder/`)
+
+A standalone Qt Widgets application that runs the optional Manifold backend
+build through `scripts/build-manifold.ps1`.
+
+Key components:
+
+- `MainWindow` - configuration form with auto-detected repository root and Qt
+  root, architecture selector, optional clean-build checkbox, derived script and
+  output paths, build/stop buttons, and a streaming log panel.
+- `QProcess` - starts `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+  scripts/build-manifold.ps1` with `-QtRoot`, `-Arch`, and `-Generator`
+  arguments. The working directory is the repository root.
+- The tool deletes only `build/manifold-build-<arch>` when clean build is
+  enabled. It does not delete `build/manifold-src`, so the downloaded Manifold
+  checkout is reused.
+
+See [docs/manifoldbuilder.md](docs/manifoldbuilder.md) for usage instructions.
+
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
