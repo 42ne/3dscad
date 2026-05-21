@@ -744,7 +744,10 @@ QSizeF previewSizeForTool(const QString &tool)
 bool isVariableToolName(const QString &tool)
 {
     const QString normalized = tool.toLower();
-    return normalized == QStringLiteral("var") || normalized == QStringLiteral("variable");
+    return normalized == QStringLiteral("var")
+           || normalized == QStringLiteral("variable")
+           || normalized == QStringLiteral("par")
+           || normalized == QStringLiteral("parameter");
 }
 
 ShapeNode::Type primitiveTypeForTool(const QString &tool)

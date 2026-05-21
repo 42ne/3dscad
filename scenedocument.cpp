@@ -612,9 +612,62 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex, bool moduleParameterZone)
 {
+    // Snapshot the variable's current state before moving so we can detect
+    // whether its isParameter flag changed and auto-rename accordingly.
+    const TreeNode *before = m_tree.nodeById(nodeId);
+    const bool wasParameter = before && before->type == TreeNode::Variable
+                              ? before->isParameter : false;
+    const QString oldName = before ? before->variableName : QString();
+
     const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex, moduleParameterZone);
     if (!moved)
         return false;
+
+    // Auto-rename when a variable is promoted to parameter or demoted back.
+    // Only touch names that match the auto-generated "varN" / "parN" pattern;
+    // user-chosen names (e.g. "radius", "height") are left untouched.
+    const TreeNode *after = m_tree.nodeById(nodeId);
+    if (after && after->type == TreeNode::Variable && after->isParameter != wasParameter) {
+        const bool nowIsParam = after->isParameter;
+        auto autoNumberSuffix = [](const QString &name, const QString &prefix, int *num) -> bool {
+            if (!name.startsWith(prefix))
+                return false;
+            const QString suffix = name.mid(prefix.size());
+            bool ok = false;
+            const int n = suffix.toInt(&ok);
+            if (ok && n > 0) {
+                if (num) *num = n;
+                return true;
+            }
+            return false;
+        };
+
+        QString newName;
+        if (nowIsParam) {
+            // varN → try to become parN (same number), fall back to next free parN
+            int num = 0;
+            if (autoNumberSuffix(oldName, QStringLiteral("var"), &num)) {
+                QSet<QString> taken;
+                collectVariableNames(m_tree.root(), &taken);
+                taken.remove(oldName);
+                const QString candidate = QStringLiteral("par%1").arg(num);
+                newName = taken.contains(candidate) ? uniqueParameterName() : candidate;
+            }
+        } else {
+            // parN → try to become varN (same number), fall back to next free varN
+            int num = 0;
+            if (autoNumberSuffix(oldName, QStringLiteral("par"), &num)) {
+                QSet<QString> taken;
+                collectVariableNames(m_tree.root(), &taken);
+                taken.remove(oldName);
+                const QString candidate = QStringLiteral("var%1").arg(num);
+                newName = taken.contains(candidate) ? uniqueVariableName() : candidate;
+            }
+        }
+
+        if (!newName.isEmpty())
+            m_tree.renameVariable(nodeId, newName);
+    }
 
     ensureTreeContainsAllShapes();
     synchronizeBooleanModesFromTree();
@@ -693,6 +746,20 @@ QString SceneDocument::uniqueVariableName() const
     QString candidate;
     do {
         candidate = QStringLiteral("var%1").arg(index++);
+    } while (names.contains(candidate));
+
+    return candidate;
+}
+
+QString SceneDocument::uniqueParameterName() const
+{
+    QSet<QString> names;
+    collectVariableNames(m_tree.root(), &names);
+
+    int index = 1;
+    QString candidate;
+    do {
+        candidate = QStringLiteral("par%1").arg(index++);
     } while (names.contains(candidate));
 
     return candidate;

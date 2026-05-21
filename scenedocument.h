@@ -77,6 +77,7 @@ private:
     void rebuildTreeFromShapes();
     TreeNode::Operation operationForBooleanMode(ShapeNode::BooleanMode booleanMode) const;
     QString uniqueVariableName() const;
+    QString uniqueParameterName() const;
     void reEvaluateDependentVariables(int changedId);
     void reEvaluateDependentExpressions();
     void reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues);

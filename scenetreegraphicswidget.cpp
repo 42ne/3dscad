@@ -1085,7 +1085,7 @@ void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, co
 QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNode &node) const
 {
     if (node.type == SceneDocument::TreeNode::Variable)
-        return QStringLiteral("var");
+        return node.isParameter ? QStringLiteral("par") : QStringLiteral("var");
     if (node.type == SceneDocument::TreeNode::ModuleCall)
         return QStringLiteral("call");
     if (node.type != SceneDocument::TreeNode::Primitive)

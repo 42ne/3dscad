@@ -187,13 +187,15 @@ public:
                      bool selected,
                      int activeNumberStart,
                      qreal opacity,
-                     qreal zValue)
+                     qreal zValue,
+                     bool isParameter = false)
         : m_rect(rect)
         , m_name(name)
         , m_expression(expression)
         , m_selected(selected)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_isParameter(isParameter)
     {
         setZValue(zValue);
     }
@@ -205,9 +207,16 @@ public:
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setOpacity(m_opacity);
 
-        const QColor accent(150, 116, 42);
+        // PAR uses indigo-blue palette; VAR uses amber palette.
+        const QColor accent     = m_isParameter ? QColor(52, 88, 172)   : QColor(150, 116, 42);
+        const QColor nameColor  = m_isParameter ? QColor(24, 36, 72)    : QColor(43, 37, 28);
+        const QColor eqColor    = m_isParameter ? QColor(58, 80, 140)   : QColor(104, 83, 48);
+        const QColor numBorder  = m_isParameter ? QColor(60, 100, 190)  : QColor(158, 126, 51);
+        const QColor numBorderA = m_isParameter ? QColor(40, 120, 220)  : QColor(220, 156, 26);
+        const QColor numFillA   = m_isParameter ? QColor(140, 190, 255, 205) : QColor(255, 220, 108, 205);
+        const QString badgeLabel = m_isParameter ? QStringLiteral("PAR") : QStringLiteral("VAR");
 
-        // VAR badge — small horizontal pill, vertically centered in VariableHeight
+        // Badge pill — vertically centered in VariableHeight
         const qreal badgeH = 13.0;
         const QRectF badgeRect(m_rect.left() + 6.0,
                                m_rect.top() + (VariableHeight - badgeH) * 0.5,
@@ -221,20 +230,20 @@ public:
             badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
             painter->setFont(badgeFont);
             painter->setPen(accent.darker(130));
-            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
-            painter->restore(); // font restored to scene default before badge
+            painter->drawText(badgeRect, Qt::AlignCenter, badgeLabel);
+            painter->restore();
         }
 
-        // Name, = and expression — all with the original painter font
+        // Name, = and expression
         const QFontMetricsF metrics(painter->font());
         const qreal nameW = metrics.horizontalAdvance(m_name);
 
-        painter->setPen(QColor(43, 37, 28));
+        painter->setPen(nameColor);
         painter->drawText(QRectF(m_rect.left() + 38.0, m_rect.top(), nameW, VariableHeight),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           m_name);
 
-        painter->setPen(QColor(104, 83, 48));
+        painter->setPen(eqColor);
         painter->drawText(QRectF(m_rect.left() + 38.0 + nameW + 4.0, m_rect.top(), 12.0, VariableHeight),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
@@ -248,11 +257,11 @@ public:
             paintRoundedPanel(painter,
                               span.rect,
                               4.0,
-                              QPen(active ? QColor(220, 156, 26) : QColor(158, 126, 51), active ? 2 : 1),
-                              QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 110)));
+                              QPen(active ? numBorderA : numBorder, active ? 2 : 1),
+                              QBrush(active ? numFillA : QColor(255, 255, 255, 110)));
         }
 
-        painter->setPen(QColor(104, 83, 48));
+        painter->setPen(eqColor);
         for (const ExpressionTextSpan &span : spans)
             painter->drawText(span.rect, Qt::AlignCenter, span.text);
     }
@@ -264,6 +273,7 @@ private:
     bool m_selected = false;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    bool m_isParameter = false;
 };
 
 class GroupCardItem final : public QGraphicsItem
@@ -679,7 +689,7 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
 {
     const int activeNumberStart = node.id == m_activeVariableNodeId ? m_activeVariableNumberStart : -1;
-    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression, node.id == m_selectedNodeId, activeNumberStart, 1.0, 5.0));
+    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression, node.id == m_selectedNodeId, activeNumberStart, 1.0, 5.0, node.isParameter));
 }
 
 void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
@@ -731,7 +741,9 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
 {
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
-    if (isVariableToolName(tool)) {
+    if (tool == QStringLiteral("par")) {
+        item = new VariableCardItem(rect, QStringLiteral("par"), QStringLiteral("0"), false, -1, 0.78, 58.0, true);
+    } else if (isVariableToolName(tool)) {
         item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0);
     } else if (tool == QStringLiteral("call")) {
         item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0);
