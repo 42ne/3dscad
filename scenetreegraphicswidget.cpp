@@ -1,4 +1,5 @@
 #include "scenetreegraphicswidget.h"
+#include "nodethumbnailcache.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenetreeinlinetextinput.h"
 #include "scenetreelayout.h"
@@ -348,6 +349,10 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
         advanceDropPreviewAnimation();
     });
+
+    m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
+    connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
+            this, &SceneTreeGraphicsWidget::refresh);
 }
 
 void SceneTreeGraphicsWidget::setSceneDocument(const SceneDocument *scene)
@@ -446,6 +451,7 @@ void SceneTreeGraphicsWidget::refresh()
     drawTreeOrPlaceholder();
     updateSceneRect();
     updateToolbarOverlay();
+    syncThumbnailCache();
 }
 
 void SceneTreeGraphicsWidget::resetGraphicsScene()
@@ -818,6 +824,7 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
     const QSizeF size = shape ? primitivePreviewSize(*shape) : QSizeF(PrimitiveWidth, PrimitiveHeight);
     const QRectF rect(topLeft, size);
     const QString label = labelForPrimitive(node.shapeId);
+    const QImage thumbnail = m_thumbnailCache ? m_thumbnailCache->thumbnail(node.id) : QImage();
 
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
@@ -832,7 +839,7 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
                           -1,
                           0,
                           -1)
-        .renderPrimitive(node, rect, label, shape);
+        .renderPrimitive(node, rect, label, shape, thumbnail);
 
     addNodeDragHandle(node.id, label, rect, rect, size);
     return rect;
@@ -2293,4 +2300,32 @@ ShapeNode::Type SceneTreeGraphicsWidget::typeForPrimitive(int shapeId) const
 
     const ShapeNode *shape = m_scene->shapeById(shapeId);
     return shape ? shape->type : ShapeNode::Cube;
+}
+
+// ---------------------------------------------------------------------------
+// Thumbnail cache helpers
+// ---------------------------------------------------------------------------
+
+void SceneTreeGraphicsWidget::syncThumbnailCache()
+{
+    if (!m_thumbnailCache || !m_scene)
+        return;
+
+    QHash<int, ShapeNode> primitiveShapes;
+    collectPrimitiveNodeShapes(m_scene->treeRoot(), &primitiveShapes);
+    m_thumbnailCache->syncPrimitives(primitiveShapes);
+}
+
+void SceneTreeGraphicsWidget::collectPrimitiveNodeShapes(
+    const SceneDocument::TreeNode &node,
+    QHash<int, ShapeNode> *out) const
+{
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = m_scene->shapeById(node.shapeId);
+        if (shape)
+            out->insert(node.id, *shape);
+        return; // primitives have no children
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectPrimitiveNodeShapes(child, out);
 }

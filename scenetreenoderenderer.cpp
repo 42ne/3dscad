@@ -5,6 +5,7 @@
 #include <QFontMetricsF>
 #include <QGraphicsItem>
 #include <QGraphicsScene>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -83,7 +84,8 @@ public:
                       int activeParamIndex,
                       int activeNumberStart,
                       qreal opacity,
-                      qreal zValue)
+                      qreal zValue,
+                      const QImage &thumbnail = QImage())
         : m_rect(rect)
         , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
@@ -91,6 +93,7 @@ public:
         , m_activeParamIndex(activeParamIndex)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_thumbnail(thumbnail)
     {
         setZValue(zValue);
     }
@@ -118,7 +121,12 @@ public:
             painter->drawEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0));
         }
 
-        paintPrimitiveIcon(painter, m_shape.type, iconRect);
+        if (!m_thumbnail.isNull()) {
+            // Draw the rendered 3-D thumbnail instead of the flat icon.
+            painter->drawImage(iconRect, m_thumbnail);
+        } else {
+            paintPrimitiveIcon(painter, m_shape.type, iconRect);
+        }
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
 
@@ -176,6 +184,7 @@ private:
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    QImage m_thumbnail;
 };
 
 class VariableCardItem final : public QGraphicsItem
@@ -675,11 +684,12 @@ SceneTreeNodeRenderer::SceneTreeNodeRenderer(QGraphicsScene *scene,
 void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
                                             const QRectF &rect,
                                             const QString &label,
-                                            const ShapeNode *shape)
+                                            const ShapeNode *shape,
+                                            const QImage &thumbnail)
 {
     const int activeParamIndex = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
     const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
-    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0));
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, thumbnail));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)

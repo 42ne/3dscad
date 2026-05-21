@@ -1355,11 +1355,11 @@ void ViewportWidget::paintGL()
 // ── Static thumbnail renderer ────────────────────────────────────────────────
 // Builds a rasterised preview image of a scene without any UI chrome.
 // Designed to be called from a background thread (all state is local).
-QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbnailSize)
+QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbnailSize,
+                                       const QColor &bgColor)
 {
-    const QColor bg(30, 32, 36);
     QImage image(thumbnailSize, QImage::Format_ARGB32_Premultiplied);
-    image.fill(bg);
+    image.fill(bgColor);
 
     const CsgPreview preview = buildCsgPreview(scene);
     if (preview.items.isEmpty())
