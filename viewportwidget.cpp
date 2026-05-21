@@ -493,17 +493,18 @@ static QVector3D rotationVectorForMode(ViewportWidget::DragMode dragMode, float 
     return QVector3D();
 }
 
-static QColor litColor(const QColor &baseColor, const QVector3D &normal, const QVector<SceneLight> &lights)
+static QColor litColor(const QColor &baseColor, const QVector3D &normal,
+                       const QVector<SceneLight> &lights, float ambient = 0.22f)
 {
-    float red = baseColor.redF() * 0.22f;
-    float green = baseColor.greenF() * 0.22f;
-    float blue = baseColor.blueF() * 0.22f;
+    float red   = baseColor.redF()   * ambient;
+    float green = baseColor.greenF() * ambient;
+    float blue  = baseColor.blueF()  * ambient;
 
     for (const SceneLight &light : lights) {
         const float amount = qMax(0.0f, QVector3D::dotProduct(normal, light.direction.normalized())) * light.intensity;
-        red += baseColor.redF() * light.color.redF() * amount;
+        red   += baseColor.redF()   * light.color.redF()   * amount;
         green += baseColor.greenF() * light.color.greenF() * amount;
-        blue += baseColor.blueF() * light.color.blueF() * amount;
+        blue  += baseColor.blueF()  * light.color.blueF()  * amount;
     }
 
     return QColor(
@@ -511,6 +512,20 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal, const Q
         clampColorChannel(green * 255.0f),
         clampColorChannel(blue * 255.0f),
         baseColor.alpha());
+}
+
+// Specialised lighting for tree-card thumbnails: strong key + warm rim from behind
+// to make silhouettes crisp; lower ambient for more contrast at small sizes.
+static QVector<SceneLight> thumbnailLights()
+{
+    return {
+        // Key: upper-left-front, warm white, punchy
+        { QVector3D(-0.40f, -0.30f, 1.0f).normalized(), QColor(255, 248, 225), 1.05f },
+        // Fill: right side, cool blue — prevents the shadow side going pure black
+        { QVector3D( 0.90f,  0.10f, 0.30f).normalized(), QColor(130, 185, 255), 0.22f },
+        // Rim: back-right at a low angle — catches top and right edges
+        { QVector3D( 0.55f,  0.85f, -0.10f).normalized(), QColor(255, 235, 195), 0.38f }
+    };
 }
 
 static QVector<SceneLight> viewportLightsForPreset(int preset)
@@ -1388,14 +1403,15 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
 
     const QVector3D cameraTarget = (bbMin + bbMax) * 0.5f;
     const float extent = (bbMax - bbMin).length();
-    // focalLength is 420 (matches projectWorldPoint); scale distance so the
-    // scene fills ~70 % of the shorter thumbnail dimension.
+    // Fill ~86 % of the shorter side so the shape sits close to the card edges.
+    // focalLength 420 matches projectWorldPoint's hardcoded value.
     const float shortSide = static_cast<float>(qMin(thumbnailSize.width(), thumbnailSize.height()));
-    const float cameraDistance = qMax(extent * 420.0f / (shortSide * 0.68f), 30.0f);
+    const float cameraDistance = qMax(extent * 420.0f / (shortSide * 0.86f), 20.0f);
 
     const float yaw   = -38.0f;
     const float pitch = -26.0f;
-    const QVector<SceneLight> lights = viewportLightsForPreset(0);
+    const QVector<SceneLight> lights = thumbnailLights();
+    constexpr float thumbnailAmbient = 0.14f; // darker shadows for crisper read
 
     auto project = [&](const QVector3D &world) {
         return projectWorldPoint(world, thumbnailSize, yaw, pitch, cameraDistance, cameraTarget);
@@ -1416,7 +1432,7 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
             tri.a      = a.point;  tri.depthA = a.depth;
             tri.b      = b.point;  tri.depthB = b.depth;
             tri.c      = c.point;  tri.depthC = c.depth;
-            tri.color  = litColor(baseColor.lighter(mt.shade), mt.normal, lights);
+            tri.color  = litColor(baseColor.lighter(mt.shade), mt.normal, lights, thumbnailAmbient);
             tri.shapeIndex = item.shapeIndex;
             triangles.append(tri);
         }
@@ -1428,6 +1444,41 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
     drawTrianglesWithDepth(&painter, triangles, thumbnailSize,
                            nullptr, &depthBuffer, &rasterBuffer);
     painter.end();
+
+    // -------------------------------------------------------------------
+    // Post-process: silhouette outline.
+    // Walk the rasterBuffer (transparent = background, opaque = geometry).
+    // Any geometry pixel adjacent to a transparent pixel is a silhouette
+    // edge — darken it in the final image to create a crisp 1-px outline.
+    // -------------------------------------------------------------------
+    {
+        const int W = thumbnailSize.width();
+        const int H = thumbnailSize.height();
+        // Check 2-pixel radius so the outline reads clearly at display size.
+        for (int y = 0; y < H; ++y) {
+            QRgb *mainRow = reinterpret_cast<QRgb *>(image.scanLine(y));
+            for (int x = 0; x < W; ++x) {
+                // Skip background pixels.
+                if (qAlpha(reinterpret_cast<const QRgb *>(rasterBuffer.constScanLine(y))[x]) == 0)
+                    continue;
+
+                // Check 4-connected neighbours for transparency.
+                bool edge =
+                    (x == 0   || qAlpha(reinterpret_cast<const QRgb *>(rasterBuffer.constScanLine(y))[x - 1]) == 0) ||
+                    (x == W-1 || qAlpha(reinterpret_cast<const QRgb *>(rasterBuffer.constScanLine(y))[x + 1]) == 0) ||
+                    (y == 0   || qAlpha(reinterpret_cast<const QRgb *>(rasterBuffer.constScanLine(y - 1))[x]) == 0) ||
+                    (y == H-1 || qAlpha(reinterpret_cast<const QRgb *>(rasterBuffer.constScanLine(y + 1))[x]) == 0);
+
+                if (edge) {
+                    const QRgb px = mainRow[x];
+                    // Darken edge pixel to ~35 % brightness for a dark contour.
+                    mainRow[x] = qRgb(qBound(0, int(qRed(px)   * 0.35f), 255),
+                                      qBound(0, int(qGreen(px) * 0.35f), 255),
+                                      qBound(0, int(qBlue(px)  * 0.35f), 255));
+                }
+            }
+        }
+    }
 
     return image;
 }
