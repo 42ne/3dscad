@@ -609,11 +609,7 @@ public:
                 for (const ExpressionTextSpan &span : spans)
                     painter->drawText(span.rect, Qt::AlignCenter, span.text);
 
-                qreal exprAdvance = metrics.horizontalAdvance(m_params[i].expression);
-                for (const QChar &c : m_params[i].expression)
-                    if (c == '+' || c == '-' || c == '*' || c == '/')
-                        exprAdvance += 6.0;
-                x += exprAdvance;
+                x += metrics.horizontalAdvance(m_params[i].expression);
 
                 if (i < m_params.size() - 1) {
                     const QString sep = QStringLiteral(", ");

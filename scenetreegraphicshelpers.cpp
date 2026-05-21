@@ -1,5 +1,6 @@
 #include "scenetreegraphicshelpers.h"
 
+#include <QApplication>
 #include <QBrush>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
@@ -255,7 +256,9 @@ QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidt
 QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics)
 {
     QVector<ExpressionTextSpan> spans;
-    const qreal operatorGap = 3.0;
+    // OpenSCAD expressions already have spaces around operators (e.g. "a + b"),
+    // so no extra gap is needed — the natural spaces provide visual separation.
+    const qreal operatorGap = 0.0;
     qreal x = textRect.left();
 
     const QString trimmed = expression.trimmed();
@@ -387,15 +390,12 @@ qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node)
     if (!isTransformOperation(node.operation))
         return 0.0;
 
+    const QFontMetricsF metrics(QApplication::font());
     qreal maxExpressionWidth = 0.0;
     for (int axis = 0; axis < 3; ++axis) {
         const QString expression = transformAxisExpression(node, axis);
-        int operatorCount = 0;
-        for (const QChar ch : expression) {
-            if (ch == QLatin1Char('+') || ch == QLatin1Char('-') || ch == QLatin1Char('*') || ch == QLatin1Char('/'))
-                ++operatorCount;
-        }
-        maxExpressionWidth = qMax(maxExpressionWidth, expression.size() * 7.0 + operatorCount * 6.0 + 8.0);
+        const qreal exprPx = metrics.horizontalAdvance(expression) + 8.0;
+        maxExpressionWidth = qMax(maxExpressionWidth, exprPx);
     }
 
     return qMax<qreal>(TransformHeaderWidth, TransformIconWidth + 4.0 + TransformParamLabelArea + maxExpressionWidth + 8.0);
@@ -566,10 +566,11 @@ QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &prim
 
 QSizeF primitivePreviewSize(const ShapeNode &shape)
 {
+    const QFontMetricsF metrics(QApplication::font());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
     qreal maxExprWidth = 0.0;
     for (const auto &control : controls) {
-        const qreal w = control.expression.size() * 7.0 + 8.0;
+        const qreal w = metrics.horizontalAdvance(control.expression) + 8.0;
         maxExprWidth = qMax(maxExprWidth, w);
     }
     const qreal width = qMax<qreal>(PrimitiveWidth,
@@ -643,40 +644,40 @@ QSizeF defaultPreviewSize()
 
 QSizeF variablePreviewSize(const QString &name, const QString &expression)
 {
-    const int nameChars = qMax(3, name.trimmed().size());
-    const int expressionChars = qMax(1, expression.trimmed().size());
-    int operatorCount = 0;
-    for (const QChar ch : expression) {
-        if (ch == QLatin1Char('+') || ch == QLatin1Char('-') || ch == QLatin1Char('*') || ch == QLatin1Char('/'))
-            ++operatorCount;
-    }
+    const QFontMetricsF metrics(QApplication::font());
+    const QString trimmedName = name.trimmed();
+    const QString trimmedExpr = expression.trimmed();
+
+    // Guarantee a minimum name width of ~3 chars so tiny names still look OK
+    const qreal nameWidth = qMax(metrics.horizontalAdvance(QStringLiteral("xxx")),
+                                 metrics.horizontalAdvance(trimmedName));
+    // Expression: actual advance + a little padding (operators add visual space in rendering)
+    const qreal exprWidth = qMax(metrics.horizontalAdvance(QStringLiteral("0")),
+                                 metrics.horizontalAdvance(trimmedExpr)) + 4.0;
 
     // Single-row: badge(38) + nameW + gap(4) + eq(12) + gap(2) + exprW + right_pad(6)
-    const qreal nameWidth = nameChars * 7.0;
-    const qreal exprWidth = expressionChars * 7.0 + operatorCount * 6.0 + 4.0;
     return QSizeF(qMax(PrimitiveWidth, 62.0 + nameWidth + exprWidth), VariableHeight);
-}
-
-QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params)
-{
-    int textChars = qMax(2, moduleName.trimmed().size()) + 2;
-    for (int i = 0; i < params.size(); ++i) {
-        textChars += params[i].name.size() + 3;
-        textChars += qMax(1, params[i].expression.trimmed().size());
-        if (i < params.size() - 1)
-            textChars += 2;
-    }
-    const qreal textWidth = textChars * 7.0 + 8.0;
-    return QSizeF(qMax(PrimitiveWidth, 42.0 + textWidth), VariableHeight);
 }
 
 static qreal moduleCallExprAdvance(const QString &expr, const QFontMetricsF &metrics)
 {
-    qreal w = metrics.horizontalAdvance(expr);
-    for (const QChar &c : expr)
-        if (c == '+' || c == '-' || c == '*' || c == '/')
-            w += 6.0;
-    return w;
+    // operatorGap is 0, so the actual advance is just the string width.
+    return metrics.horizontalAdvance(expr);
+}
+
+QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params)
+{
+    const QFontMetricsF metrics(QApplication::font());
+    // "moduleName(" + params + ")" — measure each piece with actual font
+    qreal textWidth = metrics.horizontalAdvance(moduleName.trimmed() + QStringLiteral("()"));
+    for (int i = 0; i < params.size(); ++i) {
+        textWidth += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
+        textWidth += moduleCallExprAdvance(params[i].expression.trimmed(), metrics);
+        if (i < params.size() - 1)
+            textWidth += metrics.horizontalAdvance(QStringLiteral(", "));
+    }
+    textWidth += 8.0; // a little right padding
+    return QSizeF(qMax(PrimitiveWidth, 42.0 + textWidth), VariableHeight);
 }
 
 QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect,
