@@ -15,6 +15,7 @@ class QTextEdit;
 class QLabel;
 class QPushButton;
 class QAction;
+class QByteArray;
 class QTimer;
 class QUndoStack;
 class ViewportWidget;
@@ -26,6 +27,9 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+
+protected:
+    bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
 
 private slots:
     void onExampleHoverTimeout();
