@@ -27,6 +27,7 @@
 #include <QSaveFile>
 #include <QSplitter>
 #include <QStringList>
+#include <QScrollBar>
 #include <QTextEdit>
 #include <QTextCharFormat>
 #include <QTextCursor>
@@ -1431,10 +1432,27 @@ void MainWindow::refreshProperties()
 
 void MainWindow::refreshOpenScadCode()
 {
+    // setPlainText resets the scroll position to the top — preserve it so that
+    // adjusting a parameter in the tree doesn't jump the code view away.
+    const int savedScroll = m_codeEditor->verticalScrollBar()->value();
     const QString code = OpenScadGenerator::generateWithSourceMap(m_scene, &m_openScadSourceRanges);
     m_codeEditor->setPlainText(code);
+    m_codeEditor->verticalScrollBar()->setValue(savedScroll);
     highlightOpenScadSelection();
     writeOpenScadPreview(false);
+}
+
+void MainWindow::scrollCodeEditorToShowCursor(const QTextCursor &cursor)
+{
+    if (!m_codeEditor || cursor.isNull())
+        return;
+    const QRect r = m_codeEditor->cursorRect(cursor);
+    const int vpH = m_codeEditor->viewport()->height();
+    if (r.top() < 0 || r.bottom() > vpH) {
+        QScrollBar *sb = m_codeEditor->verticalScrollBar();
+        // Place the target line roughly one-third from the top.
+        sb->setValue(sb->value() + r.top() - vpH / 3);
+    }
 }
 
 void MainWindow::applyCtrlParamHighlight()
@@ -1472,6 +1490,7 @@ void MainWindow::applyCtrlParamHighlight()
         sel.cursor = cursor;
         sel.format = fmt;
         m_codeEditor->setExtraSelections({sel});
+        scrollCodeEditorToShowCursor(cursor);
         return;
     }
 
@@ -1513,6 +1532,8 @@ void MainWindow::highlightOpenScadSelection()
 
     m_codeEditor->setExtraSelections(hasSelection ? QList<QTextEdit::ExtraSelection>{selection}
                                                   : QList<QTextEdit::ExtraSelection>{});
+    if (hasSelection)
+        scrollCodeEditorToShowCursor(selection.cursor);
 }
 
 void MainWindow::refreshCsgStatus()

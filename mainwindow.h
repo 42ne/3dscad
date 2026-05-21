@@ -7,6 +7,7 @@
 #include <QMainWindow>
 #include <QVector>
 
+class QTextCursor;
 class QTextEdit;
 class QLabel;
 class QPushButton;
@@ -79,6 +80,7 @@ private:
     QString examplesPath() const;
     void populateExamplesMenu(QMenu *menu);
     void applyCtrlParamHighlight();
+    void scrollCodeEditorToShowCursor(const QTextCursor &cursor);
 
     struct CtrlParamHighlight {
         bool    active        = false;
