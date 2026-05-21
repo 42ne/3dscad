@@ -71,18 +71,32 @@ QStringList splitAtTopLevelCommas(const QString &text)
     return result;
 }
 
-QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+// Resolves both named and positional call arguments against a module's parameter list.
+static QHash<QString, QString> resolveModuleArguments(
+    const QString &callArguments,
+    const SceneDocument::TreeNode &moduleNode)
 {
-    QHash<QString, QString> result;
-    for (const QString &part : splitAtTopLevelCommas(arguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal <= 0)
-            continue;
+    QStringList paramOrder;
+    for (const SceneDocument::TreeNode &child : moduleNode.children)
+        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
+            paramOrder.append(child.variableName);
 
-        const QString name = part.left(equal).trimmed();
-        const QString expression = part.mid(equal + 1).trimmed();
-        if (!name.isEmpty() && !expression.isEmpty())
-            result[name] = expression;
+    QHash<QString, QString> result;
+    int positionalIndex = 0;
+    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal > 0) {
+            const QString name = part.left(equal).trimmed();
+            const QString expr  = part.mid(equal + 1).trimmed();
+            if (!name.isEmpty() && !expr.isEmpty())
+                result[name] = expr;
+            // Named args don't consume positional slots in OpenSCAD
+        } else {
+            const QString expr = part.trimmed();
+            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
+                result[paramOrder[positionalIndex]] = expr;
+            ++positionalIndex;
+        }
     }
     return result;
 }
@@ -830,7 +844,7 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
     if (m_scene) {
         const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node.shapeId);
         if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
-            const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node.moduleCallArguments);
+            const QHash<QString, QString> overrides = resolveModuleArguments(node.moduleCallArguments, *modGroup);
             for (const SceneDocument::TreeNode &child : modGroup->children) {
                 if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
                     const QString expr = overrides.value(child.variableName,
@@ -1187,7 +1201,7 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
                     QVector<ModuleCallParam> params;
                     const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
                     if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
-                        const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node->moduleCallArguments);
+                        const QHash<QString, QString> overrides = resolveModuleArguments(node->moduleCallArguments, *modGroup);
                         for (const SceneDocument::TreeNode &paramNode : modGroup->children) {
                             if (paramNode.type != SceneDocument::TreeNode::Variable || !paramNode.isParameter)
                                 continue;
@@ -1770,7 +1784,7 @@ bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosit
                 continue;
 
             QVector<ModuleCallParam> params;
-            const QHash<QString, QString> overrides = parseNamedArgumentExpressions(node->moduleCallArguments);
+            const QHash<QString, QString> overrides = resolveModuleArguments(node->moduleCallArguments, *modGroup);
             for (const SceneDocument::TreeNode &pChild : modGroup->children) {
                 if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
                     const QString expr = overrides.value(pChild.variableName,

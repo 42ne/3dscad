@@ -686,18 +686,31 @@ static QStringList splitAtTopLevelCommas(const QString &text)
     return result;
 }
 
-static QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
+// Resolves both named and positional call arguments against a module's parameter list.
+static QHash<QString, QString> resolveModuleArguments(
+    const QString &callArguments,
+    const SceneDocument::TreeNode &moduleNode)
 {
-    QHash<QString, QString> result;
-    for (const QString &part : splitAtTopLevelCommas(arguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal <= 0)
-            continue;
+    QStringList paramOrder;
+    for (const SceneDocument::TreeNode &child : moduleNode.children)
+        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
+            paramOrder.append(child.variableName);
 
-        const QString name = part.left(equal).trimmed();
-        const QString expression = part.mid(equal + 1).trimmed();
-        if (!name.isEmpty() && !expression.isEmpty())
-            result[name] = expression;
+    QHash<QString, QString> result;
+    int positionalIndex = 0;
+    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal > 0) {
+            const QString name = part.left(equal).trimmed();
+            const QString expr  = part.mid(equal + 1).trimmed();
+            if (!name.isEmpty() && !expr.isEmpty())
+                result[name] = expr;
+        } else {
+            const QString expr = part.trimmed();
+            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
+                result[paramOrder[positionalIndex]] = expr;
+            ++positionalIndex;
+        }
     }
     return result;
 }
@@ -859,7 +872,7 @@ static void appendTreeHelpers(CsgPreview *preview,
                               inheritedMode,
                               variables,
                               groupStack,
-                              parseNamedArgumentExpressions(node.moduleCallArguments),
+                              resolveModuleArguments(node.moduleCallArguments, *module),
                               node.id);
         }
         return;

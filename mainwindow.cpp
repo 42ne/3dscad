@@ -122,6 +122,35 @@ static QHash<QString, QString> parseNamedArgumentExpressions(const QString &argu
     return result;
 }
 
+// Resolves both named and positional call arguments against a module's parameter list.
+static QHash<QString, QString> resolveModuleArguments(
+    const QString &callArguments,
+    const SceneDocument::TreeNode &moduleNode)
+{
+    QStringList paramOrder;
+    for (const SceneDocument::TreeNode &child : moduleNode.children)
+        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
+            paramOrder.append(child.variableName);
+
+    QHash<QString, QString> result;
+    int positionalIndex = 0;
+    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
+        const int equal = part.indexOf(QLatin1Char('='));
+        if (equal > 0) {
+            const QString name = part.left(equal).trimmed();
+            const QString expr  = part.mid(equal + 1).trimmed();
+            if (!name.isEmpty() && !expr.isEmpty())
+                result[name] = expr;
+        } else {
+            const QString expr = part.trimmed();
+            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
+                result[paramOrder[positionalIndex]] = expr;
+            ++positionalIndex;
+        }
+    }
+    return result;
+}
+
 static float normalizedRotationDegrees(float value)
 {
     while (value > 180.0f)
@@ -1137,7 +1166,10 @@ void MainWindow::onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId,
         return;
     }
 
-    const QHash<QString, QString> overrides = parseNamedArgumentExpressions(callNode->moduleCallArguments);
+    const SceneDocument::TreeNode *moduleGroupNode = m_scene.treeNodeById(callNode->shapeId);
+    const QHash<QString, QString> overrides = moduleGroupNode
+        ? resolveModuleArguments(callNode->moduleCallArguments, *moduleGroupNode)
+        : parseNamedArgumentExpressions(callNode->moduleCallArguments);
     QString expression = overrides.value(parameterNode->variableName,
                                          parameterNode->variableExpression.trimmed().isEmpty()
                                              ? QString::number(parameterNode->variableValue)
