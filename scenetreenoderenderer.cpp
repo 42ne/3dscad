@@ -243,17 +243,13 @@ public:
         const QColor numFillA   = SceneTreePalette::pillFillActive();
         const QString badgeLabel = m_isParameter ? QStringLiteral("PAR") : QStringLiteral("VAR");
 
-        // Row background — gives the card a clean surface both inside its group
-        // and when rendered as a drag-ghost outside the group panel.
-        // Semi-transparent so the group fill (or grid) shows through faintly.
+        // Row background — rounded card so it looks polished inside groups
+        // and as a standalone drag-ghost.
         {
             const QColor rowBg = SceneTreePalette::variableFill(m_isParameter, pt);
-            painter->save();
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(rowBg);
-            painter->setRenderHint(QPainter::Antialiasing, false);
-            painter->drawRect(m_rect);
-            painter->restore();
+            const QColor rowBorder = dark ? rowBg.lighter(148) : rowBg.darker(122);
+            paintRoundedPanel(painter, m_rect, 5.0,
+                              QPen(rowBorder, 1.0), QBrush(rowBg));
         }
 
         // Badge pill — vertically centred in VariableHeight.
@@ -380,18 +376,20 @@ public:
         // Body border: selected = golden; otherwise lighter above fill on dark themes.
         const QPen bodyBorderPen = m_selected
             ? QPen(QColor(255, 203, 87), 3)
-            : QPen(dark ? fill.lighter(165) : fill.darker(145), 2);
+            : QPen(dark ? fill.lighter(165) : fill.darker(145), 1.5);
 
         const QColor cTextPrimary = SceneTreePalette::textPrimary(pt);
         const QColor cTextMuted   = SceneTreePalette::textMuted(pt);
         const QColor cPillBorder  = SceneTreePalette::pillBorder(fill, pt);
         const QColor cPillFill    = SceneTreePalette::pillFill(pt);
 
-        // Shadow — slightly more prominent on dark themes to give depth.
+        // Soft multi-layer shadow — rounded so it matches the card shape.
         if (m_showShadow) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0, 0, 0, dark ? 55 : 38));
-            painter->drawRect(m_rect.translated(2.0, 2.0));
+            painter->setBrush(QColor(0, 0, 0, dark ? 16 : 11));
+            painter->drawRoundedRect(m_rect.adjusted(-1, 1, 4, 5), CornerRadius + 2.0, CornerRadius + 2.0);
+            painter->setBrush(QColor(0, 0, 0, dark ? 24 : 16));
+            painter->drawRoundedRect(m_rect.adjusted( 0, 1, 3, 4), CornerRadius + 1.0, CornerRadius + 1.0);
         }
 
         const QColor bodyFill = m_insertedPreview ? translucent(fill, qMin(fill.alpha() + 55, 230)) : fill;
@@ -445,16 +443,24 @@ private:
                                 const QColor &cTextPrimary, const QColor &cTextMuted,
                                 const QColor &cPillBorder, const QColor &cPillFill)
     {
-        const QRectF headerRect(m_rect.left() + 1.5,
-                                m_rect.top() + 1.5,
-                                m_rect.width() - 3.0,
-                                GroupHeaderHeight - 2.0);
-        // Header is slightly lighter than the body — more so for dark themes.
+        const QRectF headerRect(m_rect.left(), m_rect.top(),
+                                m_rect.width(), GroupHeaderHeight);
+        // Header fill clipped to the card outline: naturally follows the rounded top corners
+        // and presents a flat bottom edge (no bubble-inside-card effect).
         const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
         const QColor headerFill = m_insertedPreview
             ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
             : rawHeaderFill;
-        paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
+        {
+            painter->save();
+            QPainterPath cardClip;
+            cardClip.addRoundedRect(m_rect, CornerRadius, CornerRadius);
+            painter->setClipPath(cardClip);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(headerFill);
+            painter->drawRect(headerRect);
+            painter->restore();
+        }
 
         const qreal headerIconSize = m_operation == SceneDocument::TreeNode::Module
                                          ? PrimitiveIconSize - 6.0
@@ -504,6 +510,13 @@ private:
             paintLabel(painter, labelForOperation(m_operation),
                        m_rect.topLeft() + QPointF(52.0, 7.0), cTextPrimary);
         }
+
+        // Thin separator between header and body.
+        const QColor sepColor = dark ? fill.lighter(148) : fill.darker(120);
+        painter->setPen(QPen(sepColor, 1.0));
+        const qreal sepY = m_rect.top() + GroupHeaderHeight - 0.5;
+        painter->drawLine(QPointF(m_rect.left() + CornerRadius * 0.5, sepY),
+                          QPointF(m_rect.right() - CornerRadius * 0.5, sepY));
     }
 
     void paintVerticalHeader(QPainter *painter, const QColor &fill,
@@ -511,16 +524,31 @@ private:
                               const QColor &cTextPrimary, const QColor & /*cTextMuted*/,
                               const QColor &cPillBorder, const QColor &cPillFill)
     {
-        // Narrow icon-only stripe (left side, like PrimitiveCardWidth for shapes).
-        const QRectF iconBorderRect(m_rect.left() + 1.5,
-                                    m_rect.top() + 1.5,
-                                    TransformIconWidth - 2.0,
-                                    m_rect.height() - 3.0);
+        // Left icon stripe — clipped to card shape so it follows the rounded corners
+        // on the left side and has a flat right edge (no bubble-inside-card effect).
+        const QRectF iconBorderRect(m_rect.left(), m_rect.top(),
+                                    TransformIconWidth, m_rect.height());
         const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
         const QColor headerFill = m_insertedPreview
             ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
             : rawHeaderFill;
-        paintRoundedPanel(painter, iconBorderRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
+        {
+            painter->save();
+            QPainterPath cardClip;
+            cardClip.addRoundedRect(m_rect, CornerRadius, CornerRadius);
+            painter->setClipPath(cardClip);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(headerFill);
+            painter->drawRect(iconBorderRect);
+            painter->restore();
+        }
+
+        // Thin vertical separator between icon stripe and value area.
+        const QColor stripeSep = dark ? fill.lighter(148) : fill.darker(120);
+        painter->setPen(QPen(stripeSep, 1.0));
+        const qreal sepX = m_rect.left() + TransformIconWidth - 0.5;
+        painter->drawLine(QPointF(sepX, m_rect.top() + CornerRadius * 0.5),
+                          QPointF(sepX, m_rect.bottom() - CornerRadius * 0.5));
 
         const QRectF iconRect(m_rect.left() + 6.0, m_rect.top() + 7.0,
                                PrimitiveIconSize - 6.0, PrimitiveIconSize - 6.0);

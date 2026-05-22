@@ -619,16 +619,19 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         gripBg->setZValue(25.0);
         m_treeItems.append(gripBg);
 
-        // 4 grip dots centred in the strip.
+        // 2×3 grip-dot grid centred in the strip (matches reference design).
+        const qreal cx = gripRect.center().x();
         const qreal cy = gripRect.center().y();
-        const qreal startX = gripRect.center().x() - 10.5;
-        const QColor dotCol(128, 142, 165, 200);
-        for (int i = 0; i < 4; ++i) {
-            const qreal x = startX + i * 7.0;
-            auto *dot = m_graphicsScene->addEllipse(x - 1.5, cy - 1.5, 3.0, 3.0,
-                                                    QPen(Qt::NoPen), QBrush(dotCol));
-            dot->setZValue(26.0);
-            m_treeItems.append(dot);
+        const QColor dotCol(138, 152, 175, 210);
+        for (int col = 0; col < 2; ++col) {
+            for (int row = 0; row < 3; ++row) {
+                const qreal x = cx - 3.5 + col * 7.0;
+                const qreal y = cy - 7.0  + row * 7.0;
+                auto *dot = m_graphicsScene->addEllipse(x - 1.5, y - 1.5, 3.0, 3.0,
+                                                        QPen(Qt::NoPen), QBrush(dotCol));
+                dot->setZValue(26.0);
+                m_treeItems.append(dot);
+            }
         }
 
         // Record handle and block rect for hit-testing and magnetic snap.
