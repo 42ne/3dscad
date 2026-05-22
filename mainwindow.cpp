@@ -41,9 +41,11 @@
 #include <QTextCursor>
 #include <QTimer>
 #include <QToolButton>
+#include <QScreen>
 #include <QUndoStack>
 #include <QVariantAnimation>
 #include <QVBoxLayout>
+#include <QWindow>
 
 #include <functional>
 #include <cmath>
@@ -751,8 +753,21 @@ private:
 
     void toggleMaximized()
     {
-        if (QWidget *w = window())
-            w->isMaximized() ? w->showNormal() : w->showMaximized();
+        QWidget *w = window();
+        if (!w) return;
+        if (w->isMaximized()) {
+            w->showNormal();
+            return;
+        }
+        // ShowWindow(SW_SHOWMAXIMIZED) uses MonitorFromWindow() to pick the target
+        // monitor based on the window's current position.  For a frameless Qt window
+        // this can resolve to the primary monitor even when the window is visually on
+        // a secondary screen, causing the window to maximize there and all QMenu
+        // popups to appear on the primary monitor (invisible to the user).
+        // Moving the window onto the correct screen first fixes the resolution.
+        if (QScreen *screen = QApplication::screenAt(w->frameGeometry().center()))
+            w->move(screen->availableGeometry().topLeft());
+        w->showMaximized();
     }
 
     QLabel *m_titleLabel = nullptr;
@@ -790,31 +805,31 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
     if (!msg || msg->message != WM_NCHITTEST || isMaximized())
         return QMainWindow::nativeEvent(eventType, message, result);
 
-    const int resizeBorder = 8;
-    const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
-    const QRect frame = frameGeometry();
+    // WM_NCHITTEST lParam carries physical-pixel screen coordinates.
+    // frameGeometry() returns logical pixels, which differ on monitors whose DPI
+    // does not match the primary screen's DPI — causing incorrect border detection.
+    // Use GetWindowRect() instead, which also returns physical-pixel coordinates.
+    const QPoint physPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+    RECT wr;
+    if (!GetWindowRect(msg->hwnd, &wr))
+        return QMainWindow::nativeEvent(eventType, message, result);
 
-    const bool onLeft = globalPos.x() >= frame.left() && globalPos.x() < frame.left() + resizeBorder;
-    const bool onRight = globalPos.x() <= frame.right() && globalPos.x() > frame.right() - resizeBorder;
-    const bool onTop = globalPos.y() >= frame.top() && globalPos.y() < frame.top() + resizeBorder;
-    const bool onBottom = globalPos.y() <= frame.bottom() && globalPos.y() > frame.bottom() - resizeBorder;
+    // Scale the logical resize border (8 px) to physical pixels for this screen.
+    const int border = qMax(1, qRound(devicePixelRatioF() * 8.0));
 
-    if (onTop && onLeft)
-        *result = HTTOPLEFT;
-    else if (onTop && onRight)
-        *result = HTTOPRIGHT;
-    else if (onBottom && onLeft)
-        *result = HTBOTTOMLEFT;
-    else if (onBottom && onRight)
-        *result = HTBOTTOMRIGHT;
-    else if (onLeft)
-        *result = HTLEFT;
-    else if (onRight)
-        *result = HTRIGHT;
-    else if (onTop)
-        *result = HTTOP;
-    else if (onBottom)
-        *result = HTBOTTOM;
+    const bool onLeft   = physPos.x() >= wr.left   && physPos.x() < wr.left   + border;
+    const bool onRight  = physPos.x() <= wr.right   && physPos.x() > wr.right  - border;
+    const bool onTop    = physPos.y() >= wr.top     && physPos.y() < wr.top    + border;
+    const bool onBottom = physPos.y() <= wr.bottom  && physPos.y() > wr.bottom - border;
+
+    if (onTop && onLeft)          *result = HTTOPLEFT;
+    else if (onTop && onRight)    *result = HTTOPRIGHT;
+    else if (onBottom && onLeft)  *result = HTBOTTOMLEFT;
+    else if (onBottom && onRight) *result = HTBOTTOMRIGHT;
+    else if (onLeft)              *result = HTLEFT;
+    else if (onRight)             *result = HTRIGHT;
+    else if (onTop)               *result = HTTOP;
+    else if (onBottom)            *result = HTBOTTOM;
     else
         return QMainWindow::nativeEvent(eventType, message, result);
 
