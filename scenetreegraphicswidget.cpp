@@ -375,6 +375,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
     , m_graphicsScene(createTreeGraphicsScene(this))
     , m_dropPreviewAnimationTimer(new QTimer(this))
+    , m_dragGapAnimationTimer(new QTimer(this))
 {
     const QFont treeFont = sceneTreeGraphicsFont();
     setFont(treeFont);
@@ -398,6 +399,11 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_dropPreviewAnimationTimer->setInterval(16);
     connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
         advanceDropPreviewAnimation();
+    });
+
+    m_dragGapAnimationTimer->setInterval(16);
+    connect(m_dragGapAnimationTimer, &QTimer::timeout, this, [this]() {
+        advanceDragGapAnimation();
     });
 
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
@@ -538,16 +544,29 @@ void SceneTreeGraphicsWidget::setTreeTheme(int theme)
 
 void SceneTreeGraphicsWidget::refresh()
 {
-    resetGraphicsScene();
+    rebuildScene(true);
+}
+
+void SceneTreeGraphicsWidget::rebuildScene(bool resetDropPreview)
+{
+    resetGraphicsScene(resetDropPreview);
     drawTreeOrPlaceholder();
     updateSceneRect();
     updateToolbarOverlay();
     syncThumbnailCache();
+    if (!resetDropPreview)
+        refreshDropPreviewAfterLayoutChange();
 }
 
-void SceneTreeGraphicsWidget::resetGraphicsScene()
+void SceneTreeGraphicsWidget::resetGraphicsScene(bool resetDropPreview)
 {
-    clearDropPreview();
+    if (resetDropPreview) {
+        clearDropPreview();
+    } else {
+        if (m_dropPreviewAnimationTimer)
+            m_dropPreviewAnimationTimer->stop();
+        m_dropPreviewItems.clear();
+    }
     m_graphicsScene->clear();
     m_canvasDragGhost = nullptr;  // scene->clear() already deleted it
     m_canvasDragItems.clear();    // scene->clear() deleted these too
@@ -635,7 +654,7 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         m_canvasMoveHandles.append({gripRect, fullBlock, child.id});
 
         // Advance auto-layout cursor (whether this node is custom-positioned or not).
-        autoPos.ry() += fullBlock.height() + ChildGap * 2.0;
+        autoPos.ry() += fullBlock.height() + activeChildGap() * 2.0;
     }
 
     const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
@@ -1022,6 +1041,21 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton && m_panning) {
         m_panning = false;
         setCursor(Qt::OpenHandCursor);
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton && m_dragActive) {
+        const QPointF scenePosition = mapToScene(event->pos());
+        const QString previewTool = m_dropPreviewTool;
+        const int movingNodeId = m_dropPreviewMovingNodeId;
+
+        finishDropPreview();
+        if (movingNodeId != 0)
+            handleTreeNodeDrop(movingNodeId, scenePosition);
+        else if (!previewTool.isEmpty())
+            handleToolDrop(previewTool, scenePosition);
+
         event->accept();
         return;
     }
@@ -1414,6 +1448,7 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
 
 QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth)
 {
+    const qreal gap = activeChildGap();
     QVector<ChildLayout> children;
     const bool transformGroup = isTransformOperation(node.operation);
     const qreal headerWidth = transformGroup ? transformHeaderWidthForNode(node) : 0.0;
@@ -1430,7 +1465,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
         children.append({childRect, previewToolForNode(child), child.id});
         maxChildWidth = qMax(maxChildWidth, childRect.width());
-        childTopLeft.ry() += childRect.height() + ChildGap;
+        childTopLeft.ry() += childRect.height() + gap;
     };
 
     if (node.operation == SceneDocument::TreeNode::Module) {
@@ -1443,8 +1478,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
             }
         }
         if (moduleParameterCount == 0)
-            childTopLeft.ry() += VariableHeight + ChildGap;
-        moduleParameterSeparatorY = childTopLeft.y() + ChildGap * 0.5;
+            childTopLeft.ry() += VariableHeight + gap;
+        moduleParameterSeparatorY = childTopLeft.y() + gap * 0.5;
 
         for (const SceneDocument::TreeNode &child : node.children) {
             if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
@@ -1454,13 +1489,13 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                 moduleCallTemplateParams.append({child.id, child.variableName, expr});
             }
         }
-        childTopLeft.ry() += 16.0 + ChildGap;
+        childTopLeft.ry() += 16.0 + gap;
         moduleCallTemplateLabelY = moduleParameterSeparatorY + 4.0;
         moduleCallTemplateRect = QRectF(childTopLeft, moduleCallPreviewSize(node.moduleName, moduleCallTemplateParams));
         maxChildWidth = qMax(maxChildWidth, moduleCallTemplateRect.width());
-        childTopLeft.ry() += moduleCallTemplateRect.height() + ChildGap;
+        childTopLeft.ry() += moduleCallTemplateRect.height() + gap;
 
-        childTopLeft.ry() += labelSpace + ChildGap;
+        childTopLeft.ry() += labelSpace + gap;
         for (const SceneDocument::TreeNode &child : node.children) {
             if (!(child.type == SceneDocument::TreeNode::Variable && child.isParameter))
                 drawChild(child);
@@ -1472,9 +1507,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
     qreal childrenHeight = children.isEmpty()
                                ? PrimitiveHeight
-                               : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
+                               : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - gap;
     if (node.operation == SceneDocument::TreeNode::Module)
-        childrenHeight = qMax(childrenHeight + 10.0, VariableHeight * 2.0 + ChildGap * 7.0);
+        childrenHeight = qMax(childrenHeight + 10.0, VariableHeight * 2.0 + gap * 7.0);
     if (node.operation == SceneDocument::TreeNode::Difference)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
 
@@ -1501,9 +1536,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const QRectF rect(topLeft, size);
     qreal cutSeparatorY = 0.0;
     if (node.operation == SceneDocument::TreeNode::Difference) {
-        cutSeparatorY = rect.top() + GroupHeaderHeight + GroupPadding + PrimitiveHeight + ChildGap * 0.5;
+        cutSeparatorY = rect.top() + GroupHeaderHeight + GroupPadding + PrimitiveHeight + gap * 0.5;
         if (!children.isEmpty())
-            cutSeparatorY = children.first().rect.bottom() + ChildGap * 0.5;
+            cutSeparatorY = children.first().rect.bottom() + gap * 0.5;
     }
     m_treeLayout.addGroup({rect, node.id, depth, node.operation, cutSeparatorY, moduleParameterSeparatorY, moduleParameterCount, children});
 
@@ -1579,7 +1614,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                   node.id, true, node.moduleName});
         }
 
-        const qreal bodyTop = moduleCallTemplateRect.bottom() + ChildGap + 4.0;
+        const qreal bodyTop = moduleCallTemplateRect.bottom() + gap + 4.0;
         auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
         bodyLabel->setBrush(QColor(84, 95, 116));
         if (bodyTop + bodyLabel->boundingRect().height() <= rect.bottom() - GroupPadding) {
@@ -2723,11 +2758,17 @@ QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)
 {
+    const bool dragJustStarted = !m_dragActive;
     m_dragActive = true;
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(true);
 
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
+    m_lastDropPreviewScenePosition = scenePosition;
+    m_lastDropPreviewSize = effectivePreviewSize;
+    if (dragJustStarted)
+        setDragGapTarget(3.6);
+
     const DropTarget target = dropTargetForToolAt(scenePosition,
                                                   effectivePreviewSize,
                                                   previewTool,
@@ -2767,10 +2808,66 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     m_dropPreviewCurrentTarget = DropTarget();
     m_dropPreviewTool.clear();
     m_dropPreviewMovingNodeId = 0;
+    m_lastDropPreviewScenePosition = QPointF();
+    m_lastDropPreviewSize = QSizeF();
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
+    setDragGapTarget(1.0);
+}
+
+qreal SceneTreeGraphicsWidget::activeChildGap() const
+{
+    return ChildGap * m_dragGapFactor;
+}
+
+void SceneTreeGraphicsWidget::setDragGapTarget(qreal target)
+{
+    target = qBound<qreal>(1.0, target, 4.0);
+    if (qFuzzyCompare(m_dragGapTarget, target))
+        return;
+
+    m_dragGapTarget = target;
+    if (!m_dragGapAnimationTimer)
+        return;
+
+    if (!m_dragGapAnimationTimer->isActive())
+        m_dragGapAnimationTimer->start();
+}
+
+void SceneTreeGraphicsWidget::advanceDragGapAnimation()
+{
+    const qreal delta = m_dragGapTarget - m_dragGapFactor;
+    if (qAbs(delta) < 0.035) {
+        m_dragGapFactor = m_dragGapTarget;
+        if (m_dragGapAnimationTimer)
+            m_dragGapAnimationTimer->stop();
+    } else {
+        m_dragGapFactor += delta * 0.28;
+    }
+
+    rebuildScene(m_dropPreviewActive ? false : true);
+}
+
+void SceneTreeGraphicsWidget::refreshDropPreviewAfterLayoutChange()
+{
+    if (!m_dropPreviewActive || m_dropPreviewTool.isEmpty())
+        return;
+
+    const QSizeF effectivePreviewSize = m_lastDropPreviewSize.isValid()
+                                            ? m_lastDropPreviewSize
+                                            : defaultPreviewSize();
+    const DropTarget target = dropTargetForToolAt(m_lastDropPreviewScenePosition,
+                                                  effectivePreviewSize,
+                                                  m_dropPreviewTool,
+                                                  m_dropPreviewMovingNodeId,
+                                                  m_dropPreviewMovingNodeId <= 0);
+    m_dropPreviewStartTarget = target;
+    m_dropPreviewTarget = target;
+    m_dropPreviewCurrentTarget = target;
+    m_dropPreviewProgress = 1.0;
+    renderDropPreviewFrame(target);
 }
 
 void SceneTreeGraphicsWidget::startDropPreviewAnimation(const DropTarget &target,
