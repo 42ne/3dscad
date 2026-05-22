@@ -170,6 +170,75 @@ void paintOperationIcon(QPainter *painter,
                         const QColor &accent,
                         qreal symbolInset)
 {
+    if (operation == SceneDocument::TreeNode::Union
+        || operation == SceneDocument::TreeNode::Difference
+        || operation == SceneDocument::TreeNode::For) {
+        QColor top;
+        QColor bottom;
+        QColor border;
+        QColor symbol;
+        if (operation == SceneDocument::TreeNode::Union) {
+            top = QColor(228, 249, 242);
+            bottom = QColor(98, 177, 151);
+            border = QColor(72, 138, 117);
+            symbol = QColor(25, 78, 68);
+        } else if (operation == SceneDocument::TreeNode::Difference) {
+            top = QColor(255, 238, 224);
+            bottom = QColor(226, 137, 102);
+            border = QColor(176, 96, 72);
+            symbol = QColor(96, 42, 36);
+        } else {
+            top = QColor(230, 238, 248);
+            bottom = QColor(118, 147, 177);
+            border = QColor(84, 112, 143);
+            symbol = QColor(34, 56, 82);
+        }
+
+        const QRectF badgeRect = rect.adjusted(1.0, 1.0, -1.0, -1.0);
+        const qreal radius = 4.0;
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 34));
+        painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), radius, radius);
+
+        QLinearGradient gradient(badgeRect.topLeft(), badgeRect.bottomLeft());
+        gradient.setColorAt(0.0, top);
+        gradient.setColorAt(0.55, top.lighter(106));
+        gradient.setColorAt(1.0, bottom);
+        painter->setPen(QPen(border, 1.0));
+        painter->setBrush(QBrush(gradient));
+        painter->drawRoundedRect(badgeRect, radius, radius);
+
+        painter->setPen(QPen(QColor(255, 255, 255, 120), 1.0));
+        painter->drawLine(QPointF(badgeRect.left() + radius, badgeRect.top() + 1.0),
+                          QPointF(badgeRect.right() - radius, badgeRect.top() + 1.0));
+
+        const QRectF symbolRect = badgeRect.adjusted(symbolInset, symbolInset, -symbolInset, -symbolInset);
+        QPen symbolPen(symbol, operation == SceneDocument::TreeNode::For ? 1.8 : 2.2);
+        symbolPen.setCapStyle(Qt::RoundCap);
+        symbolPen.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(symbolPen);
+        painter->setBrush(Qt::NoBrush);
+
+        const QPointF center = symbolRect.center();
+        if (operation == SceneDocument::TreeNode::Union) {
+            painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
+            painter->drawLine(center.x(), symbolRect.top(), center.x(), symbolRect.bottom());
+        } else if (operation == SceneDocument::TreeNode::Difference) {
+            painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
+        } else {
+            const QRectF arcRect = badgeRect.adjusted(7.0, 7.0, -7.0, -7.0);
+            painter->drawArc(arcRect, 35 * 16, 285 * 16);
+            const QPointF tip(arcRect.right() - 1.0, arcRect.center().y() - 2.0);
+            QPainterPath arrow;
+            arrow.moveTo(tip);
+            arrow.lineTo(tip + QPointF(-4.5, -2.8));
+            arrow.moveTo(tip);
+            arrow.lineTo(tip + QPointF(-1.0, -5.4));
+            painter->drawPath(arrow);
+        }
+        return;
+    }
+
     painter->setPen(QPen(accent.darker(135), 1));
     painter->setBrush(QColor(255, 255, 255, 135));
     painter->drawRoundedRect(rect, 3.0, 3.0);
