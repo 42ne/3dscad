@@ -76,6 +76,34 @@ void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF 
     painter->drawText(badgeRect, Qt::AlignCenter, number);
 }
 
+void paintHeaderGripDots(QPainter *painter, const QRectF &rect, const QColor &color)
+{
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(color);
+    const qreal dotR = 1.35;
+    const qreal gap = 5.0;
+    const QPointF center = rect.center();
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 2; ++col) {
+            const QPointF dot(center.x() - gap * 0.5 + col * gap,
+                              center.y() - gap + row * gap);
+            painter->drawEllipse(dot, dotR, dotR);
+        }
+    }
+}
+
+void paintHeaderChevron(QPainter *painter, const QRectF &headerRect, const QColor &color)
+{
+    const QPointF center(headerRect.right() - 18.0, headerRect.center().y() + 1.0);
+    QPainterPath path;
+    path.moveTo(center.x() - 4.5, center.y() - 2.0);
+    path.lineTo(center.x(), center.y() + 2.5);
+    path.lineTo(center.x() + 4.5, center.y() - 2.0);
+    painter->setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawPath(path);
+}
+
 void paintGlossBadge(QPainter *painter,
                      const QRectF &rect,
                      const QString &text,
@@ -483,10 +511,19 @@ private:
             painter->restore();
         }
 
+        const QRectF gripRect(m_rect.left() + 10.0,
+                              m_rect.top() + 6.0,
+                              16.0,
+                              GroupHeaderHeight - 12.0);
+        paintHeaderGripDots(painter,
+                            gripRect,
+                            dark ? QColor(205, 214, 228, 205) : QColor(86, 96, 112, 205));
+
+        const qreal iconLeft = m_rect.left() + 30.0;
         const qreal headerIconSize = m_operation == SceneDocument::TreeNode::Module
                                          ? PrimitiveIconSize - 6.0
                                          : PrimitiveIconSize;
-        const QRectF iconRect(m_rect.left() + 8.0,
+        const QRectF iconRect(iconLeft,
                               m_rect.top() + (m_operation == SceneDocument::TreeNode::Module ? 5.0 : 6.0),
                               headerIconSize,
                               headerIconSize);
@@ -502,7 +539,8 @@ private:
             // produced here match the rects produced by the hit-testing code in the widget.
             const QFontMetricsF metrics(sceneTreeGraphicsFont());
             painter->setPen(cTextPrimary);
-            painter->drawText(QRectF(m_rect.left() + 52.0, m_rect.top() + 7.0,
+            const qreal textLeft = iconRect.right() + 10.0;
+            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0,
                                      metrics.horizontalAdvance(prefix), 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, prefix);
 
@@ -529,8 +567,11 @@ private:
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
         } else {
             paintLabel(painter, labelForOperation(m_operation),
-                       m_rect.topLeft() + QPointF(52.0, 7.0), cTextPrimary);
+                       QPointF(iconRect.right() + 10.0, m_rect.top() + 7.0), cTextPrimary);
         }
+
+        if (!isTransformOperation(m_operation))
+            paintHeaderChevron(painter, headerRect, dark ? QColor(220, 228, 238, 210) : QColor(54, 64, 76, 210));
 
         // Thin separator between header and body.
         const QColor sepColor = dark ? fill.lighter(148) : fill.darker(120);

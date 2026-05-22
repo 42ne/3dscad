@@ -1486,8 +1486,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         const QString varName   = forLoopVariableName(node);
         const QString rangeExpr = forLoopRangeExpression(node);
         const QString prefix    = QStringLiteral("for (%1 = ").arg(varName);
-        // 52 = badge area, 8 = right padding inside card
-        forLoopHeaderMinWidth = 52.0
+        // 68 = grip + operation icon + label gap, 8 = right padding inside card
+        forLoopHeaderMinWidth = 68.0
             + fm.horizontalAdvance(prefix)
             + fm.horizontalAdvance(rangeExpr)
             + fm.horizontalAdvance(QStringLiteral(")"))

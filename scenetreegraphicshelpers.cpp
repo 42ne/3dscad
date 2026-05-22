@@ -453,7 +453,7 @@ QString forLoopRangeExpression(const SceneDocument::TreeNode &node)
 QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName, const QFontMetricsF &metrics)
 {
     const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
-    const qreal left = groupRect.left() + 52.0 + metrics.horizontalAdvance(prefix);
+    const qreal left = groupRect.left() + 68.0 + metrics.horizontalAdvance(prefix);
     return QRectF(left,
                   groupRect.top() + 7.0,
                   qMax<qreal>(0.0, groupRect.right() - left - 8.0),
