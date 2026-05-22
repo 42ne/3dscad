@@ -21,7 +21,8 @@ public:
     SceneTreePreviewRenderer(QGraphicsScene *scene,
                              QVector<QGraphicsItem *> *previewItems,
                              const SceneDocument *document,
-                             const SceneTreeLayout *layout);
+                             const SceneTreeLayout *layout,
+                             int theme = 0);
 
     void render(const DropTarget &target, const QString &previewTool, int movingNodeId);
     void clear();
@@ -29,12 +30,13 @@ public:
 private:
     void addExpandedGroupPreviews(const DropTarget &target);
     void addSourceGroupPreview(const DropTarget &target);
-    void addTargetGroupPreview(const DropTarget &target, const QString &previewTool);
+    void addTargetGroupPreview(const DropTarget &target, const QString &previewTool, int movingNodeId);
     bool addModuleTargetPreview(const DropTarget &target);
     void addPreviewExistingNode(int nodeId, const QRectF &rect);
     void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);
     void addPreviewChildren(const QVector<ChildLayout> &children, const QRectF &excludedRect = QRectF());
     const GroupHitArea *groupAreaForId(int groupId) const;
+    int depthForGroup(int groupId) const;
     QString previewToolForNode(const SceneDocument::TreeNode &node) const;
 
 private:
@@ -42,6 +44,7 @@ private:
     QVector<QGraphicsItem *> *m_previewItems = nullptr;
     const SceneDocument *m_document = nullptr;
     const SceneTreeLayout *m_layout = nullptr;
+    int m_theme = 0;
 };
 
 #endif

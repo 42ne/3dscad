@@ -2410,7 +2410,7 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     m_dropPreviewCurrentTarget = DropTarget();
     m_dropPreviewTool.clear();
     m_dropPreviewMovingNodeId = 0;
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout).clear();
+    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
@@ -2461,10 +2461,10 @@ void SceneTreeGraphicsWidget::advanceDropPreviewAnimation()
 void SceneTreeGraphicsWidget::renderDropPreviewFrame(const DropTarget &target)
 {
     m_dropPreviewCurrentTarget = target;
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout).clear();
+    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
     setTreeItemsVisible(true);
 
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout)
+    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme)
         .render(target, m_dropPreviewTool, m_dropPreviewMovingNodeId);
 }
 

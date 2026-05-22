@@ -844,21 +844,22 @@ qreal SceneTreeNodeRenderer::zForDepth(int depth, qreal offset) const
 void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
                                               QVector<QGraphicsItem *> *items,
                                               const QString &tool,
-                                              const QRectF &rect)
+                                              const QRectF &rect,
+                                              int theme)
 {
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
     if (tool == QStringLiteral("par")) {
-        item = new VariableCardItem(rect, QStringLiteral("par"), QStringLiteral("0"), false, -1, 0.78, 58.0, true);
+        item = new VariableCardItem(rect, QStringLiteral("par"), QStringLiteral("0"), false, -1, 0.78, 58.0, true, 0, theme);
     } else if (isVariableToolName(tool)) {
-        item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0);
+        item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0, false, 0, theme);
     } else if (tool == QStringLiteral("call")) {
         item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0);
     } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
-                                 0, 0); // preview always uses Frost theme
+                                 0, theme);
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
@@ -869,18 +870,31 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     appendPreviewItem(items, item);
 }
 
+void SceneTreeNodeRenderer::renderPreviewVariable(QGraphicsScene *scene,
+                                                  QVector<QGraphicsItem *> *items,
+                                                  const QString &name,
+                                                  const QString &expression,
+                                                  bool isParameter,
+                                                  const QRectF &rect,
+                                                  int theme)
+{
+    auto *item = new VariableCardItem(rect, name, expression, false, -1, 0.78, 58.0, isParameter, 0, theme);
+    scene->addItem(item);
+    appendPreviewItem(items, item);
+}
+
 void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
                                                QVector<QGraphicsItem *> *items,
                                                SceneDocument::TreeNode::Operation operation,
                                                const QRectF &rect,
-                                               qreal cutSeparatorY)
+                                               qreal cutSeparatorY,
+                                               int theme,
+                                               int depth)
 {
-    // Preview groups always use the default (Frost) theme so drag previews look
-    // consistent regardless of the active tree theme.
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
-                                   0, 0);
+                                   depth, theme);
     scene->addItem(item);
     appendPreviewItem(items, item);
 }

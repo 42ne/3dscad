@@ -124,19 +124,21 @@ void appendModuleCallChip(QGraphicsScene *scene,
 SceneTreePreviewRenderer::SceneTreePreviewRenderer(QGraphicsScene *scene,
                                                    QVector<QGraphicsItem *> *previewItems,
                                                    const SceneDocument *document,
-                                                   const SceneTreeLayout *layout)
+                                                   const SceneTreeLayout *layout,
+                                                   int theme)
     : m_scene(scene)
     , m_previewItems(previewItems)
     , m_document(document)
     , m_layout(layout)
+    , m_theme(theme)
 {
 }
 
-void SceneTreePreviewRenderer::render(const DropTarget &target, const QString &previewTool, int)
+void SceneTreePreviewRenderer::render(const DropTarget &target, const QString &previewTool, int movingNodeId)
 {
     addExpandedGroupPreviews(target);
     addSourceGroupPreview(target);
-    addTargetGroupPreview(target, previewTool);
+    addTargetGroupPreview(target, previewTool, movingNodeId);
 }
 
 void SceneTreePreviewRenderer::clear()
@@ -159,7 +161,18 @@ void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target
             continue;
         }
 
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, expandedGroup.operation, expandedRect, 0.0);
+        // Match to a GroupHitArea by overlapping center to recover the true depth.
+        int depth = 0;
+        if (m_layout) {
+            for (const GroupHitArea &area : m_layout->groupHitAreas()) {
+                if (area.operation == expandedGroup.operation
+                    && expandedRect.contains(area.rect.center())) {
+                    depth = area.depth;
+                    break;
+                }
+            }
+        }
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, expandedGroup.operation, expandedRect, 0.0, m_theme, depth);
         addPreviewChildren(expandedGroup.children, target.previewGroupRect);
     }
 }
@@ -180,12 +193,22 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target)
     }
 
     if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget && !sourceGroupCoveredByExpandedGroup) {
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY);
+        int sourceDepth = 0;
+        if (m_layout) {
+            for (const GroupHitArea &area : m_layout->groupHitAreas()) {
+                if (area.operation == target.sourceGroupOperation
+                    && target.sourceGroupRect.contains(area.rect.center())) {
+                    sourceDepth = area.depth;
+                    break;
+                }
+            }
+        }
+        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY, m_theme, sourceDepth);
         addPreviewChildren(target.sourceChildren);
     }
 }
 
-void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, const QString &previewTool)
+void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, const QString &previewTool, int movingNodeId)
 {
     // Only draw the target-group preview when there is an active drop target;
     // otherwise interpolation can leave a stale phantom group rectangle visible
@@ -200,7 +223,9 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
                                                       m_previewItems,
                                                       operation,
                                                       target.previewGroupRect,
-                                                      target.previewCutSeparatorY);
+                                                      target.previewCutSeparatorY,
+                                                      m_theme,
+                                                      depthForGroup(target.parentGroupId));
         }
     }
 
@@ -211,7 +236,25 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
                           m_previewItems,
                           target.slotMarkerRect.isValid() ? target.slotMarkerRect : target.placeholderRect,
                           88.0);
-        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, previewTool, target.placeholderRect);
+
+        // If an existing variable is being moved, show its real name/expression
+        // instead of the generic "var = 0" or "par = 0" stub.
+        bool renderedPlaceholder = false;
+        if (movingNodeId > 0 && target.placeholderRect.isValid() && m_document) {
+            const SceneDocument::TreeNode *moving = m_document->treeNodeById(movingNodeId);
+            if (moving && moving->type == SceneDocument::TreeNode::Variable) {
+                SceneTreeNodeRenderer::renderPreviewVariable(m_scene, m_previewItems,
+                                                             moving->variableName,
+                                                             moving->variableExpression,
+                                                             moving->isParameter,
+                                                             target.placeholderRect,
+                                                             m_theme);
+                renderedPlaceholder = true;
+            }
+        }
+        if (!renderedPlaceholder)
+            SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, previewTool, target.placeholderRect, m_theme);
+
         addDragFocusOutline(m_scene,
                             m_previewItems,
                             previewTool,
@@ -233,7 +276,9 @@ bool SceneTreePreviewRenderer::addModuleTargetPreview(const DropTarget &target)
                                               m_previewItems,
                                               SceneDocument::TreeNode::Module,
                                               target.previewGroupRect,
-                                              0.0);
+                                              0.0,
+                                              m_theme,
+                                              depthForGroup(target.parentGroupId));
 
     const GroupHitArea *area = groupAreaForId(target.parentGroupId);
     qreal separatorY = target.previewGroupRect.top() + GroupHeaderHeight + GroupPadding + 16.0 + VariableHeight + ChildGap + ChildGap * 0.5;
@@ -303,8 +348,16 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
         return;
 
     const QString tool = previewToolForNode(*node);
-    if (node->type == SceneDocument::TreeNode::Primitive || node->type == SceneDocument::TreeNode::Variable) {
-        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect);
+    if (node->type == SceneDocument::TreeNode::Variable) {
+        SceneTreeNodeRenderer::renderPreviewVariable(m_scene, m_previewItems,
+                                                     node->variableName,
+                                                     node->variableExpression,
+                                                     node->isParameter,
+                                                     rect, m_theme);
+        return;
+    }
+    if (node->type == SceneDocument::TreeNode::Primitive) {
+        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect, m_theme);
         return;
     }
 
@@ -320,7 +373,7 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
     if (area)
         cutSeparatorY = area->cutSeparatorY + (rect.top() - area->rect.top());
 
-    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY);
+    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY, m_theme, area ? area->depth : 0);
 
     if (!area)
         return;
@@ -338,7 +391,7 @@ void SceneTreePreviewRenderer::addPreviewTreeItem(const QString &tool, int nodeI
         return;
     }
 
-    SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect);
+    SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect, m_theme);
 }
 
 void SceneTreePreviewRenderer::addPreviewChildren(const QVector<ChildLayout> &children, const QRectF &excludedRect)
@@ -363,6 +416,12 @@ const SceneTreePreviewRenderer::GroupHitArea *SceneTreePreviewRenderer::groupAre
             return &area;
     }
     return nullptr;
+}
+
+int SceneTreePreviewRenderer::depthForGroup(int groupId) const
+{
+    const GroupHitArea *area = groupAreaForId(groupId);
+    return area ? area->depth : 0;
 }
 
 QString SceneTreePreviewRenderer::previewToolForNode(const SceneDocument::TreeNode &node) const

@@ -33,6 +33,10 @@ Implemented:
 - Graphics-tree move preview suppresses self-drop and removes the moved node from its source container preview while dragging.
 - Graphics-tree supports `Delete`/`Backspace` for the selected tree node through the same undoable commands as the classic tree.
 - The graphics tree uses a dark grid canvas with mouse panning and hidden scroll bars.
+- Graphics-tree nodes use semi-transparent glass-like fills so the grid shows through; nested group depth is expressed through an HSV hue rotation (18° per level) applied to each operation's base colour.
+- Four visual themes are available — Frost (cool mint), Glass (dark navy), Embers (warm amber), and Deep (emerald) — switchable from a circular swatch row at the bottom-left of the tree panel, styled like the viewport theme switcher.
+- Drag-preview animation respects the active theme throughout: group cards, variable cards, and the drop-slot placeholder all use the current palette instead of resetting to Frost.
+- The drop-slot placeholder shows the real name and expression of the node being moved (e.g. `radius = 15`) rather than the generic `var = 0` stub.
 - Scene-tree context menus expose group creation plus shape/group deletion near the selected node.
 - Scene-tree refreshes preserve selected groups when no primitive is selected.
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
@@ -181,7 +185,7 @@ contract and known limitations for correct tree reconstruction.
 - Mesh approximate fallback is not exact.
 - Box CSG only handles axis-aligned cubes.
 - No export pipeline yet.
-- The graphics tree is still a prototype: it coexists with the classic tree, its drag preview is still being refined, and its toolbar is intentionally embedded in the scene for experimentation.
+- The graphics tree is still a prototype: it coexists with the classic tree and its toolbar is intentionally embedded in the scene for experimentation.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
 
 ## Next Good Steps

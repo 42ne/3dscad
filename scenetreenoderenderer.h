@@ -60,12 +60,22 @@ public:
     static void renderPreviewTool(QGraphicsScene *scene,
                                   QVector<QGraphicsItem *> *items,
                                   const QString &tool,
-                                  const QRectF &rect);
+                                  const QRectF &rect,
+                                  int theme = 0);
+    static void renderPreviewVariable(QGraphicsScene *scene,
+                                      QVector<QGraphicsItem *> *items,
+                                      const QString &name,
+                                      const QString &expression,
+                                      bool isParameter,
+                                      const QRectF &rect,
+                                      int theme = 0);
     static void renderPreviewGroup(QGraphicsScene *scene,
                                    QVector<QGraphicsItem *> *items,
                                    SceneDocument::TreeNode::Operation operation,
                                    const QRectF &rect,
-                                   qreal cutSeparatorY = 0.0);
+                                   qreal cutSeparatorY = 0.0,
+                                   int theme = 0,
+                                   int depth = 0);
 
 private:
     qreal zForDepth(int depth, qreal offset) const;
