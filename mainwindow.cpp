@@ -805,31 +805,22 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
     if (!msg || msg->message != WM_NCHITTEST || isMaximized())
         return QMainWindow::nativeEvent(eventType, message, result);
 
-    // WM_NCHITTEST lParam carries physical-pixel screen coordinates.
-    // frameGeometry() returns logical pixels, which differ on monitors whose DPI
-    // does not match the primary screen's DPI — causing incorrect border detection.
-    // Use GetWindowRect() instead, which also returns physical-pixel coordinates.
-    const QPoint physPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
-    RECT wr;
-    if (!GetWindowRect(msg->hwnd, &wr))
-        return QMainWindow::nativeEvent(eventType, message, result);
+    // Convert the physical-pixel screen position to logical widget-local coordinates.
+    // mapFromGlobal handles DPI scaling and multi-monitor offsets automatically,
+    // matching exactly the approach used by the tree-debug tool (which works correctly
+    // on secondary monitors).
+    const QPoint pos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+    const QPoint local = mapFromGlobal(pos);
+    constexpr int B = 8;
 
-    // Scale the logical resize border (8 px) to physical pixels for this screen.
-    const int border = qMax(1, qRound(devicePixelRatioF() * 8.0));
-
-    const bool onLeft   = physPos.x() >= wr.left   && physPos.x() < wr.left   + border;
-    const bool onRight  = physPos.x() <= wr.right   && physPos.x() > wr.right  - border;
-    const bool onTop    = physPos.y() >= wr.top     && physPos.y() < wr.top    + border;
-    const bool onBottom = physPos.y() <= wr.bottom  && physPos.y() > wr.bottom - border;
-
-    if (onTop && onLeft)          *result = HTTOPLEFT;
-    else if (onTop && onRight)    *result = HTTOPRIGHT;
-    else if (onBottom && onLeft)  *result = HTBOTTOMLEFT;
-    else if (onBottom && onRight) *result = HTBOTTOMRIGHT;
-    else if (onLeft)              *result = HTLEFT;
-    else if (onRight)             *result = HTRIGHT;
-    else if (onTop)               *result = HTTOP;
-    else if (onBottom)            *result = HTBOTTOM;
+    if (local.x() < B && local.y() < B)                      *result = HTTOPLEFT;
+    else if (local.x() > width() - B && local.y() < B)       *result = HTTOPRIGHT;
+    else if (local.x() < B && local.y() > height() - B)      *result = HTBOTTOMLEFT;
+    else if (local.x() > width() - B && local.y() > height() - B) *result = HTBOTTOMRIGHT;
+    else if (local.y() < B)                                   *result = HTTOP;
+    else if (local.y() > height() - B)                        *result = HTBOTTOM;
+    else if (local.x() < B)                                   *result = HTLEFT;
+    else if (local.x() > width() - B)                         *result = HTRIGHT;
     else
         return QMainWindow::nativeEvent(eventType, message, result);
 
