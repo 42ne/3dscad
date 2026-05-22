@@ -444,10 +444,17 @@ void TreeDebugWindow::appendSnapshotForNode(QString &out,
     } else if (node.operation == N::For) {
         const QString varName  = forLoopVariableName(node);
         const QString rangeExp = forLoopRangeExpression(node);
-        out += indent + QStringLiteral("[For#%1  %2=[%3]]  card=%4\n")
+        // rangeExp already contains the brackets (e.g. "[0 : 10 : 100]").
+        out += indent + QStringLiteral("[For#%1  %2=%3]  card=%4\n")
             .arg(node.id).arg(varName).arg(rangeExp).arg(formatRectShort(groupRect));
         const auto ctrls = forLoopRangeNumberControls(groupRect, varName, rangeExp, fm);
-        out += indent + formatControls(ctrls) + QStringLiteral("\n");
+        for (const auto &c : ctrls) {
+            const QRectF &r = c.rect;
+            out += indent + QStringLiteral("  pill \"%1\"  start=%2 len=%3  hit=(%4,%5 %6×%7)\n")
+                .arg(c.text).arg(c.start).arg(c.length)
+                .arg(qRound(r.x())).arg(qRound(r.y()))
+                .arg(qRound(r.width())).arg(qRound(r.height()));
+        }
     } else if (isTransformOperation(node.operation)) {
         const qreal hw = transformHeaderWidthForNode(node);
         out += indent + QStringLiteral("[%1#%2]  card=%3\n")
@@ -550,9 +557,48 @@ void TreeDebugWindow::buildUi()
         logCursor(widget, scene);
     };
 
-    m_treeWidget->setToolDroppedCallback([this](const QString &tool, int parent, int idx) {
+    m_treeWidget->setToolDroppedCallback([this](const QString &tool, int parentId, int idx) {
+        // idx < -100000 → insert into module parameter zone (idx = -100000 - insertIndex)
+        const int insertIndex = (idx < -100000) ? (-idx - 100000) : idx;
+
+        // Create the actual node in the scene document.
+        if (tool == QStringLiteral("cube")) {
+            ShapeNode s; s.type = ShapeNode::Cube; s.size = QVector3D(10,10,10);
+            s.parameterExpressions = QStringList{QStringLiteral("10"),QStringLiteral("10"),QStringLiteral("10")};
+            m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("sphere")) {
+            ShapeNode s; s.type = ShapeNode::Sphere; s.radius = 5.0f;
+            s.parameterExpressions = QStringList{QStringLiteral("5")};
+            m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("cylinder")) {
+            ShapeNode s; s.type = ShapeNode::Cylinder; s.radius = 5.0f; s.height = 10.0f;
+            s.parameterExpressions = QStringList{QStringLiteral("5"),QStringLiteral("10")};
+            m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("module")) {
+            const int gId = m_scene.addGroup(SceneDocument::TreeNode::Module, 0, insertIndex);
+            m_scene.setModuleName(gId, QStringLiteral("module"));
+        } else {
+            // Boolean / transform / for group
+            SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
+            if      (tool == QStringLiteral("difference"))   op = SceneDocument::TreeNode::Difference;
+            else if (tool == QStringLiteral("intersection")) op = SceneDocument::TreeNode::Intersection;
+            else if (tool == QStringLiteral("translate"))    op = SceneDocument::TreeNode::Translate;
+            else if (tool == QStringLiteral("rotate"))       op = SceneDocument::TreeNode::Rotate;
+            else if (tool == QStringLiteral("scale"))        op = SceneDocument::TreeNode::Scale;
+            else if (tool == QStringLiteral("for"))          op = SceneDocument::TreeNode::For;
+            const int gId = m_scene.addGroup(op, parentId, insertIndex);
+            if (op == SceneDocument::TreeNode::Translate
+             || op == SceneDocument::TreeNode::Rotate
+             || op == SceneDocument::TreeNode::Scale) {
+                m_scene.updateGroupTransform(gId, {}, {}, QVector3D(1,1,1),
+                                             {QStringLiteral("0"),QStringLiteral("0"),QStringLiteral("0")});
+            } else if (op == SceneDocument::TreeNode::For) {
+                m_scene.updateForLoop(gId, QStringLiteral("i"), QStringLiteral("[0 : 1 : 10]"));
+            }
+        }
+
         log(QStringLiteral("[%1] toolDrop  \"%2\"  parent=#%3  idx=%4")
-            .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(tool).arg(parent).arg(idx));
+            .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(tool).arg(parentId).arg(insertIndex));
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after toolDrop"));
     });
