@@ -116,6 +116,40 @@ QVector<SceneTreeLayout::ChildLayout> childrenShiftedFromIndex(const QVector<Sce
     return shiftedChildren;
 }
 
+int insertionIndexForExpandedY(const QVector<QRectF> &childRects,
+                               qreal y,
+                               int minimumIndex,
+                               const QSizeF &previewSize,
+                               qreal gap)
+{
+    if (childRects.isEmpty())
+        return minimumIndex;
+
+    const int minIndex = qBound(0, minimumIndex, childRects.size());
+    const qreal previewHeight = qMax<qreal>(PrimitiveHeight, previewSize.height());
+    int bestSlot = minIndex;
+    qreal bestDistance = std::numeric_limits<qreal>::max();
+
+    for (int slot = minIndex; slot <= childRects.size(); ++slot) {
+        qreal slotTop = childRects.first().top();
+        if (slot == 0)
+            slotTop = childRects.first().top();
+        else if (slot >= childRects.size())
+            slotTop = childRects.last().bottom() + gap;
+        else
+            slotTop = childRects[slot - 1].bottom() + gap;
+
+        const qreal slotCenter = slotTop + previewHeight * 0.5;
+        const qreal distance = qAbs(y - slotCenter);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestSlot = slot;
+        }
+    }
+
+    return bestSlot;
+}
+
 QRectF placeholderRectForInsertIndexWithGap(const QRectF &contentRect,
                                             const QVector<QRectF> &childRects,
                                             int insertIndex,
@@ -286,7 +320,11 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         candidateChildRects.append(child.rect);
 
     target.zoneRect = contentRect;
-    target.insertIndex = insertionIndexForY(candidateChildRects, scenePosition.y());
+    target.insertIndex = insertionIndexForExpandedY(candidateChildRects,
+                                                    scenePosition.y(),
+                                                    0,
+                                                    effectivePreviewSize,
+                                                    insertionGap);
     QVector<QRectF> placementChildRects = candidateChildRects;
     int placementInsertIndex = target.insertIndex;
 
@@ -304,7 +342,11 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                      contentRect.top(),
                                      contentRect.width(),
                                      qMax<qreal>(PrimitiveHeight, bestArea->moduleParameterSeparatorY - contentRect.top()));
-            placementInsertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+            placementInsertIndex = insertionIndexForExpandedY(zoneChildRects,
+                                                              scenePosition.y(),
+                                                              0,
+                                                              effectivePreviewSize,
+                                                              insertionGap);
             target.insertIndex = placementInsertIndex;
         } else {
             for (int i = parameterCount; i < candidateChildren.size(); ++i)
@@ -314,7 +356,11 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                      bodyContentTop,
                                      contentRect.width(),
                                      qMax<qreal>(PrimitiveHeight, contentRect.bottom() - bodyContentTop));
-            placementInsertIndex = insertionIndexForY(zoneChildRects, scenePosition.y());
+            placementInsertIndex = insertionIndexForExpandedY(zoneChildRects,
+                                                              scenePosition.y(),
+                                                              0,
+                                                              effectivePreviewSize,
+                                                              insertionGap);
             target.insertIndex = parameterCount + placementInsertIndex;
         }
 
@@ -350,7 +396,11 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         const bool baseZone = scenePosition.y() < bestArea->cutSeparatorY;
         target.insertIndex = baseZone
                                  ? 0
-                                 : insertionIndexForY(candidateChildRects, scenePosition.y(), 1);
+                                 : insertionIndexForExpandedY(candidateChildRects,
+                                                              scenePosition.y(),
+                                                              1,
+                                                              effectivePreviewSize,
+                                                              insertionGap);
         target.zoneRect = baseZone
                               ? QRectF(contentRect.left(),
                                        contentRect.top(),
