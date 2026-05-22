@@ -2766,8 +2766,10 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     m_lastDropPreviewScenePosition = scenePosition;
     m_lastDropPreviewSize = effectivePreviewSize;
-    if (dragJustStarted)
-        setDragGapTarget(3.6);
+    // Do not rebuild the QGraphicsScene while a tree/tool item owns the mouse
+    // grab. Rebuilding deletes that item mid-drag and can leave nested drops
+    // frozen. Expanded insertion gaps need a non-destructive layout pass.
+    Q_UNUSED(dragJustStarted);
 
     const DropTarget target = dropTargetForToolAt(scenePosition,
                                                   effectivePreviewSize,
@@ -2814,7 +2816,10 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
-    setDragGapTarget(1.0);
+    if (m_dragGapAnimationTimer)
+        m_dragGapAnimationTimer->stop();
+    m_dragGapTarget = 1.0;
+    m_dragGapFactor = 1.0;
 }
 
 qreal SceneTreeGraphicsWidget::activeChildGap() const

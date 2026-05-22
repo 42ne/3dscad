@@ -522,9 +522,9 @@ private:
         const qreal iconLeft = m_rect.left() + 30.0;
         const qreal headerIconSize = m_operation == SceneDocument::TreeNode::Module
                                          ? PrimitiveIconSize - 6.0
-                                         : PrimitiveIconSize;
+                                         : PrimitiveIconSize - 4.0;
         const QRectF iconRect(iconLeft,
-                              m_rect.top() + (m_operation == SceneDocument::TreeNode::Module ? 5.0 : 6.0),
+                              m_rect.top() + (GroupHeaderHeight - headerIconSize) * 0.5,
                               headerIconSize,
                               headerIconSize);
         const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
