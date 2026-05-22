@@ -603,9 +603,12 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after toolDrop"));
     });
-    m_treeWidget->setTreeNodeDroppedCallback([this](int nodeId, int parent, int idx) {
-        log(QStringLiteral("[%1] nodeDrop  node=#%2  parent=#%3  idx=%4")
-            .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(nodeId).arg(parent).arg(idx));
+    m_treeWidget->setTreeNodeDroppedCallback([this](int nodeId, int parentId, int idx) {
+        const bool ok = m_scene.moveTreeNode(nodeId, parentId, idx);
+        log(QStringLiteral("[%1] nodeDrop  node=#%2  parent=#%3  idx=%4%5")
+            .arg(++m_eventSeq, 4, 10, QLatin1Char('0'))
+            .arg(nodeId).arg(parentId).arg(idx)
+            .arg(ok ? QString() : QStringLiteral("  ⚠ moveTreeNode failed")));
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after nodeDrop"));
     });
@@ -803,7 +806,8 @@ void TreeDebugWindow::buildUi()
     // Drop preview — fires every time cursor moves during drag; deduplicated on target change.
     m_treeWidget->setDropPreviewChangedCallback(
         [this, lastParent = -2, lastIdx = -2](
-            const QString &tool, int movingNodeId, const SceneTreeLayout::DropTarget &t) mutable
+            const QString &tool, int movingNodeId,
+            const SceneTreeLayout::DropTarget &t, const QPointF &scenePos) mutable
         {
             const int curParent = t.hasTarget ? t.parentGroupId : -1;
             const int curIdx    = t.hasTarget ? t.insertIndex   : -1;
@@ -812,6 +816,7 @@ void TreeDebugWindow::buildUi()
             lastParent = curParent;
             lastIdx    = curIdx;
 
+            // scenePos is the actual cursor from this exact event (no lag).
             const QString subject = movingNodeId > 0
                 ? QStringLiteral("node#%1").arg(movingNodeId)
                 : QStringLiteral("\"%1\"").arg(tool);
@@ -819,27 +824,31 @@ void TreeDebugWindow::buildUi()
             if (!t.hasTarget) {
                 log(QStringLiteral("[....] preview  %1  no-target  cursor=(%2,%3)")
                     .arg(subject)
-                    .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+                    .arg(qRound(scenePos.x())).arg(qRound(scenePos.y())));
                 return;
             }
 
             // What group type will the preview land in?
             const SceneDocument::TreeNode *parent = m_scene.treeNodeById(t.parentGroupId);
-            const QString parentType = parent
-                ? nodeTypeLabel(*parent)
-                : QStringLiteral("?");
+            const QString parentType = parent ? nodeTypeLabel(*parent) : QStringLiteral("?");
 
+            // group=   → the parent card that opens up to receive the item
+            // marker=  → the thin slot-line drawn at the insertion point
+            // ghost=   → the preview placeholder card rect
             log(QStringLiteral("[....] preview  %1  →%2#%3[%4]"
-                               "  previewRect=(%5,%6 %7×%8)"
-                               "  slot=(%9,%10 %11×%12)"
-                               "  cursor=(%13,%14)")
+                               "  marker=(%5,%6 %7×%8)"
+                               "  ghost=(%9,%10 %11×%12)"
+                               "  group=(%13,%14 %15×%16)"
+                               "  cursor=(%17,%18)")
                 .arg(subject)
                 .arg(parentType).arg(t.parentGroupId).arg(t.insertIndex)
-                .arg(qRound(t.previewGroupRect.x())).arg(qRound(t.previewGroupRect.y()))
-                .arg(qRound(t.previewGroupRect.width())).arg(qRound(t.previewGroupRect.height()))
+                .arg(qRound(t.slotMarkerRect.x())).arg(qRound(t.slotMarkerRect.y()))
+                .arg(qRound(t.slotMarkerRect.width())).arg(qRound(t.slotMarkerRect.height()))
                 .arg(qRound(t.placeholderRect.x())).arg(qRound(t.placeholderRect.y()))
                 .arg(qRound(t.placeholderRect.width())).arg(qRound(t.placeholderRect.height()))
-                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+                .arg(qRound(t.previewGroupRect.x())).arg(qRound(t.previewGroupRect.y()))
+                .arg(qRound(t.previewGroupRect.width())).arg(qRound(t.previewGroupRect.height()))
+                .arg(qRound(scenePos.x())).arg(qRound(scenePos.y())));
         });
 
     m_treeWidget->setTransformControlHoveredCallback(

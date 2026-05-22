@@ -431,7 +431,7 @@ void SceneTreeGraphicsWidget::setHoverScrollZoneChangedCallback(std::function<vo
 }
 
 void SceneTreeGraphicsWidget::setDropPreviewChangedCallback(
-    std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &)> callback)
+    std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &, const QPointF &)> callback)
 {
     m_dropPreviewChangedCallback = callback;
 }
@@ -2210,7 +2210,7 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                                                   movingNodeId <= 0);
 
     if (m_dropPreviewChangedCallback)
-        m_dropPreviewChangedCallback(previewTool, movingNodeId, target);
+        m_dropPreviewChangedCallback(previewTool, movingNodeId, target, scenePosition);
 
     startDropPreviewAnimation(target, previewTool, movingNodeId, LiveDropPreviewDurationMs);
 }
