@@ -134,6 +134,8 @@ private:
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void finishDropPreview();
     void clearDropPreview();
+    void setDropGapTarget(qreal target);
+    void advanceDropGapAnimation();
     void refreshDropPreviewAfterLayoutChange();
     void startDropPreviewAnimation(const DropTarget &target, const QString &previewTool, int movingNodeId, qreal durationMs);
     void advanceDropPreviewAnimation();
@@ -156,6 +158,7 @@ private:
     QVector<QGraphicsItem *> m_toolbarItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
+    QTimer *m_dropGapAnimationTimer = nullptr;
     std::function<void(const QString &, int, int)> m_toolDroppedCallback;
     std::function<void(int, int, int)> m_moduleCallDroppedCallback;
     std::function<void(int, int, int)> m_treeNodeDroppedCallback;
@@ -272,6 +275,8 @@ private:
     QSizeF m_lastDropPreviewSize;
     qreal m_dropPreviewProgress = 0.0;
     qreal m_dropPreviewDurationMs = 180.0;
+    qreal m_dropGapFactor = 1.0;
+    qreal m_dropGapTarget = 1.0;
     bool m_panning = false;
     bool m_dragActive = false;
     bool m_dropPreviewActive = false;

@@ -375,6 +375,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
     , m_graphicsScene(createTreeGraphicsScene(this))
     , m_dropPreviewAnimationTimer(new QTimer(this))
+    , m_dropGapAnimationTimer(new QTimer(this))
 {
     const QFont treeFont = sceneTreeGraphicsFont();
     setFont(treeFont);
@@ -398,6 +399,11 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_dropPreviewAnimationTimer->setInterval(16);
     connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
         advanceDropPreviewAnimation();
+    });
+
+    m_dropGapAnimationTimer->setInterval(16);
+    connect(m_dropGapAnimationTimer, &QTimer::timeout, this, [this]() {
+        advanceDropGapAnimation();
     });
 
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
@@ -1749,7 +1755,7 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
                                                   effectivePreviewSize,
                                                   movingNodeId,
                                                   isVariableToolName(previewTool),
-                                                  m_dragActive ? 3.6 : 1.0);
+                                                  m_dragActive ? m_dropGapFactor : 1.0);
     if (!target.zoneRect.isValid())
         target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
 
@@ -2753,6 +2759,7 @@ QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)
 {
+    const bool dragJustStarted = !m_dragActive;
     m_dragActive = true;
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(true);
@@ -2760,6 +2767,11 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     m_lastDropPreviewScenePosition = scenePosition;
     m_lastDropPreviewSize = effectivePreviewSize;
+    if (dragJustStarted) {
+        m_dropGapFactor = 1.0;
+        setDropGapTarget(3.6);
+    }
+
     const DropTarget target = dropTargetForToolAt(scenePosition,
                                                   effectivePreviewSize,
                                                   previewTool,
@@ -2801,10 +2813,43 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     m_dropPreviewMovingNodeId = 0;
     m_lastDropPreviewScenePosition = QPointF();
     m_lastDropPreviewSize = QSizeF();
+    if (m_dropGapAnimationTimer)
+        m_dropGapAnimationTimer->stop();
+    m_dropGapFactor = 1.0;
+    m_dropGapTarget = 1.0;
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
+}
+
+void SceneTreeGraphicsWidget::setDropGapTarget(qreal target)
+{
+    target = qBound<qreal>(1.0, target, 4.0);
+    if (qFuzzyCompare(m_dropGapTarget, target))
+        return;
+
+    m_dropGapTarget = target;
+    if (m_dropGapAnimationTimer && !m_dropGapAnimationTimer->isActive())
+        m_dropGapAnimationTimer->start();
+}
+
+void SceneTreeGraphicsWidget::advanceDropGapAnimation()
+{
+    const qreal delta = m_dropGapTarget - m_dropGapFactor;
+    if (qAbs(delta) < 0.025) {
+        m_dropGapFactor = m_dropGapTarget;
+        if (m_dropGapAnimationTimer)
+            m_dropGapAnimationTimer->stop();
+    } else {
+        m_dropGapFactor += delta * 0.24;
+    }
+
+    // Safety rule: this timer must only repaint the transient drop-preview.
+    // Rebuilding the scene here would delete the QGraphicsItem that owns the
+    // mouse grab and can freeze nested drags.
+    if (m_dropPreviewActive)
+        refreshDropPreviewAfterLayoutChange();
 }
 
 void SceneTreeGraphicsWidget::refreshDropPreviewAfterLayoutChange()
