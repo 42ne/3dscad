@@ -7,6 +7,7 @@
 #include <QGraphicsItem>
 #include <QGraphicsScene>
 #include <QImage>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -67,7 +68,7 @@ QRectF boundedVerticalLabelRect(qreal left, qreal top, qreal bottom, qreal width
 
 void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &iconRect)
 {
-    const QRectF badgeRect(iconRect.right() - 3.0, iconRect.top() + 1.0, 16.0, 16.0);
+    const QRectF badgeRect(iconRect.right() - 2.0, iconRect.top(), 15.0, 15.0);
     painter->setPen(QPen(QColor(82, 111, 146), 1));
     painter->setBrush(QColor(244, 248, 252));
     painter->drawEllipse(badgeRect);
@@ -113,8 +114,8 @@ public:
                           QPen(QColor(86, 117, 150), 1),
                           QBrush(QColor(219, 231, 246)));
 
-        const qreal iconSize = PrimitiveIconSize - 2.0;
-        const QRectF iconRect(m_rect.left() + 10.0,
+        const qreal iconSize = PrimitiveIconSize;
+        const QRectF iconRect(m_rect.left() + 8.0,
                               m_rect.top() + (PrimitiveHeight - iconSize) * 0.5,
                               iconSize,
                               iconSize);
@@ -681,19 +682,26 @@ public:
         }
 
         // CALL badge
-        const qreal badgeH = 13.0;
+        const qreal badgeH = 16.0;
         const QRectF badgeRect(m_rect.left() + 6.0,
                                m_rect.top() + (VariableHeight - badgeH) * 0.5,
-                               32.0,
+                               34.0,
                                badgeH);
-        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(QColor(255, 255, 255, 150)));
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 38));
+        painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), 4.0, 4.0);
+
+        QLinearGradient badgeGradient(badgeRect.topLeft(), badgeRect.bottomLeft());
+        badgeGradient.setColorAt(0.0, QColor(82, 145, 205));
+        badgeGradient.setColorAt(1.0, QColor(24, 82, 135));
+        paintRoundedPanel(painter, badgeRect, 4.0, QPen(QColor(170, 215, 255, 150), 1.0), QBrush(badgeGradient));
         {
             painter->save();
             QFont badgeFont = painter->font();
             badgeFont.setBold(true);
-            badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
+            badgeFont.setPointSizeF(qMax<qreal>(6.5, badgeFont.pointSizeF() - 1.5));
             painter->setFont(badgeFont);
-            painter->setPen(accent.darker(130));
+            painter->setPen(QColor(238, 248, 255));
             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("CALL"));
             painter->restore();
         }
@@ -703,7 +711,7 @@ public:
         const QColor punctColor(60, 60, 80);
         const QColor paramNameColor(70, 80, 60);
 
-        qreal x = m_rect.left() + 42.0;
+        qreal x = m_rect.left() + 46.0;
         const QString nameOpen = m_moduleName + QStringLiteral("(");
         painter->setPen(nameColor);
         painter->drawText(QRectF(x, m_rect.top(), metrics.horizontalAdvance(nameOpen), VariableHeight),

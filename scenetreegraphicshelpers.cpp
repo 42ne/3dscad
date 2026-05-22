@@ -685,7 +685,7 @@ QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCall
             textWidth += metrics.horizontalAdvance(QStringLiteral(", "));
     }
     textWidth += 8.0; // a little right padding
-    return QSizeF(qMax(PrimitiveWidth, 42.0 + textWidth), VariableHeight);
+    return QSizeF(qMax(PrimitiveWidth, 46.0 + textWidth), VariableHeight);
 }
 
 QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect,
@@ -697,7 +697,7 @@ QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect,
     if (params.isEmpty())
         return controls;
 
-    qreal x = cardRect.left() + 42.0 + metrics.horizontalAdvance(moduleName + QStringLiteral("("));
+    qreal x = cardRect.left() + 46.0 + metrics.horizontalAdvance(moduleName + QStringLiteral("("));
     for (int i = 0; i < params.size(); ++i) {
         x += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
         const QRectF exprRect(x, cardRect.top(), cardRect.right() - x, VariableHeight);

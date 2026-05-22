@@ -1571,11 +1571,11 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           moduleCallTemplateRect.size());
 
         // Register rename zone for the module name inside the call-handle card.
-        // The module name text starts at x = cardLeft + 42 (after the CALL badge).
+        // The module name text starts at x = cardLeft + 46 (after the CALL badge).
         {
             const QFontMetricsF metrics(sceneTreeGraphicsFont());
             const qreal nameW = qMax(metrics.horizontalAdvance(node.moduleName), 24.0);
-            m_renameZones.append({QRectF(moduleCallTemplateRect.left() + 42.0,
+            m_renameZones.append({QRectF(moduleCallTemplateRect.left() + 46.0,
                                          moduleCallTemplateRect.top(),
                                          nameW,
                                          VariableHeight),

@@ -3,6 +3,7 @@
 #include "scenetreenoderenderer.h"
 
 #include <QGraphicsSimpleTextItem>
+#include <QLinearGradient>
 #include <QPen>
 
 using namespace SceneTreeGraphics;
@@ -87,19 +88,25 @@ void appendModuleCallChip(QGraphicsScene *scene,
                                   zValue);
     appendPreviewItem(items, panel);
 
-    const QRectF badgeRect(rect.left() + 6.0, rect.top() + 6.0, 28.0, rect.height() - 12.0);
+    const QRectF badgeRect(rect.left() + 6.0,
+                           rect.top() + (rect.height() - 16.0) * 0.5,
+                           34.0,
+                           16.0);
+    QLinearGradient badgeGradient(badgeRect.topLeft(), badgeRect.bottomLeft());
+    badgeGradient.setColorAt(0.0, QColor(82, 145, 205));
+    badgeGradient.setColorAt(1.0, QColor(24, 82, 135));
     auto *badge = addRoundedPanel(scene,
                                   badgeRect,
-                                  3.0,
-                                  QPen(QColor(0, 112, 192), 1.0),
-                                  QBrush(QColor(255, 255, 255, 238)),
+                                  4.0,
+                                  QPen(QColor(170, 215, 255, 150), 1.0),
+                                  QBrush(badgeGradient),
                                   zValue + 1.0);
     appendPreviewItem(items, badge);
 
     auto *badgeText = scene->addSimpleText(QStringLiteral("CALL"));
-    badgeText->setBrush(QColor(0, 88, 160));
-    badgeText->setScale(0.62);
-    badgeText->setPos(badgeRect.left() + 3.0, badgeRect.top() + 4.0);
+    badgeText->setBrush(QColor(238, 248, 255));
+    badgeText->setScale(0.66);
+    badgeText->setPos(badgeRect.left() + 3.0, badgeRect.top() + 3.0);
     badgeText->setZValue(zValue + 2.0);
     appendPreviewItem(items, badgeText);
 
@@ -114,7 +121,7 @@ void appendModuleCallChip(QGraphicsScene *scene,
 
     auto *nameText = scene->addSimpleText(text);
     nameText->setBrush(QColor(25, 92, 156));
-    nameText->setPos(rect.left() + 40.0, rect.top() + 4.0);
+    nameText->setPos(rect.left() + 46.0, rect.top() + 4.0);
     nameText->setZValue(zValue + 2.0);
     appendPreviewItem(items, nameText);
 }
