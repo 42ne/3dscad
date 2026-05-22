@@ -21,6 +21,7 @@ SOURCES += \
     $$PARENT/scenetree.cpp \
     $$PARENT/scenetreegraphicshelpers.cpp \
     $$PARENT/scenetreegraphicswidget.cpp \
+    $$PARENT/scenetreegraphicswidget_canvasdrag.cpp \
     $$PARENT/scenetreeinlinetextinput.cpp \
     $$PARENT/scenetreelayout.cpp \
     $$PARENT/scenetreenoderenderer.cpp \

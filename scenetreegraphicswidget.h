@@ -5,7 +5,9 @@
 #include "scenetreelayout.h"
 #include "scenetreepalette.h"
 
+#include <QGraphicsPathItem>
 #include <QGraphicsView>
+#include <QHash>
 #include <QRectF>
 #include <QVector>
 #include <functional>
@@ -48,6 +50,13 @@ public:
     void setCtrlReleasedCallback(std::function<void()> callback);
     void setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback);
     void setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback);
+    // Canvas-drag debug hook.  Receives a pre-formatted log line on key events:
+    //   "press"  — grip strip hit (drag pending)
+    //   "start"  — drag activated, cluster resolved
+    //   "move"   — position/snap update (throttled: snap-change or ≥25 px)
+    //   "detach" — fast drag broke the cluster
+    //   "commit" — drag released, positions committed
+    void setCanvasDragCallback(std::function<void(const QString &)> callback);
     void setSelectedTreeNodeId(int nodeId);
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
@@ -165,8 +174,59 @@ private:
     std::function<void()> m_ctrlReleasedCallback;
     std::function<void(int, const QString &)> m_moduleRenameRequestedCallback;
     std::function<void(int, const QString &)> m_variableRenameRequestedCallback;
+    std::function<void(const QString &)>      m_canvasDragCallback;
+    // Throttle state for canvas-drag debug logging (not used in production paths).
+    bool    m_dbgPrevSnapped    = false;
+    QPointF m_dbgLastLoggedPos;
 
-    // Rename-zone hit testing — populated during drawNode / drawGroup.
+    // ── Canvas-move drag ───────────────────────────────────────────────────────
+    // Grip strip above each root-level block used to reposition it on the canvas.
+    struct CanvasMoveHandle {
+        QRectF gripRect;  // 8 px strip above the block (scene coords)
+        QRectF blockRect; // full block rect including grip strip
+        int    nodeId = 0;
+    };
+    QVector<CanvasMoveHandle>  m_canvasMoveHandles;
+    QHash<int, QPointF>        m_nodeCanvasPositions; // custom top-lefts; absent → auto
+
+    // Snap settings
+    static constexpr qreal kGripStripH   = 20.0;
+    static constexpr qreal kMagnetRadius = 80.0;
+
+    // Canvas drag state
+    bool              m_canvasDragPending  = false;
+    bool              m_canvasDragActive   = false;
+    int               m_canvasDragNodeId   = 0;
+    QPointF           m_canvasDragPressScene;
+    QPointF           m_canvasDragOrigPos;   // top-left of full block rect at drag start
+    QSizeF            m_canvasDragBlockSize;
+    QPointF           m_canvasDragCurrentPos;
+    bool              m_canvasDragSnapped   = false;
+    QGraphicsPathItem *m_canvasDragGhost   = nullptr;
+
+    // Cluster-movement state (blocks edge-touching the dragged block move together).
+    QVector<int>                          m_canvasDragCluster;       // nodeIds in the cluster
+    QHash<int, QPointF>                   m_canvasDragClusterOrigPos;// top-left at drag start
+    bool                                  m_canvasDragDetached  = false; // true = fast drag broke cluster
+    QPointF                               m_canvasDragPrevEventScene; // for velocity calculation
+    // Items that are physically moved during the drag (primary block + cluster members).
+    QVector<QGraphicsItem *>              m_canvasDragItems;
+    QHash<int, QVector<QGraphicsItem *>>  m_clusterDragItems;
+
+    static constexpr qreal kClusterVelocityThreshold = 12.0; // px/event → detaches cluster
+
+    // Pending canvas position for the next toolbar-drop insertion.
+    bool    m_hasPendingInsertPos         = false;
+    QPointF m_pendingInsertCanvasPosition;
+
+    bool applyMagneticSnap(const QPointF &candidate, const QSizeF &size,
+                           int excludeId, QPointF *snapped) const;
+    void showDragPlaceholder(const QPointF &pos, const QSizeF &size);
+    void clearCanvasDragGhost();
+    QVector<int>              findConnectedCluster(int startNodeId) const;
+    QVector<QGraphicsItem *>  itemsInBlockRect(const QRectF &blockRect) const;
+
+    // ── Rename zones ──────────────────────────────────────────────────────────
     struct RenameZone {
         QRectF rect;
         int    nodeId   = 0;

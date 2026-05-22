@@ -26,6 +26,7 @@ SOURCES += \
     scenecommands.cpp \
     scenetreegraphicshelpers.cpp \
     scenetreegraphicswidget.cpp \
+    scenetreegraphicswidget_canvasdrag.cpp \
     scenetreeinlinetextinput.cpp \
     scenetreelayout.cpp \
     scenetreenoderenderer.cpp \

@@ -403,6 +403,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
     connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
             this, &SceneTreeGraphicsWidget::refresh);
+
 }
 
 void SceneTreeGraphicsWidget::setSceneDocument(const SceneDocument *scene)
@@ -512,6 +513,11 @@ void SceneTreeGraphicsWidget::setVariableRenameRequestedCallback(std::function<v
     m_variableRenameRequestedCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setCanvasDragCallback(std::function<void(const QString &)> callback)
+{
+    m_canvasDragCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
     if (m_selectedTreeNodeId == nodeId)
@@ -543,10 +549,14 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
     clearDropPreview();
     m_graphicsScene->clear();
+    m_canvasDragGhost = nullptr;  // scene->clear() already deleted it
+    m_canvasDragItems.clear();    // scene->clear() deleted these too
+    m_clusterDragItems.clear();
     m_treeLayout.clear();
     m_treeItems.clear();
     m_renameZones.clear();
     m_toolbarItems.clear();
+    m_canvasMoveHandles.clear();
     m_treeItemsVisible = true;
 }
 
@@ -560,11 +570,73 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         return;
     }
 
-    const QList<QGraphicsItem *> existingItems = m_graphicsScene->items();
-    QPointF topLeft(TreeX, TreeY);
+    // Prune positions for nodes that no longer exist.
+    {
+        QSet<int> liveIds;
+        for (const SceneDocument::TreeNode &c : m_scene->treeRoot().children)
+            liveIds.insert(c.id);
+        for (auto it = m_nodeCanvasPositions.begin(); it != m_nodeCanvasPositions.end(); ) {
+            if (!liveIds.contains(it.key()))
+                it = m_nodeCanvasPositions.erase(it);
+            else
+                ++it;
+        }
+    }
 
-    for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children)
-        topLeft.ry() += drawNode(child, topLeft, 0).height() + ChildGap * 2.0;
+    // Apply the pending toolbar-drop canvas position to the most-recently-inserted
+    // child that does not yet have a custom position (typically the last child).
+    if (m_hasPendingInsertPos) {
+        m_hasPendingInsertPos = false;
+        const auto &children = m_scene->treeRoot().children;
+        for (int ci = children.size() - 1; ci >= 0; --ci) {
+            const int id = children[ci].id;
+            if (!m_nodeCanvasPositions.contains(id)) {
+                m_nodeCanvasPositions[id] = m_pendingInsertCanvasPosition;
+                break;
+            }
+        }
+    }
+
+    const QList<QGraphicsItem *> existingItems = m_graphicsScene->items();
+    QPointF autoPos(TreeX, TreeY);
+
+    for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children) {
+        // Position: stored custom or auto-layout fallback.
+        const QPointF blockTopLeft = m_nodeCanvasPositions.value(child.id, autoPos);
+        // Draw the node content kGripStripH px below the block top (grip strip occupies top).
+        const QRectF drawn = drawNode(child, blockTopLeft + QPointF(0.0, kGripStripH), 0);
+        const QRectF fullBlock(blockTopLeft, QSizeF(drawn.width(), kGripStripH + drawn.height()));
+
+        // ── Grip strip ───────────────────────────────────────────────────────
+        const QRectF gripRect(blockTopLeft, QSizeF(drawn.width(), kGripStripH));
+
+        // Background of the grip strip.
+        QPainterPath gripPath;
+        gripPath.addRoundedRect(gripRect.adjusted(0, 0, 0, 0), 3.0, 3.0);
+        auto *gripBg = m_graphicsScene->addPath(gripPath,
+                                                QPen(Qt::NoPen),
+                                                QBrush(QColor(40, 50, 66, 140)));
+        gripBg->setZValue(25.0);
+        m_treeItems.append(gripBg);
+
+        // 4 grip dots centred in the strip.
+        const qreal cy = gripRect.center().y();
+        const qreal startX = gripRect.center().x() - 10.5;
+        const QColor dotCol(128, 142, 165, 200);
+        for (int i = 0; i < 4; ++i) {
+            const qreal x = startX + i * 7.0;
+            auto *dot = m_graphicsScene->addEllipse(x - 1.5, cy - 1.5, 3.0, 3.0,
+                                                    QPen(Qt::NoPen), QBrush(dotCol));
+            dot->setZValue(26.0);
+            m_treeItems.append(dot);
+        }
+
+        // Record handle and block rect for hit-testing and magnetic snap.
+        m_canvasMoveHandles.append({gripRect, fullBlock, child.id});
+
+        // Advance auto-layout cursor (whether this node is custom-positioned or not).
+        autoPos.ry() += fullBlock.height() + ChildGap * 2.0;
+    }
 
     const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
     for (QGraphicsItem *item : allItems) {
@@ -634,6 +706,41 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     setFocus();
     m_lastMousePosition = event->pos();
 
+    // ── Canvas-move drag: check grip strip before anything else ──────────────
+    if (event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
+            if (h.gripRect.contains(scenePos)) {
+                m_canvasDragPending    = true;
+                m_canvasDragActive     = false;
+                m_canvasDragNodeId     = h.nodeId;
+                m_canvasDragPressScene = scenePos;
+                m_canvasDragOrigPos    = h.blockRect.topLeft();
+                m_canvasDragBlockSize  = h.blockRect.size();
+                m_canvasDragCurrentPos = m_canvasDragOrigPos;
+                // Reset cluster state for the new drag.
+                m_canvasDragCluster.clear();
+                m_canvasDragClusterOrigPos.clear();
+                m_canvasDragDetached       = false;
+                m_canvasDragPrevEventScene = scenePos;
+                m_dbgPrevSnapped           = false;
+                m_dbgLastLoggedPos         = m_canvasDragOrigPos;
+                if (m_canvasDragCallback)
+                    m_canvasDragCallback(
+                        QStringLiteral("[....] canvas-press   node=#%1  origPos=(%2,%3)"
+                                       "  size=%4x%5  grip=(%6,%7 %8x%9)")
+                        .arg(h.nodeId)
+                        .arg(qRound(h.blockRect.x())).arg(qRound(h.blockRect.y()))
+                        .arg(qRound(h.blockRect.width())).arg(qRound(h.blockRect.height()))
+                        .arg(qRound(h.gripRect.x())).arg(qRound(h.gripRect.y()))
+                        .arg(qRound(h.gripRect.width())).arg(qRound(h.gripRect.height())));
+                setCursor(Qt::SizeAllCursor);
+                event->accept();
+                return;
+            }
+        }
+    }
+
     if (event->button() == Qt::RightButton && itemAt(event->pos()) == nullptr) {
         handleTreeNodeSelected(0);
         event->accept();
@@ -644,7 +751,6 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         m_panning = true;
         m_lastPanPoint = event->pos();
         setCursor(Qt::ClosedHandCursor);
-        // Clear hover highlights when a pan begins.
         const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
         m_hoveredScrollRect = QRectF();
         m_hoveredRenameRect = QRectF();
@@ -662,6 +768,167 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     m_lastMousePosition = event->pos();
     const bool controlDown = event->modifiers() & Qt::ControlModifier;
     const QPointF scenePosition = mapToScene(event->pos());
+
+    // ── Canvas-move drag ─────────────────────────────────────────────────────
+    if (m_canvasDragPending || m_canvasDragActive) {
+        const QPointF delta = scenePosition - m_canvasDragPressScene;
+        const qreal dist = QLineF(QPointF(), delta).length();
+
+        if (m_canvasDragPending && dist >= DragPreviewStartDistance) {
+            m_canvasDragPending        = false;
+            m_canvasDragActive         = true;
+            m_canvasDragPrevEventScene = scenePosition; // start velocity tracking here
+
+            // Find cluster (blocks edge-touching the dragged block).
+            m_canvasDragCluster = findConnectedCluster(m_canvasDragNodeId);
+            m_canvasDragClusterOrigPos.clear();
+            m_clusterDragItems.clear();
+            for (int nid : m_canvasDragCluster) {
+                for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
+                    if (h.nodeId == nid) {
+                        m_canvasDragClusterOrigPos[nid] = h.blockRect.topLeft();
+                        if (nid != m_canvasDragNodeId) {
+                            m_clusterDragItems[nid] = itemsInBlockRect(h.blockRect);
+                            // Raise cluster members slightly so they render above neighbours.
+                            for (QGraphicsItem *item : m_clusterDragItems[nid])
+                                item->setZValue(item->zValue() + 195.0);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Collect primary block items and raise them to the top.
+            m_canvasDragItems = itemsInBlockRect(QRectF(m_canvasDragOrigPos, m_canvasDragBlockSize));
+            for (QGraphicsItem *item : m_canvasDragItems)
+                item->setZValue(item->zValue() + 200.0);
+
+            // Leave a faint placeholder outline where the block started.
+            showDragPlaceholder(m_canvasDragOrigPos, m_canvasDragBlockSize);
+
+            if (m_canvasDragCallback) {
+                QStringList clIds;
+                for (int nid : m_canvasDragCluster) clIds << QStringLiteral("#%1").arg(nid);
+                m_canvasDragCallback(
+                    QStringLiteral("[....] canvas-start   node=#%1  cluster=[%2]"
+                                   "  items=%3  origPos=(%4,%5)")
+                    .arg(m_canvasDragNodeId)
+                    .arg(clIds.join(QStringLiteral(",")))
+                    .arg(m_canvasDragItems.size())
+                    .arg(qRound(m_canvasDragOrigPos.x())).arg(qRound(m_canvasDragOrigPos.y())));
+            }
+        }
+
+        if (m_canvasDragActive) {
+            // Velocity check — fast drag detaches block from cluster.
+            const qreal velocity = QLineF(m_canvasDragPrevEventScene, scenePosition).length();
+            m_canvasDragPrevEventScene = scenePosition;
+            if (!m_canvasDragDetached && velocity > kClusterVelocityThreshold
+                    && m_canvasDragCluster.size() > 1) {
+                m_canvasDragDetached = true;
+
+                // Restore cluster members' Z so they stop appearing "lifted".
+                for (auto it = m_clusterDragItems.constBegin(); it != m_clusterDragItems.constEnd(); ++it) {
+                    for (QGraphicsItem *item : it.value())
+                        item->setZValue(item->zValue() - 195.0);
+                }
+                m_clusterDragItems.clear();
+
+                // Freeze cluster members at their current visual position so that:
+                //   (a) refresh() after commit draws them where they visually are now,
+                //       not at their pre-drag original → prevents the "snap-back" bounce.
+                //   (b) m_canvasMoveHandles is updated → magnetic snap during continued
+                //       drag of the primary block uses the correct neighbour rects.
+                const QPointF detachOffset = m_canvasDragCurrentPos - m_canvasDragOrigPos;
+                for (int nid : m_canvasDragCluster) {
+                    if (nid == m_canvasDragNodeId) continue;
+                    const QPointF frozenPos = m_canvasDragClusterOrigPos.value(nid) + detachOffset;
+                    m_nodeCanvasPositions[nid] = frozenPos;
+                    for (CanvasMoveHandle &h : m_canvasMoveHandles) {
+                        if (h.nodeId == nid) {
+                            h.gripRect.moveTo(frozenPos);
+                            h.blockRect.moveTo(frozenPos);
+                            break;
+                        }
+                    }
+                }
+
+                if (m_canvasDragCallback)
+                    m_canvasDragCallback(
+                        QStringLiteral("[....] canvas-detach  node=#%1  vel=%2px"
+                                       "  cluster had %3 members  detachOffset=(%4,%5)")
+                        .arg(m_canvasDragNodeId)
+                        .arg(qRound(velocity))
+                        .arg(m_canvasDragCluster.size())
+                        .arg(qRound(detachOffset.x())).arg(qRound(detachOffset.y())));
+            }
+
+            const QPointF rawCandidate = m_canvasDragOrigPos + delta;
+            QPointF candidate = rawCandidate;
+
+            // Magnetic snap — but skip candidates that would put the block back at its
+            // original position (a neighbour that was adjacent generates exactly that).
+            QPointF snapped;
+            bool magnetic = applyMagneticSnap(candidate, m_canvasDragBlockSize,
+                                              m_canvasDragNodeId, &snapped);
+            if (magnetic && QLineF(snapped, m_canvasDragOrigPos).length() < 4.0)
+                magnetic = false;
+            if (magnetic)
+                candidate = snapped;
+
+            // Debug: log on snap state change or every ≥25 px of movement.
+            if (m_canvasDragCallback) {
+                const bool snapChanged = (magnetic != m_dbgPrevSnapped);
+                const qreal logDist = QLineF(m_dbgLastLoggedPos, candidate).length();
+                if (snapChanged || logDist >= 25.0) {
+                    m_dbgPrevSnapped    = magnetic;
+                    m_dbgLastLoggedPos  = candidate;
+                    QString msg = QStringLiteral(
+                        "[....] canvas-move    node=#%1"
+                        "  raw=(%2,%3)  final=(%4,%5)  snap=%6")
+                        .arg(m_canvasDragNodeId)
+                        .arg(qRound(rawCandidate.x())).arg(qRound(rawCandidate.y()))
+                        .arg(qRound(candidate.x())).arg(qRound(candidate.y()))
+                        .arg(magnetic ? QStringLiteral("YES  snappedTo=(%1,%2)")
+                                            .arg(qRound(snapped.x())).arg(qRound(snapped.y()))
+                                      : QStringLiteral("no"));
+                    if (!m_canvasDragDetached && m_canvasDragCluster.size() > 1) {
+                        QStringList cl;
+                        for (int nid : m_canvasDragCluster)
+                            if (nid != m_canvasDragNodeId)
+                                cl << QStringLiteral("#%1").arg(nid);
+                        msg += QStringLiteral("  dragging-cluster=[%1]").arg(cl.join(QStringLiteral(",")));
+                    } else if (m_canvasDragDetached) {
+                        msg += QStringLiteral("  (detached)");
+                    }
+                    m_canvasDragCallback(msg);
+                }
+            }
+
+            // Move all primary-block items by the per-frame delta.
+            const QPointF frameDelta = candidate - m_canvasDragCurrentPos;
+            m_canvasDragCurrentPos = candidate;
+            m_canvasDragSnapped    = magnetic;
+
+            for (QGraphicsItem *item : m_canvasDragItems)
+                item->setPos(item->pos() + frameDelta);
+
+            // Move cluster members by the same delta (unless detached).
+            if (!m_canvasDragDetached) {
+                for (auto it = m_clusterDragItems.constBegin(); it != m_clusterDragItems.constEnd(); ++it) {
+                    for (QGraphicsItem *item : it.value())
+                        item->setPos(item->pos() + frameDelta);
+                }
+            }
+
+            event->accept();
+            return;
+        }
+        event->accept();
+        return;
+    }
+
+    // ── Normal flow ──────────────────────────────────────────────────────────
     updateControlTooltip(event->globalPos(), scenePosition, controlDown);
     updateActiveTransformControl(scenePosition, controlDown);
     updateActiveShapeParameterControl(scenePosition, controlDown);
@@ -678,13 +945,80 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    updateHoverHighlights(scenePosition);
+    // Update grip cursor when hovering over a strip.
+    bool onGrip = false;
+    for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
+        if (h.gripRect.contains(scenePosition)) { onGrip = true; break; }
+    }
+    setCursor(onGrip ? Qt::SizeAllCursor : Qt::OpenHandCursor);
 
+    updateHoverHighlights(scenePosition);
     QGraphicsView::mouseMoveEvent(event);
 }
 
 void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    // ── Canvas-move drag release ──────────────────────────────────────────────
+    if (event->button() == Qt::LeftButton && (m_canvasDragActive || m_canvasDragPending)) {
+        const bool wasActive = m_canvasDragActive;
+        const int  nodeId    = m_canvasDragNodeId;
+
+        m_canvasDragActive  = false;
+        m_canvasDragPending = false;
+        m_canvasDragNodeId  = 0;
+        clearCanvasDragGhost();
+        setCursor(Qt::OpenHandCursor);
+
+        if (wasActive) {
+            // Commit position of the primary block.
+            m_nodeCanvasPositions[nodeId] = m_canvasDragCurrentPos;
+
+            // Commit cluster members' final positions.
+            // Slow drag (not detached): move all by the same offset as the primary.
+            // Fast drag (detached): members were already frozen in m_nodeCanvasPositions
+            //   at the moment of detach — nothing to do here.
+            if (!m_canvasDragDetached && m_canvasDragCluster.size() > 1) {
+                const QPointF offset = m_canvasDragCurrentPos - m_canvasDragOrigPos;
+                for (int nid : m_canvasDragCluster) {
+                    if (nid == nodeId)
+                        continue;
+                    m_nodeCanvasPositions[nid] = m_canvasDragClusterOrigPos.value(nid) + offset;
+                }
+            }
+
+            // Clear item vectors before refresh() destroys the scene.
+            m_canvasDragItems.clear();
+            m_clusterDragItems.clear();
+
+            if (m_canvasDragCallback) {
+                QStringList movedIds;
+                movedIds << QStringLiteral("#%1").arg(nodeId);
+                if (!m_canvasDragDetached) {
+                    for (int nid : m_canvasDragCluster)
+                        if (nid != nodeId) movedIds << QStringLiteral("#%1").arg(nid);
+                }
+                m_canvasDragCallback(
+                    QStringLiteral("[....] canvas-commit  node=#%1"
+                                   "  finalPos=(%2,%3)  snap=%4"
+                                   "  moved=[%5]  detached=%6")
+                    .arg(nodeId)
+                    .arg(qRound(m_canvasDragCurrentPos.x())).arg(qRound(m_canvasDragCurrentPos.y()))
+                    .arg(m_canvasDragSnapped ? QStringLiteral("yes") : QStringLiteral("no"))
+                    .arg(movedIds.join(QStringLiteral(",")))
+                    .arg(m_canvasDragDetached ? QStringLiteral("yes") : QStringLiteral("no")));
+            }
+
+            m_canvasDragCluster.clear();
+            m_canvasDragClusterOrigPos.clear();
+            refresh(); // rebuilds scene from scratch
+        } else {
+            // No drag — treat as block selection.
+            handleTreeNodeSelected(nodeId);
+        }
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && m_panning) {
         m_panning = false;
         setCursor(Qt::OpenHandCursor);
@@ -1265,7 +1599,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
     const QString groupLabel = labelForOperation(node.operation);
     // Scene is the permanent top-level container — it cannot be dragged or moved.
-    if (node.operation != SceneDocument::TreeNode::Scene) {
+    // Root-level groups (depth == 0) are repositioned via the canvas-move grip strip,
+    // not via the tree-structure drag handle — which always returns no-target for them.
+    if (node.operation != SceneDocument::TreeNode::Scene && depth > 0) {
         const QRectF handleRect = transformGroup
                                       ? QRectF(rect.topLeft(), QSizeF(headerWidth, rect.height()))
                                       : QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight));
@@ -1286,6 +1622,13 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
         if (!target.hasTarget && !isRootOnlyTreeTool(toolName)) {
             clearDropPreview();
             return;
+        }
+
+        // For root-level tools (modules) store the snapped canvas position so that
+        // drawTreeOrPlaceholder() can place the newly-created block there.
+        if (isRootOnlyTreeTool(toolName) && target.zoneRect.isValid()) {
+            m_pendingInsertCanvasPosition = target.zoneRect.topLeft();
+            m_hasPendingInsertPos = true;
         }
 
         scheduleDropCommit([this, toolName, target]() {
@@ -1356,8 +1699,22 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
                                                                                  bool allowFreeFloatingInsertion) const
 {
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
-    if (isRootOnlyTreeTool(previewTool))
-        return freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
+    if (isRootOnlyTreeTool(previewTool)) {
+        // Compute candidate top-left (centered on cursor), then apply magnetic snap
+        // so the drop preview snaps to nearby blocks just like canvas-move drag does.
+        const QPointF candidateTL = scenePosition - QPointF(effectivePreviewSize.width() * 0.5,
+                                                             effectivePreviewSize.height() * 0.5);
+        QPointF snappedTL;
+        const bool magnetic = applyMagneticSnap(candidateTL, effectivePreviewSize, 0, &snappedTL);
+        const QPointF finalTL = magnetic ? snappedTL : candidateTL;
+        DropTarget target;
+        target.zoneRect = QRectF(finalTL, effectivePreviewSize);
+        if (allowFreeFloatingInsertion) {
+            target.placeholderRect = target.zoneRect;
+            target.hasTarget = true;
+        }
+        return target;
+    }
 
     DropTarget target = m_treeLayout.dropTargetAt(scenePosition,
                                                   effectivePreviewSize,

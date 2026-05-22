@@ -1144,6 +1144,11 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
     });
     m_treeWidget->setCtrlReleasedCallback([]() {});
+
+    // ── Canvas-drag / magnetic-snap debug ────────────────────────────────────
+    m_treeWidget->setCanvasDragCallback([this](const QString &msg) {
+        log(msg);
+    });
 }
 
 // ─── buildTestDocument() ─────────────────────────────────────────────────────
