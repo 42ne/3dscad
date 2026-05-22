@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd f:\\\\Qtprojects\\\\3DScad; if \\(Test-Path \"debug\\\\3DScad.exe\"\\) { $f = Get-Item \"debug\\\\3DScad.exe\"; \"SUCCESS: $\\($f.Name\\) - $\\([math]::Round\\($f.Length/1KB\\)\\) KB - $\\($f.LastWriteTime\\)\" } else { \"FAILED: no executable\" })"
+    ]
+  }
+}

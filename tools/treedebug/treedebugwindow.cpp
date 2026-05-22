@@ -378,6 +378,71 @@ static QString formatControls(const QVector<ExpressionNumberControl> &ctrls)
     return out.chopped(1); // remove trailing \n
 }
 
+// ─── debugBuildModuleCallParams ──────────────────────────────────────────────
+// Builds a ModuleCallParam list for a ModuleCall node by:
+//   1. Walking the referenced module group to collect its parameter variables
+//      (in definition order).
+//   2. Splitting moduleCallArguments at top-level commas → "name = expr" pairs.
+//   3. Using each param's call-site expression (falling back to the default).
+//
+// This replicates the logic of the private resolveModuleArguments + split helpers
+// that live inside scenetreegraphicswidget.cpp, for use in the debug window only.
+
+static QVector<SceneTreeGraphics::ModuleCallParam> debugBuildModuleCallParams(
+    const SceneDocument &scene, const SceneDocument::TreeNode &callNode)
+{
+    using N = SceneDocument::TreeNode;
+    using Param = SceneTreeGraphics::ModuleCallParam;
+    QVector<Param> result;
+
+    // For a ModuleCall node, shapeId holds the referenced module group id.
+    const N *modGroup = scene.treeNodeById(callNode.shapeId);
+    if (!modGroup) return result;
+
+    // Collect parameter variable nodes in definition order.
+    QVector<const N *> paramNodes;
+    for (const N &child : modGroup->children)
+        if (child.type == N::Variable && child.isParameter)
+            paramNodes.append(&child);
+
+    // Split the argument string at top-level commas.
+    // Bracket/paren depth prevents splitting inside nested expressions.
+    const QString &args = callNode.moduleCallArguments;
+    QStringList parts;
+    {
+        int depth = 0, start = 0;
+        for (int i = 0; i < args.size(); ++i) {
+            const QChar c = args[i];
+            if (c == QLatin1Char('[') || c == QLatin1Char('(')) ++depth;
+            else if (c == QLatin1Char(']') || c == QLatin1Char(')')) --depth;
+            else if (c == QLatin1Char(',') && depth == 0) {
+                parts << args.mid(start, i - start).trimmed();
+                start = i + 1;
+            }
+        }
+        const QString last = args.mid(start).trimmed();
+        if (!last.isEmpty()) parts << last;
+    }
+
+    // Build a name → expression map.
+    QHash<QString, QString> argMap;
+    for (const QString &part : parts) {
+        const int eq = part.indexOf(QLatin1Char('='));
+        if (eq < 0) continue;
+        argMap.insert(part.left(eq).trimmed(), part.mid(eq + 1).trimmed());
+    }
+
+    // Build final params in module-definition order.
+    for (const N *pn : paramNodes) {
+        Param p;
+        p.varNodeId  = pn->id;
+        p.name       = pn->variableName;
+        p.expression = argMap.value(pn->variableName, pn->variableExpression);
+        result.append(p);
+    }
+    return result;
+}
+
 void TreeDebugWindow::appendSnapshotForNode(QString &out,
                                             const SceneDocument::TreeNode &node,
                                             int depth,
@@ -428,8 +493,23 @@ void TreeDebugWindow::appendSnapshotForNode(QString &out,
 
     if (node.type == N::ModuleCall) {
         const QRectF rect = m_treeWidget->debugChildRect(node.id);
-        out += indent + QStringLiteral("[Call#%1]  card=%2\n")
-            .arg(node.id).arg(formatRectShort(rect));
+        out += indent + QStringLiteral("[Call#%1  \"%2\"(%3)]  card=%4\n")
+            .arg(node.id).arg(node.moduleName).arg(node.moduleCallArguments)
+            .arg(formatRectShort(rect));
+        const auto params = debugBuildModuleCallParams(m_scene, node);
+        const auto ctrls  = moduleCallParamControls(rect, node.moduleName, params, fm);
+        for (const auto &c : ctrls) {
+            QString pName, pExpr;
+            for (const auto &p : params)
+                if (p.varNodeId == c.paramVarNodeId) { pName = p.name; pExpr = p.expression; break; }
+            const QString numText = pExpr.mid(c.numberStart, c.numberLength);
+            const QRectF &r = c.rect;
+            out += indent + QStringLiteral("  pill \"%1\" [%2 var#%3]  start=%4 len=%5  hit=(%6,%7 %8×%9)\n")
+                .arg(numText).arg(pName).arg(c.paramVarNodeId)
+                .arg(c.numberStart).arg(c.numberLength)
+                .arg(qRound(r.x())).arg(qRound(r.y()))
+                .arg(qRound(r.width())).arg(qRound(r.height()));
+        }
         return;
     }
 
@@ -578,6 +658,22 @@ void TreeDebugWindow::buildUi()
         } else if (tool == QStringLiteral("module")) {
             const int gId = m_scene.addGroup(SceneDocument::TreeNode::Module, 0, insertIndex);
             m_scene.setModuleName(gId, QStringLiteral("module"));
+        } else if (isVariableToolName(tool)) {
+            // "var" → plain variable; "par" → parameter.
+            // If the drop target is a Module group, use addVariableToModule so the
+            // variable ends up inside that module.  Otherwise fall back to addVariable
+            // which inserts into the scene root.
+            const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentId);
+            const bool intoModule = parentNode
+                                    && parentNode->operation == SceneDocument::TreeNode::Module;
+            if (intoModule) {
+                const bool isParam = (tool == QStringLiteral("par"));
+                const int varId = m_scene.addVariableToModule(parentId, isParam, insertIndex);
+                m_scene.updateVariableExpression(varId, QStringLiteral("0"));
+            } else {
+                const int varId = m_scene.addVariable(insertIndex);
+                m_scene.updateVariableExpression(varId, QStringLiteral("0"));
+            }
         } else {
             // Boolean / transform / for group
             SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
@@ -784,11 +880,53 @@ void TreeDebugWindow::buildUi()
         });
 
     m_treeWidget->setModuleCallArgumentAdjustedCallback(
-        [this](int /*moduleCallId*/, int /*paramVarNodeId*/, int start, int len, qreal delta) {
-            log(QStringLiteral("[%1] modcall   start=%2 len=%3 Δ=%4  cursor=(%5,%6)")
+        [this](int moduleCallId, int paramVarNodeId, int start, int len, qreal delta) {
+            const SceneDocument::TreeNode *callNode = m_scene.treeNodeById(moduleCallId);
+            if (!callNode) return;
+            const SceneDocument::TreeNode *varNode = m_scene.treeNodeById(paramVarNodeId);
+            const QString paramName = varNode ? varNode->variableName : QStringLiteral("?");
+
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const auto params = debugBuildModuleCallParams(m_scene, *callNode);
+            const auto ctrls  = moduleCallParamControls(
+                m_treeWidget->debugChildRect(moduleCallId), callNode->moduleName, params, fm);
+
+            // Locate pill rect and old expression for this param / position.
+            QRectF pillRect;
+            QString paramExpr;
+            for (const auto &p : params)
+                if (p.varNodeId == paramVarNodeId) { paramExpr = p.expression; break; }
+            for (const auto &c : ctrls)
+                if (c.paramVarNodeId == paramVarNodeId && c.numberStart == start) {
+                    pillRect = c.rect; break;
+                }
+
+            const QString oldNum = paramExpr.mid(start, len);
+            bool ok = false;
+            const qreal cur  = oldNum.toDouble(&ok);
+            const qreal next = (ok ? cur : 0.0) + delta;
+            const QString newNum = QString::number(next, 'f', 1);
+
+            // Apply: replace the number in the param expression, then write back.
+            QString newExpr = paramExpr;
+            newExpr.replace(start, len, newNum);
+            m_scene.updateModuleCallArgument(moduleCallId, paramName, newExpr);
+
+            log(QStringLiteral("[%1] modcall   node=#%2 param=%3[var#%4]  \"%5\"→\"%6\"  Δ=%7"
+                               "  start=%8 len=%9"
+                               "  pill=(%10,%11 %12×%13)"
+                               "  cursor=(%14,%15)")
                 .arg(++m_eventSeq, 4, 10, QLatin1Char('0'))
-                .arg(start).arg(len).arg(delta, 0, 'f', 1)
+                .arg(moduleCallId).arg(paramName).arg(paramVarNodeId)
+                .arg(oldNum, newNum)
+                .arg(delta, 0, 'f', 1)
+                .arg(start).arg(len)
+                .arg(qRound(pillRect.x())).arg(qRound(pillRect.y()))
+                .arg(qRound(pillRect.width())).arg(qRound(pillRect.height()))
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+
+            m_treeWidget->refresh();
+            logSnapshot(QStringLiteral("after modcall"));
         });
 
     // ── Hover callbacks — log highlight rect vs cursor on every change ───────────
@@ -953,17 +1091,44 @@ void TreeDebugWindow::buildUi()
                     .arg(c.text)
                     .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
                     .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
-            log(QStringLiteral("[....] ctrl-hover  for-loop  node=#%1 %2=[%3]%4  cursor=(%5,%6)")
+            // rangeExp already contains brackets, e.g. "[0 : 10 : 100]"
+            log(QStringLiteral("[....] ctrl-hover  for-loop  node=#%1 %2=%3%4  cursor=(%5,%6)")
                 .arg(nodeId).arg(varName).arg(rangeExp).arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
         });
 
     // Ctrl hover — module-call param
     m_treeWidget->setModuleCallParamHoveredCallback(
-        [this](int callNodeId, int /*varNodeId*/, int numberStart) {
+        [this](int callNodeId, int varNodeId, int numberStart) {
             if (callNodeId <= 0 || numberStart < 0) return;
-            log(QStringLiteral("[....] ctrl-hover  modcall   node=#%1 start=%2  cursor=(%3,%4)")
-                .arg(callNodeId).arg(numberStart)
+            const SceneDocument::TreeNode *callNode = m_scene.treeNodeById(callNodeId);
+            if (!callNode) return;
+            const SceneDocument::TreeNode *varNode = m_scene.treeNodeById(varNodeId);
+            const QString paramName = varNode ? varNode->variableName : QStringLiteral("?");
+
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const auto params = debugBuildModuleCallParams(m_scene, *callNode);
+            const auto ctrls  = moduleCallParamControls(
+                m_treeWidget->debugChildRect(callNodeId), callNode->moduleName, params, fm);
+
+            // Show every pill rect so cursor vs hit-rect mismatches are visible.
+            QString pills;
+            for (const auto &c : ctrls) {
+                QString pName, pExpr;
+                for (const auto &p : params)
+                    if (p.varNodeId == c.paramVarNodeId) { pName = p.name; pExpr = p.expression; break; }
+                const QString mark = (c.paramVarNodeId == varNodeId && c.numberStart == numberStart)
+                                     ? QStringLiteral("*") : QStringLiteral(" ");
+                pills += QStringLiteral("  %1\"%2\"[%3] hit=(%4,%5 %6×%7)")
+                    .arg(mark)
+                    .arg(pExpr.mid(c.numberStart, c.numberLength)).arg(pName)
+                    .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
+                    .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
+            }
+
+            log(QStringLiteral("[....] ctrl-hover  modcall   node=#%1 param=%2[var#%3] start=%4%5  cursor=(%6,%7)")
+                .arg(callNodeId).arg(paramName).arg(varNodeId).arg(numberStart)
+                .arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
         });
     m_treeWidget->setModuleRenameRequestedCallback([this](int groupId, const QString &newName) {
