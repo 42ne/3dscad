@@ -76,6 +76,33 @@ void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF 
     painter->drawText(badgeRect, Qt::AlignCenter, number);
 }
 
+void paintGlossBadge(QPainter *painter,
+                     const QRectF &rect,
+                     const QString &text,
+                     const QColor &top,
+                     const QColor &bottom,
+                     const QColor &textColor,
+                     qreal radius = 4.0)
+{
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 36));
+    painter->drawRoundedRect(rect.translated(1.0, 1.0), radius, radius);
+
+    QLinearGradient gradient(rect.topLeft(), rect.bottomLeft());
+    gradient.setColorAt(0.0, top);
+    gradient.setColorAt(1.0, bottom);
+    paintRoundedPanel(painter, rect, radius, QPen(top.lighter(120), 1.0), QBrush(gradient));
+
+    painter->save();
+    QFont badgeFont = painter->font();
+    badgeFont.setBold(true);
+    badgeFont.setPointSizeF(qMax<qreal>(6.5, badgeFont.pointSizeF() - 1.5));
+    painter->setFont(badgeFont);
+    painter->setPen(textColor);
+    painter->drawText(rect, Qt::AlignCenter, text);
+    painter->restore();
+}
+
 class PrimitiveCardItem final : public QGraphicsItem
 {
 public:
@@ -228,9 +255,6 @@ public:
         const bool dark = SceneTreePalette::isDarkTheme(pt);
 
         // Theme-aware accent / text colours.
-        const QColor accent = dark
-            ? (m_isParameter ? QColor(140, 175, 235) : QColor(220, 175,  80))
-            : (m_isParameter ? QColor( 52,  88, 172) : QColor(150, 116,  42));
         const QColor nameColor = dark
             ? (m_isParameter ? QColor(200, 215, 245) : QColor(235, 210, 160))
             : (m_isParameter ? QColor( 24,  36,  72) : QColor( 43,  37,  28));
@@ -259,18 +283,14 @@ public:
                                m_rect.top() + (VariableHeight - badgeH) * 0.5,
                                28.0,
                                badgeH);
-        const QColor badgePillFill = dark ? QColor(255, 255, 255, 38) : QColor(255, 255, 255, 150);
-        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(badgePillFill));
-        {
-            painter->save();
-            QFont badgeFont = painter->font();
-            badgeFont.setBold(true);
-            badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
-            painter->setFont(badgeFont);
-            painter->setPen(accent.darker(dark ? 80 : 130));
-            painter->drawText(badgeRect, Qt::AlignCenter, badgeLabel);
-            painter->restore();
-        }
+        const QColor badgeTop = m_isParameter
+                                    ? QColor(165, 205, 255)
+                                    : QColor(255, 235, 170);
+        const QColor badgeBottom = m_isParameter
+                                       ? QColor(70, 118, 195)
+                                       : QColor(185, 135, 42);
+        const QColor badgeText = m_isParameter ? QColor(20, 45, 86) : QColor(62, 46, 20);
+        paintGlossBadge(painter, badgeRect, badgeLabel, badgeTop, badgeBottom, badgeText);
 
         // Name, = and expression.
         const QFontMetricsF metrics(painter->font());
@@ -556,12 +576,26 @@ private:
         const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
         paintOperationIcon(painter, m_operation, iconRect, iconAccent, 6.0);
 
-        painter->setPen(cTextPrimary);
-        painter->drawText(QRectF(iconRect.left(), iconRect.bottom() - 1.0, iconRect.width(), 14.0),
-                          Qt::AlignCenter,
-                          m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T")
-                          : m_operation == SceneDocument::TreeNode::Rotate  ? QStringLiteral("R")
-                                                                             : QStringLiteral("S"));
+        const QString opLabel = m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T")
+                              : m_operation == SceneDocument::TreeNode::Rotate  ? QStringLiteral("R")
+                                                                                 : QStringLiteral("S");
+        const QRectF opBadgeRect(iconRect.left() + 1.0,
+                                 iconRect.bottom() - 1.0,
+                                 iconRect.width() - 2.0,
+                                 14.0);
+        QColor badgeTop;
+        QColor badgeBottom;
+        if (m_operation == SceneDocument::TreeNode::Translate) {
+            badgeTop = QColor(205, 224, 255);
+            badgeBottom = QColor(100, 139, 210);
+        } else if (m_operation == SceneDocument::TreeNode::Rotate) {
+            badgeTop = QColor(226, 205, 255);
+            badgeBottom = QColor(145, 98, 195);
+        } else {
+            badgeTop = QColor(205, 242, 218);
+            badgeBottom = QColor(84, 158, 105);
+        }
+        paintGlossBadge(painter, opBadgeRect, opLabel, badgeTop, badgeBottom, QColor(24, 34, 44), 3.0);
 
         // X/Y/Z rows outside icon border.
         // Use the canonical scene font for metrics so pill rects are pixel-identical

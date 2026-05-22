@@ -7,6 +7,7 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSimpleTextItem>
 #include <QFontMetricsF>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPen>
 #include <QPixmap>
@@ -1199,14 +1200,22 @@ public:
             glyphRect = QRectF(8.0, 6.0, 38.0, 40.0);
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         if (isVariableToolName(m_label)) {
-            painter->setPen(QPen(QColor(115, 92, 38), 1.4));
-            painter->setBrush(QColor(255, 248, 218));
-            painter->drawRoundedRect(glyphRect.adjusted(1.0, 5.0, -1.0, -5.0), 4.0, 4.0);
+            const QRectF badgeRect = glyphRect.adjusted(0.0, 8.0, 0.0, -8.0);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(0, 0, 0, 35));
+            painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), 4.0, 4.0);
+            QLinearGradient badgeGradient(badgeRect.topLeft(), badgeRect.bottomLeft());
+            badgeGradient.setColorAt(0.0, QColor(255, 237, 172));
+            badgeGradient.setColorAt(1.0, QColor(193, 143, 48));
+            painter->setPen(QPen(QColor(255, 248, 218, 170), 1.0));
+            painter->setBrush(QBrush(badgeGradient));
+            painter->drawRoundedRect(badgeRect, 4.0, 4.0);
             QFont font = painter->font();
             font.setBold(true);
             font.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 1.0));
             painter->setFont(font);
-            painter->drawText(glyphRect, Qt::AlignCenter, QStringLiteral("VAR"));
+            painter->setPen(QColor(61, 48, 24));
+            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
         } else if (operationForToolName(m_label, &operation)) {
             paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125));
         } else {
