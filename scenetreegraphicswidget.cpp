@@ -375,7 +375,6 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
     , m_graphicsScene(createTreeGraphicsScene(this))
     , m_dropPreviewAnimationTimer(new QTimer(this))
-    , m_dragGapAnimationTimer(new QTimer(this))
 {
     const QFont treeFont = sceneTreeGraphicsFont();
     setFont(treeFont);
@@ -399,11 +398,6 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_dropPreviewAnimationTimer->setInterval(16);
     connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
         advanceDropPreviewAnimation();
-    });
-
-    m_dragGapAnimationTimer->setInterval(16);
-    connect(m_dragGapAnimationTimer, &QTimer::timeout, this, [this]() {
-        advanceDragGapAnimation();
     });
 
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
@@ -654,7 +648,7 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         m_canvasMoveHandles.append({gripRect, fullBlock, child.id});
 
         // Advance auto-layout cursor (whether this node is custom-positioned or not).
-        autoPos.ry() += fullBlock.height() + activeChildGap() * 2.0;
+        autoPos.ry() += fullBlock.height() + ChildGap * 2.0;
     }
 
     const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
@@ -1448,7 +1442,7 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
 
 QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth)
 {
-    const qreal gap = activeChildGap();
+    const qreal gap = ChildGap;
     QVector<ChildLayout> children;
     const bool transformGroup = isTransformOperation(node.operation);
     const qreal headerWidth = transformGroup ? transformHeaderWidthForNode(node) : 0.0;
@@ -1754,7 +1748,8 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
     DropTarget target = m_treeLayout.dropTargetAt(scenePosition,
                                                   effectivePreviewSize,
                                                   movingNodeId,
-                                                  isVariableToolName(previewTool));
+                                                  isVariableToolName(previewTool),
+                                                  m_dragActive ? 3.6 : 1.0);
     if (!target.zoneRect.isValid())
         target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
 
@@ -2758,7 +2753,6 @@ QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
 
 void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)
 {
-    const bool dragJustStarted = !m_dragActive;
     m_dragActive = true;
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(true);
@@ -2766,11 +2760,6 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     m_lastDropPreviewScenePosition = scenePosition;
     m_lastDropPreviewSize = effectivePreviewSize;
-    // Do not rebuild the QGraphicsScene while a tree/tool item owns the mouse
-    // grab. Rebuilding deletes that item mid-drag and can leave nested drops
-    // frozen. Expanded insertion gaps need a non-destructive layout pass.
-    Q_UNUSED(dragJustStarted);
-
     const DropTarget target = dropTargetForToolAt(scenePosition,
                                                   effectivePreviewSize,
                                                   previewTool,
@@ -2816,43 +2805,6 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
-    if (m_dragGapAnimationTimer)
-        m_dragGapAnimationTimer->stop();
-    m_dragGapTarget = 1.0;
-    m_dragGapFactor = 1.0;
-}
-
-qreal SceneTreeGraphicsWidget::activeChildGap() const
-{
-    return ChildGap * m_dragGapFactor;
-}
-
-void SceneTreeGraphicsWidget::setDragGapTarget(qreal target)
-{
-    target = qBound<qreal>(1.0, target, 4.0);
-    if (qFuzzyCompare(m_dragGapTarget, target))
-        return;
-
-    m_dragGapTarget = target;
-    if (!m_dragGapAnimationTimer)
-        return;
-
-    if (!m_dragGapAnimationTimer->isActive())
-        m_dragGapAnimationTimer->start();
-}
-
-void SceneTreeGraphicsWidget::advanceDragGapAnimation()
-{
-    const qreal delta = m_dragGapTarget - m_dragGapFactor;
-    if (qAbs(delta) < 0.035) {
-        m_dragGapFactor = m_dragGapTarget;
-        if (m_dragGapAnimationTimer)
-            m_dragGapAnimationTimer->stop();
-    } else {
-        m_dragGapFactor += delta * 0.28;
-    }
-
-    rebuildScene(m_dropPreviewActive ? false : true);
 }
 
 void SceneTreeGraphicsWidget::refreshDropPreviewAfterLayoutChange()

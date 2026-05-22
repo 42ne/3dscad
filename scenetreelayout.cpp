@@ -116,6 +116,68 @@ QVector<SceneTreeLayout::ChildLayout> childrenShiftedFromIndex(const QVector<Sce
     return shiftedChildren;
 }
 
+QRectF placeholderRectForInsertIndexWithGap(const QRectF &contentRect,
+                                            const QVector<QRectF> &childRects,
+                                            int insertIndex,
+                                            const QSizeF &previewSize,
+                                            qreal gap)
+{
+    if (childRects.isEmpty())
+        return QRectF(contentRect.left(), contentRect.top(), previewSize.width(), previewSize.height());
+
+    if (insertIndex <= 0)
+        return QRectF(contentRect.left(), contentRect.top(), previewSize.width(), previewSize.height());
+
+    if (insertIndex >= childRects.size())
+        return QRectF(contentRect.left(), childRects.last().bottom() + gap, previewSize.width(), previewSize.height());
+
+    return QRectF(contentRect.left(), childRects[insertIndex - 1].bottom() + gap, previewSize.width(), previewSize.height());
+}
+
+QRectF slotMarkerRectForInsertIndexWithGap(const QRectF &contentRect,
+                                           const QVector<QRectF> &childRects,
+                                           int insertIndex,
+                                           qreal gap)
+{
+    const qreal markerWidth = childRects.isEmpty()
+                                  ? qMax(contentRect.width(), PrimitiveWidth)
+                                  : qMax(contentRect.width(), childRects.first().width());
+    qreal y = contentRect.top();
+
+    if (childRects.isEmpty()) {
+        y = contentRect.top();
+    } else if (insertIndex <= 0) {
+        y = childRects.first().top() - gap * 0.5;
+    } else if (insertIndex >= childRects.size()) {
+        y = childRects.last().bottom() + gap * 0.5;
+    } else {
+        y = childRects[insertIndex - 1].bottom() + gap * 0.5;
+    }
+
+    return QRectF(contentRect.left(), y, markerWidth, 1.0);
+}
+
+QRectF expandedGroupRectForPreviewWithGap(const QRectF &groupRect,
+                                          const QRectF &placeholderRect,
+                                          const QVector<QRectF> &childRects,
+                                          int insertIndex,
+                                          const QSizeF &previewSize,
+                                          qreal gap)
+{
+    QRectF expanded = groupRect;
+    QRectF futureContent = placeholderRect;
+    const qreal shift = previewSize.height() + gap;
+
+    for (int i = 0; i < childRects.size(); ++i) {
+        const QRectF childRect = i >= insertIndex ? childRects[i].translated(0.0, shift) : childRects[i];
+        futureContent = futureContent.united(childRect);
+    }
+
+    expanded.setRight(qMax(expanded.right(), futureContent.right() + GroupPadding));
+    expanded.setBottom(qMax(expanded.bottom(), futureContent.bottom() + GroupPadding));
+    return expanded;
+}
+
 qreal moduleBodyContentTop(qreal parameterSeparatorY)
 {
     return parameterSeparatorY
@@ -164,10 +226,12 @@ const QVector<SceneTreeLayout::GroupHitArea> &SceneTreeLayout::groupHitAreas() c
 SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePosition,
                                                           const QSizeF &previewSize,
                                                           int movingNodeId,
-                                                          bool variableDrop) const
+                                                          bool variableDrop,
+                                                          qreal insertionGapMultiplier) const
 {
     DropTarget target;
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
+    const qreal insertionGap = ChildGap * qBound<qreal>(1.0, insertionGapMultiplier, 4.0);
     int sourceChildIndex = -1;
     qreal sourceRemovalShift = 0.0;
     const GroupHitArea *sourceArea = findSourceArea(movingNodeId,
@@ -257,23 +321,30 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         placementChildRects = zoneChildRects;
     }
 
-    target.placeholderRect = placeholderRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex, effectivePreviewSize);
+    target.placeholderRect = placeholderRectForInsertIndexWithGap(target.zoneRect,
+                                                                  placementChildRects,
+                                                                  placementInsertIndex,
+                                                                  effectivePreviewSize,
+                                                                  insertionGap);
     if (bestArea->operation == SceneDocument::TreeNode::Module
         && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop
         && !target.moduleParameterZone
         && target.placeholderRect.top() < bestArea->moduleParameterSeparatorY)
-        target.placeholderRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
-    target.slotMarkerRect = slotMarkerRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex);
+        target.placeholderRect.moveTop(bestArea->moduleParameterSeparatorY + insertionGap * 0.5);
+    target.slotMarkerRect = slotMarkerRectForInsertIndexWithGap(target.zoneRect,
+                                                               placementChildRects,
+                                                               placementInsertIndex,
+                                                               insertionGap);
     if (bestArea->operation == SceneDocument::TreeNode::Module
         && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop
         && !target.moduleParameterZone
         && target.slotMarkerRect.top() < bestArea->moduleParameterSeparatorY)
-        target.slotMarkerRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
+        target.slotMarkerRect.moveTop(bestArea->moduleParameterSeparatorY + insertionGap * 0.5);
     target.previewChildren = childrenShiftedFromIndex(candidateChildren,
                                                      target.insertIndex,
-                                                     effectivePreviewSize.height() + ChildGap);
+                                                     effectivePreviewSize.height() + insertionGap);
 
     if (bestArea->operation == SceneDocument::TreeNode::Difference && bestArea->cutSeparatorY > 0.0) {
         const bool baseZone = scenePosition.y() < bestArea->cutSeparatorY;
@@ -289,17 +360,24 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                        bestArea->cutSeparatorY,
                                        contentRect.width(),
                                        qMax<qreal>(PrimitiveHeight, contentRect.bottom() - bestArea->cutSeparatorY));
-        target.placeholderRect = placeholderRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex, effectivePreviewSize);
+        target.placeholderRect = placeholderRectForInsertIndexWithGap(contentRect,
+                                                                      candidateChildRects,
+                                                                      target.insertIndex,
+                                                                      effectivePreviewSize,
+                                                                      insertionGap);
         if (!baseZone && target.placeholderRect.top() < bestArea->cutSeparatorY)
-            target.placeholderRect.moveTop(bestArea->cutSeparatorY + ChildGap * 0.5);
-        target.slotMarkerRect = slotMarkerRectForInsertIndex(contentRect, candidateChildRects, target.insertIndex);
+            target.placeholderRect.moveTop(bestArea->cutSeparatorY + insertionGap * 0.5);
+        target.slotMarkerRect = slotMarkerRectForInsertIndexWithGap(contentRect,
+                                                                   candidateChildRects,
+                                                                   target.insertIndex,
+                                                                   insertionGap);
         if (!baseZone && target.slotMarkerRect.top() < bestArea->cutSeparatorY)
-            target.slotMarkerRect.moveTop(bestArea->cutSeparatorY + ChildGap * 0.5);
+            target.slotMarkerRect.moveTop(bestArea->cutSeparatorY + insertionGap * 0.5);
         target.previewChildren = childrenShiftedFromIndex(candidateChildren,
                                                          target.insertIndex,
-                                                         effectivePreviewSize.height() + ChildGap);
+                                                         effectivePreviewSize.height() + insertionGap);
         if (baseZone)
-            target.previewCutSeparatorY = target.placeholderRect.bottom() + ChildGap * 0.5;
+            target.previewCutSeparatorY = target.placeholderRect.bottom() + insertionGap * 0.5;
     }
 
     if (sourceArea == bestArea && sourceChildIndex >= 0 && target.insertIndex == sourceChildIndex) {
@@ -314,11 +392,12 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     }
 
     QRectF changedOldRect = bestArea->rect;
-    QRectF changedNewRect = expandedGroupRectForPreview(bestArea->rect,
-                                                        target.placeholderRect,
-                                                        candidateChildRects,
-                                                        target.insertIndex,
-                                                        effectivePreviewSize);
+    QRectF changedNewRect = expandedGroupRectForPreviewWithGap(bestArea->rect,
+                                                               target.placeholderRect,
+                                                               candidateChildRects,
+                                                               target.insertIndex,
+                                                               effectivePreviewSize,
+                                                               insertionGap);
     target.previewGroupRect = changedNewRect;
 
     QVector<const GroupHitArea *> containingAreas;

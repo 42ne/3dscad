@@ -67,7 +67,8 @@ public:
     DropTarget dropTargetAt(const QPointF &scenePosition,
                             const QSizeF &previewSize = QSizeF(),
                             int movingNodeId = 0,
-                            bool variableDrop = false) const;
+                            bool variableDrop = false,
+                            qreal insertionGapMultiplier = 1.0) const;
 
 private:
     void buildSourcePreview(const GroupHitArea *sourceArea,
