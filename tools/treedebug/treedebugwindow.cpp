@@ -817,8 +817,11 @@ void TreeDebugWindow::buildUi()
             lastIdx    = curIdx;
 
             // scenePos is the actual cursor from this exact event (no lag).
+            // For node drags: show both the node id AND the actual tool string
+            // the drag handle passed to the renderer.  If tool != expected type
+            // (e.g. "radius" instead of "var") the bug is immediately visible.
             const QString subject = movingNodeId > 0
-                ? QStringLiteral("node#%1").arg(movingNodeId)
+                ? QStringLiteral("node#%1[%2]").arg(movingNodeId).arg(tool)
                 : QStringLiteral("\"%1\"").arg(tool);
 
             if (!t.hasTarget) {

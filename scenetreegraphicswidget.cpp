@@ -834,7 +834,12 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               0,
                               -1)
             .renderVariable(node, rect);
-        addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
+        // Pass the canonical tool name ("var"/"par"), not the variable name.
+        // renderPreviewTool() does not recognise arbitrary variable names and falls
+        // back to drawing a cube — the user would see a cube ghost when dragging a variable.
+        addNodeDragHandle(node.id,
+                          node.isParameter ? QStringLiteral("par") : QStringLiteral("var"),
+                          rect, rect, rect.size());
 
         // Register rename zone for the variable name text (badge = 38px, name follows).
         const QFontMetricsF metrics(sceneTreeGraphicsFont());
@@ -907,7 +912,8 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
                           node.id, activeMCVarNodeId, activeMCNumberStart)
         .renderModuleCall(node, rect, params);
 
-    addNodeDragHandle(node.id, node.moduleName, rect, rect, rect.size());
+    // Pass "call" (canonical tool name) not the module name — same reason as "var".
+    addNodeDragHandle(node.id, QStringLiteral("call"), rect, rect, rect.size());
     return rect;
 }
 
