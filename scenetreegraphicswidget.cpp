@@ -2802,6 +2802,7 @@ void SceneTreeGraphicsWidget::clearDropPreview()
 {
     if (m_dropPreviewAnimationTimer)
         m_dropPreviewAnimationTimer->stop();
+    restoreLiveTreeDisplacement();
     m_dragActive = false;
     m_dropPreviewActive = false;
     m_dropPreviewFinishing = false;
@@ -2917,17 +2918,91 @@ void SceneTreeGraphicsWidget::advanceDropPreviewAnimation()
 void SceneTreeGraphicsWidget::renderDropPreviewFrame(const DropTarget &target)
 {
     m_dropPreviewCurrentTarget = target;
+    restoreLiveTreeDisplacement();
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
 
-    const bool liveTreePreview = target.hasTarget
-                                 && target.parentGroupId > 0
-                                 && (target.previewGroupRect.isValid()
-                                     || target.sourceGroupRect.isValid()
-                                     || !target.expandedGroups.isEmpty());
-    setTreeItemsVisible(!liveTreePreview);
+    setTreeItemsVisible(true);
+    applyLiveTreeDisplacement(target);
 
+    DropTarget overlayTarget = target;
+    overlayTarget.previewChildren.clear();
+    overlayTarget.sourceChildren.clear();
+    for (SceneTreeLayout::GroupPreview &group : overlayTarget.expandedGroups)
+        group.children.clear();
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme)
-        .render(target, m_dropPreviewTool, m_dropPreviewMovingNodeId);
+        .render(overlayTarget, m_dropPreviewTool, m_dropPreviewMovingNodeId);
+}
+
+void SceneTreeGraphicsWidget::applyLiveTreeDisplacement(const DropTarget &target)
+{
+    if (!target.hasTarget)
+        return;
+
+    struct MoveRegion {
+        QRectF rect;
+        QPointF delta;
+        int depth = 0;
+    };
+    QVector<MoveRegion> regions;
+
+    auto appendRegions = [&](const QVector<ChildLayout> &children) {
+        for (const ChildLayout &futureChild : children) {
+            if (futureChild.nodeId <= 0)
+                continue;
+
+            for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+                for (const ChildLayout &originalChild : area.children) {
+                    if (originalChild.nodeId != futureChild.nodeId)
+                        continue;
+
+                    const QPointF delta = futureChild.rect.topLeft() - originalChild.rect.topLeft();
+                    if (qAbs(delta.x()) < 0.25 && qAbs(delta.y()) < 0.25)
+                        continue;
+                    regions.append({originalChild.rect.adjusted(-2.0, -2.0, 2.0, 2.0), delta, area.depth});
+                    break;
+                }
+            }
+        }
+    };
+
+    appendRegions(target.sourceChildren);
+    appendRegions(target.previewChildren);
+    for (const SceneTreeLayout::GroupPreview &group : target.expandedGroups)
+        appendRegions(group.children);
+
+    if (regions.isEmpty())
+        return;
+
+    for (QGraphicsItem *item : m_treeItems) {
+        if (!item)
+            continue;
+
+        const QPointF center = item->sceneBoundingRect().center();
+        const MoveRegion *bestRegion = nullptr;
+        for (const MoveRegion &region : regions) {
+            if (!region.rect.contains(center))
+                continue;
+            if (!bestRegion || region.depth > bestRegion->depth)
+                bestRegion = &region;
+        }
+        if (!bestRegion)
+            continue;
+
+        m_liveDisplacedTreeItemPositions.insert(item, item->pos());
+        item->setPos(item->pos() + bestRegion->delta);
+    }
+}
+
+void SceneTreeGraphicsWidget::restoreLiveTreeDisplacement()
+{
+    if (m_liveDisplacedTreeItemPositions.isEmpty())
+        return;
+
+    for (auto it = m_liveDisplacedTreeItemPositions.constBegin(); it != m_liveDisplacedTreeItemPositions.constEnd(); ++it) {
+        if (it.key())
+            it.key()->setPos(it.value());
+    }
+    m_liveDisplacedTreeItemPositions.clear();
 }
 
 void SceneTreeGraphicsWidget::scheduleDropCommit(std::function<void()> action)

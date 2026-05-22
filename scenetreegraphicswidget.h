@@ -140,6 +140,8 @@ private:
     void startDropPreviewAnimation(const DropTarget &target, const QString &previewTool, int movingNodeId, qreal durationMs);
     void advanceDropPreviewAnimation();
     void renderDropPreviewFrame(const DropTarget &target);
+    void applyLiveTreeDisplacement(const DropTarget &target);
+    void restoreLiveTreeDisplacement();
     void scheduleDropCommit(std::function<void()> action);
     void setTreeItemsVisible(bool visible);
     void updateSceneRect();
@@ -273,6 +275,7 @@ private:
     int m_dropPreviewMovingNodeId = 0;
     QPointF m_lastDropPreviewScenePosition;
     QSizeF m_lastDropPreviewSize;
+    QHash<QGraphicsItem *, QPointF> m_liveDisplacedTreeItemPositions;
     qreal m_dropPreviewProgress = 0.0;
     qreal m_dropPreviewDurationMs = 180.0;
     qreal m_dropGapFactor = 1.0;
