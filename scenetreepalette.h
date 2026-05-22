@@ -8,12 +8,12 @@
 namespace SceneTreePalette {
 
 enum class Theme {
-    Sakura  = 0,  // Cherry-blossom pastels — soft rose/lavender, light
+    Aurora  = 0,  // Northern-lights pastels — teal, mint, soft violet, light
     Glass   = 1,  // Dark glass, like the toolbar panel
     Embers  = 2,  // Warm amber / terracotta
     Nordic  = 3,  // Saturated north-European darks — viridian, rust, slate
     Ocean   = 4,  // Deep oceanic blues and teals, dark
-    Harvest = 5,  // Warm autumn earth tones, light
+    Meadow  = 5,  // Spring meadow — sage, cornflower, buttercup, light
 };
 
 constexpr int ThemeCount = 6;
