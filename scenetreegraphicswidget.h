@@ -40,6 +40,7 @@ public:
     void setForLoopRangeHoveredCallback(std::function<void(int, int)> callback);
     void setModuleCallParamHoveredCallback(std::function<void(int, int, int)> callback);
     void setHoverScrollZoneChangedCallback(std::function<void(const QRectF &)> callback);
+    void setDropPreviewChangedCallback(std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &)> callback);
     void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
@@ -152,6 +153,7 @@ private:
     std::function<void(int, int)> m_forLoopRangeHoveredCallback;
     std::function<void(int, int, int)> m_moduleCallParamHoveredCallback;
     std::function<void(const QRectF &)> m_hoverScrollZoneChangedCallback;
+    std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &)> m_dropPreviewChangedCallback;
     std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
     std::function<void(int, int, int, int, qreal)> m_moduleCallArgumentAdjustedCallback;
     std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;
