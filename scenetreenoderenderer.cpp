@@ -1,5 +1,6 @@
 #include "scenetreenoderenderer.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenetreepalette.h"
 
 #include <QBrush>
 #include <QFontMetricsF>
@@ -197,7 +198,9 @@ public:
                      int activeNumberStart,
                      qreal opacity,
                      qreal zValue,
-                     bool isParameter = false)
+                     bool isParameter = false,
+                     int depth = 0,
+                     int theme = 0)
         : m_rect(rect)
         , m_name(name)
         , m_expression(expression)
@@ -205,7 +208,10 @@ public:
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
         , m_isParameter(isParameter)
+        , m_depth(depth)
+        , m_theme(theme)
     {
+        Q_UNUSED(m_depth);  // reserved for future depth-tinted variable rows
         setZValue(zValue);
     }
 
@@ -217,34 +223,59 @@ public:
         painter->setOpacity(m_opacity);
         painter->setFont(sceneTreeGraphicsFont());
 
-        // PAR uses indigo-blue palette; VAR uses amber palette.
-        const QColor accent     = m_isParameter ? QColor(52, 88, 172)   : QColor(150, 116, 42);
-        const QColor nameColor  = m_isParameter ? QColor(24, 36, 72)    : QColor(43, 37, 28);
-        const QColor eqColor    = m_isParameter ? QColor(58, 80, 140)   : QColor(104, 83, 48);
-        const QColor numBorder  = m_isParameter ? QColor(60, 100, 190)  : QColor(158, 126, 51);
-        const QColor numBorderA = m_isParameter ? QColor(40, 120, 220)  : QColor(220, 156, 26);
-        const QColor numFillA   = m_isParameter ? QColor(140, 190, 255, 205) : QColor(255, 220, 108, 205);
+        const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
+        const bool dark = SceneTreePalette::isDarkTheme(pt);
+
+        // Theme-aware accent / text colours.
+        const QColor accent = dark
+            ? (m_isParameter ? QColor(140, 175, 235) : QColor(220, 175,  80))
+            : (m_isParameter ? QColor( 52,  88, 172) : QColor(150, 116,  42));
+        const QColor nameColor = dark
+            ? (m_isParameter ? QColor(200, 215, 245) : QColor(235, 210, 160))
+            : (m_isParameter ? QColor( 24,  36,  72) : QColor( 43,  37,  28));
+        const QColor eqColor = dark
+            ? (m_isParameter ? QColor(160, 185, 230) : QColor(200, 170, 100))
+            : (m_isParameter ? QColor( 58,  80, 140) : QColor(104,  83,  48));
+        const QColor numBorder = dark
+            ? (m_isParameter ? QColor(120, 160, 230) : QColor(200, 160,  70))
+            : (m_isParameter ? QColor( 60, 100, 190) : QColor(158, 126,  51));
+        const QColor numBorderA = SceneTreePalette::pillBorderActive();
+        const QColor numFillA   = SceneTreePalette::pillFillActive();
         const QString badgeLabel = m_isParameter ? QStringLiteral("PAR") : QStringLiteral("VAR");
 
-        // Badge pill — vertically centered in VariableHeight
+        // Row background — gives the card a clean surface both inside its group
+        // and when rendered as a drag-ghost outside the group panel.
+        // Semi-transparent so the group fill (or grid) shows through faintly.
+        {
+            const QColor rowBg = SceneTreePalette::variableFill(m_isParameter, pt);
+            painter->save();
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(rowBg);
+            painter->setRenderHint(QPainter::Antialiasing, false);
+            painter->drawRect(m_rect);
+            painter->restore();
+        }
+
+        // Badge pill — vertically centred in VariableHeight.
         const qreal badgeH = 13.0;
         const QRectF badgeRect(m_rect.left() + 6.0,
                                m_rect.top() + (VariableHeight - badgeH) * 0.5,
                                28.0,
                                badgeH);
-        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(QColor(255, 255, 255, 150)));
+        const QColor badgePillFill = dark ? QColor(255, 255, 255, 38) : QColor(255, 255, 255, 150);
+        paintRoundedPanel(painter, badgeRect, 3.0, QPen(accent, 1.0), QBrush(badgePillFill));
         {
             painter->save();
             QFont badgeFont = painter->font();
             badgeFont.setBold(true);
             badgeFont.setPointSizeF(qMax<qreal>(6.0, badgeFont.pointSizeF() - 2.0));
             painter->setFont(badgeFont);
-            painter->setPen(accent.darker(130));
+            painter->setPen(accent.darker(dark ? 80 : 130));
             painter->drawText(badgeRect, Qt::AlignCenter, badgeLabel);
             painter->restore();
         }
 
-        // Name, = and expression
+        // Name, = and expression.
         const QFontMetricsF metrics(painter->font());
         const qreal nameW = metrics.horizontalAdvance(m_name);
         const QRectF textLineRect(m_rect.left() + 38.0,
@@ -253,26 +284,24 @@ public:
                                   16.0);
 
         painter->setPen(nameColor);
-        painter->drawText(textLineRect,
-                          Qt::AlignLeft | Qt::AlignVCenter,
-                          m_name);
+        painter->drawText(textLineRect, Qt::AlignLeft | Qt::AlignVCenter, m_name);
 
         painter->setPen(eqColor);
         painter->drawText(QRectF(textLineRect.right() + 4.0, textLineRect.top(), 12.0, textLineRect.height()),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
 
+        const QColor numFillInactive = dark ? QColor(255, 255, 255, 32) : QColor(255, 255, 255, 110);
         const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics, nameW);
         for (const ExpressionTextSpan &span : spans) {
             if (!span.number)
                 continue;
-
             const bool active = span.start == m_activeNumberStart;
             paintRoundedPanel(painter,
                               span.rect,
                               4.0,
                               QPen(active ? numBorderA : numBorder, active ? 2 : 1),
-                              QBrush(active ? numFillA : QColor(255, 255, 255, 110)));
+                              QBrush(active ? numFillA : numFillInactive));
         }
 
         painter->setPen(eqColor);
@@ -281,13 +310,15 @@ public:
     }
 
 private:
-    QRectF m_rect;
+    QRectF  m_rect;
     QString m_name;
     QString m_expression;
-    bool m_selected = false;
-    int m_activeNumberStart = -1;
-    qreal m_opacity = 1.0;
-    bool m_isParameter = false;
+    bool    m_selected = false;
+    int     m_activeNumberStart = -1;
+    qreal   m_opacity = 1.0;
+    bool    m_isParameter = false;
+    int     m_depth = 0;
+    int     m_theme = 0;
 };
 
 class GroupCardItem final : public QGraphicsItem
@@ -309,7 +340,9 @@ public:
                   const QStringList &transformExpressions = QStringList(),
                   const QString &loopVariable = QString(),
                   const QString &loopRangeExpression = QString(),
-                  int activeForLoopNumberStart = -1)
+                  int activeForLoopNumberStart = -1,
+                  int depth = 0,
+                  int theme = 0)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
@@ -326,6 +359,8 @@ public:
         , m_showShadow(showShadow)
         , m_showDifferenceLabels(showDifferenceLabels)
         , m_insertedPreview(insertedPreview)
+        , m_depth(depth)
+        , m_theme(theme)
     {
         setZValue(zValue);
     }
@@ -336,70 +371,89 @@ public:
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
         painter->setFont(sceneTreeGraphicsFont());
-        const QColor fill = operationVisual(m_operation).fill;
 
+        // ----- Palette-derived colours -----
+        const auto pt   = static_cast<SceneTreePalette::Theme>(m_theme);
+        const bool dark = SceneTreePalette::isDarkTheme(pt);
+        const QColor fill = SceneTreePalette::groupFill(m_operation, m_depth, pt);
+
+        // Body border: selected = golden; otherwise lighter above fill on dark themes.
+        const QPen bodyBorderPen = m_selected
+            ? QPen(QColor(255, 203, 87), 3)
+            : QPen(dark ? fill.lighter(165) : fill.darker(145), 2);
+
+        const QColor cTextPrimary = SceneTreePalette::textPrimary(pt);
+        const QColor cTextMuted   = SceneTreePalette::textMuted(pt);
+        const QColor cPillBorder  = SceneTreePalette::pillBorder(fill, pt);
+        const QColor cPillFill    = SceneTreePalette::pillFill(pt);
+
+        // Shadow — slightly more prominent on dark themes to give depth.
         if (m_showShadow) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0, 0, 0, 38));
+            painter->setBrush(QColor(0, 0, 0, dark ? 55 : 38));
             painter->drawRect(m_rect.translated(2.0, 2.0));
         }
 
-        const QColor bodyFill = m_insertedPreview ? translucent(fill, 205) : fill;
-        paintRoundedPanel(painter,
-                          m_rect,
-                          CornerRadius,
-                          QPen(m_selected ? QColor(255, 203, 87) : fill.darker(145), m_selected ? 3 : 2),
-                          QBrush(bodyFill));
+        const QColor bodyFill = m_insertedPreview ? translucent(fill, qMin(fill.alpha() + 55, 230)) : fill;
+        paintRoundedPanel(painter, m_rect, CornerRadius, bodyBorderPen, QBrush(bodyFill));
 
         if (isTransformOperation(m_operation)) {
-            paintVerticalHeader(painter, fill);
+            paintVerticalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
         } else {
-            paintHorizontalHeader(painter, fill);
+            paintHorizontalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
         }
 
         if (m_empty) {
             const QPointF emptyPosition = isTransformOperation(m_operation)
-                                              ? QPointF(m_rect.left() + TransformHeaderWidth + GroupPadding + PrimitiveIconSize + 8.0,
-                                                        m_rect.top() + GroupPadding + 10.0)
-                                              : QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0,
-                                                        m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0);
-            paintLabel(painter, QStringLiteral("empty"), emptyPosition, QColor(95, 98, 105));
+                ? QPointF(m_rect.left() + TransformHeaderWidth + GroupPadding + PrimitiveIconSize + 8.0,
+                          m_rect.top() + GroupPadding + 10.0)
+                : QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0,
+                          m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0);
+            paintLabel(painter, QStringLiteral("empty"), emptyPosition, cTextMuted);
         }
 
         if (m_operation != SceneDocument::TreeNode::Difference || m_cutSeparatorY <= 0.0)
             return;
 
-        painter->setPen(QPen(QColor(130, 92, 70), 1, Qt::DashLine));
+        const QColor diffSepColor = dark ? QColor(190, 140, 110) : QColor(130, 92, 70);
+        painter->setPen(QPen(diffSepColor, 1, Qt::DashLine));
         painter->drawLine(QPointF(m_rect.left() + GroupPadding, m_cutSeparatorY),
                           QPointF(m_rect.right() - GroupPadding, m_cutSeparatorY));
 
         if (m_showDifferenceLabels) {
-            const qreal labelWidth = 20.0;
+            const qreal labelWidth  = 20.0;
             const qreal labelHeight = 42.0;
-            const qreal labelLeft = m_rect.left() + GroupPadding * 0.5;
-            const qreal baseTop = m_rect.top() + GroupHeaderHeight + GroupPadding;
-            const qreal baseBottom = m_cutSeparatorY - 4.0;
-            const qreal cutTop = m_cutSeparatorY + 4.0;
-            const qreal cutBottom = m_rect.bottom() - GroupPadding;
-            paintVerticalPillLabel(painter,
-                                   QStringLiteral("base"),
+            const qreal labelLeft   = m_rect.left() + GroupPadding * 0.5;
+            const qreal baseTop     = m_rect.top() + GroupHeaderHeight + GroupPadding;
+            const qreal baseBottom  = m_cutSeparatorY - 4.0;
+            const qreal cutTop      = m_cutSeparatorY + 4.0;
+            const qreal cutBottom   = m_rect.bottom() - GroupPadding;
+            const QColor diffAccent = dark ? QColor(200, 160, 120) : QColor(128, 99, 73);
+            const QColor cutAccent  = dark ? QColor(210, 130, 100) : QColor(153, 85, 56);
+            paintVerticalPillLabel(painter, QStringLiteral("base"),
                                    boundedVerticalLabelRect(labelLeft, baseTop, baseBottom, labelWidth, labelHeight),
-                                   QColor(128, 99, 73));
-            paintVerticalPillLabel(painter,
-                                   QStringLiteral("cut"),
+                                   diffAccent);
+            paintVerticalPillLabel(painter, QStringLiteral("cut"),
                                    boundedVerticalLabelRect(labelLeft, cutTop, cutBottom, labelWidth, labelHeight),
-                                   QColor(153, 85, 56));
+                                   cutAccent);
         }
     }
 
 private:
-    void paintHorizontalHeader(QPainter *painter, const QColor &fill)
+    void paintHorizontalHeader(QPainter *painter, const QColor &fill,
+                                bool dark,
+                                const QColor &cTextPrimary, const QColor &cTextMuted,
+                                const QColor &cPillBorder, const QColor &cPillFill)
     {
         const QRectF headerRect(m_rect.left() + 1.5,
                                 m_rect.top() + 1.5,
                                 m_rect.width() - 3.0,
                                 GroupHeaderHeight - 2.0);
-        const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
+        // Header is slightly lighter than the body — more so for dark themes.
+        const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
+        const QColor headerFill = m_insertedPreview
+            ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
+            : rawHeaderFill;
         paintRoundedPanel(painter, headerRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
         const qreal headerIconSize = m_operation == SceneDocument::TreeNode::Module
@@ -409,84 +463,94 @@ private:
                               m_rect.top() + (m_operation == SceneDocument::TreeNode::Module ? 5.0 : 6.0),
                               headerIconSize,
                               headerIconSize);
-        paintOperationIcon(painter, m_operation, iconRect, fill.darker(125));
+        const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
+        paintOperationIcon(painter, m_operation, iconRect, iconAccent);
 
         if (m_operation == SceneDocument::TreeNode::For) {
-            const QString variableName = m_loopVariable.trimmed().isEmpty() ? QStringLiteral("i") : m_loopVariable.trimmed();
+            const QString variableName    = m_loopVariable.trimmed().isEmpty()      ? QStringLiteral("i")         : m_loopVariable.trimmed();
             const QString rangeExpression = m_loopRangeExpression.trimmed().isEmpty() ? QStringLiteral("[0 : 1 : 3]") : m_loopRangeExpression.trimmed();
             const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
             // Use the canonical scene font directly — not painter->font() which may be
             // device-resolved to a slightly different pixel size — so that the pill rects
             // produced here match the rects produced by the hit-testing code in the widget.
             const QFontMetricsF metrics(sceneTreeGraphicsFont());
-            painter->setPen(QColor(24, 34, 44));
-            painter->drawText(QRectF(m_rect.left() + 52.0, m_rect.top() + 7.0, metrics.horizontalAdvance(prefix), 16.0),
-                              Qt::AlignLeft | Qt::AlignVCenter,
-                              prefix);
+            painter->setPen(cTextPrimary);
+            painter->drawText(QRectF(m_rect.left() + 52.0, m_rect.top() + 7.0,
+                                     metrics.horizontalAdvance(prefix), 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, prefix);
 
             const QVector<ExpressionTextSpan> spans = forLoopRangeTextSpans(m_rect, variableName, rangeExpression, metrics);
             for (const ExpressionTextSpan &span : spans) {
                 if (span.number) {
                     const bool active = span.start == m_activeForLoopNumberStart;
-                    paintRoundedPanel(painter,
-                                      span.rect,
-                                      3.0,
-                                      QPen(active ? QColor(220, 156, 26) : fill.darker(125), active ? 2 : 1),
-                                      QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+                    paintRoundedPanel(painter, span.rect, 3.0,
+                                      QPen(active ? SceneTreePalette::pillBorderActive() : cPillBorder, active ? 2 : 1),
+                                      QBrush(active ? SceneTreePalette::pillFillActive() : cPillFill));
                 }
-                painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 82, 64));
+                painter->setPen(span.number ? cTextPrimary : cTextMuted);
                 // Numbers use HCenter: span.rect has 4 px padding on each side so the digit
-                // sits centred inside the pill.  Non-numbers are exactly their text width, so
-                // AlignLeft is correct for them.
+                // sits centred inside the pill.  Non-numbers are exactly their text width.
                 const Qt::Alignment align = span.number
-                                                ? (Qt::AlignHCenter | Qt::AlignVCenter)
-                                                : (Qt::AlignLeft | Qt::AlignVCenter);
+                    ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                    : (Qt::AlignLeft | Qt::AlignVCenter);
                 painter->drawText(span.rect, align, span.text);
             }
             const qreal suffixLeft = forLoopRangeTextRect(m_rect, variableName, metrics).left()
                                      + metrics.horizontalAdvance(rangeExpression);
-            painter->setPen(QColor(24, 34, 44));
-            painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+            painter->setPen(cTextPrimary);
+            painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
         } else {
-            paintLabel(painter, labelForOperation(m_operation), m_rect.topLeft() + QPointF(52.0, 7.0), QColor(24, 34, 44));
+            paintLabel(painter, labelForOperation(m_operation),
+                       m_rect.topLeft() + QPointF(52.0, 7.0), cTextPrimary);
         }
     }
 
-    void paintVerticalHeader(QPainter *painter, const QColor &fill)
+    void paintVerticalHeader(QPainter *painter, const QColor &fill,
+                              bool dark,
+                              const QColor &cTextPrimary, const QColor & /*cTextMuted*/,
+                              const QColor &cPillBorder, const QColor &cPillFill)
     {
-        // Narrow icon-only border (like PrimitiveCardWidth for shapes)
+        // Narrow icon-only stripe (left side, like PrimitiveCardWidth for shapes).
         const QRectF iconBorderRect(m_rect.left() + 1.5,
                                     m_rect.top() + 1.5,
                                     TransformIconWidth - 2.0,
                                     m_rect.height() - 3.0);
-        const QColor headerFill = m_insertedPreview ? translucent(fill.lighter(112), 210) : fill.lighter(112);
+        const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
+        const QColor headerFill = m_insertedPreview
+            ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
+            : rawHeaderFill;
         paintRoundedPanel(painter, iconBorderRect, CornerRadius - 1.0, Qt::NoPen, QBrush(headerFill));
 
-        const QRectF iconRect(m_rect.left() + 6.0, m_rect.top() + 7.0, PrimitiveIconSize - 6.0, PrimitiveIconSize - 6.0);
-        paintOperationIcon(painter, m_operation, iconRect, fill.darker(125), 6.0);
+        const QRectF iconRect(m_rect.left() + 6.0, m_rect.top() + 7.0,
+                               PrimitiveIconSize - 6.0, PrimitiveIconSize - 6.0);
+        const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
+        paintOperationIcon(painter, m_operation, iconRect, iconAccent, 6.0);
 
-        painter->setPen(QColor(24, 34, 44));
+        painter->setPen(cTextPrimary);
         painter->drawText(QRectF(iconRect.left(), iconRect.bottom() - 1.0, iconRect.width(), 14.0),
                           Qt::AlignCenter,
-                          m_operation == SceneDocument::TreeNode::Translate
-                              ? QStringLiteral("T")
-                              : m_operation == SceneDocument::TreeNode::Rotate
-                                    ? QStringLiteral("R")
-                                    : QStringLiteral("S"));
+                          m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T")
+                          : m_operation == SceneDocument::TreeNode::Rotate  ? QStringLiteral("R")
+                                                                             : QStringLiteral("S"));
 
-        // X/Y/Z rows outside icon border
-        // Use the canonical scene font directly for metrics so that pill rects here
-        // are pixel-identical to those produced by the widget's hit-testing code.
+        // X/Y/Z rows outside icon border.
+        // Use the canonical scene font for metrics so pill rects are pixel-identical
+        // to those produced by the widget's hit-testing code.
         const QFontMetricsF metrics(sceneTreeGraphicsFont());
         QFont valueFont = painter->font();
         valueFont.setPointSizeF(qMax<qreal>(7.0, valueFont.pointSizeF() - 2.0));
 
+        // Axis label colour: on dark themes, derive from the fill so it reads
+        // against the dark background; on light themes, use the traditional darker.
+        const QColor axisLabelColor = dark ? fill.lighter(220) : fill.darker(160);
+
         static const QString axisLabels[3] = {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
         for (int axis = 0; axis < 3; ++axis) {
-            const QRectF rowRect = transformParameterControlRect(m_rect, axis, m_transformHeaderWidth);
-            const bool rowActive = axis == m_activeTransformAxis;
+            const QRectF rowRect   = transformParameterControlRect(m_rect, axis, m_transformHeaderWidth);
+            const bool   rowActive = (axis == m_activeTransformAxis);
 
-            // Expression for this axis
+            // Expression for this axis.
             QString expr;
             if (axis < m_transformExpressions.size() && !m_transformExpressions[axis].isEmpty())
                 expr = m_transformExpressions[axis];
@@ -498,55 +562,54 @@ private:
                 expr = QString::number(val, 'f', precision);
             }
 
-            // Label "X =" in muted color
             painter->setFont(valueFont);
-            painter->setPen(fill.darker(160));
+            painter->setPen(axisLabelColor);
             painter->drawText(QRectF(rowRect.left(), rowRect.top(), TransformParamLabelArea - 2.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter,
                               axisLabels[axis] + QStringLiteral(" ="));
 
-            // Expression text spans
             const QRectF textRect(rowRect.left() + TransformParamLabelArea,
                                   rowRect.top(),
                                   rowRect.width() - TransformParamLabelArea,
                                   rowRect.height());
             const QVector<ExpressionTextSpan> spans = expressionSpansInTextRect(textRect, expr, metrics);
             for (const ExpressionTextSpan &span : spans) {
-                const bool numActive = rowActive && span.number && span.start == m_activeTransformNumberStart;
+                const bool numActive = rowActive && span.number && (span.start == m_activeTransformNumberStart);
                 if (span.number) {
-                    paintRoundedPanel(painter,
-                                      span.rect,
-                                      3.0,
-                                      QPen(numActive ? QColor(220, 156, 26) : fill.darker(125), numActive ? 2 : 1),
-                                      QBrush(numActive ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
+                    paintRoundedPanel(painter, span.rect, 3.0,
+                                      QPen(numActive ? SceneTreePalette::pillBorderActive() : cPillBorder,
+                                           numActive ? 2 : 1),
+                                      QBrush(numActive ? SceneTreePalette::pillFillActive() : cPillFill));
                 }
-                painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 110, 160));
-                // Numbers: span.rect is 4 px wider on each side than the text — centre it
-                // inside the pill so the digit aligns with the surrounding non-number text.
+                // Numbers: span.rect is 4 px wider on each side → centre digit inside pill.
+                painter->setPen(span.number ? cTextPrimary
+                                            : (dark ? QColor(140, 175, 220) : QColor(80, 110, 160)));
                 const Qt::Alignment align = span.number
-                                                ? (Qt::AlignHCenter | Qt::AlignVCenter)
-                                                : (Qt::AlignLeft | Qt::AlignVCenter);
+                    ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                    : (Qt::AlignLeft | Qt::AlignVCenter);
                 painter->drawText(span.rect, align, span.text);
             }
         }
     }
 
-    QRectF m_rect;
-    qreal m_cutSeparatorY = 0.0;
-    QVector3D m_transformValues;
+    QRectF      m_rect;
+    qreal       m_cutSeparatorY = 0.0;
+    QVector3D   m_transformValues;
     QStringList m_transformExpressions;
-    qreal m_transformHeaderWidth = TransformHeaderWidth;
-    QString m_loopVariable;
-    QString m_loopRangeExpression;
-    int m_activeForLoopNumberStart = -1;
-    int m_activeTransformAxis = -1;
-    int m_activeTransformNumberStart = -1;
+    qreal       m_transformHeaderWidth = TransformHeaderWidth;
+    QString     m_loopVariable;
+    QString     m_loopRangeExpression;
+    int         m_activeForLoopNumberStart   = -1;
+    int         m_activeTransformAxis        = -1;
+    int         m_activeTransformNumberStart = -1;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
-    bool m_selected = false;
-    bool m_empty = false;
-    bool m_showShadow = false;
-    bool m_showDifferenceLabels = false;
-    bool m_insertedPreview = false;
+    bool        m_selected            = false;
+    bool        m_empty               = false;
+    bool        m_showShadow          = false;
+    bool        m_showDifferenceLabels = false;
+    bool        m_insertedPreview      = false;
+    int         m_depth = 0;
+    int         m_theme = 0;
 };
 
 
@@ -724,7 +787,11 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
 {
     const int activeNumberStart = node.id == m_activeVariableNodeId ? m_activeVariableNumberStart : -1;
-    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression, node.id == m_selectedNodeId, activeNumberStart, 1.0, 5.0, node.isParameter));
+    m_scene->addItem(new VariableCardItem(rect, node.variableName, node.variableExpression,
+                                          node.id == m_selectedNodeId, activeNumberStart,
+                                          1.0, 5.0, node.isParameter,
+                                          0,        // depth (variables: no depth-hue shift)
+                                          m_theme));
 }
 
 void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
@@ -756,7 +823,12 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
     const bool showEmptyText = node.operation != SceneDocument::TreeNode::Module
                                && node.operation != SceneDocument::TreeNode::Scene
                                && node.children.isEmpty();
-    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0), node.id == m_selectedNodeId, showEmptyText, true, true, false, transformValues, activeAxis, activeNumberStart, transformHeaderWidth, node.transformExpressions, node.loopVariable, node.loopRangeExpression, activeForLoopStart));
+    m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0),
+                                       node.id == m_selectedNodeId, showEmptyText, true, true, false,
+                                       transformValues, activeAxis, activeNumberStart,
+                                       transformHeaderWidth, node.transformExpressions,
+                                       node.loopVariable, node.loopRangeExpression, activeForLoopStart,
+                                       depth, m_theme));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),
@@ -783,7 +855,10 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     } else if (tool == QStringLiteral("call")) {
         item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0);
     } else if (operationForToolName(tool, &operation)) {
-        item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true);
+        item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
+                                 QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
+                                 QString(), QString(), -1,
+                                 0, 0); // preview always uses Frost theme
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
@@ -800,7 +875,12 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
                                                const QRectF &rect,
                                                qreal cutSeparatorY)
 {
-    auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false);
+    // Preview groups always use the default (Frost) theme so drag previews look
+    // consistent regardless of the active tree theme.
+    auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
+                                   QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
+                                   QString(), QString(), -1,
+                                   0, 0);
     scene->addItem(item);
     appendPreviewItem(items, item);
 }

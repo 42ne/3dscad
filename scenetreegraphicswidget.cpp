@@ -1,6 +1,7 @@
 #include "scenetreegraphicswidget.h"
 #include "nodethumbnailcache.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenetreepalette.h"
 #include "scenetreeinlinetextinput.h"
 #include "scenetreelayout.h"
 #include "scenetreepreviewrenderer.h"
@@ -9,11 +10,14 @@
 
 #include <QApplication>
 #include <QFontMetricsF>
+#include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
+#include <QGraphicsSceneMouseEvent>
 #include <QHash>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QScrollBar>
 #include <QToolTip>
 #include <QTimer>
@@ -23,6 +27,48 @@
 using namespace SceneTreeGraphics;
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// ThemeSwitcherSwatchItem — a single clickable swatch circle in the theme
+// switcher overlay at the bottom of the viewport.
+// ---------------------------------------------------------------------------
+class ThemeSwitcherSwatchItem : public QGraphicsEllipseItem
+{
+public:
+    ThemeSwitcherSwatchItem(const QPointF &center,
+                             qreal radius,
+                             const QPen &pen,
+                             const QBrush &brush,
+                             int themeIndex,
+                             std::function<void(int)> onClick)
+        : QGraphicsEllipseItem(center.x() - radius, center.y() - radius,
+                                radius * 2.0, radius * 2.0)
+        , m_themeIndex(themeIndex)
+        , m_onClick(std::move(onClick))
+    {
+        setPen(pen);
+        setBrush(brush);
+        setAcceptedMouseButtons(Qt::LeftButton);
+    }
+
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            if (m_onClick)
+                m_onClick(m_themeIndex);
+            event->accept();
+        } else {
+            event->ignore();
+        }
+    }
+
+private:
+    int m_themeIndex = 0;
+    std::function<void(int)> m_onClick;
+};
+
+// ---------------------------------------------------------------------------
 
 constexpr qreal LiveDropPreviewDurationMs = 210.0;
 constexpr qreal ReleaseDropPreviewDurationMs = 95.0;
@@ -475,6 +521,15 @@ void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
     refresh();
 }
 
+void SceneTreeGraphicsWidget::setTreeTheme(int theme)
+{
+    const int clamped = qBound(0, theme, SceneTreePalette::ThemeCount - 1);
+    if (m_treeTheme == clamped)
+        return;
+    m_treeTheme = clamped;
+    refresh();
+}
+
 void SceneTreeGraphicsWidget::refresh()
 {
     resetGraphicsScene();
@@ -788,6 +843,111 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
 
     clearToolbar();
     drawToolbar();
+    drawThemeSwitcher();
+}
+
+void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
+{
+    const int clamped = qBound(0, themeIndex, SceneTreePalette::ThemeCount - 1);
+    if (m_treeTheme == clamped)
+        return;
+    m_treeTheme = clamped;
+    // refresh() rebuilds the whole scene including the toolbar overlay.
+    refresh();
+}
+
+void SceneTreeGraphicsWidget::drawThemeSwitcher()
+{
+    if (!m_graphicsScene || !viewport())
+        return;
+
+    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
+    const qreal viewportHeight = viewport()->height();
+    const qreal viewportScale  = transform().m11();
+    const qreal safeScale = qMax<qreal>(0.001, std::abs(viewportScale));
+
+    const auto scenePoint = [&](qreal x, qreal y) {
+        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
+    };
+
+    // Geometry constants (all in logical viewport pixels before scale application).
+    constexpr qreal SwatchR     =  7.0;   // circle radius
+    constexpr qreal SwatchGap   =  5.0;   // gap between circles
+    constexpr qreal PadH        =  7.0;   // panel left/right padding
+    constexpr qreal PadV        =  6.0;   // panel top/bottom padding
+    constexpr qreal BottomGap   = 12.0;   // distance from bottom viewport edge
+
+    // Use the same OverlayZ as the toolbar (defined in scenetreetoolbarrenderer.cpp).
+    // We replicate the constant here to keep the file self-contained.
+    constexpr qreal LocalOverlayZ = 10000.0;
+
+    const int n = SceneTreePalette::ThemeCount;
+    const qreal panelW = n * (SwatchR * 2.0) + (n - 1) * SwatchGap + PadH * 2.0;
+    const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
+
+    const QRectF panelLocal(0.0, 0.0, panelW, panelH);
+    const QPointF panelTopLeft = scenePoint(12.0,                           // OverlayMargin
+                                             viewportHeight - BottomGap - panelH);
+
+    // Drop shadow.
+    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
+                                             Qt::NoPen,
+                                             QBrush(QColor(0, 0, 0, 90)));
+    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setPos(panelTopLeft);
+    shadow->setZValue(LocalOverlayZ - 2.0);
+    shadow->setOpacity(0.65);
+    m_toolbarItems.append(shadow);
+
+    // Glass panel background — same style as toolbar.
+    QPainterPath panelPath;
+    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
+    auto *panel = m_graphicsScene->addPath(panelPath,
+                                            QPen(QColor(148, 163, 184, 82), 1.0),
+                                            QBrush(QColor(10, 16, 24, 178)));
+    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setPos(panelTopLeft);
+    panel->setZValue(LocalOverlayZ - 1.0);
+    m_toolbarItems.append(panel);
+
+    // One swatch circle per theme.
+    for (int i = 0; i < n; ++i) {
+        const auto  th      = static_cast<SceneTreePalette::Theme>(i);
+        const bool  active  = (i == m_treeTheme);
+        const QColor swatch = SceneTreePalette::swatchColor(th);
+        const qreal cx = PadH + i * (SwatchR * 2.0 + SwatchGap) + SwatchR;
+        const qreal cy = PadV + SwatchR;
+
+        // Active ring (drawn first, below the fill circle).
+        if (active) {
+            const qreal ringR = SwatchR + 2.8;
+            auto *ring = new ThemeSwitcherSwatchItem(
+                QPointF(cx, cy), ringR,
+                QPen(QColor(255, 255, 255, 210), 1.6),
+                Qt::NoBrush,
+                i, [this](int idx) { handleThemeSwitcherClick(idx); });
+            ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+            ring->setPos(panelTopLeft);
+            ring->setZValue(LocalOverlayZ);
+            m_graphicsScene->addItem(ring);
+            m_toolbarItems.append(ring);
+        }
+
+        // Filled swatch circle.
+        const QPen swatchPen = active
+            ? QPen(Qt::NoPen)
+            : QPen(swatch.darker(150), 1.0);
+        auto *circle = new ThemeSwitcherSwatchItem(
+            QPointF(cx, cy), SwatchR,
+            swatchPen,
+            QBrush(swatch),
+            i, [this](int idx) { handleThemeSwitcherClick(idx); });
+        circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        circle->setPos(panelTopLeft);
+        circle->setZValue(LocalOverlayZ + 0.5);
+        m_graphicsScene->addItem(circle);
+        m_toolbarItems.append(circle);
+    }
 }
 
 void SceneTreeGraphicsWidget::addNodeDragHandle(int nodeId,
@@ -833,6 +993,7 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               m_activeVariableNumberStart,
                               0,
                               -1)
+            .setTheme(m_treeTheme)
             .renderVariable(node, rect);
         // Pass the canonical tool name ("var"/"par"), not the variable name.
         // renderPreviewTool() does not recognise arbitrary variable names and falls
@@ -1025,6 +1186,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           -1,
                           m_activeForLoopNodeId,
                           m_activeForLoopNumberStart)
+        .setTheme(m_treeTheme)
         .renderGroup(node, rect, depth, cutSeparatorY);
 
     if (node.operation == SceneDocument::TreeNode::Module) {

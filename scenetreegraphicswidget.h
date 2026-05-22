@@ -3,6 +3,7 @@
 
 #include "scenedocument.h"
 #include "scenetreelayout.h"
+#include "scenetreepalette.h"
 
 #include <QGraphicsView>
 #include <QRectF>
@@ -48,6 +49,8 @@ public:
     void setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback);
     void setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback);
     void setSelectedTreeNodeId(int nodeId);
+    void setTreeTheme(int theme);
+    int  treeTheme() const { return m_treeTheme; }
     void refresh();
 
     // Debug/inspection — for use by debug tools only.
@@ -74,8 +77,10 @@ private:
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
     QRectF drawToolbar();
+    void drawThemeSwitcher();
     void clearToolbar();
     void updateToolbarOverlay();
+    void handleThemeSwitcherClick(int themeIndex);
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
@@ -174,6 +179,7 @@ private:
     bool                      m_inlineInputActive = false;
     QRectF                    m_inlineInputSceneRect;
 
+    int m_treeTheme = 0;    // SceneTreePalette::Theme cast to int; 0 = Frost
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;

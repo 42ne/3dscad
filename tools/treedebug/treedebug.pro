@@ -24,6 +24,7 @@ SOURCES += \
     $$PARENT/scenetreeinlinetextinput.cpp \
     $$PARENT/scenetreelayout.cpp \
     $$PARENT/scenetreenoderenderer.cpp \
+    $$PARENT/scenetreepalette.cpp \
     $$PARENT/scenetreepreviewrenderer.cpp \
     $$PARENT/scenetreetoolbarrenderer.cpp
 
@@ -37,6 +38,7 @@ HEADERS += \
     $$PARENT/scenetreeinlinetextinput.h \
     $$PARENT/scenetreelayout.h \
     $$PARENT/scenetreenoderenderer.h \
+    $$PARENT/scenetreepalette.h \
     $$PARENT/scenetreepreviewrenderer.h \
     $$PARENT/scenetreetoolbarrenderer.h \
     $$PARENT/shapenode.h

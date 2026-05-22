@@ -53,6 +53,10 @@ public:
                      int depth,
                      qreal cutSeparatorY);
 
+    // Set the active visual theme (0 = Frost, 1 = Glass, 2 = Embers, 3 = Deep).
+    // Returns *this so it can be chained: SceneTreeNodeRenderer(...).setTheme(t).renderXxx(...)
+    SceneTreeNodeRenderer &setTheme(int theme) { m_theme = theme; return *this; }
+
     static void renderPreviewTool(QGraphicsScene *scene,
                                   QVector<QGraphicsItem *> *items,
                                   const QString &tool,
@@ -82,6 +86,7 @@ private:
     int m_activeModuleCallNodeId = 0;
     int m_activeModuleCallVarNodeId = 0;
     int m_activeModuleCallNumberStart = -1;
+    int m_theme = 0;  // SceneTreePalette::Theme cast to int; 0 = Frost
     NodeSelectedCallback m_onSelected;
 };
 
