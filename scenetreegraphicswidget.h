@@ -36,6 +36,10 @@ public:
     void setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback);
     void setShapeParameterAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setShapeParameterHoveredCallback(std::function<void(int, int)> callback);
+    void setVariableNumberHoveredCallback(std::function<void(int, int)> callback);
+    void setForLoopRangeHoveredCallback(std::function<void(int, int)> callback);
+    void setModuleCallParamHoveredCallback(std::function<void(int, int, int)> callback);
+    void setHoverScrollZoneChangedCallback(std::function<void(const QRectF &)> callback);
     void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
     void setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
     void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
@@ -144,6 +148,10 @@ private:
     std::function<void(int, SceneDocument::TreeNode::Operation, int)> m_transformControlHoveredCallback;
     std::function<void(int, int, int, int, qreal)> m_shapeParameterAdjustedCallback;
     std::function<void(int, int)> m_shapeParameterHoveredCallback;
+    std::function<void(int, int)> m_variableNumberHoveredCallback;
+    std::function<void(int, int)> m_forLoopRangeHoveredCallback;
+    std::function<void(int, int, int)> m_moduleCallParamHoveredCallback;
+    std::function<void(const QRectF &)> m_hoverScrollZoneChangedCallback;
     std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
     std::function<void(int, int, int, int, qreal)> m_moduleCallArgumentAdjustedCallback;
     std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;

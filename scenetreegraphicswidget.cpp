@@ -410,6 +410,26 @@ void SceneTreeGraphicsWidget::setShapeParameterHoveredCallback(std::function<voi
     m_shapeParameterHoveredCallback = callback;
 }
 
+void SceneTreeGraphicsWidget::setVariableNumberHoveredCallback(std::function<void(int, int)> callback)
+{
+    m_variableNumberHoveredCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setForLoopRangeHoveredCallback(std::function<void(int, int)> callback)
+{
+    m_forLoopRangeHoveredCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setModuleCallParamHoveredCallback(std::function<void(int, int, int)> callback)
+{
+    m_moduleCallParamHoveredCallback = callback;
+}
+
+void SceneTreeGraphicsWidget::setHoverScrollZoneChangedCallback(std::function<void(const QRectF &)> callback)
+{
+    m_hoverScrollZoneChangedCallback = callback;
+}
+
 void SceneTreeGraphicsWidget::setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
 {
     m_variableNumberAdjustedCallback = callback;
@@ -1782,6 +1802,8 @@ void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &s
     m_activeVariableNumberStart = start;
     if (!m_dragActive)
         refresh();
+    if (m_variableNumberHoveredCallback)
+        m_variableNumberHoveredCallback(nodeId, start);
 }
 
 void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled)
@@ -1805,6 +1827,8 @@ void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &sce
     m_activeForLoopNumberStart = start;
     if (!m_dragActive)
         refresh();
+    if (m_forLoopRangeHoveredCallback)
+        m_forLoopRangeHoveredCallback(nodeId, start);
 }
 
 bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosition,
@@ -1907,6 +1931,8 @@ void SceneTreeGraphicsWidget::updateActiveModuleCallParamControl(const QPointF &
     m_activeModuleCallNumberStart = start;
     if (!m_dragActive)
         refresh();
+    if (m_moduleCallParamHoveredCallback)
+        m_moduleCallParamHoveredCallback(moduleCallNodeId, varNodeId, start);
 }
 
 void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition)
@@ -1945,6 +1971,8 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
     m_hoveredScrollRect = newScrollRect;
     m_hoveredRenameRect = newRenameRect;
     refresh();
+    if (m_hoverScrollZoneChangedCallback)
+        m_hoverScrollZoneChangedCallback(m_hoveredScrollRect);
 }
 
 QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition) const

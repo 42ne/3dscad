@@ -741,8 +741,130 @@ void TreeDebugWindow::buildUi()
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
         });
 
-    m_treeWidget->setTransformControlHoveredCallback([](int, SceneDocument::TreeNode::Operation, int) {});
-    m_treeWidget->setShapeParameterHoveredCallback([](int, int) {});
+    // ── Hover callbacks — log highlight rect vs cursor on every change ───────────
+
+    // Plain hover (no Ctrl): the teal pill border that appears on mouseover.
+    m_treeWidget->setHoverScrollZoneChangedCallback([this](const QRectF &pillRect) {
+        if (!pillRect.isValid()) return;   // cleared — don't spam "nothing" entries
+        log(QStringLiteral("[....] hover      pill=(%1,%2 %3×%4)  cursor=(%5,%6)")
+            .arg(qRound(pillRect.x())).arg(qRound(pillRect.y()))
+            .arg(qRound(pillRect.width())).arg(qRound(pillRect.height()))
+            .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+    });
+
+    // Ctrl hover — transform axis
+    m_treeWidget->setTransformControlHoveredCallback(
+        [this](int groupId, SceneDocument::TreeNode::Operation /*op*/, int axis) {
+            if (groupId <= 0 || axis < 0) return;
+            const SceneDocument::TreeNode *node = m_scene.treeNodeById(groupId);
+            if (!node) return;
+            const QString axisName = QStringList{QStringLiteral("X"),
+                                                  QStringLiteral("Y"),
+                                                  QStringLiteral("Z")}[axis];
+            const QString expr = transformAxisExpression(*node, axis);
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const qreal hw = transformHeaderWidthForNode(*node);
+            const auto ctrls = transformParameterNumberControls(
+                m_treeWidget->debugGroupRect(groupId), axis, expr, fm, hw);
+            QString pills;
+            for (const auto &c : ctrls)
+                pills += QStringLiteral("  \"%1\" hit=(%2,%3 %4×%5)")
+                    .arg(c.text)
+                    .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
+                    .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
+            log(QStringLiteral("[....] ctrl-hover  transform  node=#%1 %2 \"%3\"%4  cursor=(%5,%6)")
+                .arg(groupId).arg(axisName).arg(expr).arg(pills)
+                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+        });
+
+    // Ctrl hover — shape parameter
+    m_treeWidget->setShapeParameterHoveredCallback(
+        [this](int shapeId, int paramIndex) {
+            if (shapeId < 0 || paramIndex < 0) return;
+            const ShapeNode *shape = m_scene.shapeById(shapeId);
+            if (!shape) return;
+            // Find tree node that owns this shape.
+            int treeNodeId = 0;
+            {
+                std::function<void(const SceneDocument::TreeNode &)> find;
+                find = [&](const SceneDocument::TreeNode &n) {
+                    if (n.type == SceneDocument::TreeNode::Primitive && n.shapeId == shapeId)
+                        treeNodeId = n.id;
+                    for (const auto &ch : n.children) find(ch);
+                };
+                find(m_scene.treeRoot());
+            }
+            const auto paramControls = shapeParameterControls(*shape);
+            if (paramIndex >= paramControls.size()) return;
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const auto ctrls = shapeParameterNumberControls(
+                m_treeWidget->debugChildRect(treeNodeId),
+                paramIndex, paramControls.size(),
+                paramControls[paramIndex].expression, fm);
+            QString pills;
+            for (const auto &c : ctrls)
+                pills += QStringLiteral("  \"%1\" hit=(%2,%3 %4×%5)")
+                    .arg(c.text)
+                    .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
+                    .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
+            log(QStringLiteral("[....] ctrl-hover  shape     node=#%1 param=%2 \"%3\"%4  cursor=(%5,%6)")
+                .arg(treeNodeId).arg(paramIndex)
+                .arg(paramControls[paramIndex].expression).arg(pills)
+                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+        });
+
+    // Ctrl hover — variable number
+    m_treeWidget->setVariableNumberHoveredCallback(
+        [this](int nodeId, int numberStart) {
+            if (nodeId <= 0 || numberStart < 0) return;
+            const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+            if (!node) return;
+            const QString expr = node->variableExpression;
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const qreal nameW = fm.horizontalAdvance(node->variableName);
+            const auto ctrls = expressionNumberControls(
+                m_treeWidget->debugChildRect(nodeId), expr, fm, nameW);
+            QString pills;
+            for (const auto &c : ctrls)
+                pills += QStringLiteral("  \"%1\" hit=(%2,%3 %4×%5)")
+                    .arg(c.text)
+                    .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
+                    .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
+            log(QStringLiteral("[....] ctrl-hover  variable  node=#%1 \"%2\" expr=\"%3\"%4  cursor=(%5,%6)")
+                .arg(nodeId).arg(node->variableName).arg(expr).arg(pills)
+                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+        });
+
+    // Ctrl hover — for-loop range
+    m_treeWidget->setForLoopRangeHoveredCallback(
+        [this](int nodeId, int numberStart) {
+            if (nodeId <= 0 || numberStart < 0) return;
+            const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+            if (!node) return;
+            const QString varName  = forLoopVariableName(*node);
+            const QString rangeExp = forLoopRangeExpression(*node);
+            const QFontMetricsF fm(sceneTreeGraphicsFont());
+            const auto ctrls = forLoopRangeNumberControls(
+                m_treeWidget->debugGroupRect(nodeId), varName, rangeExp, fm);
+            QString pills;
+            for (const auto &c : ctrls)
+                pills += QStringLiteral("  \"%1\" hit=(%2,%3 %4×%5)")
+                    .arg(c.text)
+                    .arg(qRound(c.rect.x())).arg(qRound(c.rect.y()))
+                    .arg(qRound(c.rect.width())).arg(qRound(c.rect.height()));
+            log(QStringLiteral("[....] ctrl-hover  for-loop  node=#%1 %2=[%3]%4  cursor=(%5,%6)")
+                .arg(nodeId).arg(varName).arg(rangeExp).arg(pills)
+                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+        });
+
+    // Ctrl hover — module-call param
+    m_treeWidget->setModuleCallParamHoveredCallback(
+        [this](int callNodeId, int /*varNodeId*/, int numberStart) {
+            if (callNodeId <= 0 || numberStart < 0) return;
+            log(QStringLiteral("[....] ctrl-hover  modcall   node=#%1 start=%2  cursor=(%3,%4)")
+                .arg(callNodeId).arg(numberStart)
+                .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
+        });
     m_treeWidget->setModuleRenameRequestedCallback([this](int groupId, const QString &newName) {
         log(QStringLiteral("[%1] modRename  #%2 → \"%3\"")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(groupId).arg(newName));
