@@ -2139,6 +2139,9 @@ void SceneTreeGraphicsWidget::updateInlineInputGeometry()
     m_inlineInput->raise();
 }
 
+QRectF SceneTreeGraphicsWidget::debugGroupRect(int groupId) const { return groupRectForNode(groupId); }
+QRectF SceneTreeGraphicsWidget::debugChildRect(int nodeId)  const { return rectForChildNode(nodeId); }
+
 QRectF SceneTreeGraphicsWidget::groupRectForNode(int groupId) const
 {
     for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {

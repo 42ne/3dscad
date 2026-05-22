@@ -45,6 +45,10 @@ public:
     void setSelectedTreeNodeId(int nodeId);
     void refresh();
 
+    // Debug/inspection — for use by debug tools only.
+    QRectF debugGroupRect(int groupId) const;
+    QRectF debugChildRect(int nodeId) const;
+
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
     void keyPressEvent(QKeyEvent *event) override;
