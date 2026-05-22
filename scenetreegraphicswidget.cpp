@@ -2918,7 +2918,13 @@ void SceneTreeGraphicsWidget::renderDropPreviewFrame(const DropTarget &target)
 {
     m_dropPreviewCurrentTarget = target;
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
-    setTreeItemsVisible(true);
+
+    const bool liveTreePreview = target.hasTarget
+                                 && target.parentGroupId > 0
+                                 && (target.previewGroupRect.isValid()
+                                     || target.sourceGroupRect.isValid()
+                                     || !target.expandedGroups.isEmpty());
+    setTreeItemsVisible(!liveTreePreview);
 
     SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme)
         .render(target, m_dropPreviewTool, m_dropPreviewMovingNodeId);
