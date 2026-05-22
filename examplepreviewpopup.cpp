@@ -41,12 +41,17 @@ void ExamplePreviewPopup::showAt(int menuRight, int cursorY)
     const int gap = 4;
     QPoint pos(menuRight + gap, cursorY - sz.height() / 2);
 
-    // Keep inside the primary screen.
-    if (const QScreen *screen = QApplication::primaryScreen()) {
+    // Use the screen that contains the menu cursor, not always the primary screen.
+    const QScreen *screen = QApplication::screenAt(QPoint(menuRight, cursorY));
+    if (!screen)
+        screen = QApplication::primaryScreen();
+    if (screen) {
         const QRect available = screen->availableGeometry();
-        // If it doesn't fit to the right, don't flip — just clamp X so it stays
-        // visible (the menu is already on screen so there's always room on one side).
-        pos.setX(qMin(pos.x(), available.right() - sz.width()));
+        // If the popup doesn't fit to the right of the menu, flip it to the left.
+        if (pos.x() + sz.width() > available.right())
+            pos.setX(menuRight - gap - sz.width());
+        // Clamp to screen bounds.
+        pos.setX(qBound(available.left(), pos.x(), available.right() - sz.width()));
         pos.setY(qBound(available.top(), pos.y(), available.bottom() - sz.height()));
     }
 
