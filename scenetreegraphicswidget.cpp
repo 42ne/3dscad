@@ -811,7 +811,7 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
         addNodeDragHandle(node.id, node.variableName, rect, rect, rect.size());
 
         // Register rename zone for the variable name text (badge = 38px, name follows).
-        const QFontMetricsF metrics(font());
+        const QFontMetricsF metrics(sceneTreeGraphicsFont());
         const qreal nameW = qMax(metrics.horizontalAdvance(node.variableName), 24.0);
         m_renameZones.append({QRectF(rect.left() + 38.0, rect.top(), nameW, VariableHeight),
                               node.id, false, node.variableName});
@@ -955,7 +955,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     // Measure it so the card is never narrower than the rendered range expression.
     qreal forLoopHeaderMinWidth = 0.0;
     if (node.operation == SceneDocument::TreeNode::For) {
-        const QFontMetricsF fm(font());
+        const QFontMetricsF fm(sceneTreeGraphicsFont());
         const QString varName   = forLoopVariableName(node);
         const QString rangeExpr = forLoopRangeExpression(node);
         const QString prefix    = QStringLiteral("for (%1 = ").arg(varName);
@@ -1042,7 +1042,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         // Register rename zone for the module name inside the call-handle card.
         // The module name text starts at x = cardLeft + 42 (after the CALL badge).
         {
-            const QFontMetricsF metrics(font());
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
             const qreal nameW = qMax(metrics.horizontalAdvance(node.moduleName), 24.0);
             m_renameZones.append({QRectF(moduleCallTemplateRect.left() + 42.0,
                                          moduleCallTemplateRect.top(),
@@ -1429,7 +1429,7 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
         const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestArea->groupId);
         if (node) {
             const QString expr = transformAxisExpression(*node, hitAxis);
-            const QFontMetricsF hitMetrics(font());
+            const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
             const QVector<ExpressionNumberControl> numControls =
                 transformParameterNumberControls(bestArea->rect, hitAxis, expr, hitMetrics, headerWidth);
             for (const ExpressionNumberControl &nc : numControls) {
@@ -1485,7 +1485,7 @@ bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePositi
     if (!shape)
         return false;
 
-    const QFontMetricsF hitMetrics(font());
+    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
     for (int i = 0; i < controls.size(); ++i) {
         if (!shapeParameterControlRect(bestRect, i, controls.size()).contains(scenePosition))
@@ -1540,7 +1540,7 @@ bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePositi
     if (!bestNode)
         return false;
 
-    const QFontMetricsF hitMetrics(font());
+    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
     const qreal hitNameW = hitMetrics.horizontalAdvance(bestNode->variableName);
     const QVector<ExpressionNumberControl> controls = expressionNumberControls(bestRect, bestNode->variableExpression, hitMetrics, hitNameW);
     for (const ExpressionNumberControl &control : controls) {
@@ -1583,7 +1583,7 @@ bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &scenePosition
     if (!node || node->type != SceneDocument::TreeNode::Group || node->operation != SceneDocument::TreeNode::For)
         return false;
 
-    const QFontMetricsF hitMetrics(font());
+    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
     const QString variableName = forLoopVariableName(*node);
     const QString rangeExpression = forLoopRangeExpression(*node);
     const QVector<ExpressionNumberControl> controls =
@@ -1844,7 +1844,7 @@ bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosit
             if (params.isEmpty())
                 continue;
 
-            const QFontMetricsF hitMetrics(font());
+            const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
             const QVector<ModuleCallParamControl> controls =
                 moduleCallParamControls(child.rect, node->moduleName, params, hitMetrics);
             for (const ModuleCallParamControl &ctrl : controls) {
@@ -1959,7 +1959,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             if (node) {
                 const QString expr = transformAxisExpression(*node, axis);
                 const qreal hw = transformHeaderWidthForNode(*node);
-                const QFontMetricsF metrics(font());
+                const QFontMetricsF metrics(sceneTreeGraphicsFont());
                 const auto controls = transformParameterNumberControls(
                     groupRectForNode(groupId), axis, expr, metrics, hw);
                 for (const auto &ctl : controls) {
@@ -1981,7 +1981,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
                             continue;
                         const auto paramControls = shapeParameterControls(*shape);
                         if (param < paramControls.size()) {
-                            const QFontMetricsF metrics(font());
+                            const QFontMetricsF metrics(sceneTreeGraphicsFont());
                             const auto numCtrls = shapeParameterNumberControls(
                                 child.rect, param, paramControls.size(),
                                 paramControls[param].expression, metrics);
@@ -2006,7 +2006,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
                     for (const ChildLayout &child : area.children) {
                         if (child.nodeId != nodeId2)
                             continue;
-                        const QFontMetricsF metrics(font());
+                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
                         const qreal nameW = metrics.horizontalAdvance(node->variableName);
                         const auto controls = expressionNumberControls(
                             child.rect, node->variableExpression, metrics, nameW);
@@ -2025,7 +2025,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
         if (forLoopRangeControlAt(scenePosition, &nodeId2, &start, &length) && start >= 0) {
             const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId2) : nullptr;
             if (node) {
-                const QFontMetricsF metrics(font());
+                const QFontMetricsF metrics(sceneTreeGraphicsFont());
                 for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
                     if (area.groupId == nodeId2) {
                         const QString varName = forLoopVariableName(*node);
@@ -2062,7 +2062,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
                 for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
                     for (const ChildLayout &child : area.children) {
                         if (child.nodeId == moduleCallId) {
-                            const QFontMetricsF metrics(font());
+                            const QFontMetricsF metrics(sceneTreeGraphicsFont());
                             const auto controls = moduleCallParamControls(
                                 child.rect, moduleNode->moduleName, params, metrics);
                             for (const auto &ctl : controls) {

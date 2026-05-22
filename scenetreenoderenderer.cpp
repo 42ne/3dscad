@@ -415,7 +415,10 @@ private:
             const QString variableName = m_loopVariable.trimmed().isEmpty() ? QStringLiteral("i") : m_loopVariable.trimmed();
             const QString rangeExpression = m_loopRangeExpression.trimmed().isEmpty() ? QStringLiteral("[0 : 1 : 3]") : m_loopRangeExpression.trimmed();
             const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
-            const QFontMetricsF metrics(painter->font());
+            // Use the canonical scene font directly — not painter->font() which may be
+            // device-resolved to a slightly different pixel size — so that the pill rects
+            // produced here match the rects produced by the hit-testing code in the widget.
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
             painter->setPen(QColor(24, 34, 44));
             painter->drawText(QRectF(m_rect.left() + 52.0, m_rect.top() + 7.0, metrics.horizontalAdvance(prefix), 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter,
@@ -432,7 +435,13 @@ private:
                                       QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
                 }
                 painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 82, 64));
-                painter->drawText(span.rect, Qt::AlignLeft | Qt::AlignVCenter, span.text);
+                // Numbers use HCenter: span.rect has 4 px padding on each side so the digit
+                // sits centred inside the pill.  Non-numbers are exactly their text width, so
+                // AlignLeft is correct for them.
+                const Qt::Alignment align = span.number
+                                                ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                                                : (Qt::AlignLeft | Qt::AlignVCenter);
+                painter->drawText(span.rect, align, span.text);
             }
             const qreal suffixLeft = forLoopRangeTextRect(m_rect, variableName, metrics).left()
                                      + metrics.horizontalAdvance(rangeExpression);
@@ -466,7 +475,9 @@ private:
                                     : QStringLiteral("S"));
 
         // X/Y/Z rows outside icon border
-        const QFontMetricsF metrics(painter->font());
+        // Use the canonical scene font directly for metrics so that pill rects here
+        // are pixel-identical to those produced by the widget's hit-testing code.
+        const QFontMetricsF metrics(sceneTreeGraphicsFont());
         QFont valueFont = painter->font();
         valueFont.setPointSizeF(qMax<qreal>(7.0, valueFont.pointSizeF() - 2.0));
 
@@ -510,7 +521,12 @@ private:
                                       QBrush(numActive ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 125)));
                 }
                 painter->setPen(span.number ? QColor(24, 34, 44) : QColor(80, 110, 160));
-                painter->drawText(span.rect, Qt::AlignLeft | Qt::AlignVCenter, span.text);
+                // Numbers: span.rect is 4 px wider on each side than the text — centre it
+                // inside the pill so the digit aligns with the surrounding non-number text.
+                const Qt::Alignment align = span.number
+                                                ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                                                : (Qt::AlignLeft | Qt::AlignVCenter);
+                painter->drawText(span.rect, align, span.text);
             }
         }
     }
