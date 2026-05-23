@@ -137,6 +137,27 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         return;
     }
 
+    if (type == ShapeNode::Cone) {
+        // Base ellipse at bottom, slant sides meeting at apex
+        const qreal bh = rect.height() * 0.30; // base ellipse height
+        const QRectF base(rect.left() + 2.0, rect.bottom() - bh - 2.0, rect.width() - 4.0, bh);
+        const QPointF apex(rect.center().x(), rect.top() + 3.0);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(face);
+        // Filled side triangle
+        QPolygonF side;
+        side << QPointF(base.left(), base.center().y())
+             << QPointF(base.right(), base.center().y())
+             << apex;
+        painter->drawPolygon(side);
+        painter->setPen(QPen(outline, 1));
+        painter->drawLine(QPointF(base.left(), base.center().y()), apex);
+        painter->drawLine(QPointF(base.right(), base.center().y()), apex);
+        painter->setBrush(faceDark);
+        painter->drawEllipse(base);
+        return;
+    }
+
     QPolygonF topFace;
     topFace << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.34)
             << QPointF(rect.left() + rect.width() * 0.48, rect.top() + rect.height() * 0.12)
@@ -295,6 +316,11 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
     if (shape.type == ShapeNode::Cylinder)
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)},
                 {QStringLiteral("H"), shape.height, expr(1, shape.height)}};
+
+    if (shape.type == ShapeNode::Cone)
+        return {{QStringLiteral("R1"), shape.radius,  expr(0, shape.radius)},
+                {QStringLiteral("R2"), shape.radius2, expr(1, shape.radius2)},
+                {QStringLiteral("H"),  shape.height,  expr(2, shape.height)}};
 
     return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
             {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())},
@@ -815,6 +841,8 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
     const QString normalized = tool.toLower();
     if (normalized.contains("sphere"))
         return ShapeNode::Sphere;
+    if (normalized.contains("cone"))
+        return ShapeNode::Cone;
     if (normalized.contains("cylinder"))
         return ShapeNode::Cylinder;
     return ShapeNode::Cube;
@@ -826,6 +854,8 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
         return QStringLiteral("sphere");
     if (type == ShapeNode::Cylinder)
         return QStringLiteral("cylinder");
+    if (type == ShapeNode::Cone)
+        return QStringLiteral("cone");
     return QStringLiteral("cube");
 }
 

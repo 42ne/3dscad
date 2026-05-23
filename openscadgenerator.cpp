@@ -350,5 +350,12 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(paramExpr(1, shape.height))
             .arg(paramExpr(0, shape.radius));
     }
+    if (shape.type == ShapeNode::Cone) {
+        // parameterExpressions: index 0 = R1 (bottom), index 1 = R2 (top), index 2 = H
+        return QString("cylinder(h=%1, r1=%2, r2=%3, center=true);\n")
+            .arg(paramExpr(2, shape.height))
+            .arg(paramExpr(0, shape.radius))
+            .arg(paramExpr(1, shape.radius2));
+    }
     return QString();
 }

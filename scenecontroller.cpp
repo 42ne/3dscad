@@ -147,6 +147,11 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         shape.type   = ShapeNode::Cylinder;
         shape.radius = 10.0f;
         shape.height = 30.0f;
+    } else if (toolName == QStringLiteral("cone")) {
+        shape.type    = ShapeNode::Cone;
+        shape.radius  = 10.0f;
+        shape.radius2 = 0.0f;
+        shape.height  = 30.0f;
     } else {
         shape.type = ShapeNode::Cube;
         shape.size = QVector3D(20, 20, 20);
@@ -302,6 +307,17 @@ void SceneController::addCylinder()
     s.name   = QString("Cylinder %1").arg(m_scene.shapeCount() + 1);
     s.radius = 10;
     s.height = 30;
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::addCone()
+{
+    ShapeNode s;
+    s.type    = ShapeNode::Cone;
+    s.name    = QString("Cone %1").arg(m_scene.shapeCount() + 1);
+    s.radius  = 10;  // r1 bottom
+    s.radius2 = 0;   // r2 top → true cone
+    s.height  = 30;
     m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
 }
 
@@ -558,7 +574,8 @@ void SceneController::handleToolDrop(const QString &toolName, int parentGroupId,
 
     if (toolName != QStringLiteral("cube")
         && toolName != QStringLiteral("sphere")
-        && toolName != QStringLiteral("cylinder"))
+        && toolName != QStringLiteral("cylinder")
+        && toolName != QStringLiteral("cone"))
         return;
 
     ShapeNode shape = makeShapeForTool(toolName, m_scene.shapeCount() + 1);

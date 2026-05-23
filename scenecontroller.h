@@ -49,6 +49,7 @@ public:
     void addCube();
     void addSphere();
     void addCylinder();
+    void addCone();
     void addGroup(SceneDocument::TreeNode::Operation operation);
     void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
 

@@ -447,29 +447,63 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         return true;
     }
 
-    // ── Cylinder ────────────────────────────────────────────────────────────
+    // ── Cylinder / Cone ─────────────────────────────────────────────────────
     if (extractCallArgs(line, "cylinder", &argsStr) && line.endsWith(';')) {
-        // Accept h and r in any order, center optional
-        // Positional order: cylinder(h, r) or cylinder(h, r, center)
-        const auto args = parseNamedArgs(argsStr, {"h", "r", "center"});
-        if (!args.contains("h") || !args.contains("r")) {
+        const auto args = parseNamedArgs(argsStr, {"h", "r", "r1", "r2", "center"});
+        if (!args.contains("h")) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("cylinder on line %1: missing h or r");
+                *errorMessage = QStringLiteral("cylinder on line %1: missing h");
             return false;
         }
-        qreal h = 0.0, r = 0.0;
-        QString he, re;
-        if (!parseParamExpression(args["h"], state->variableValues, &h, &he)
-            || !parseParamExpression(args["r"], state->variableValues, &r, &re)) {
+        qreal h = 0.0;
+        QString he;
+        if (!parseParamExpression(args["h"], state->variableValues, &h, &he)) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("cylinder on line %1: could not parse h or r");
+                *errorMessage = QStringLiteral("cylinder on line %1: could not parse h");
+            return false;
+        }
+
+        if (args.contains("r1") || args.contains("r2")) {
+            // Cone / frustum: cylinder(h=..., r1=..., r2=..., center=true)
+            const QString r1Str = args.value("r1", QStringLiteral("0"));
+            const QString r2Str = args.value("r2", QStringLiteral("0"));
+            qreal r1 = 0.0, r2 = 0.0;
+            QString r1e, r2e;
+            if (!parseParamExpression(r1Str, state->variableValues, &r1, &r1e)
+                || !parseParamExpression(r2Str, state->variableValues, &r2, &r2e)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("cylinder on line %1: could not parse r1 or r2");
+                return false;
+            }
+            shape->id = state->nextShapeId++;
+            shape->type = ShapeNode::Cone;
+            shape->name = QStringLiteral("Cone %1").arg(shape->id);
+            shape->height  = static_cast<float>(h);
+            shape->radius  = static_cast<float>(r1);
+            shape->radius2 = static_cast<float>(r2);
+            // parameterExpressions order: R1=0, R2=1, H=2
+            shape->parameterExpressions = QStringList({r1e, r2e, he});
+            return true;
+        }
+
+        // Regular cylinder: cylinder(h=..., r=..., center=true)
+        if (!args.contains("r")) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("cylinder on line %1: missing r (or r1/r2)");
+            return false;
+        }
+        qreal r = 0.0;
+        QString re;
+        if (!parseParamExpression(args["r"], state->variableValues, &r, &re)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("cylinder on line %1: could not parse r");
             return false;
         }
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Cylinder;
         shape->name = QStringLiteral("Cylinder %1").arg(shape->id);
-        shape->height = h;
-        shape->radius = r;
+        shape->height = static_cast<float>(h);
+        shape->radius = static_cast<float>(r);
         // parameterExpressions order: R=index 0, H=index 1
         shape->parameterExpressions = QStringList({re, he});
         return true;

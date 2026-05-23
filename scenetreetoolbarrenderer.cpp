@@ -20,6 +20,7 @@ QStringList paletteTools()
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
+        QStringLiteral("cone"),
         QStringLiteral("union"),
         QStringLiteral("difference"),
         QStringLiteral("intersection"),

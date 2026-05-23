@@ -261,6 +261,7 @@ void MainWindow::buildUi()
 void MainWindow::addCube()              { m_controller->addCube();     }
 void MainWindow::addSphere()            { m_controller->addSphere();   }
 void MainWindow::addCylinder()          { m_controller->addCylinder(); }
+void MainWindow::addCone()              { m_controller->addCone();     }
 void MainWindow::addUnionGroup()        { m_controller->addGroup(SceneDocument::TreeNode::Union);        }
 void MainWindow::addDifferenceGroup()   { m_controller->addGroup(SceneDocument::TreeNode::Difference);   }
 void MainWindow::addIntersectionGroup() { m_controller->addGroup(SceneDocument::TreeNode::Intersection); }

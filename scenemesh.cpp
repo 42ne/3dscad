@@ -177,6 +177,47 @@ static SceneMesh buildCylinderMesh(const ShapeNode &shape)
     return mesh;
 }
 
+static SceneMesh buildConeMesh(const ShapeNode &shape)
+{
+    // Frustum/cone: bottom radius = shape.radius (r1), top radius = shape.radius2 (r2)
+    SceneMesh mesh;
+    QVector<QVector3D> top;
+    QVector<QVector3D> bottom;
+    const int sectors = 24;
+
+    for (int i = 0; i < sectors; ++i) {
+        const float angle = 2.0f * M_PI * i / sectors;
+        const float ca = qCos(angle), sa = qSin(angle);
+        const QVector3D topPt(shape.radius2 * ca, shape.radius2 * sa, 0);
+        const QVector3D botPt(shape.radius  * ca, shape.radius  * sa, 0);
+        top.append(rotatePoint(topPt + QVector3D(0, 0,  shape.height * 0.5f), shape.rotation) + shape.position);
+        bottom.append(rotatePoint(botPt + QVector3D(0, 0, -shape.height * 0.5f), shape.rotation) + shape.position);
+    }
+
+    mesh.shadowPoints = bottom;
+    if (shape.radius2 > 0.0f)
+        mesh.shadowPoints += top;
+    else {
+        // apex is a single point
+        const QVector3D apex = rotatePoint(QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position;
+        mesh.shadowPoints.append(apex);
+    }
+
+    for (int i = 0; i < sectors; ++i) {
+        const int next = (i + 1) % sectors;
+        if (shape.radius2 > 0.0f)
+            appendPolygon(&mesh.triangles, {bottom[i], bottom[next], top[next], top[i]});
+        else
+            appendPolygon(&mesh.triangles, {bottom[i], bottom[next], top[i]});
+    }
+
+    appendPolygon(&mesh.triangles, bottom, 82);
+    if (shape.radius2 > 0.0f)
+        appendPolygon(&mesh.triangles, top, 120);
+
+    return mesh;
+}
+
 SceneMesh buildShapeMesh(const ShapeNode &shape)
 {
     if (shape.type == ShapeNode::Sphere)
@@ -184,6 +225,9 @@ SceneMesh buildShapeMesh(const ShapeNode &shape)
 
     if (shape.type == ShapeNode::Cylinder)
         return buildCylinderMesh(shape);
+
+    if (shape.type == ShapeNode::Cone)
+        return buildConeMesh(shape);
 
     return buildCubeMesh(shape);
 }

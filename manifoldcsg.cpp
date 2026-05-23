@@ -42,6 +42,8 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
     } else if (shape.type == ShapeNode::Sphere) {
         result = Manifold::Sphere(shape.radius, 32);
+    } else if (shape.type == ShapeNode::Cone) {
+        result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, 32, true);
     } else {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, 32, true);
     }
@@ -65,6 +67,7 @@ static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHas
         if (!ExpressionSyntax::evaluate(expression, variables, &value))
             continue;
 
+        const qreal rawValue = value; // saved before clamping — needed for Cone r2 (may be 0)
         value = qMax<qreal>(0.1, value);
         if (evaluated.type == ShapeNode::Cube) {
             if (i == 0)
@@ -81,6 +84,14 @@ static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHas
                 evaluated.radius = static_cast<float>(value);
             else if (i == 1)
                 evaluated.height = static_cast<float>(value);
+        } else if (evaluated.type == ShapeNode::Cone) {
+            // param order: R1=0, R2=1, H=2; R2 may be 0.0 (true cone → use rawValue)
+            if (i == 0)
+                evaluated.radius  = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            else if (i == 1)
+                evaluated.radius2 = static_cast<float>(qMax<qreal>(0.0, rawValue));
+            else if (i == 2)
+                evaluated.height  = static_cast<float>(qMax<qreal>(0.1, rawValue));
         }
     }
 

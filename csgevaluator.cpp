@@ -94,6 +94,14 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
                && qAbs(local.z()) <= shape.height * 0.5f;
     }
 
+    if (shape.type == ShapeNode::Cone) {
+        // Approximate: use max(r1, r2) as a bounding cylinder (conservative)
+        const float maxR = qMax(shape.radius, shape.radius2);
+        const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
+        return radialDistanceSquared <= maxR * maxR
+               && qAbs(local.z()) <= shape.height * 0.5f;
+    }
+
     const QVector3D half = shape.size * 0.5f;
     return qAbs(local.x()) <= half.x()
            && qAbs(local.y()) <= half.y()
@@ -563,6 +571,7 @@ static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHas
         if (!ExpressionSyntax::evaluate(expression, variables, &value))
             continue;
 
+        const qreal rawValue = value;
         value = qMax<qreal>(0.1, value);
         if (evaluated.type == ShapeNode::Cube) {
             if (i == 0)
@@ -579,6 +588,13 @@ static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHas
                 evaluated.radius = static_cast<float>(value);
             else if (i == 1)
                 evaluated.height = static_cast<float>(value);
+        } else if (evaluated.type == ShapeNode::Cone) {
+            if (i == 0)
+                evaluated.radius  = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            else if (i == 1)
+                evaluated.radius2 = static_cast<float>(qMax<qreal>(0.0, rawValue));
+            else if (i == 2)
+                evaluated.height  = static_cast<float>(qMax<qreal>(0.1, rawValue));
         }
     }
 
