@@ -260,8 +260,12 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
         return source.Rotate(node.rotation.x(), node.rotation.y(), node.rotation.z());
     if (node.operation == SceneDocument::TreeNode::Scale)
         return source.Scale(vec3(node.scale.x(), node.scale.y(), node.scale.z()));
-    if (node.operation == SceneDocument::TreeNode::Mirror)
-        return source.Mirror(vec3(node.position.x(), node.position.y(), node.position.z()));
+    if (node.operation == SceneDocument::TreeNode::Mirror) {
+        const QVector3D &n = node.position;
+        if (qFuzzyIsNull(n.x()) && qFuzzyIsNull(n.y()) && qFuzzyIsNull(n.z()))
+            return source; // zero normal = no-op, matches OpenSCAD behaviour
+        return source.Mirror(vec3(n.x(), n.y(), n.z()));
+    }
 
     return source;
 }
@@ -395,19 +399,23 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (geometryChildren.isEmpty())
         return {};
 
-    // Hull: union all children first, then compute convex hull via instance method.
-    // Using the instance Hull() is more reliable than the static overload across versions.
+    // Hull: extract vertices from each child's mesh and compute convex hull via
+    // Manifold::Hull(vector<vec3>). This mirrors OpenSCAD's hull() semantics
+    // (convex hull of vertex sets) and avoids boolean-union pre-processing.
     if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {
-        Manifold combined;
-        bool hasAny = false;
+        std::vector<vec3> pts;
         for (const SceneDocument::TreeNode *child : geometryChildren) {
-            Manifold part = evaluateNode(*child, scene, localVariables);
-            if (!part.IsEmpty()) {
-                combined = hasAny ? combined + part : part;
-                hasAny = true;
-            }
+            const Manifold part = evaluateNode(*child, scene, localVariables);
+            if (part.IsEmpty())
+                continue;
+            const MeshGL m = part.GetMeshGL();
+            const int np = static_cast<int>(m.numProp);
+            for (int i = 0; i + 2 < static_cast<int>(m.vertProperties.size()); i += np)
+                pts.emplace_back(static_cast<double>(m.vertProperties[i]),
+                                 static_cast<double>(m.vertProperties[i + 1]),
+                                 static_cast<double>(m.vertProperties[i + 2]));
         }
-        return hasAny ? combined.Hull() : Manifold{};
+        return pts.empty() ? Manifold{} : Manifold::Hull(pts);
     }
 
     Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
