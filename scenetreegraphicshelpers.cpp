@@ -811,7 +811,7 @@ QSizeF previewSizeForTool(const QString &tool)
         return variablePreviewSize();
     if (tool == "call")
         return moduleCallPreviewSize(QStringLiteral("module"), {});
-    if (tool == "cube" || tool == "sphere" || tool == "cylinder")
+    if (tool == "cube" || tool == "sphere" || tool == "cylinder" || tool == "cone")
         return defaultPreviewSize();
     if (tool == "difference")
         return differencePreviewSize();
