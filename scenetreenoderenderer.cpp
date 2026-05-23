@@ -618,7 +618,8 @@ private:
         paintOperationIcon(painter, m_operation, iconRect, iconAccent, 6.0);
 
         const QString opLabel = m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T")
-                              : m_operation == SceneDocument::TreeNode::Rotate  ? QStringLiteral("R")
+                              : m_operation == SceneDocument::TreeNode::Rotate   ? QStringLiteral("R")
+                              : m_operation == SceneDocument::TreeNode::Mirror   ? QStringLiteral("M")
                                                                                  : QStringLiteral("S");
         const QRectF opBadgeRect(iconRect.left() + 1.0,
                                  iconRect.bottom() - 1.0,
@@ -632,6 +633,9 @@ private:
         } else if (m_operation == SceneDocument::TreeNode::Rotate) {
             badgeTop = QColor(226, 205, 255);
             badgeBottom = QColor(145, 98, 195);
+        } else if (m_operation == SceneDocument::TreeNode::Mirror) {
+            badgeTop = QColor(252, 215, 238);
+            badgeBottom = QColor(175, 85, 138);
         } else {
             badgeTop = QColor(205, 242, 218);
             badgeBottom = QColor(84, 158, 105);
@@ -920,13 +924,11 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         int depth,
                                         qreal cutSeparatorY)
 {
-    const QVector3D transformValues = node.operation == SceneDocument::TreeNode::Translate
-                                          ? node.position
-                                          : node.operation == SceneDocument::TreeNode::Rotate
-                                                ? node.rotation
-                                                : node.operation == SceneDocument::TreeNode::Scale
-                                                      ? node.scale
-                                                      : QVector3D();
+    const QVector3D transformValues = node.operation == SceneDocument::TreeNode::Translate ? node.position
+                                    : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
+                                    : node.operation == SceneDocument::TreeNode::Mirror    ? node.position
+                                    : node.operation == SceneDocument::TreeNode::Scale     ? node.scale
+                                                                                           : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;

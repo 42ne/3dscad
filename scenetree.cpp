@@ -695,6 +695,9 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
     // Root module keeps the default "scene_model"; new user-added modules get unique auto-names.
     if (operation == TreeNode::Module && node.id > 1)
         node.moduleName = QString("module_%1").arg(node.id);
+    // Mirror axis defaults to [1,0,0] (reflect across the Y-Z plane).
+    if (operation == TreeNode::Mirror)
+        node.position = QVector3D(1, 0, 0);
     return node;
 }
 

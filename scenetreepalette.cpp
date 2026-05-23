@@ -35,6 +35,8 @@ static const OperationColor OperationColors[] = {
     { Op::Translate,    QColor(188,232,245,183), QColor( 18, 55, 72,145), QColor(215,235,185,178), QColor( 42,112,145,158), QColor( 25, 75,118,152), QColor(198,218,248,186) },
     { Op::Rotate,       QColor(228,210,250,183), QColor( 58, 26, 72,145), QColor(255,195,155,178), QColor(112, 58,142,158), QColor( 75, 42,118,152), QColor(225,208,245,186) },
     { Op::Scale,        QColor(198,242,222,183), QColor( 22, 58, 32,145), QColor(195,230,185,178), QColor( 52,115, 72,158), QColor( 28, 98, 75,152), QColor(188,235,200,186) },
+    { Op::Mirror,       QColor(245,215,238,183), QColor( 72, 28, 58,145), QColor(255,180,195,178), QColor(145, 52, 98,158), QColor(105, 35, 78,152), QColor(245,205,230,186) },
+    { Op::Hull,         QColor(215,242,218,183), QColor( 25, 62, 32,145), QColor(185,228,172,178), QColor( 48,118, 58,158), QColor( 28, 98, 48,152), QColor(205,238,202,186) },
     { Op::For,          QColor(248,232,195,183), QColor( 68, 55, 18,145), QColor(255,220,140,178), QColor(135,112, 42,158), QColor( 95, 88, 38,152), QColor(248,238,188,186) },
     { Op::Scene,        QColor(212,225,238,183), QColor( 35, 45, 62,145), QColor(228,215,192,178), QColor( 52, 65, 92,158), QColor( 28, 45, 75,152), QColor(218,228,215,186) },
 };

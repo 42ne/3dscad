@@ -37,6 +37,8 @@ static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
         return "difference";
     if (operation == SceneDocument::TreeNode::Intersection)
         return "intersection";
+    if (operation == SceneDocument::TreeNode::Hull)
+        return "hull";
     return "union";
 }
 
@@ -268,7 +270,8 @@ void OpenScadGenerator::appendTreeNode(QString *code,
 
     if (node.operation == SceneDocument::TreeNode::Translate
         || node.operation == SceneDocument::TreeNode::Rotate
-        || node.operation == SceneDocument::TreeNode::Scale) {
+        || node.operation == SceneDocument::TreeNode::Scale
+        || node.operation == SceneDocument::TreeNode::Mirror) {
         QString transformName = QStringLiteral("scale");
         QVector3D transformVector = node.scale;
         if (node.operation == SceneDocument::TreeNode::Translate) {
@@ -277,6 +280,9 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         } else if (node.operation == SceneDocument::TreeNode::Rotate) {
             transformName = QStringLiteral("rotate");
             transformVector = node.rotation;
+        } else if (node.operation == SceneDocument::TreeNode::Mirror) {
+            transformName = QStringLiteral("mirror");
+            transformVector = node.position;
         }
         auto txExpr = [&](int axis, float numericValue) -> QString {
             if (axis < node.transformExpressions.size() && !node.transformExpressions[axis].isEmpty())

@@ -258,9 +258,11 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression intersectionRegex("^intersection\\s*\\(\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression hullRegex("^hull\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression translateRegex("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression rotateRegex("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression scaleRegex("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression mirrorRegex("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression forRegex("^for\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(\\[[^\\]]+\\])\\s*\\)\\s*\\{\\s*$");
 
     if (unionRegex.match(line).hasMatch()) {
@@ -273,6 +275,10 @@ static bool parseOperationLine(const QString &line,
     }
     if (intersectionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Intersection;
+        return true;
+    }
+    if (hullRegex.match(line).hasMatch()) {
+        *operation = SceneDocument::TreeNode::Hull;
         return true;
     }
 
@@ -297,6 +303,11 @@ static bool parseOperationLine(const QString &line,
     match = scaleRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Scale;
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
+    }
+    match = mirrorRegex.match(line);
+    if (match.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Mirror;
         return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
     }
 
@@ -475,6 +486,7 @@ static bool parseBraceFreeOperationLine(const QString &line,
     static const QRegularExpression translateRe("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
     static const QRegularExpression rotateRe("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
     static const QRegularExpression scaleRe("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression mirrorRe("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
 
     QRegularExpressionMatch m = translateRe.match(line);
     if (m.hasMatch()) {
@@ -491,6 +503,11 @@ static bool parseBraceFreeOperationLine(const QString &line,
         *operation = SceneDocument::TreeNode::Scale;
         return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
     }
+    m = mirrorRe.match(line);
+    if (m.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Mirror;
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+    }
     return false;
 }
 
@@ -499,8 +516,8 @@ static bool parseBraceFreeOperationLine(const QString &line,
 static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
-        "translate", "rotate", "scale",
-        "union", "difference", "intersection", "for",
+        "translate", "rotate", "scale", "mirror",
+        "union", "difference", "intersection", "hull", "for",
         "cube", "sphere", "cylinder"
     };
     for (const QString &kw : known)
@@ -617,13 +634,16 @@ static bool parseBlock(ParserState *state,
                 group.rotation = transformVector;
             else if (operation == SceneDocument::TreeNode::Scale)
                 group.scale = transformVector;
+            else if (operation == SceneDocument::TreeNode::Mirror)
+                group.position = transformVector;
             else if (operation == SceneDocument::TreeNode::For) {
                 group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
-                || operation == SceneDocument::TreeNode::Scale)
+                || operation == SceneDocument::TreeNode::Scale
+                || operation == SceneDocument::TreeNode::Mirror)
                 group.transformExpressions = transformExpressions;
 
             parent->children.append(group);
@@ -1009,13 +1029,16 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.rotation = transformVector;
             else if (operation == SceneDocument::TreeNode::Scale)
                 group.scale = transformVector;
+            else if (operation == SceneDocument::TreeNode::Mirror)
+                group.position = transformVector;
             else if (operation == SceneDocument::TreeNode::For) {
                 group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
-                || operation == SceneDocument::TreeNode::Scale)
+                || operation == SceneDocument::TreeNode::Scale
+                || operation == SceneDocument::TreeNode::Mirror)
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
             SceneDocument::TreeNode &child = sceneNode.children.last();

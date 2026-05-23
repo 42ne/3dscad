@@ -216,6 +216,32 @@ void paintOperationIcon(QPainter *painter,
         painter->drawRect(large);
         painter->drawRect(small);
         painter->drawLine(small.right(), small.top(), large.right(), large.top());
+    } else if (operation == SceneDocument::TreeNode::Mirror) {
+        // Two small rectangles reflected across a vertical centre line.
+        const qreal cx = center.x();
+        const qreal gap = 2.5;
+        const qreal rw = (symbolRect.width() * 0.5 - gap) * 0.72;
+        const qreal rh = symbolRect.height() * 0.55;
+        const qreal ry = center.y() - rh * 0.5;
+        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setBrush(QColor(255, 255, 255, 55));
+        painter->drawRect(QRectF(cx - gap - rw, ry, rw, rh));
+        painter->drawRect(QRectF(cx + gap,       ry, rw, rh));
+        painter->setPen(QPen(accent.darker(170), 1.0, Qt::DashLine));
+        painter->drawLine(QPointF(cx, symbolRect.top()), QPointF(cx, symbolRect.bottom()));
+    } else if (operation == SceneDocument::TreeNode::Hull) {
+        // Convex polygon outline (pentagon-ish).
+        painter->setPen(QPen(accent.darker(155), 1.5));
+        painter->setBrush(QColor(255, 255, 255, 55));
+        const qreal r = symbolRect.height() * 0.46;
+        const QPointF c = symbolRect.center();
+        QPolygonF poly;
+        // 5 vertices, first at top-centre, then clockwise
+        for (int i = 0; i < 5; ++i) {
+            const qreal angle = -M_PI * 0.5 + i * 2.0 * M_PI / 5.0;
+            poly << QPointF(c.x() + r * std::cos(angle), c.y() + r * std::sin(angle));
+        }
+        painter->drawPolygon(poly);
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
@@ -822,6 +848,14 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Scale;
         return true;
     }
+    if (normalized.contains("mirror")) {
+        *operation = SceneDocument::TreeNode::Mirror;
+        return true;
+    }
+    if (normalized.contains("hull")) {
+        *operation = SceneDocument::TreeNode::Hull;
+        return true;
+    }
     if (normalized == QStringLiteral("for")) {
         *operation = SceneDocument::TreeNode::For;
         return true;
@@ -839,6 +873,8 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Translate, "translate", QColor(218, 238, 246), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Rotate, "rotate", QColor(239, 229, 247), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scale, "scale", QColor(229, 241, 218), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+    {SceneDocument::TreeNode::Mirror, "mirror", QColor(242, 218, 235), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+    {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
 };
@@ -868,7 +904,8 @@ bool isTransformOperation(SceneDocument::TreeNode::Operation operation)
 {
     return operation == SceneDocument::TreeNode::Translate
            || operation == SceneDocument::TreeNode::Rotate
-           || operation == SceneDocument::TreeNode::Scale;
+           || operation == SceneDocument::TreeNode::Scale
+           || operation == SceneDocument::TreeNode::Mirror;
 }
 
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)
