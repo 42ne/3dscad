@@ -1828,7 +1828,8 @@ bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
     for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
         if (area.operation != SceneDocument::TreeNode::Translate
             && area.operation != SceneDocument::TreeNode::Rotate
-            && area.operation != SceneDocument::TreeNode::Scale) {
+            && area.operation != SceneDocument::TreeNode::Scale
+            && area.operation != SceneDocument::TreeNode::Mirror) {
             continue;
         }
 

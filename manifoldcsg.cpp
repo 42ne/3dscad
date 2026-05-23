@@ -395,15 +395,19 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (geometryChildren.isEmpty())
         return {};
 
-    // Hull: compute convex hull of all children together via Manifold::Hull()
+    // Hull: union all children first, then compute convex hull via instance method.
+    // Using the instance Hull() is more reliable than the static overload across versions.
     if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {
-        std::vector<Manifold> parts;
+        Manifold combined;
+        bool hasAny = false;
         for (const SceneDocument::TreeNode *child : geometryChildren) {
             Manifold part = evaluateNode(*child, scene, localVariables);
-            if (!part.IsEmpty())
-                parts.push_back(std::move(part));
+            if (!part.IsEmpty()) {
+                combined = hasAny ? combined + part : part;
+                hasAny = true;
+            }
         }
-        return parts.empty() ? Manifold{} : Manifold::Hull(parts);
+        return hasAny ? combined.Hull() : Manifold{};
     }
 
     Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
