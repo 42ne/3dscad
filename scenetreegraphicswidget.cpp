@@ -457,7 +457,7 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
 
 void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 {
-    if (!m_scene || m_scene->isEmpty()) {
+    if (!m_scene) {
         addLabel(m_graphicsScene,
                  QStringLiteral("Drop tree components here"),
                  QPointF(TreeX + 8.0, TreeY + 8.0),
