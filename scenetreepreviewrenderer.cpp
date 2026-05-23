@@ -365,6 +365,13 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
         }
         return;
     }
+    if (node->type == SceneDocument::TreeNode::ModuleCall) {
+        const SceneDocument::TreeNode *moduleNode = m_document->treeNodeById(node->shapeId);
+        const QString moduleName = moduleNode ? moduleNode->moduleName : QStringLiteral("module");
+        const QVector<ModuleCallParam> params = moduleParamsForNode(*node);
+        appendModuleCallChip(m_scene, m_previewItems, rect, moduleName, params, 58.0);
+        return;
+    }
 
     qreal cutSeparatorY = 0.0;
     const GroupHitArea *area = nullptr;
