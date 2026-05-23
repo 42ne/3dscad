@@ -4,6 +4,7 @@
 #include "csgevaluator.h"
 #include "shapenode.h"
 
+#include <QFutureWatcher>
 #include <QImage>
 #include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
@@ -55,6 +56,7 @@ public:
 signals:
     void shapeClicked(int index);
     void emptyClicked();
+    void csgPreviewReady();
     void shapeDragStarted(int index);
     void shapeDragged(int index, const QVector3D &delta);
     void shapeDragFinished(int index);
@@ -101,6 +103,8 @@ private:
     void updateViewportControls();
     bool canUseOpenGLRenderBackend() const;
     void updateSelectionPulseTimer();
+    void startAsyncCsgCompute();
+    void onCsgPreviewReady();
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
     QVector3D transformOriginForGroup(int groupId) const;
     QVector3D worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const;
@@ -147,7 +151,10 @@ private:
     int m_dragGroupId = 0;
     CsgPreview m_cachedCsgPreview;
     uint m_cachedCsgFingerprint = 0;
+    uint m_pendingCsgFingerprint = 0;
     bool m_csgPreviewDirty = true;
+    bool m_csgComputing = false;
+    QFutureWatcher<CsgPreview> m_csgWatcher;
     QVector<int> m_pickBuffer;
     QVector<float> m_depthBuffer;
     QImage m_renderImage;

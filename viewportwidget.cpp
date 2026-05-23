@@ -1,8 +1,10 @@
 #include "viewportwidget.h"
 
+#include "scenedocument.h"
 #include "scenemesh.h"
 
 #include <QCheckBox>
+#include <QtConcurrent>
 #include <QComboBox>
 #include <QHash>
 #include <QMouseEvent>
@@ -959,36 +961,6 @@ static uint sceneFingerprint(const SceneDocument &scene)
     return treeFingerprint(scene.treeRoot(), shapesFingerprint(scene.shapes()));
 }
 
-static const CsgPreview &cachedCsgPreview(const QVector<ShapeNode> &shapes,
-                                          CsgPreview *cache,
-                                          uint *cachedFingerprint,
-                                          bool *dirty)
-{
-    const uint fingerprint = shapesFingerprint(shapes);
-    if (*dirty || fingerprint != *cachedFingerprint) {
-        *cache = buildCsgPreview(shapes);
-        *cachedFingerprint = fingerprint;
-        *dirty = false;
-    }
-
-    return *cache;
-}
-
-static const CsgPreview &cachedCsgPreview(const SceneDocument &scene,
-                                          CsgPreview *cache,
-                                          uint *cachedFingerprint,
-                                          bool *dirty)
-{
-    const uint fingerprint = sceneFingerprint(scene);
-    if (*dirty || fingerprint != *cachedFingerprint) {
-        *cache = buildCsgPreview(scene);
-        *cachedFingerprint = fingerprint;
-        *dirty = false;
-    }
-
-    return *cache;
-}
-
 ViewportWidget::ViewportWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
@@ -1054,6 +1026,9 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         ++m_selectionPulseFrame;
         update();
     });
+
+    connect(&m_csgWatcher, &QFutureWatcher<CsgPreview>::finished,
+            this, &ViewportWidget::onCsgPreviewReady);
 
     updateViewportControls();
     updateSelectionPulseTimer();
@@ -1158,9 +1133,59 @@ bool ViewportWidget::isOpenGLRenderBackendAvailable() const
     return canUseOpenGLRenderBackend();
 }
 
+void ViewportWidget::startAsyncCsgCompute()
+{
+    // One compute at a time; if already running, onCsgPreviewReady() will
+    // re-check m_csgPreviewDirty and re-enter if the scene changed again.
+    if (m_csgComputing || !m_shapes)
+        return;
+
+    const uint fingerprint = m_scene
+                                 ? sceneFingerprint(*m_scene)
+                                 : shapesFingerprint(*m_shapes);
+
+    // Nothing actually changed — skip redundant work.
+    if (!m_csgPreviewDirty && fingerprint == m_cachedCsgFingerprint)
+        return;
+
+    m_csgComputing = true;
+    m_csgPreviewDirty = false;
+    m_pendingCsgFingerprint = fingerprint;
+
+    if (m_scene) {
+        // Snapshot the scene so the worker thread has its own independent copy.
+        const SceneDocument::Snapshot snap = m_scene->snapshot();
+        m_csgWatcher.setFuture(QtConcurrent::run([snap]() -> CsgPreview {
+            SceneDocument doc;
+            doc.restoreSnapshot(snap);
+            return buildCsgPreview(doc);
+        }));
+    } else {
+        const QVector<ShapeNode> shapes = *m_shapes;
+        m_csgWatcher.setFuture(QtConcurrent::run([shapes]() -> CsgPreview {
+            return buildCsgPreview(shapes);
+        }));
+    }
+}
+
+void ViewportWidget::onCsgPreviewReady()
+{
+    m_cachedCsgPreview = m_csgWatcher.result();
+    m_cachedCsgFingerprint = m_pendingCsgFingerprint;
+    m_csgComputing = false;
+
+    // If the scene changed while we were computing, kick off another round.
+    if (m_csgPreviewDirty)
+        startAsyncCsgCompute();
+
+    update();
+    emit csgPreviewReady();
+}
+
 void ViewportWidget::invalidateCsgPreview()
 {
     m_csgPreviewDirty = true;
+    startAsyncCsgCompute();
 }
 
 QString ViewportWidget::csgStatusText()
@@ -1168,16 +1193,10 @@ QString ViewportWidget::csgStatusText()
     if (!m_shapes)
         return QStringLiteral("CSG preview: empty");
 
-    const CsgPreview &preview = m_scene
-                                    ? cachedCsgPreview(*m_scene,
-                                                       &m_cachedCsgPreview,
-                                                       &m_cachedCsgFingerprint,
-                                                       &m_csgPreviewDirty)
-                                    : cachedCsgPreview(*m_shapes,
-                                                       &m_cachedCsgPreview,
-                                                       &m_cachedCsgFingerprint,
-                                                       &m_csgPreviewDirty);
-    return preview.statusText;
+    if (m_csgComputing || m_csgPreviewDirty)
+        return QStringLiteral("CSG preview: computing…");
+
+    return m_cachedCsgPreview.statusText;
 }
 
 // ── Camera matrix helpers ──────────────────────────────────────────────────────
@@ -1736,16 +1755,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 appendMesh(triangles, buildShapeMesh(shape), color, i);
             }
         } else {
-            const CsgPreview &preview = m_scene
-                                            ? cachedCsgPreview(*m_scene,
-                                                               &m_cachedCsgPreview,
-                                                               &m_cachedCsgFingerprint,
-                                                               &m_csgPreviewDirty)
-                                            : cachedCsgPreview(*m_shapes,
-                                                               &m_cachedCsgPreview,
-                                                               &m_cachedCsgFingerprint,
-                                                               &m_csgPreviewDirty);
-            csgStatus = preview.statusText;
+            const CsgPreview &preview = m_cachedCsgPreview;
+            csgStatus = m_csgComputing ? QStringLiteral("CSG preview: computing…") : preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 QColor color = QColor(80, 160, 255);
@@ -1915,15 +1926,7 @@ void ViewportWidget::paintOpenGLContactShadows()
     if (!m_shapes || !m_glFlatProgram || !m_glFlatProgram->isLinked() || !m_vboShadow.isCreated())
         return;
 
-    const CsgPreview &preview = m_scene
-                                    ? cachedCsgPreview(*m_scene,
-                                                       &m_cachedCsgPreview,
-                                                       &m_cachedCsgFingerprint,
-                                                       &m_csgPreviewDirty)
-                                    : cachedCsgPreview(*m_shapes,
-                                                       &m_cachedCsgPreview,
-                                                       &m_cachedCsgFingerprint,
-                                                       &m_csgPreviewDirty);
+    const CsgPreview &preview = m_cachedCsgPreview;
 
     // Rebuild shadow VBO only when CSG fingerprint changes. Stores all 13 soft-shadow
     // samples in world space (Z=0 plane, per-sample XY offset baked into position).
@@ -1997,15 +2000,8 @@ void ViewportWidget::paintOpenGLPreview()
     // cache the key so the post-drag frame re-derives from CSG preview.
     const bool dragging = m_draggingShape;
 
-    // For non-drag, resolve CSG preview now so m_cachedCsgFingerprint is current
-    // before we compute the VBO key. The result is cached; the second call inside
-    // the rebuild block just returns the same pointer.
-    if (!dragging) {
-        if (m_scene)
-            cachedCsgPreview(*m_scene,  &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
-        else
-            cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
-    }
+    // m_cachedCsgFingerprint is updated asynchronously by onCsgPreviewReady();
+    // no synchronous cache-warming needed here.
 
     const QSet<int> selectedShapeIds = selectedViewportShapeIds(m_scene,
                                                                 m_shapes,
@@ -2055,9 +2051,7 @@ void ViewportWidget::paintOpenGLPreview()
                 appendMesh(buildShapeMesh(shape), color);
             }
         } else {
-            const CsgPreview &preview = m_scene
-                ? cachedCsgPreview(*m_scene, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty)
-                : cachedCsgPreview(*m_shapes, &m_cachedCsgPreview, &m_cachedCsgFingerprint, &m_csgPreviewDirty);
+            const CsgPreview &preview = m_cachedCsgPreview;
 
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
@@ -2815,15 +2809,7 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton && m_shapes) {
-        const CsgPreview &preview = m_scene
-                                        ? cachedCsgPreview(*m_scene,
-                                                           &m_cachedCsgPreview,
-                                                           &m_cachedCsgFingerprint,
-                                                           &m_csgPreviewDirty)
-                                        : cachedCsgPreview(*m_shapes,
-                                                           &m_cachedCsgPreview,
-                                                           &m_cachedCsgFingerprint,
-                                                           &m_csgPreviewDirty);
+        const CsgPreview &preview = m_cachedCsgPreview;
         int helperShapeIndex = -1;
         float bestDistance = 8.0f;
 

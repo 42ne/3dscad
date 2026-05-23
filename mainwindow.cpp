@@ -1017,6 +1017,7 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::groupRotationDragStarted, this, &MainWindow::onViewportGroupRotationDragStarted);
     connect(m_viewport, &ViewportWidget::groupRotated, this, &MainWindow::onViewportGroupRotated);
     connect(m_viewport, &ViewportWidget::groupRotationDragFinished, this, &MainWindow::onViewportGroupRotationDragFinished);
+    connect(m_viewport, &ViewportWidget::csgPreviewReady, this, &MainWindow::refreshCsgStatus);
 
 }
 
