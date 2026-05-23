@@ -17,22 +17,27 @@ namespace {
 QStringList paletteTools()
 {
     return {
+        // ── Primitives ────────────────────────────────────────────────────────
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
         QStringLiteral("cone"),
+        // ── Boolean operations ────────────────────────────────────────────────
         QStringLiteral("union"),
         QStringLiteral("difference"),
         QStringLiteral("intersection"),
+        // ── Transforms ────────────────────────────────────────────────────────
         QStringLiteral("translate"),
         QStringLiteral("rotate"),
         QStringLiteral("scale"),
         QStringLiteral("mirror"),
+        // ── Geometry algorithms ───────────────────────────────────────────────
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),
-        QStringLiteral("for"),
+        // ── Structure / control flow ──────────────────────────────────────────
+        QStringLiteral("module"),
         QStringLiteral("var"),
-        QStringLiteral("module")
+        QStringLiteral("for"),
     };
 }
 

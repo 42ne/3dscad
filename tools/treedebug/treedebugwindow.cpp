@@ -474,6 +474,7 @@ void TreeDebugWindow::appendSnapshotForNode(QString &out,
         const QString shapeDesc = shape
             ? (shape->type == ShapeNode::Cube     ? QStringLiteral("cube")
              : shape->type == ShapeNode::Sphere   ? QStringLiteral("sphere")
+             : shape->type == ShapeNode::Cone     ? QStringLiteral("cone")
                                                   : QStringLiteral("cylinder"))
             : QStringLiteral("?");
         out += indent + QStringLiteral("[Prim#%1  %2]  card=%3\n")
@@ -656,6 +657,10 @@ void TreeDebugWindow::buildUi()
             ShapeNode s; s.type = ShapeNode::Cylinder; s.radius = 5.0f; s.height = 10.0f;
             s.parameterExpressions = QStringList{QStringLiteral("5"),QStringLiteral("10")};
             m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("cone")) {
+            ShapeNode s; s.type = ShapeNode::Cone; s.radius = 5.0f; s.radius2 = 0.0f; s.height = 10.0f;
+            s.parameterExpressions = QStringList{QStringLiteral("5"),QStringLiteral("0"),QStringLiteral("10")};
+            m_scene.addShape(s, parentId, insertIndex);
         } else if (tool == QStringLiteral("module")) {
             const int gId = m_scene.addGroup(SceneDocument::TreeNode::Module, 0, insertIndex);
             m_scene.setModuleName(gId, QStringLiteral("module"));
@@ -676,13 +681,16 @@ void TreeDebugWindow::buildUi()
                 m_scene.updateVariableExpression(varId, QStringLiteral("0"));
             }
         } else {
-            // Boolean / transform / for group
+            // Boolean / transform / geometry / for group
             SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
             if      (tool == QStringLiteral("difference"))   op = SceneDocument::TreeNode::Difference;
             else if (tool == QStringLiteral("intersection")) op = SceneDocument::TreeNode::Intersection;
             else if (tool == QStringLiteral("translate"))    op = SceneDocument::TreeNode::Translate;
             else if (tool == QStringLiteral("rotate"))       op = SceneDocument::TreeNode::Rotate;
             else if (tool == QStringLiteral("scale"))        op = SceneDocument::TreeNode::Scale;
+            else if (tool == QStringLiteral("mirror"))       op = SceneDocument::TreeNode::Mirror;
+            else if (tool == QStringLiteral("hull"))         op = SceneDocument::TreeNode::Hull;
+            else if (tool == QStringLiteral("minkowski"))    op = SceneDocument::TreeNode::Minkowski;
             else if (tool == QStringLiteral("for"))          op = SceneDocument::TreeNode::For;
             const int gId = m_scene.addGroup(op, parentId, insertIndex);
             if (op == SceneDocument::TreeNode::Translate
@@ -690,6 +698,9 @@ void TreeDebugWindow::buildUi()
              || op == SceneDocument::TreeNode::Scale) {
                 m_scene.updateGroupTransform(gId, {}, {}, QVector3D(1,1,1),
                                              {QStringLiteral("0"),QStringLiteral("0"),QStringLiteral("0")});
+            } else if (op == SceneDocument::TreeNode::Mirror) {
+                m_scene.updateGroupTransform(gId, QVector3D(1,0,0), {}, {},
+                                             {QStringLiteral("1"),QStringLiteral("0"),QStringLiteral("0")});
             } else if (op == SceneDocument::TreeNode::For) {
                 m_scene.updateForLoop(gId, QStringLiteral("i"), QStringLiteral("[0 : 1 : 10]"));
             }
