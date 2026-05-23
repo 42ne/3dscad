@@ -708,6 +708,16 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after nodeDrop"));
     });
+    m_treeWidget->setModuleCallDroppedCallback([this](int moduleGroupId, int parentId, int idx) {
+        const int callId = m_scene.addModuleCall(moduleGroupId, parentId, idx);
+        const bool ok = callId > 0;
+        log(QStringLiteral("[%1] callDrop  module=#%2  parent=#%3  idx=%4  callId=#%5%6")
+            .arg(++m_eventSeq, 4, 10, QLatin1Char('0'))
+            .arg(moduleGroupId).arg(parentId).arg(idx).arg(callId)
+            .arg(ok ? QString() : QStringLiteral("  ⚠ addModuleCall failed")));
+        m_treeWidget->refresh();
+        logSnapshot(QStringLiteral("after callDrop"));
+    });
     m_treeWidget->setTreeNodeSelectedCallback([this](int nodeId) {
         log(QStringLiteral("[%1] select    node=#%2  cursor=(%3,%4)")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(nodeId)

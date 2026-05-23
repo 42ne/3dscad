@@ -1613,41 +1613,47 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
 void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPointF &scenePosition)
 {
-    if (m_toolDroppedCallback) {
-        const DropTarget target = dropTargetForToolAt(scenePosition,
-                                                      previewSizeForTool(toolName),
-                                                      toolName,
-                                                      0,
-                                                      false);
-        if (!target.hasTarget && !isRootOnlyTreeTool(toolName)) {
-            clearDropPreview();
-            return;
-        }
-
-        // For root-level tools (modules) store the snapped canvas position so that
-        // drawTreeOrPlaceholder() can place the newly-created block there.
-        if (isRootOnlyTreeTool(toolName) && target.zoneRect.isValid()) {
-            m_pendingInsertCanvasPosition = target.zoneRect.topLeft();
-            m_hasPendingInsertPos = true;
-        }
-
-        scheduleDropCommit([this, toolName, target]() {
-            if (m_toolDroppedCallback)
-                m_toolDroppedCallback(toolName,
-                                      target.parentGroupId,
-                                      target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
-        });
+    if (!m_toolDroppedCallback) {
+        clearDropPreview();
+        return;
     }
+
+    const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                  previewSizeForTool(toolName),
+                                                  toolName,
+                                                  0,
+                                                  false);
+    if (!target.hasTarget && !isRootOnlyTreeTool(toolName)) {
+        clearDropPreview();
+        return;
+    }
+
+    // For root-level tools (modules) store the snapped canvas position so that
+    // drawTreeOrPlaceholder() can place the newly-created block there.
+    if (isRootOnlyTreeTool(toolName) && target.zoneRect.isValid()) {
+        m_pendingInsertCanvasPosition = target.zoneRect.topLeft();
+        m_hasPendingInsertPos = true;
+    }
+
+    scheduleDropCommit([this, toolName, target]() {
+        if (m_toolDroppedCallback)
+            m_toolDroppedCallback(toolName,
+                                  target.parentGroupId,
+                                  target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+    });
 }
 
 void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition)
 {
-    if (!m_moduleCallDroppedCallback || moduleGroupId <= 0 || !m_scene)
+    if (!m_moduleCallDroppedCallback || moduleGroupId <= 0 || !m_scene) {
+        clearDropPreview();
         return;
+    }
 
     const SceneDocument::TreeNode *module = m_scene->treeNodeById(moduleGroupId);
     if (!module || module->type != SceneDocument::TreeNode::Group
         || module->operation != SceneDocument::TreeNode::Module) {
+        clearDropPreview();
         return;
     }
 
@@ -1785,71 +1791,74 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
         return;
     }
 
-    if (m_treeNodeDroppedCallback) {
-        QSizeF previewSize = defaultPreviewSize();
-        QString previewTool;
-        if (m_scene) {
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
-            if (node) {
-                previewTool = previewToolForNode(*node);
-                if (node->type == SceneDocument::TreeNode::Variable) {
-                    previewSize = variablePreviewSize(node->variableName, node->variableExpression);
-                } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
-                    QVector<ModuleCallParam> params;
-                    const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
-                    if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
-                        const QHash<QString, QString> overrides = resolveModuleArguments(node->moduleCallArguments, *modGroup);
-                        for (const SceneDocument::TreeNode &paramNode : modGroup->children) {
-                            if (paramNode.type != SceneDocument::TreeNode::Variable || !paramNode.isParameter)
-                                continue;
-                            const QString expression = overrides.value(paramNode.variableName,
-                                                                       paramNode.variableExpression.trimmed().isEmpty()
-                                                                           ? QString::number(paramNode.variableValue)
-                                                                           : paramNode.variableExpression.trimmed());
-                            params.append({paramNode.id, paramNode.variableName, expression});
-                        }
+    if (!m_treeNodeDroppedCallback) {
+        clearDropPreview();
+        return;
+    }
+
+    QSizeF previewSize = defaultPreviewSize();
+    QString previewTool;
+    if (m_scene) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+        if (node) {
+            previewTool = previewToolForNode(*node);
+            if (node->type == SceneDocument::TreeNode::Variable) {
+                previewSize = variablePreviewSize(node->variableName, node->variableExpression);
+            } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
+                QVector<ModuleCallParam> params;
+                const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
+                if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
+                    const QHash<QString, QString> overrides = resolveModuleArguments(node->moduleCallArguments, *modGroup);
+                    for (const SceneDocument::TreeNode &paramNode : modGroup->children) {
+                        if (paramNode.type != SceneDocument::TreeNode::Variable || !paramNode.isParameter)
+                            continue;
+                        const QString expression = overrides.value(paramNode.variableName,
+                                                                   paramNode.variableExpression.trimmed().isEmpty()
+                                                                       ? QString::number(paramNode.variableValue)
+                                                                       : paramNode.variableExpression.trimmed());
+                        params.append({paramNode.id, paramNode.variableName, expression});
                     }
-                    previewSize = moduleCallPreviewSize(node->moduleName, params);
-                } else {
-                    previewSize = previewSizeForTool(previewTool);
                 }
+                previewSize = moduleCallPreviewSize(node->moduleName, params);
+            } else {
+                previewSize = previewSizeForTool(previewTool);
             }
         }
+    }
 
-        const DropTarget target = dropTargetForToolAt(scenePosition,
-                                                      previewSize,
-                                                      previewTool,
-                                                      nodeId,
-                                                      false);
-        if (!target.hasTarget) {
-            if (!target.zoneRect.isValid()) {
-                clearDropPreview();
-                return;
-            }
-
-            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId) : nullptr;
-            const bool moduleDeclaration = node
-                                           && node->type == SceneDocument::TreeNode::Group
-                                           && node->operation == SceneDocument::TreeNode::Module;
-            if (moduleDeclaration) {
-                clearDropPreview();
-                return;
-            }
-
-            scheduleDropCommit([this, nodeId]() {
-                if (m_treeNodeDeleteRequestedCallback)
-                    m_treeNodeDeleteRequestedCallback(nodeId);
-            });
+    const DropTarget target = dropTargetForToolAt(scenePosition,
+                                                  previewSize,
+                                                  previewTool,
+                                                  nodeId,
+                                                  false);
+    if (!target.hasTarget) {
+        if (!target.zoneRect.isValid()) {
+            clearDropPreview();
             return;
         }
 
-        scheduleDropCommit([this, nodeId, target]() {
-            if (m_treeNodeDroppedCallback)
-                m_treeNodeDroppedCallback(nodeId,
-                                          target.parentGroupId,
-                                          target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+        const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId) : nullptr;
+        const bool moduleDeclaration = node
+                                       && node->type == SceneDocument::TreeNode::Group
+                                       && node->operation == SceneDocument::TreeNode::Module;
+        if (moduleDeclaration) {
+            clearDropPreview();
+            return;
+        }
+
+        scheduleDropCommit([this, nodeId]() {
+            if (m_treeNodeDeleteRequestedCallback)
+                m_treeNodeDeleteRequestedCallback(nodeId);
         });
+        return;
     }
+
+    scheduleDropCommit([this, nodeId, target]() {
+        if (m_treeNodeDroppedCallback)
+            m_treeNodeDroppedCallback(nodeId,
+                                      target.parentGroupId,
+                                      target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+    });
 }
 
 void SceneTreeGraphicsWidget::handleTreeNodeSelected(int nodeId)
