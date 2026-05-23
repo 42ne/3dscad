@@ -399,23 +399,16 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (geometryChildren.isEmpty())
         return {};
 
-    // Hull: extract vertices from each child's mesh and compute convex hull via
-    // Manifold::Hull(vector<vec3>). This mirrors OpenSCAD's hull() semantics
-    // (convex hull of vertex sets) and avoids boolean-union pre-processing.
     if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {
-        std::vector<vec3> pts;
+        std::vector<Manifold> parts;
         for (const SceneDocument::TreeNode *child : geometryChildren) {
             const Manifold part = evaluateNode(*child, scene, localVariables);
-            if (part.IsEmpty())
-                continue;
-            const MeshGL m = part.GetMeshGL();
-            const int np = static_cast<int>(m.numProp);
-            for (int i = 0; i + 2 < static_cast<int>(m.vertProperties.size()); i += np)
-                pts.emplace_back(static_cast<double>(m.vertProperties[i]),
-                                 static_cast<double>(m.vertProperties[i + 1]),
-                                 static_cast<double>(m.vertProperties[i + 2]));
+            if (!part.IsEmpty())
+                parts.push_back(part);
         }
-        return pts.empty() ? Manifold{} : Manifold::Hull(pts);
+        if (parts.empty())
+            return {};
+        return applyNodeTransform(Manifold::Hull(parts), evaluatedNode);
     }
 
     Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
