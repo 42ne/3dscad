@@ -47,7 +47,7 @@ Graphics-tree selection flows back through `MainWindow`, which updates the class
 - dark/light viewport theme and material color variant controls
 - transform gizmo with move axes and rotation rings
 - helper cut-volume drawing
-- cached CSG preview reuse between repaints
+- asynchronous CSG preview: `invalidateCsgPreview()` snapshots the scene and launches `buildCsgPreview` on a `QtConcurrent::run` thread; `QFutureWatcher<CsgPreview>` delivers the result back to the main thread via `onCsgPreviewReady()`, which updates the cached result, increments the fingerprint, and calls `update()` — paint paths always read `m_cachedCsgPreview` without blocking
 
 ## Code Generation And Parsing
 
@@ -201,7 +201,7 @@ Dragging:
 - Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
-- Outside drag, the viewport caches CSG preview data by a scene fingerprint so camera motion and repaint events do not recompute Manifold CSG.
+- Outside drag, CSG preview is computed asynchronously: `invalidateCsgPreview()` (called from `refreshShapeList()` on every scene change, and from drag-end handlers) snapshots the scene and dispatches a `QtConcurrent::run` task. Paint paths read the last valid `m_cachedCsgPreview` without blocking. When the background task finishes, `onCsgPreviewReady()` atomically updates `m_cachedCsgPreview` and `m_cachedCsgFingerprint`, then schedules a repaint and emits `csgPreviewReady()` so `MainWindow` can refresh the status label. A `m_csgComputing` guard ensures at most one background task runs at a time; if the scene changes again during a running compute, `m_csgPreviewDirty` is set and a new compute is started immediately when the current one finishes.
 - The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, and contact shadows are drawn by shader paths while gizmo, helper overlays, text, CPU-side projection, and picking still reuse the software path.
 - Graphics-tree transform and primitive parameter controls can be adjusted with `Ctrl + mouse wheel`. Hovering editable controls provides viewport hints for the affected axis, rotation, scale, or primitive dimension.
 
@@ -265,6 +265,7 @@ See [docs/manifoldbuilder.md](docs/manifoldbuilder.md) for usage instructions.
 - Variable and module-parameter support intentionally follows a smaller scope model than full OpenSCAD; rename UI and broader language semantics are future work.
 - The graphics tree is still a preview/editor prototype; classic tree remains available until insertion, explicit reordering affordances, group deletion ergonomics, and difference base/cut editing feel complete there.
 - Parser and generator are coupled to the narrow subset documented in `docs/openscad_subset.md`.
+- Background CSG tasks cannot be cancelled mid-flight (QtConcurrent::run futures are not cancellable); if the scene changes rapidly, one extra compute for the superseded state may complete before the final one starts.
 
 ## Recommended Next Work
 

@@ -8,7 +8,7 @@ Prototype of a visual editor for OpenSCAD-style modeling. The goal is a Tinkerca
 
 ## Current State
 
-The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering can use the software `QPainter` raster path or an experimental OpenGL mesh path selected directly inside the viewport.
+The project is a Qt Widgets application using a custom `QOpenGLWidget` viewport. Rendering can use the software `QPainter` raster path or an OpenGL mesh path selected directly inside the viewport. CSG preview is computed asynchronously on a background thread so that loading complex parametric scenes (e.g. snowflake, gear, railway signal) never blocks the UI.
 
 Implemented:
 
@@ -84,6 +84,8 @@ There are currently four preview modes:
 - `box mode`: real computed CSG for unrotated cubes.
 - `mesh approximate`: approximate CSG for spheres, cylinders, and rotated cubes.
 
+CSG preview is computed **asynchronously** on a background thread via `QFutureWatcher`. While a new result is being computed (e.g. right after loading a complex file), the viewport renders the last valid cached frame and the status line shows `CSG preview: computing…`. When the background result is ready the viewport refreshes automatically. This prevents the UI from freezing when loading scenes with many shapes or deep module hierarchies.
+
 Manifold mode:
 
 - Is used first when the matching local Manifold library exists at qmake time:
@@ -149,10 +151,10 @@ The in-viewport `OpenGL` checkbox enables the optional experimental viewport bac
 A collection of ready-made parametric OpenSCAD scenes is included under
 `docs/sample_codes/`. Each file uses only the round-trippable command subset so
 the scene can be loaded, edited visually, and written back as code. Examples
-include mechanical parts (pulley, pipe flange, fan, gear rack), furniture
+include mechanical parts (pulley, pipe flange, fan, gear), furniture
 (armchair, dining table, bookshelf), architecture (castle tower, Japanese
 pagoda, spiral staircase), and decorative models (Saturn, snowflake, space
-station).
+station, railway signal).
 
 ## Distribution — Portable Build
 
