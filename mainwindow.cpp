@@ -1900,6 +1900,7 @@ void MainWindow::refreshShapeList()
         m_sceneTreeGraphics->refresh();
 
     refreshOpenScadCode();
+    m_viewport->invalidateCsgPreview();  // scene content changed → trigger async recompute
     m_viewport->update();
     refreshCsgStatus();
 }
