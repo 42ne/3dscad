@@ -410,7 +410,7 @@ public:
         setZValue(zValue);
     }
 
-    QRectF boundingRect() const override { return m_rect.adjusted(-1.0, -1.0, 4.0, 4.0); }
+    QRectF boundingRect() const override { return m_rect.adjusted(-2.0, -2.0, 6.0, 7.0); }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
