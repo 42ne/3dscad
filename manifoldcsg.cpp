@@ -125,6 +125,13 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
                 evaluated.scale.setY(static_cast<float>(value));
             else
                 evaluated.scale.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Mirror) {
+            if (axis == 0)
+                evaluated.position.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.position.setY(static_cast<float>(value));
+            else
+                evaluated.position.setZ(static_cast<float>(value));
         }
     }
 
@@ -138,7 +145,8 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Scene
            || operation == SceneDocument::TreeNode::Translate
            || operation == SceneDocument::TreeNode::Rotate
-           || operation == SceneDocument::TreeNode::Scale;
+           || operation == SceneDocument::TreeNode::Scale
+           || operation == SceneDocument::TreeNode::Mirror;
 }
 
 static bool isTopLevelModuleDeclaration(const SceneDocument::TreeNode &node)
@@ -252,6 +260,8 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
         return source.Rotate(node.rotation.x(), node.rotation.y(), node.rotation.z());
     if (node.operation == SceneDocument::TreeNode::Scale)
         return source.Scale(vec3(node.scale.x(), node.scale.y(), node.scale.z()));
+    if (node.operation == SceneDocument::TreeNode::Mirror)
+        return source.Mirror(vec3(node.position.x(), node.position.y(), node.position.z()));
 
     return source;
 }
@@ -384,6 +394,17 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
 
     if (geometryChildren.isEmpty())
         return {};
+
+    // Hull: compute convex hull of all children together via Manifold::Hull()
+    if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {
+        std::vector<Manifold> parts;
+        for (const SceneDocument::TreeNode *child : geometryChildren) {
+            Manifold part = evaluateNode(*child, scene, localVariables);
+            if (!part.IsEmpty())
+                parts.push_back(std::move(part));
+        }
+        return parts.empty() ? Manifold{} : Manifold::Hull(parts);
+    }
 
     Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
 

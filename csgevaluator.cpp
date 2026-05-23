@@ -623,6 +623,13 @@ static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
                 evaluated.scale.setY(static_cast<float>(value));
             else
                 evaluated.scale.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Mirror) {
+            if (axis == 0)
+                evaluated.position.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.position.setY(static_cast<float>(value));
+            else
+                evaluated.position.setZ(static_cast<float>(value));
         }
     }
 
@@ -791,6 +798,15 @@ static bool evaluateRangeExpression(const QString &rangeExpression,
     return true;
 }
 
+// Reflect a vector across the plane whose normal is n (Householder reflection).
+static QVector3D reflectAcrossPlane(const QVector3D &v, const QVector3D &n)
+{
+    const float len2 = n.lengthSquared();
+    if (qFuzzyIsNull(len2))
+        return v;
+    return v - 2.0f * QVector3D::dotProduct(v, n) / len2 * n;
+}
+
 static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDocument::TreeNode &group)
 {
     if (group.operation == SceneDocument::TreeNode::Translate)
@@ -799,6 +815,8 @@ static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDo
         return rotatePoint(point, group.rotation);
     if (group.operation == SceneDocument::TreeNode::Scale)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
+    if (group.operation == SceneDocument::TreeNode::Mirror)
+        return reflectAcrossPlane(point, group.position);
     return point;
 }
 
@@ -813,6 +831,8 @@ static QVector3D transformNormalForGroup(const QVector3D &normal, const SceneDoc
                          qFuzzyIsNull(group.scale.y()) ? normal.y() : normal.y() / group.scale.y(),
                          qFuzzyIsNull(group.scale.z()) ? normal.z() : normal.z() / group.scale.z());
     }
+    if (group.operation == SceneDocument::TreeNode::Mirror)
+        return -reflectAcrossPlane(normal, group.position); // negate to compensate winding reversal
     return normal;
 }
 
@@ -1270,6 +1290,10 @@ static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
         if (node.operation == SceneDocument::TreeNode::Rotate && hasVectorValue(node.rotation))
             return true;
         if (node.operation == SceneDocument::TreeNode::Scale && hasScaleValue(node.scale))
+            return true;
+        if (node.operation == SceneDocument::TreeNode::Mirror)
+            return true;
+        if (node.operation == SceneDocument::TreeNode::Hull)
             return true;
     }
 
