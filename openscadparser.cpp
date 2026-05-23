@@ -259,6 +259,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression intersectionRegex("^intersection\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression hullRegex("^hull\\s*\\(\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression minkowskiRegex("^minkowski\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression translateRegex("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression rotateRegex("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression scaleRegex("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
@@ -279,6 +280,10 @@ static bool parseOperationLine(const QString &line,
     }
     if (hullRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Hull;
+        return true;
+    }
+    if (minkowskiRegex.match(line).hasMatch()) {
+        *operation = SceneDocument::TreeNode::Minkowski;
         return true;
     }
 
@@ -517,7 +522,7 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "for",
+        "union", "difference", "intersection", "hull", "minkowski", "for",
         "cube", "sphere", "cylinder"
     };
     for (const QString &kw : known)

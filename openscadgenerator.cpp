@@ -39,6 +39,8 @@ static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
         return "intersection";
     if (operation == SceneDocument::TreeNode::Hull)
         return "hull";
+    if (operation == SceneDocument::TreeNode::Minkowski)
+        return "minkowski";
     return "union";
 }
 

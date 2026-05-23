@@ -1295,6 +1295,8 @@ static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
             return true;
         if (node.operation == SceneDocument::TreeNode::Hull)
             return true;
+        if (node.operation == SceneDocument::TreeNode::Minkowski)
+            return true;
     }
 
     for (const SceneDocument::TreeNode &child : node.children) {

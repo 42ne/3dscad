@@ -248,7 +248,7 @@ These constructs are outside the current round-trippable subset:
 - `children()`
 - `$fn`, `$fa`, `$fs`, and other special variables
 - positional module arguments in the visual editor workflow
-- `minkowski`, `hull`, `offset`, `projection`
+- `offset`, `projection`
 - `linear_extrude`, `rotate_extrude`
 - `polyhedron`, `import`, `surface`, `text`
 - arbitrary named arguments on primitives beyond the generated forms

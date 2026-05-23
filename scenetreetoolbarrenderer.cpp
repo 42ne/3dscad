@@ -28,6 +28,7 @@ QStringList paletteTools()
         QStringLiteral("scale"),
         QStringLiteral("mirror"),
         QStringLiteral("hull"),
+        QStringLiteral("minkowski"),
         QStringLiteral("for"),
         QStringLiteral("var"),
         QStringLiteral("module")

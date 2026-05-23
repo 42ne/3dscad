@@ -411,6 +411,15 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return applyNodeTransform(Manifold::Hull(parts), evaluatedNode);
     }
 
+    if (evaluatedNode.operation == SceneDocument::TreeNode::Minkowski) {
+        if (geometryChildren.size() < 2)
+            return geometryChildren.isEmpty() ? Manifold{} : evaluateNode(*geometryChildren.first(), scene, localVariables);
+        Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
+        for (int i = 1; i < geometryChildren.size(); ++i)
+            result = result.MinkowskiSum(evaluateNode(*geometryChildren[i], scene, localVariables));
+        return applyNodeTransform(result, evaluatedNode);
+    }
+
     Manifold result = evaluateNode(*geometryChildren.first(), scene, localVariables);
 
     for (int i = 1; i < geometryChildren.size(); ++i) {

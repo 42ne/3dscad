@@ -242,6 +242,20 @@ void paintOperationIcon(QPainter *painter,
             poly << QPointF(c.x() + r * std::cos(angle), c.y() + r * std::sin(angle));
         }
         painter->drawPolygon(poly);
+    } else if (operation == SceneDocument::TreeNode::Minkowski) {
+        // Two overlapping rounded rectangles (⊕-like Minkowski sum symbol).
+        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setBrush(QColor(255, 255, 255, 55));
+        const qreal hw = symbolRect.width() * 0.42;
+        const qreal hh = symbolRect.height() * 0.38;
+        const qreal offset = symbolRect.width() * 0.14;
+        painter->drawRoundedRect(QRectF(symbolRect.left(),          center.y() - hh * 0.5, hw, hh), 2.5, 2.5);
+        painter->drawRoundedRect(QRectF(symbolRect.right() - hw - offset, center.y() - hh * 0.5, hw, hh), 2.5, 2.5);
+        // Plus sign in the gap between the two shapes
+        const qreal gx = symbolRect.left() + hw + (symbolRect.width() - 2 * hw - offset) * 0.3;
+        painter->setPen(QPen(accent.darker(170), 1.2));
+        painter->drawLine(QPointF(gx, center.y() - 2.5), QPointF(gx, center.y() + 2.5));
+        painter->drawLine(QPointF(gx - 2.5, center.y()), QPointF(gx + 2.5, center.y()));
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
@@ -857,6 +871,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Hull;
         return true;
     }
+    if (normalized.contains("minkowski")) {
+        *operation = SceneDocument::TreeNode::Minkowski;
+        return true;
+    }
     if (normalized == QStringLiteral("for")) {
         *operation = SceneDocument::TreeNode::For;
         return true;
@@ -876,6 +894,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Scale, "scale", QColor(229, 241, 218), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Mirror, "mirror", QColor(242, 218, 235), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
+    {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
 };

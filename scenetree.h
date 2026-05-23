@@ -34,8 +34,9 @@ public:
             Translate,
             Rotate,
             Scale,
-            Mirror, // reflect across plane with normal [x,y,z]; axis stored in position
-            Hull,   // convex hull of children; no parameters
+            Mirror,     // reflect across plane with normal [x,y,z]; axis stored in position
+            Hull,       // convex hull of children; no parameters
+            Minkowski,  // Minkowski sum of children; no parameters
             For,
             Scene // top-level container; flattened in code generation, never emitted as a block
         };

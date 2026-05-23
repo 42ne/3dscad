@@ -167,6 +167,7 @@ static bool operationForTool(const QString &toolName,
     if (toolName == QStringLiteral("scale"))        { *operation = SceneDocument::TreeNode::Scale;        return true; }
     if (toolName == QStringLiteral("mirror"))       { *operation = SceneDocument::TreeNode::Mirror;       return true; }
     if (toolName == QStringLiteral("hull"))         { *operation = SceneDocument::TreeNode::Hull;         return true; }
+    if (toolName == QStringLiteral("minkowski"))    { *operation = SceneDocument::TreeNode::Minkowski;    return true; }
     if (toolName == QStringLiteral("for"))          { *operation = SceneDocument::TreeNode::For;          return true; }
     return false;
 }
