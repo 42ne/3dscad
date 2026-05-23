@@ -421,7 +421,8 @@ QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis)
 {
     if (axis >= 0 && axis < node.transformExpressions.size() && !node.transformExpressions[axis].isEmpty())
         return node.transformExpressions[axis];
-    const QVector3D &v = node.operation == SceneDocument::TreeNode::Translate ? node.position
+    const QVector3D &v = (node.operation == SceneDocument::TreeNode::Translate
+                       || node.operation == SceneDocument::TreeNode::Mirror)  ? node.position
                        : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
                                                                               : node.scale;
     const float val = axis == 0 ? v.x() : axis == 1 ? v.y() : v.z();

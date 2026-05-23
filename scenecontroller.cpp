@@ -698,16 +698,18 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
         ExpressionSyntax::evaluate(newExpr, varValues, &newNumeric);
         newNumeric = qMax(minVal, newNumeric);
 
+        const bool isTranslateOrMirror = (group->operation == SceneDocument::TreeNode::Translate
+                                        || group->operation == SceneDocument::TreeNode::Mirror);
         if (axis == 0) {
-            if (group->operation == SceneDocument::TreeNode::Translate) position.setX(float(newNumeric));
+            if (isTranslateOrMirror) position.setX(float(newNumeric));
             else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setX(float(newNumeric));
             else scale.setX(float(newNumeric));
         } else if (axis == 1) {
-            if (group->operation == SceneDocument::TreeNode::Translate) position.setY(float(newNumeric));
+            if (isTranslateOrMirror) position.setY(float(newNumeric));
             else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setY(float(newNumeric));
             else scale.setY(float(newNumeric));
         } else {
-            if (group->operation == SceneDocument::TreeNode::Translate) position.setZ(float(newNumeric));
+            if (isTranslateOrMirror) position.setZ(float(newNumeric));
             else if (group->operation == SceneDocument::TreeNode::Rotate) rotation.setZ(float(newNumeric));
             else scale.setZ(float(newNumeric));
         }
@@ -715,7 +717,8 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
         const bool  isScale = (group->operation == SceneDocument::TreeNode::Scale);
         const qreal step    = group->operation == SceneDocument::TreeNode::Rotate ? 5.0
                             : isScale ? 0.1 : 1.0;
-        QVector3D *target   = group->operation == SceneDocument::TreeNode::Translate ? &position
+        QVector3D *target   = (group->operation == SceneDocument::TreeNode::Translate
+                             || group->operation == SceneDocument::TreeNode::Mirror) ? &position
                             : group->operation == SceneDocument::TreeNode::Rotate    ? &rotation
                                                                                      : &scale;
         auto adjustAxis = [&](float current) -> float {
