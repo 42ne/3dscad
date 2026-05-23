@@ -16,6 +16,7 @@ contains(CONFIG, opengl_renderer) {
 
 SOURCES += \
     animatedtitlebar.cpp \
+    codeeditorpanel.cpp \
     csgevaluator.cpp \
     theme.cpp \
     examplepreviewpopup.cpp \
@@ -43,6 +44,7 @@ SOURCES += \
 
 HEADERS += \
     animatedtitlebar.h \
+    codeeditorpanel.h \
     csgevaluator.h \
     theme.h \
     examplepreviewpopup.h \

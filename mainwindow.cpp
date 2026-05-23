@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "animatedtitlebar.h"
+#include "codeeditorpanel.h"
 #include "csgevaluator.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
@@ -16,27 +17,17 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCursor>
-#include <QDockWidget>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
-#include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QMouseEvent>
-#include <QPushButton>
-#include <QSaveFile>
 #include <QSplitter>
-#include <QScrollBar>
-#include <QTextEdit>
-#include <QTextCharFormat>
-#include <QTextCursor>
 #include <QTimer>
-#include <QUndoStack>
 #include <QVBoxLayout>
-#include <QWindow>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -83,14 +74,14 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
     const QPoint local = mapFromGlobal(pos);
     constexpr int B = 8;
 
-    if      (local.x() < B && local.y() < B)                         *result = HTTOPLEFT;
-    else if (local.x() > width()-B && local.y() < B)                 *result = HTTOPRIGHT;
-    else if (local.x() < B && local.y() > height()-B)                *result = HTBOTTOMLEFT;
-    else if (local.x() > width()-B && local.y() > height()-B)        *result = HTBOTTOMRIGHT;
-    else if (local.y() < B)                                           *result = HTTOP;
-    else if (local.y() > height()-B)                                  *result = HTBOTTOM;
-    else if (local.x() < B)                                           *result = HTLEFT;
-    else if (local.x() > width()-B)                                   *result = HTRIGHT;
+    if      (local.x() < B && local.y() < B)                  *result = HTTOPLEFT;
+    else if (local.x() > width()-B && local.y() < B)          *result = HTTOPRIGHT;
+    else if (local.x() < B && local.y() > height()-B)         *result = HTBOTTOMLEFT;
+    else if (local.x() > width()-B && local.y() > height()-B) *result = HTBOTTOMRIGHT;
+    else if (local.y() < B)                                    *result = HTTOP;
+    else if (local.y() > height()-B)                           *result = HTBOTTOM;
+    else if (local.x() < B)                                    *result = HTLEFT;
+    else if (local.x() > width()-B)                            *result = HTRIGHT;
     else return QMainWindow::nativeEvent(eventType, message, result);
     return true;
 #else
@@ -145,7 +136,7 @@ void MainWindow::buildUi()
     setMenuWidget(chrome);
 
     // Example hover preview
-    m_examplePreview  = new ExamplePreviewPopup;
+    m_examplePreview    = new ExamplePreviewPopup;
     m_exampleHoverTimer = new QTimer(this);
     m_exampleHoverTimer->setSingleShot(true);
     m_exampleHoverTimer->setInterval(900);
@@ -163,35 +154,11 @@ void MainWindow::buildUi()
         m_viewport->update();
     });
 
-    m_codeEditor = new QTextEdit;
-    m_codeEditor->setReadOnly(false);
-    m_codeEditor->setMinimumHeight(180);
-    m_codeEditor->setFontFamily("Consolas");
-
-    m_applyCodeButton       = new QPushButton("Apply code");
-    m_sendToOpenScadButton  = new QPushButton("Send to OpenSCAD");
-    m_openScadPreviewLabel  = new QLabel;
-    m_openScadPreviewLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_openScadPreviewLabel->setWordWrap(true);
-    m_openScadPreviewLabel->setText(
-        QString("Preview file: %1").arg(QDir::toNativeSeparators(previewScadPath())));
-    m_parseErrorLabel = new QLabel;
-    m_parseErrorLabel->setWordWrap(true);
-    m_parseErrorLabel->setContentsMargins(4, 2, 4, 2);
-    m_parseErrorLabel->hide();
-
-    auto *codePanel  = new QWidget;
-    auto *codeLayout = new QVBoxLayout(codePanel);
-    codeLayout->setContentsMargins(0, 0, 0, 0);
-    codeLayout->addWidget(m_codeEditor);
-    codeLayout->addWidget(m_applyCodeButton);
-    codeLayout->addWidget(m_parseErrorLabel);
-    codeLayout->addWidget(m_sendToOpenScadButton);
-    codeLayout->addWidget(m_openScadPreviewLabel);
+    m_codeEditorPanel = new CodeEditorPanel;
 
     auto *mainSplitter = new QSplitter(Qt::Vertical);
     mainSplitter->addWidget(m_viewport);
-    mainSplitter->addWidget(codePanel);
+    mainSplitter->addWidget(m_codeEditorPanel);
     mainSplitter->setStretchFactor(0, 4);
     mainSplitter->setStretchFactor(1, 1);
     setCentralWidget(mainSplitter);
@@ -247,9 +214,26 @@ void MainWindow::buildUi()
     leftDock->setWidget(leftPanel);
     addDockWidget(Qt::LeftDockWidgetArea, leftDock);
 
-    // Buttons
-    connect(m_applyCodeButton,      &QPushButton::clicked, this, &MainWindow::applyOpenScadCode);
-    connect(m_sendToOpenScadButton, &QPushButton::clicked, this, &MainWindow::sendToOpenScad);
+    // Code-editor panel signals
+    connect(m_codeEditorPanel, &CodeEditorPanel::applyRequested, this, [this]() {
+        QString errorMsg;
+        int     errorLine = -1;
+        if (!m_controller->applyCode(m_codeEditorPanel->code(), &errorMsg, &errorLine)) {
+            m_codeEditorPanel->showParseError(errorMsg, errorLine);
+        } else {
+            m_codeEditorPanel->clearParseError();
+        }
+    });
+    connect(m_codeEditorPanel, &CodeEditorPanel::sendToOpenScadRequested, this, [this]() {
+        if (!m_codeEditorPanel->writeOpenScadPreview(true)) return;
+        const QString nativePath = QDir::toNativeSeparators(m_codeEditorPanel->previewScadPath());
+        QApplication::clipboard()->setText(nativePath);
+        QMessageBox::information(
+            this, "OpenSCAD preview file",
+            QString("Saved the current model to:\n\n%1\n\n"
+                    "The path was copied to the clipboard. Open this file in OpenSCAD and "
+                    "enable automatic reload/preview there.").arg(nativePath));
+    });
 
     // Viewport signals → controller handlers
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
@@ -288,51 +272,12 @@ void MainWindow::buildUi()
 
 // ── Toolbar shape/group actions ────────────────────────────────────────────────
 
-void MainWindow::addCube()          { m_controller->addCube();     }
-void MainWindow::addSphere()        { m_controller->addSphere();   }
-void MainWindow::addCylinder()      { m_controller->addCylinder(); }
+void MainWindow::addCube()              { m_controller->addCube();     }
+void MainWindow::addSphere()            { m_controller->addSphere();   }
+void MainWindow::addCylinder()          { m_controller->addCylinder(); }
 void MainWindow::addUnionGroup()        { m_controller->addGroup(SceneDocument::TreeNode::Union);        }
 void MainWindow::addDifferenceGroup()   { m_controller->addGroup(SceneDocument::TreeNode::Difference);   }
 void MainWindow::addIntersectionGroup() { m_controller->addGroup(SceneDocument::TreeNode::Intersection); }
-
-// ── Code apply / OpenSCAD preview ─────────────────────────────────────────────
-
-void MainWindow::applyOpenScadCode()
-{
-    QString errorMessage;
-    int     errorLine = -1;
-
-    if (!m_controller->applyCode(m_codeEditor->toPlainText(), &errorMessage, &errorLine)) {
-        m_parseErrorLabel->setText(
-            QString("<span style='color:#d04040;'>%1</span>")
-                .arg(errorMessage.toHtmlEscaped()));
-        m_parseErrorLabel->show();
-
-        if (errorLine > 0) {
-            QTextCursor cursor(m_codeEditor->document());
-            cursor.movePosition(QTextCursor::Start);
-            cursor.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, errorLine - 1);
-            cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
-            m_codeEditor->setTextCursor(cursor);
-            m_codeEditor->ensureCursorVisible();
-        }
-        return;
-    }
-    m_parseErrorLabel->hide();
-}
-
-void MainWindow::sendToOpenScad()
-{
-    if (!writeOpenScadPreview(true))
-        return;
-    const QString nativePath = QDir::toNativeSeparators(previewScadPath());
-    QApplication::clipboard()->setText(nativePath);
-    QMessageBox::information(
-        this, "OpenSCAD preview file",
-        QString("Saved the current model to:\n\n%1\n\n"
-                "The path was copied to the clipboard. Open this file in OpenSCAD and enable automatic reload/preview there.")
-            .arg(nativePath));
-}
 
 // ── Selection ─────────────────────────────────────────────────────────────────
 
@@ -417,13 +362,11 @@ void MainWindow::refreshProperties()
 
 void MainWindow::refreshOpenScadCode()
 {
-    const int savedScroll = m_codeEditor->verticalScrollBar()->value();
-    const QString code = OpenScadGenerator::generateWithSourceMap(
-        m_controller->scene(), &m_openScadSourceRanges);
-    m_codeEditor->setPlainText(code);
-    m_codeEditor->verticalScrollBar()->setValue(savedScroll);
+    QVector<OpenScadGenerator::SourceRange> ranges;
+    const QString code = OpenScadGenerator::generateWithSourceMap(m_controller->scene(), &ranges);
+    m_codeEditorPanel->setCodeAndRanges(code, ranges);
     highlightOpenScadSelection();
-    writeOpenScadPreview(false);
+    m_codeEditorPanel->writeOpenScadPreview(false);
 }
 
 void MainWindow::refreshCsgStatus()
@@ -437,91 +380,17 @@ void MainWindow::refreshCsgStatus()
 
 // ── Code-editor highlight ──────────────────────────────────────────────────────
 
-void MainWindow::scrollCodeEditorToShowCursor(const QTextCursor &cursor)
-{
-    if (!m_codeEditor || cursor.isNull()) return;
-    const QRect r   = m_codeEditor->cursorRect(cursor);
-    const int   vpH = m_codeEditor->viewport()->height();
-    if (r.top() < 0 || r.bottom() > vpH) {
-        QScrollBar *sb = m_codeEditor->verticalScrollBar();
-        sb->setValue(sb->value() + r.top() - vpH / 3);
-    }
-}
-
-void MainWindow::applyCtrlParamHighlight()
-{
-    const SceneController::CtrlParamHighlight &h = m_controller->ctrlHighlight();
-    const QString code = m_codeEditor->toPlainText();
-
-    for (const OpenScadGenerator::SourceRange &range : m_openScadSourceRanges) {
-        if (range.treeNodeId != h.nodeId || range.length <= 0) continue;
-        const int    searchCap = qMin(range.length, 300);
-        const QString needle   = h.contextPrefix + h.expression;
-        const int    hitPos    = code.indexOf(needle, range.start);
-        if (hitPos < 0 || hitPos >= range.start + searchCap) break;
-
-        const int exprPos  = hitPos + h.contextPrefix.size();
-        const int numStart = exprPos + h.numberStart;
-        const int numLen   = h.numberLength;
-        if (numStart + numLen > code.size()) break;
-
-        QTextCursor cursor(m_codeEditor->document());
-        cursor.setPosition(numStart);
-        cursor.setPosition(numStart + numLen, QTextCursor::KeepAnchor);
-
-        QTextCharFormat fmt;
-        fmt.setBackground(QColor(80, 180, 255, 140));
-        fmt.setFontUnderline(true);
-
-        QTextEdit::ExtraSelection sel;
-        sel.cursor = cursor;
-        sel.format = fmt;
-        m_codeEditor->setExtraSelections({sel});
-        scrollCodeEditorToShowCursor(cursor);
-        return;
-    }
-}
-
 void MainWindow::highlightOpenScadSelection()
 {
-    if (!m_codeEditor) return;
-
-    if (m_controller->ctrlHighlight().active) {
-        applyCtrlParamHighlight();
-        return;
-    }
-
-    const int selectedNodeId = m_controller->selectedTreeNodeId();
-    QTextEdit::ExtraSelection selection;
-    bool hasSelection = false;
-
-    for (const OpenScadGenerator::SourceRange &range : m_openScadSourceRanges) {
-        if (range.treeNodeId != selectedNodeId || range.length <= 0) continue;
-        QTextCursor cursor(m_codeEditor->document());
-        cursor.setPosition(range.start);
-        cursor.setPosition(range.start + range.length, QTextCursor::KeepAnchor);
-        QTextCharFormat format;
-        format.setBackground(QColor(255, 203, 87, 95));
-        selection.cursor = cursor;
-        selection.format = format;
-        hasSelection = true;
-        break;
-    }
-
-    m_codeEditor->setExtraSelections(
-        hasSelection ? QList<QTextEdit::ExtraSelection>{selection}
-                     : QList<QTextEdit::ExtraSelection>{});
-    if (hasSelection)
-        scrollCodeEditorToShowCursor(selection.cursor);
+    if (!m_codeEditorPanel) return;
+    const SceneController::CtrlParamHighlight &h = m_controller->ctrlHighlight();
+    if (h.active)
+        m_codeEditorPanel->applyCtrlParamHighlight(h);
+    else
+        m_codeEditorPanel->applySelectionHighlight(m_controller->selectedTreeNodeId());
 }
 
-// ── Utilities / file I/O ──────────────────────────────────────────────────────
-
-QString MainWindow::previewScadPath() const
-{
-    return QDir(QCoreApplication::applicationDirPath())
-        .absoluteFilePath("openscad_preview.scad");
-}
+// ── Examples ──────────────────────────────────────────────────────────────────
 
 QString MainWindow::examplesPath() const
 {
@@ -533,33 +402,6 @@ QString MainWindow::examplesPath() const
     }
     return QString();
 }
-
-bool MainWindow::writeOpenScadPreview(bool notify)
-{
-    const QString path = previewScadPath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        if (notify)
-            QMessageBox::warning(this, "OpenSCAD preview error",
-                                 QString("Cannot write preview file:\n%1").arg(path));
-        return false;
-    }
-    const QByteArray data = m_codeEditor->toPlainText().toUtf8();
-    if (file.write(data) != data.size() || !file.commit()) {
-        if (notify)
-            QMessageBox::warning(this, "OpenSCAD preview error",
-                                 QString("Cannot finish writing preview file:\n%1").arg(path));
-        return false;
-    }
-    if (m_openScadPreviewLabel)
-        m_openScadPreviewLabel->setText(
-            QString("Preview file: %1").arg(QDir::toNativeSeparators(path)));
-    return true;
-}
-
-// ── Examples ──────────────────────────────────────────────────────────────────
 
 void MainWindow::populateExamplesMenu(QMenu *menu)
 {
@@ -632,6 +474,13 @@ void MainWindow::loadExample(const QString &filePath)
                              QString("Cannot open:\n%1").arg(filePath));
         return;
     }
-    m_codeEditor->setPlainText(QString::fromUtf8(file.readAll()));
-    applyOpenScadCode();
+    m_codeEditorPanel->setCode(QString::fromUtf8(file.readAll()));
+    // Apply the loaded code immediately.
+    QString errorMsg;
+    int     errorLine = -1;
+    if (!m_controller->applyCode(m_codeEditorPanel->code(), &errorMsg, &errorLine)) {
+        m_codeEditorPanel->showParseError(errorMsg, errorLine);
+    } else {
+        m_codeEditorPanel->clearParseError();
+    }
 }
