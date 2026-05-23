@@ -26,6 +26,8 @@ QStringList paletteTools()
         QStringLiteral("translate"),
         QStringLiteral("rotate"),
         QStringLiteral("scale"),
+        QStringLiteral("mirror"),
+        QStringLiteral("hull"),
         QStringLiteral("for"),
         QStringLiteral("var"),
         QStringLiteral("module")
