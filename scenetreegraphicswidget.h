@@ -26,37 +26,12 @@ class SceneTreeInlineTextInput;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
+    Q_OBJECT
+
 public:
     explicit SceneTreeGraphicsWidget(QWidget *parent = nullptr);
 
     void setSceneDocument(const SceneDocument *scene);
-    void setToolDroppedCallback(std::function<void(const QString &, int, int)> callback);
-    void setModuleCallDroppedCallback(std::function<void(int, int, int)> callback);
-    void setTreeNodeDroppedCallback(std::function<void(int, int, int)> callback);
-    void setTreeNodeSelectedCallback(std::function<void(int)> callback);
-    void setTreeNodeDeleteRequestedCallback(std::function<void(int)> callback);
-    void setTransformValueAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
-    void setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback);
-    void setShapeParameterAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
-    void setShapeParameterHoveredCallback(std::function<void(int, int)> callback);
-    void setVariableNumberHoveredCallback(std::function<void(int, int)> callback);
-    void setForLoopRangeHoveredCallback(std::function<void(int, int)> callback);
-    void setModuleCallParamHoveredCallback(std::function<void(int, int, int)> callback);
-    void setHoverScrollZoneChangedCallback(std::function<void(const QRectF &)> callback);
-    void setDropPreviewChangedCallback(std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &, const QPointF &)> callback);
-    void setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
-    void setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback);
-    void setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback);
-    void setCtrlReleasedCallback(std::function<void()> callback);
-    void setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback);
-    void setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback);
-    // Canvas-drag debug hook.  Receives a pre-formatted log line on key events:
-    //   "press"  — grip strip hit (drag pending)
-    //   "start"  — drag activated, cluster resolved
-    //   "move"   — position/snap update (throttled: snap-change or ≥25 px)
-    //   "detach" — fast drag broke the cluster
-    //   "commit" — drag released, positions committed
-    void setCanvasDragCallback(std::function<void(const QString &)> callback);
     void setSelectedTreeNodeId(int nodeId);
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
@@ -65,6 +40,31 @@ public:
     // Debug/inspection — for use by debug tools only.
     QRectF debugGroupRect(int groupId) const;
     QRectF debugChildRect(int nodeId) const;
+
+signals:
+    void toolDropped(const QString &toolName, int parentGroupId, int insertIndex);
+    void moduleCallDropped(int moduleGroupId, int parentGroupId, int insertIndex);
+    void treeNodeDropped(int nodeId, int parentGroupId, int insertIndex);
+    void treeNodeSelected(int nodeId);
+    void treeNodeDeleteRequested(int nodeId);
+    void transformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);
+    void transformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
+    void shapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
+    void shapeParameterHovered(int shapeId, int parameter);
+    void variableNumberHovered(int nodeId, int start);
+    void forLoopRangeHovered(int nodeId, int start);
+    void moduleCallParamHovered(int moduleCallNodeId, int paramVarNodeId, int start);
+    void hoverScrollZoneChanged(const QRectF &rect);
+    void dropPreviewChanged(const QString &previewTool, int movingNodeId,
+                            const SceneTreeLayout::DropTarget &target, const QPointF &scenePosition);
+    void variableNumberAdjusted(int nodeId, int start, int length, qreal delta);
+    void moduleCallArgumentAdjusted(int moduleCallId, int parameterVariableId,
+                                    int start, int length, qreal delta);
+    void forLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
+    void ctrlReleased();
+    void moduleRenameRequested(int groupId, const QString &newName);
+    void variableRenameRequested(int variableId, const QString &newName);
+    void canvasDrag(const QString &logLine);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -154,27 +154,6 @@ private:
     QVector<QGraphicsItem *> m_toolbarItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
-    std::function<void(const QString &, int, int)> m_toolDroppedCallback;
-    std::function<void(int, int, int)> m_moduleCallDroppedCallback;
-    std::function<void(int, int, int)> m_treeNodeDroppedCallback;
-    std::function<void(int)> m_treeNodeSelectedCallback;
-    std::function<void(int)> m_treeNodeDeleteRequestedCallback;
-    std::function<void(int, int, int, int, qreal)> m_transformValueAdjustedCallback;
-    std::function<void(int, SceneDocument::TreeNode::Operation, int)> m_transformControlHoveredCallback;
-    std::function<void(int, int, int, int, qreal)> m_shapeParameterAdjustedCallback;
-    std::function<void(int, int)> m_shapeParameterHoveredCallback;
-    std::function<void(int, int)> m_variableNumberHoveredCallback;
-    std::function<void(int, int)> m_forLoopRangeHoveredCallback;
-    std::function<void(int, int, int)> m_moduleCallParamHoveredCallback;
-    std::function<void(const QRectF &)> m_hoverScrollZoneChangedCallback;
-    std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &, const QPointF &)> m_dropPreviewChangedCallback;
-    std::function<void(int, int, int, qreal)> m_variableNumberAdjustedCallback;
-    std::function<void(int, int, int, int, qreal)> m_moduleCallArgumentAdjustedCallback;
-    std::function<void(int, int, int, qreal)> m_forLoopRangeAdjustedCallback;
-    std::function<void()> m_ctrlReleasedCallback;
-    std::function<void(int, const QString &)> m_moduleRenameRequestedCallback;
-    std::function<void(int, const QString &)> m_variableRenameRequestedCallback;
-    std::function<void(const QString &)>      m_canvasDragCallback;
     // Throttle state for canvas-drag debug logging (not used in production paths).
     bool    m_dbgPrevSnapped    = false;
     QPointF m_dbgLastLoggedPos;

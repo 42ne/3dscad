@@ -412,111 +412,6 @@ void SceneTreeGraphicsWidget::setSceneDocument(const SceneDocument *scene)
     refresh();
 }
 
-void SceneTreeGraphicsWidget::setToolDroppedCallback(std::function<void(const QString &, int, int)> callback)
-{
-    m_toolDroppedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setModuleCallDroppedCallback(std::function<void(int, int, int)> callback)
-{
-    m_moduleCallDroppedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setTreeNodeDroppedCallback(std::function<void(int, int, int)> callback)
-{
-    m_treeNodeDroppedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setTreeNodeSelectedCallback(std::function<void(int)> callback)
-{
-    m_treeNodeSelectedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setTreeNodeDeleteRequestedCallback(std::function<void(int)> callback)
-{
-    m_treeNodeDeleteRequestedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setTransformValueAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback)
-{
-    m_transformValueAdjustedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setTransformControlHoveredCallback(std::function<void(int, SceneDocument::TreeNode::Operation, int)> callback)
-{
-    m_transformControlHoveredCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setShapeParameterAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback)
-{
-    m_shapeParameterAdjustedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setShapeParameterHoveredCallback(std::function<void(int, int)> callback)
-{
-    m_shapeParameterHoveredCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setVariableNumberHoveredCallback(std::function<void(int, int)> callback)
-{
-    m_variableNumberHoveredCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setForLoopRangeHoveredCallback(std::function<void(int, int)> callback)
-{
-    m_forLoopRangeHoveredCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setModuleCallParamHoveredCallback(std::function<void(int, int, int)> callback)
-{
-    m_moduleCallParamHoveredCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setHoverScrollZoneChangedCallback(std::function<void(const QRectF &)> callback)
-{
-    m_hoverScrollZoneChangedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setDropPreviewChangedCallback(
-    std::function<void(const QString &, int, const SceneTreeLayout::DropTarget &, const QPointF &)> callback)
-{
-    m_dropPreviewChangedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setVariableNumberAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
-{
-    m_variableNumberAdjustedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setModuleCallArgumentAdjustedCallback(std::function<void(int, int, int, int, qreal)> callback)
-{
-    m_moduleCallArgumentAdjustedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setForLoopRangeAdjustedCallback(std::function<void(int, int, int, qreal)> callback)
-{
-    m_forLoopRangeAdjustedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setCtrlReleasedCallback(std::function<void()> callback)
-{
-    m_ctrlReleasedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setModuleRenameRequestedCallback(std::function<void(int, const QString &)> callback)
-{
-    m_moduleRenameRequestedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setVariableRenameRequestedCallback(std::function<void(int, const QString &)> callback)
-{
-    m_variableRenameRequestedCallback = callback;
-}
-
-void SceneTreeGraphicsWidget::setCanvasDragCallback(std::function<void(const QString &)> callback)
-{
-    m_canvasDragCallback = callback;
-}
 
 void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 {
@@ -692,8 +587,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
-        if (m_treeNodeDeleteRequestedCallback)
-            m_treeNodeDeleteRequestedCallback(m_selectedTreeNodeId);
+        emit treeNodeDeleteRequested(m_selectedTreeNodeId);
         event->accept();
         return;
     }
@@ -725,8 +619,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
                 m_canvasDragPrevEventScene = scenePos;
                 m_dbgPrevSnapped           = false;
                 m_dbgLastLoggedPos         = m_canvasDragOrigPos;
-                if (m_canvasDragCallback)
-                    m_canvasDragCallback(
+                emit canvasDrag(
                         QStringLiteral("[....] canvas-press   node=#%1  origPos=(%2,%3)"
                                        "  size=%4x%5  grip=(%6,%7 %8x%9)")
                         .arg(h.nodeId)
@@ -806,10 +699,10 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
             // Leave a faint placeholder outline where the block started.
             showDragPlaceholder(m_canvasDragOrigPos, m_canvasDragBlockSize);
 
-            if (m_canvasDragCallback) {
+            {
                 QStringList clIds;
                 for (int nid : m_canvasDragCluster) clIds << QStringLiteral("#%1").arg(nid);
-                m_canvasDragCallback(
+                emit canvasDrag(
                     QStringLiteral("[....] canvas-start   node=#%1  cluster=[%2]"
                                    "  items=%3  origPos=(%4,%5)")
                     .arg(m_canvasDragNodeId)
@@ -853,8 +746,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
                     }
                 }
 
-                if (m_canvasDragCallback)
-                    m_canvasDragCallback(
+                emit canvasDrag(
                         QStringLiteral("[....] canvas-detach  node=#%1  vel=%2px"
                                        "  cluster had %3 members  detachOffset=(%4,%5)")
                         .arg(m_canvasDragNodeId)
@@ -877,7 +769,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
                 candidate = snapped;
 
             // Debug: log on snap state change or every ≥25 px of movement.
-            if (m_canvasDragCallback) {
+            {
                 const bool snapChanged = (magnetic != m_dbgPrevSnapped);
                 const qreal logDist = QLineF(m_dbgLastLoggedPos, candidate).length();
                 if (snapChanged || logDist >= 25.0) {
@@ -901,7 +793,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
                     } else if (m_canvasDragDetached) {
                         msg += QStringLiteral("  (detached)");
                     }
-                    m_canvasDragCallback(msg);
+                    emit canvasDrag(msg);
                 }
             }
 
@@ -990,14 +882,14 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
             m_canvasDragItems.clear();
             m_clusterDragItems.clear();
 
-            if (m_canvasDragCallback) {
+            {
                 QStringList movedIds;
                 movedIds << QStringLiteral("#%1").arg(nodeId);
                 if (!m_canvasDragDetached) {
                     for (int nid : m_canvasDragCluster)
                         if (nid != nodeId) movedIds << QStringLiteral("#%1").arg(nid);
                 }
-                m_canvasDragCallback(
+                emit canvasDrag(
                     QStringLiteral("[....] canvas-commit  node=#%1"
                                    "  finalPos=(%2,%3)  snap=%4"
                                    "  moved=[%5]  detached=%6")
@@ -1085,8 +977,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
         updateActiveVariableNumberControl(QPointF(), false);
         updateActiveForLoopRangeControl(QPointF(), false);
         updateActiveModuleCallParamControl(QPointF(), false);
-        if (m_ctrlReleasedCallback)
-            m_ctrlReleasedCallback();
+        emit ctrlReleased();
     }
 
     QGraphicsView::keyReleaseEvent(event);
@@ -1613,11 +1504,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
 
 void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPointF &scenePosition)
 {
-    if (!m_toolDroppedCallback) {
-        clearDropPreview();
-        return;
-    }
-
     const DropTarget target = dropTargetForToolAt(scenePosition,
                                                   previewSizeForTool(toolName),
                                                   toolName,
@@ -1636,16 +1522,15 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
     }
 
     scheduleDropCommit([this, toolName, target]() {
-        if (m_toolDroppedCallback)
-            m_toolDroppedCallback(toolName,
-                                  target.parentGroupId,
-                                  target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+        emit toolDropped(toolName,
+                         target.parentGroupId,
+                         target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
     });
 }
 
 void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition)
 {
-    if (!m_moduleCallDroppedCallback || moduleGroupId <= 0 || !m_scene) {
+    if (moduleGroupId <= 0 || !m_scene) {
         clearDropPreview();
         return;
     }
@@ -1678,10 +1563,9 @@ void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, co
     }
 
     scheduleDropCommit([this, moduleGroupId, target]() {
-        if (m_moduleCallDroppedCallback)
-            m_moduleCallDroppedCallback(moduleGroupId,
-                                        target.parentGroupId,
-                                        target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+        emit moduleCallDropped(moduleGroupId,
+                               target.parentGroupId,
+                               target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
     });
 }
 
@@ -1791,11 +1675,6 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
         return;
     }
 
-    if (!m_treeNodeDroppedCallback) {
-        clearDropPreview();
-        return;
-    }
-
     QSizeF previewSize = defaultPreviewSize();
     QString previewTool;
     if (m_scene) {
@@ -1847,17 +1726,15 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
         }
 
         scheduleDropCommit([this, nodeId]() {
-            if (m_treeNodeDeleteRequestedCallback)
-                m_treeNodeDeleteRequestedCallback(nodeId);
+            emit treeNodeDeleteRequested(nodeId);
         });
         return;
     }
 
     scheduleDropCommit([this, nodeId, target]() {
-        if (m_treeNodeDroppedCallback)
-            m_treeNodeDroppedCallback(nodeId,
-                                      target.parentGroupId,
-                                      target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+        emit treeNodeDropped(nodeId,
+                             target.parentGroupId,
+                             target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
     });
 }
 
@@ -1866,13 +1743,12 @@ void SceneTreeGraphicsWidget::handleTreeNodeSelected(int nodeId)
     setFocus();
     m_selectedTreeNodeId = nodeId;
     refresh();
-    if (m_treeNodeSelectedCallback)
-        m_treeNodeSelectedCallback(nodeId);
+    emit treeNodeSelected(nodeId);
 }
 
 bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_transformValueAdjustedCallback)
+    if (!m_scene)
         return false;
 
     int groupId = 0;
@@ -1885,14 +1761,14 @@ bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition,
     if (start < 0 || length <= 0)
         return false;
 
-    m_transformValueAdjustedCallback(groupId, axis, start, length, static_cast<qreal>(wheelSteps));
+    emit transformValueAdjusted(groupId, axis, start, length, static_cast<qreal>(wheelSteps));
     updateActiveTransformControl(scenePosition, true);
     return true;
 }
 
 bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_shapeParameterAdjustedCallback)
+    if (!m_scene)
         return false;
 
     int shapeId = -1;
@@ -1903,7 +1779,7 @@ bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosi
     if (!shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &paramIndex, &start, &length))
         return false;
 
-    m_shapeParameterAdjustedCallback(nodeId, paramIndex, start, length, static_cast<qreal>(wheelSteps));
+    emit shapeParameterAdjusted(nodeId, paramIndex, start, length, static_cast<qreal>(wheelSteps));
     updateActiveShapeParameterControl(scenePosition, true);
     Q_UNUSED(shapeId);
     return true;
@@ -1911,7 +1787,7 @@ bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosi
 
 bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_variableNumberAdjustedCallback)
+    if (!m_scene)
         return false;
 
     int nodeId = 0;
@@ -1920,14 +1796,14 @@ bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosi
     if (!variableNumberControlAt(scenePosition, &nodeId, &start, &length))
         return false;
 
-    m_variableNumberAdjustedCallback(nodeId, start, length, wheelSteps);
+    emit variableNumberAdjusted(nodeId, start, length, wheelSteps);
     updateActiveVariableNumberControl(scenePosition, true);
     return true;
 }
 
 bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_forLoopRangeAdjustedCallback)
+    if (!m_scene)
         return false;
 
     int nodeId = 0;
@@ -1936,7 +1812,7 @@ bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePositi
     if (!forLoopRangeControlAt(scenePosition, &nodeId, &start, &length))
         return false;
 
-    m_forLoopRangeAdjustedCallback(nodeId, start, length, wheelSteps);
+    emit forLoopRangeAdjusted(nodeId, start, length, wheelSteps);
     updateActiveForLoopRangeControl(scenePosition, true);
     return true;
 }
@@ -2288,8 +2164,7 @@ void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &sceneP
     if (!m_dragActive)
         refresh();
 
-    if (m_transformControlHoveredCallback)
-        m_transformControlHoveredCallback(groupId, operation, axis);
+    emit transformControlHovered(groupId, operation, axis);
 }
 
 void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled)
@@ -2317,8 +2192,7 @@ void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &s
     if (!m_dragActive)
         refresh();
 
-    if (m_shapeParameterHoveredCallback)
-        m_shapeParameterHoveredCallback(shapeId, paramIndex);
+    emit shapeParameterHovered(shapeId, paramIndex);
 }
 
 void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled)
@@ -2342,8 +2216,7 @@ void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &s
     m_activeVariableNumberStart = start;
     if (!m_dragActive)
         refresh();
-    if (m_variableNumberHoveredCallback)
-        m_variableNumberHoveredCallback(nodeId, start);
+    emit variableNumberHovered(nodeId, start);
 }
 
 void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled)
@@ -2367,8 +2240,7 @@ void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &sce
     m_activeForLoopNumberStart = start;
     if (!m_dragActive)
         refresh();
-    if (m_forLoopRangeHoveredCallback)
-        m_forLoopRangeHoveredCallback(nodeId, start);
+    emit forLoopRangeHovered(nodeId, start);
 }
 
 bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosition,
@@ -2431,7 +2303,7 @@ bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosit
 
 bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps)
 {
-    if (!m_scene || !m_moduleCallArgumentAdjustedCallback)
+    if (!m_scene)
         return false;
 
     int moduleCallNodeId = 0;
@@ -2441,7 +2313,7 @@ bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePos
     if (!moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &paramVarNodeId, &start, &length))
         return false;
 
-    m_moduleCallArgumentAdjustedCallback(moduleCallNodeId, paramVarNodeId, start, length, wheelSteps);
+    emit moduleCallArgumentAdjusted(moduleCallNodeId, paramVarNodeId, start, length, wheelSteps);
     updateActiveModuleCallParamControl(scenePosition, true);
     return true;
 }
@@ -2471,8 +2343,7 @@ void SceneTreeGraphicsWidget::updateActiveModuleCallParamControl(const QPointF &
     m_activeModuleCallNumberStart = start;
     if (!m_dragActive)
         refresh();
-    if (m_moduleCallParamHoveredCallback)
-        m_moduleCallParamHoveredCallback(moduleCallNodeId, varNodeId, start);
+    emit moduleCallParamHovered(moduleCallNodeId, varNodeId, start);
 }
 
 void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition)
@@ -2511,8 +2382,7 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
     m_hoveredScrollRect = newScrollRect;
     m_hoveredRenameRect = newRenameRect;
     refresh();
-    if (m_hoverScrollZoneChangedCallback)
-        m_hoverScrollZoneChangedCallback(m_hoveredScrollRect);
+    emit hoverScrollZoneChanged(m_hoveredScrollRect);
 }
 
 QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition) const
@@ -2685,11 +2555,9 @@ void SceneTreeGraphicsWidget::startInlineRename(int nodeId,
                            m_scene->treeNodeById(nodeId)->variableName : QString() : QString())))
                 return;
             if (isModule) {
-                if (m_moduleRenameRequestedCallback)
-                    m_moduleRenameRequestedCallback(nodeId, newName);
+                emit moduleRenameRequested(nodeId, newName);
             } else {
-                if (m_variableRenameRequestedCallback)
-                    m_variableRenameRequestedCallback(nodeId, newName);
+                emit variableRenameRequested(nodeId, newName);
             }
         },
         [this]() {
@@ -2743,8 +2611,7 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
                                                   movingNodeId,
                                                   movingNodeId <= 0);
 
-    if (m_dropPreviewChangedCallback)
-        m_dropPreviewChangedCallback(previewTool, movingNodeId, target, scenePosition);
+    emit dropPreviewChanged(previewTool, movingNodeId, target, scenePosition);
 
     startDropPreviewAnimation(target, previewTool, movingNodeId, LiveDropPreviewDurationMs);
 }

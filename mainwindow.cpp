@@ -475,52 +475,41 @@ void MainWindow::buildUi()
     m_sceneTreeGraphics = new SceneTreeGraphicsWidget;
     m_sceneTreeGraphics->setSceneDocument(&m_controller->scene());
 
-    // Wire all graphics-tree callbacks through the controller.
-    m_sceneTreeGraphics->setToolDroppedCallback([this](const QString &toolName, int parentGroupId, int insertIndex) {
-        m_controller->handleToolDrop(toolName, parentGroupId, insertIndex);
-    });
-    m_sceneTreeGraphics->setModuleCallDroppedCallback([this](int moduleGroupId, int parentGroupId, int insertIndex) {
-        m_controller->handleModuleCallDrop(moduleGroupId, parentGroupId, insertIndex);
-    });
-    m_sceneTreeGraphics->setTreeNodeDroppedCallback([this](int nodeId, int parentGroupId, int insertIndex) {
-        m_controller->moveTreeNodeToGroup(nodeId, parentGroupId, insertIndex);
-    });
-    m_sceneTreeGraphics->setTreeNodeSelectedCallback([this](int nodeId) {
-        m_controller->handleNodeSelected(nodeId);
-    });
-    m_sceneTreeGraphics->setTreeNodeDeleteRequestedCallback([this](int nodeId) {
-        m_controller->handleNodeDeleteRequested(nodeId);
-    });
-    m_sceneTreeGraphics->setTransformValueAdjustedCallback([this](int groupId, int axis, int start, int length, qreal delta) {
-        m_controller->handleTransformValueAdjusted(groupId, axis, start, length, delta);
-    });
-    m_sceneTreeGraphics->setTransformControlHoveredCallback([this](int groupId, SceneDocument::TreeNode::Operation op, int axis) {
-        if (m_viewport) m_viewport->setTreeTransformControlPreview(groupId, op, axis);
-    });
-    m_sceneTreeGraphics->setShapeParameterAdjustedCallback([this](int nodeId, int paramIndex, int start, int length, qreal delta) {
-        m_controller->handleShapeParameterAdjusted(nodeId, paramIndex, start, length, delta);
-    });
-    m_sceneTreeGraphics->setShapeParameterHoveredCallback([this](int shapeId, int parameter) {
-        if (m_viewport) m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
-    });
-    m_sceneTreeGraphics->setVariableNumberAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
-        m_controller->handleVariableNumberAdjusted(nodeId, start, length, delta);
-    });
-    m_sceneTreeGraphics->setModuleCallArgumentAdjustedCallback([this](int moduleCallId, int paramVariableId, int start, int length, qreal delta) {
-        m_controller->handleModuleCallArgumentAdjusted(moduleCallId, paramVariableId, start, length, delta);
-    });
-    m_sceneTreeGraphics->setForLoopRangeAdjustedCallback([this](int nodeId, int start, int length, qreal delta) {
-        m_controller->handleForLoopRangeAdjusted(nodeId, start, length, delta);
-    });
-    m_sceneTreeGraphics->setCtrlReleasedCallback([this]() {
-        m_controller->handleCtrlReleased();
-    });
-    m_sceneTreeGraphics->setModuleRenameRequestedCallback([this](int groupId, const QString &name) {
-        m_controller->handleModuleRenameRequested(groupId, name);
-    });
-    m_sceneTreeGraphics->setVariableRenameRequestedCallback([this](int variableId, const QString &name) {
-        m_controller->handleVariableRenameRequested(variableId, name);
-    });
+    // Wire all graphics-tree signals through the controller.
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::toolDropped,
+            m_controller, &SceneController::handleToolDrop);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleCallDropped,
+            m_controller, &SceneController::handleModuleCallDrop);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::treeNodeDropped,
+            m_controller, &SceneController::moveTreeNodeToGroup);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::treeNodeSelected,
+            m_controller, &SceneController::handleNodeSelected);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::treeNodeDeleteRequested,
+            m_controller, &SceneController::handleNodeDeleteRequested);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformValueAdjusted,
+            m_controller, &SceneController::handleTransformValueAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformControlHovered,
+            this, [this](int groupId, SceneDocument::TreeNode::Operation op, int axis) {
+                if (m_viewport) m_viewport->setTreeTransformControlPreview(groupId, op, axis);
+            });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeParameterAdjusted,
+            m_controller, &SceneController::handleShapeParameterAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeParameterHovered,
+            this, [this](int shapeId, int parameter) {
+                if (m_viewport) m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
+            });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableNumberAdjusted,
+            m_controller, &SceneController::handleVariableNumberAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleCallArgumentAdjusted,
+            m_controller, &SceneController::handleModuleCallArgumentAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::forLoopRangeAdjusted,
+            m_controller, &SceneController::handleForLoopRangeAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::ctrlReleased,
+            m_controller, &SceneController::handleCtrlReleased);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleRenameRequested,
+            m_controller, &SceneController::handleModuleRenameRequested);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableRenameRequested,
+            m_controller, &SceneController::handleVariableRenameRequested);
 
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;

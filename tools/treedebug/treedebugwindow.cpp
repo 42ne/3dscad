@@ -638,7 +638,8 @@ void TreeDebugWindow::buildUi()
         logCursor(widget, scene);
     };
 
-    m_treeWidget->setToolDroppedCallback([this](const QString &tool, int parentId, int idx) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::toolDropped,
+            this, [this](const QString &tool, int parentId, int idx) {
         // idx < -100000 → insert into module parameter zone (idx = -100000 - insertIndex)
         const int insertIndex = (idx < -100000) ? (-idx - 100000) : idx;
 
@@ -699,7 +700,8 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after toolDrop"));
     });
-    m_treeWidget->setTreeNodeDroppedCallback([this](int nodeId, int parentId, int idx) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::treeNodeDropped,
+            this, [this](int nodeId, int parentId, int idx) {
         const bool ok = m_scene.moveTreeNode(nodeId, parentId, idx);
         log(QStringLiteral("[%1] nodeDrop  node=#%2  parent=#%3  idx=%4%5")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0'))
@@ -708,7 +710,8 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after nodeDrop"));
     });
-    m_treeWidget->setModuleCallDroppedCallback([this](int moduleGroupId, int parentId, int idx) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::moduleCallDropped,
+            this, [this](int moduleGroupId, int parentId, int idx) {
         const int callId = m_scene.addModuleCall(moduleGroupId, parentId, idx);
         const bool ok = callId > 0;
         log(QStringLiteral("[%1] callDrop  module=#%2  parent=#%3  idx=%4  callId=#%5%6")
@@ -718,20 +721,22 @@ void TreeDebugWindow::buildUi()
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after callDrop"));
     });
-    m_treeWidget->setTreeNodeSelectedCallback([this](int nodeId) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::treeNodeSelected,
+            this, [this](int nodeId) {
         log(QStringLiteral("[%1] select    node=#%2  cursor=(%3,%4)")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(nodeId)
             .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
     });
-    m_treeWidget->setTreeNodeDeleteRequestedCallback([this](int nodeId) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::treeNodeDeleteRequested,
+            this, [this](int nodeId) {
         log(QStringLiteral("[%1] delete    node=#%2")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(nodeId));
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after delete"));
     });
 
-    m_treeWidget->setTransformValueAdjustedCallback(
-        [this](int groupId, int axis, int start, int len, qreal delta) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::transformValueAdjusted,
+            this, [this](int groupId, int axis, int start, int len, qreal delta) {
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(groupId);
             if (!node) return;
             const QString axisName = QStringList{QStringLiteral("X"),
@@ -772,10 +777,10 @@ void TreeDebugWindow::buildUi()
 
             m_treeWidget->refresh();
             logSnapshot(QStringLiteral("after transform"));
-        });
+    });
 
-    m_treeWidget->setForLoopRangeAdjustedCallback(
-        [this](int nodeId, int start, int len, qreal delta) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::forLoopRangeAdjusted,
+            this, [this](int nodeId, int start, int len, qreal delta) {
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
             if (!node) return;
             const QString oldExpr = node->loopRangeExpression;
@@ -810,10 +815,10 @@ void TreeDebugWindow::buildUi()
 
             m_treeWidget->refresh();
             logSnapshot(QStringLiteral("after for-loop"));
-        });
+    });
 
-    m_treeWidget->setVariableNumberAdjustedCallback(
-        [this](int nodeId, int start, int len, qreal delta) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::variableNumberAdjusted,
+            this, [this](int nodeId, int start, int len, qreal delta) {
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
             if (!node) return;
             const QString oldExpr = node->variableExpression;
@@ -847,10 +852,10 @@ void TreeDebugWindow::buildUi()
 
             m_treeWidget->refresh();
             logSnapshot(QStringLiteral("after variable"));
-        });
+    });
 
-    m_treeWidget->setShapeParameterAdjustedCallback(
-        [this](int nodeId, int param, int start, int len, qreal delta) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::shapeParameterAdjusted,
+            this, [this](int nodeId, int param, int start, int len, qreal delta) {
             const SceneDocument::TreeNode *treeNode = m_scene.treeNodeById(nodeId);
             if (!treeNode) return;
             ShapeNode *shape = m_scene.shapeById(treeNode->shapeId);
@@ -887,10 +892,10 @@ void TreeDebugWindow::buildUi()
 
             m_treeWidget->refresh();
             logSnapshot(QStringLiteral("after shape"));
-        });
+    });
 
-    m_treeWidget->setModuleCallArgumentAdjustedCallback(
-        [this](int moduleCallId, int paramVarNodeId, int start, int len, qreal delta) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::moduleCallArgumentAdjusted,
+            this, [this](int moduleCallId, int paramVarNodeId, int start, int len, qreal delta) {
             const SceneDocument::TreeNode *callNode = m_scene.treeNodeById(moduleCallId);
             if (!callNode) return;
             const SceneDocument::TreeNode *varNode = m_scene.treeNodeById(paramVarNodeId);
@@ -937,12 +942,13 @@ void TreeDebugWindow::buildUi()
 
             m_treeWidget->refresh();
             logSnapshot(QStringLiteral("after modcall"));
-        });
+    });
 
-    // ── Hover callbacks — log highlight rect vs cursor on every change ───────────
+    // ── Hover signals — log highlight rect vs cursor on every change ──────────
 
     // Plain hover (no Ctrl): the teal pill border that appears on mouseover.
-    m_treeWidget->setHoverScrollZoneChangedCallback([this](const QRectF &pillRect) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::hoverScrollZoneChanged,
+            this, [this](const QRectF &pillRect) {
         if (!pillRect.isValid()) return;   // cleared — don't spam "nothing" entries
         log(QStringLiteral("[....] hover      pill=(%1,%2 %3×%4)  cursor=(%5,%6)")
             .arg(qRound(pillRect.x())).arg(qRound(pillRect.y()))
@@ -950,12 +956,11 @@ void TreeDebugWindow::buildUi()
             .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
     });
 
-    // Ctrl hover — transform axis
     // Drop preview — fires every time cursor moves during drag; deduplicated on target change.
-    m_treeWidget->setDropPreviewChangedCallback(
-        [this, lastParent = -2, lastIdx = -2](
-            const QString &tool, int movingNodeId,
-            const SceneTreeLayout::DropTarget &t, const QPointF &scenePos) mutable
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::dropPreviewChanged,
+            this, [this, lastParent = -2, lastIdx = -2](
+                const QString &tool, int movingNodeId,
+                const SceneTreeLayout::DropTarget &t, const QPointF &scenePos) mutable
         {
             const int curParent = t.hasTarget ? t.parentGroupId : -1;
             const int curIdx    = t.hasTarget ? t.insertIndex   : -1;
@@ -1002,8 +1007,9 @@ void TreeDebugWindow::buildUi()
                 .arg(qRound(scenePos.x())).arg(qRound(scenePos.y())));
         });
 
-    m_treeWidget->setTransformControlHoveredCallback(
-        [this](int groupId, SceneDocument::TreeNode::Operation /*op*/, int axis) {
+    // Ctrl hover — transform axis
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::transformControlHovered,
+            this, [this](int groupId, SceneDocument::TreeNode::Operation /*op*/, int axis) {
             if (groupId <= 0 || axis < 0) return;
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(groupId);
             if (!node) return;
@@ -1024,11 +1030,11 @@ void TreeDebugWindow::buildUi()
             log(QStringLiteral("[....] ctrl-hover  transform  node=#%1 %2 \"%3\"%4  cursor=(%5,%6)")
                 .arg(groupId).arg(axisName).arg(expr).arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
-        });
+    });
 
     // Ctrl hover — shape parameter
-    m_treeWidget->setShapeParameterHoveredCallback(
-        [this](int shapeId, int paramIndex) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::shapeParameterHovered,
+            this, [this](int shapeId, int paramIndex) {
             if (shapeId < 0 || paramIndex < 0) return;
             const ShapeNode *shape = m_scene.shapeById(shapeId);
             if (!shape) return;
@@ -1060,11 +1066,11 @@ void TreeDebugWindow::buildUi()
                 .arg(treeNodeId).arg(paramIndex)
                 .arg(paramControls[paramIndex].expression).arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
-        });
+    });
 
     // Ctrl hover — variable number
-    m_treeWidget->setVariableNumberHoveredCallback(
-        [this](int nodeId, int numberStart) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::variableNumberHovered,
+            this, [this](int nodeId, int numberStart) {
             if (nodeId <= 0 || numberStart < 0) return;
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
             if (!node) return;
@@ -1082,11 +1088,11 @@ void TreeDebugWindow::buildUi()
             log(QStringLiteral("[....] ctrl-hover  variable  node=#%1 \"%2\" expr=\"%3\"%4  cursor=(%5,%6)")
                 .arg(nodeId).arg(node->variableName).arg(expr).arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
-        });
+    });
 
     // Ctrl hover — for-loop range
-    m_treeWidget->setForLoopRangeHoveredCallback(
-        [this](int nodeId, int numberStart) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::forLoopRangeHovered,
+            this, [this](int nodeId, int numberStart) {
             if (nodeId <= 0 || numberStart < 0) return;
             const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
             if (!node) return;
@@ -1105,11 +1111,11 @@ void TreeDebugWindow::buildUi()
             log(QStringLiteral("[....] ctrl-hover  for-loop  node=#%1 %2=%3%4  cursor=(%5,%6)")
                 .arg(nodeId).arg(varName).arg(rangeExp).arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
-        });
+    });
 
     // Ctrl hover — module-call param
-    m_treeWidget->setModuleCallParamHoveredCallback(
-        [this](int callNodeId, int varNodeId, int numberStart) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::moduleCallParamHovered,
+            this, [this](int callNodeId, int varNodeId, int numberStart) {
             if (callNodeId <= 0 || numberStart < 0) return;
             const SceneDocument::TreeNode *callNode = m_scene.treeNodeById(callNodeId);
             if (!callNode) return;
@@ -1140,23 +1146,25 @@ void TreeDebugWindow::buildUi()
                 .arg(callNodeId).arg(paramName).arg(varNodeId).arg(numberStart)
                 .arg(pills)
                 .arg(qRound(m_lastScene.x())).arg(qRound(m_lastScene.y())));
-        });
-    m_treeWidget->setModuleRenameRequestedCallback([this](int groupId, const QString &newName) {
+    });
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::moduleRenameRequested,
+            this, [this](int groupId, const QString &newName) {
         log(QStringLiteral("[%1] modRename  #%2 → \"%3\"")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(groupId).arg(newName));
         m_scene.setModuleName(groupId, newName);
         m_treeWidget->refresh();
     });
-    m_treeWidget->setVariableRenameRequestedCallback([this](int varId, const QString &newName) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::variableRenameRequested,
+            this, [this](int varId, const QString &newName) {
         log(QStringLiteral("[%1] varRename  #%2 → \"%3\"")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(varId).arg(newName));
         m_scene.renameVariable(varId, newName);
         m_treeWidget->refresh();
     });
-    m_treeWidget->setCtrlReleasedCallback([]() {});
 
     // ── Canvas-drag / magnetic-snap debug ────────────────────────────────────
-    m_treeWidget->setCanvasDragCallback([this](const QString &msg) {
+    connect(m_treeWidget, &SceneTreeGraphicsWidget::canvasDrag,
+            this, [this](const QString &msg) {
         log(msg);
     });
 }
