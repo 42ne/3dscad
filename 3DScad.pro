@@ -18,6 +18,7 @@ SOURCES += \
     animatedtitlebar.cpp \
     codeeditorpanel.cpp \
     csgevaluator.cpp \
+    examplebrowsermenu.cpp \
     theme.cpp \
     examplepreviewpopup.cpp \
     main.cpp \
@@ -46,6 +47,7 @@ HEADERS += \
     animatedtitlebar.h \
     codeeditorpanel.h \
     csgevaluator.h \
+    examplebrowsermenu.h \
     theme.h \
     examplepreviewpopup.h \
     scenecontroller.h \

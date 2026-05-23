@@ -2,31 +2,25 @@
 #include "animatedtitlebar.h"
 #include "codeeditorpanel.h"
 #include "csgevaluator.h"
+#include "examplebrowsermenu.h"
 #include "openscadgenerator.h"
-#include "openscadparser.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenetreegraphicswidget.h"
 #include "theme.h"
 #include "viewportwidget.h"
 
-#include <QtConcurrent>
-
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
-#include <QCoreApplication>
-#include <QCursor>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
-#include <QFileInfo>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSplitter>
-#include <QTimer>
 #include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
@@ -105,7 +99,9 @@ void MainWindow::buildUi()
     QMenuBar *appMenuBar = menuBar();
     auto *fileMenu     = appMenuBar->addMenu("File");
     auto *examplesMenu = fileMenu->addMenu("Open Example");
-    populateExamplesMenu(examplesMenu);
+    m_exampleBrowser   = new ExampleBrowserMenu(examplesMenu, this);
+    connect(m_exampleBrowser, &ExampleBrowserMenu::exampleSelected,
+            this, &MainWindow::loadExample);
 
     auto *editMenu = appMenuBar->addMenu("Edit");
     editMenu->addAction(m_controller->undoAction());
@@ -134,16 +130,6 @@ void MainWindow::buildUi()
     chromeLayout->addWidget(titleBar);
     chromeLayout->addWidget(appMenuBar);
     setMenuWidget(chrome);
-
-    // Example hover preview
-    m_examplePreview    = new ExamplePreviewPopup;
-    m_exampleHoverTimer = new QTimer(this);
-    m_exampleHoverTimer->setSingleShot(true);
-    m_exampleHoverTimer->setInterval(900);
-    connect(m_exampleHoverTimer, &QTimer::timeout, this, &MainWindow::onExampleHoverTimeout);
-    m_thumbnailWatcher = new QFutureWatcher<QImage>(this);
-    connect(m_thumbnailWatcher, &QFutureWatcher<QImage>::finished,
-            this, &MainWindow::onExampleThumbnailReady);
 
     m_viewport = new ViewportWidget;
     m_viewport->setScene(&m_controller->scene());
@@ -388,82 +374,6 @@ void MainWindow::highlightOpenScadSelection()
         m_codeEditorPanel->applyCtrlParamHighlight(h);
     else
         m_codeEditorPanel->applySelectionHighlight(m_controller->selectedTreeNodeId());
-}
-
-// ── Examples ──────────────────────────────────────────────────────────────────
-
-QString MainWindow::examplesPath() const
-{
-    QDir dir(QCoreApplication::applicationDirPath());
-    for (int i = 0; i < 6; ++i) {
-        QDir candidate(dir.absoluteFilePath("docs/sample_codes"));
-        if (candidate.exists()) return candidate.absolutePath();
-        if (!dir.cdUp()) break;
-    }
-    return QString();
-}
-
-void MainWindow::populateExamplesMenu(QMenu *menu)
-{
-    const QString path = examplesPath();
-    if (path.isEmpty()) {
-        menu->addAction("(no examples found)")->setEnabled(false); return;
-    }
-    const QStringList files = QDir(path).entryList({"*.scad"}, QDir::Files, QDir::Name);
-    if (files.isEmpty()) {
-        menu->addAction("(no .scad files)")->setEnabled(false); return;
-    }
-    for (const QString &fileName : files) {
-        const QString filePath = QDir(path).absoluteFilePath(fileName);
-        const QString name     = QFileInfo(fileName).completeBaseName();
-        QAction *action = menu->addAction(name);
-        connect(action, &QAction::triggered, this, [this, filePath]() {
-            loadExample(filePath);
-        });
-        connect(action, &QAction::hovered, this, [this, filePath, name, menu]() {
-            m_pendingPreviewFile = filePath;
-            m_pendingPreviewName = name;
-            m_pendingMenuRight   = menu->mapToGlobal(menu->rect().topRight()).x();
-            m_pendingCursorY     = QCursor::pos().y();
-            m_exampleHoverTimer->start();
-        });
-    }
-    connect(menu, &QMenu::aboutToHide, this, &MainWindow::hideExamplePreview);
-}
-
-void MainWindow::hideExamplePreview()
-{
-    m_exampleHoverTimer->stop();
-    if (m_thumbnailWatcher->isRunning()) m_thumbnailWatcher->cancel();
-    m_examplePreview->hidePopup();
-}
-
-void MainWindow::onExampleHoverTimeout()
-{
-    m_examplePreview->setLoading(m_pendingPreviewName);
-    m_examplePreview->showAt(m_pendingMenuRight, QCursor::pos().y());
-    if (m_thumbnailWatcher->isRunning()) return;
-
-    const QString filePath = m_pendingPreviewFile;
-    QFuture<QImage> future = QtConcurrent::run([filePath]() -> QImage {
-        QFile file(filePath);
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return QImage();
-        const QString code = QString::fromUtf8(file.readAll());
-        SceneDocument::Snapshot snapshot;
-        if (!OpenScadParser::parseScene(code, &snapshot, nullptr, nullptr)) return QImage();
-        SceneDocument scene;
-        scene.restoreSnapshot(snapshot);
-        return ViewportWidget::renderThumbnail(scene, QSize(280, 210));
-    });
-    m_thumbnailWatcher->setFuture(future);
-}
-
-void MainWindow::onExampleThumbnailReady()
-{
-    if (m_thumbnailWatcher->isCanceled()) return;
-    const QImage image = m_thumbnailWatcher->result();
-    if (m_examplePreview->isVisible())
-        m_examplePreview->setImage(image, m_pendingPreviewName);
 }
 
 void MainWindow::loadExample(const QString &filePath)
