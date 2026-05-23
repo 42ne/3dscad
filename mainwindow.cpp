@@ -1,9 +1,11 @@
 #include "mainwindow.h"
+#include "animatedtitlebar.h"
 #include "csgevaluator.h"
 #include "openscadgenerator.h"
 #include "openscadparser.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenetreegraphicswidget.h"
+#include "theme.h"
 #include "viewportwidget.h"
 
 #include <QtConcurrent>
@@ -24,9 +26,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMouseEvent>
-#include <QPalette>
-#include <QPainter>
-#include <QPoint>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSplitter>
@@ -35,10 +34,7 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QTimer>
-#include <QToolButton>
-#include <QScreen>
 #include <QUndoStack>
-#include <QVariantAnimation>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -49,273 +45,6 @@
 #include <windows.h>
 #include <windowsx.h>
 #endif
-
-// ────────────────────────────────────────────────────────────────────────────
-// Theme support (UI-only, stays in MainWindow)
-// ────────────────────────────────────────────────────────────────────────────
-
-struct ThemeSpec
-{
-    QString id;
-    QString label;
-    QColor window, surface, panel, panelAlt, text, mutedText, border,
-           accent, accentHover, danger, titleBase, titlePulse;
-};
-
-static QVector<ThemeSpec> availableThemes()
-{
-    return {
-        { QStringLiteral("dark-nord"),   QStringLiteral("Dark Nord"),
-          QColor("#2e3440"), QColor("#252a34"), QColor("#3b4252"), QColor("#434c5e"),
-          QColor("#eceff4"), QColor("#7f8898"), QColor("#4c566a"), QColor("#5e81ac"),
-          QColor("#81a1c1"), QColor("#bf616a"), QColor("#111827"), QColor("#3b4252") },
-        { QStringLiteral("olive-light"), QStringLiteral("Olive Light"),
-          QColor("#eef0e6"), QColor("#f8f9f1"), QColor("#dde3cf"), QColor("#cfd8bd"),
-          QColor("#23281c"), QColor("#65705a"), QColor("#a7b18f"), QColor("#6f8741"),
-          QColor("#8fa85b"), QColor("#9f4f45"), QColor("#3b442e"), QColor("#586b3a") },
-        { QStringLiteral("graphite"),    QStringLiteral("Graphite"),
-          QColor("#202124"), QColor("#17191c"), QColor("#2b2f34"), QColor("#353b42"),
-          QColor("#eef1f4"), QColor("#8f98a3"), QColor("#4b5560"), QColor("#6ea8fe"),
-          QColor("#8bbcff"), QColor("#e06c75"), QColor("#111315"), QColor("#303844") },
-        { QStringLiteral("blueprint"),   QStringLiteral("Blueprint"),
-          QColor("#17202a"), QColor("#111820"), QColor("#223044"), QColor("#2f405a"),
-          QColor("#e9f2ff"), QColor("#94a6bc"), QColor("#40556d"), QColor("#4ea1d3"),
-          QColor("#78bee8"), QColor("#d66a6a"), QColor("#0b1320"), QColor("#243b55") },
-        { QStringLiteral("warm-light"),  QStringLiteral("Warm Light"),
-          QColor("#f4f1ea"), QColor("#fffdf7"), QColor("#e8dfd1"), QColor("#d8cbbb"),
-          QColor("#27221c"), QColor("#776a5d"), QColor("#b6a897"), QColor("#9b6b3f"),
-          QColor("#bd8452"), QColor("#a85048"), QColor("#443326"), QColor("#6b4b35") },
-    };
-}
-
-static ThemeSpec defaultTheme()
-{
-    return availableThemes().first();
-}
-
-static QString colorName(const QColor &c) { return c.name(QColor::HexRgb); }
-
-static QString themeStyleSheet(const ThemeSpec &t)
-{
-    QString style = QStringLiteral(R"(
-        QMainWindow, QWidget { background-color: __WINDOW__; color: __TEXT__; font-family: "Segoe UI"; font-size: 10pt; }
-        QMenuBar { background-color: __SURFACE__; color: __TEXT__; border-bottom: 1px solid __BORDER__; padding: 2px; }
-        QMenuBar::item { background: transparent; padding: 4px 10px; }
-        QMenuBar::item:selected, QMenuBar::item:pressed { background-color: __PANEL__; border-radius: 4px; }
-        QMenu { background-color: __WINDOW__; color: __TEXT__; border: 1px solid __BORDER__; padding: 4px; }
-        QMenu::item { padding: 5px 24px 5px 18px; }
-        QMenu::item:selected { background-color: __ACCENT__; color: #ffffff; }
-        QMenu::separator { height: 1px; background: __BORDER__; margin: 4px 8px; }
-        QDockWidget { titlebar-close-icon: none; titlebar-normal-icon: none; }
-        QDockWidget::title { background-color: __PANEL__; color: __TEXT__; padding: 5px 8px; border: 1px solid __BORDER__; }
-        QLabel { background: transparent; color: __TEXT__; }
-        QPushButton, QToolButton { background-color: __PANEL__; color: __TEXT__; border: 1px solid __BORDER__; border-radius: 5px; padding: 5px 10px; min-height: 22px; }
-        QPushButton:hover, QToolButton:hover { background-color: __PANEL_ALT__; border-color: __ACCENT__; }
-        QPushButton:pressed, QToolButton:pressed { background-color: __ACCENT__; color: #ffffff; }
-        QPushButton:disabled, QToolButton:disabled { background-color: __PANEL__; color: __MUTED__; border-color: __BORDER__; }
-        QTextEdit, QPlainTextEdit, QLineEdit, QAbstractSpinBox, QComboBox, QListView, QTreeView, QTableView { background-color: __SURFACE__; color: __TEXT__; selection-background-color: __ACCENT__; selection-color: #ffffff; border: 1px solid __BORDER__; border-radius: 4px; padding: 3px; }
-        QTextEdit { font-family: "Consolas", "Courier New", monospace; }
-        QAbstractSpinBox:disabled, QComboBox:disabled, QLineEdit:disabled { background-color: __PANEL__; color: __MUTED__; border-color: __BORDER__; }
-        QComboBox::drop-down { width: 20px; border-left: 1px solid __BORDER__; background-color: __PANEL__; }
-        QComboBox QAbstractItemView { background-color: __SURFACE__; color: __TEXT__; border: 1px solid __BORDER__; selection-background-color: __ACCENT__; }
-        QGroupBox { color: __TEXT__; border: 1px solid __BORDER__; border-radius: 5px; margin-top: 10px; padding-top: 10px; }
-        QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; background-color: __WINDOW__; }
-        QCheckBox { spacing: 6px; background: transparent; }
-        QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid __BORDER__; border-radius: 3px; background-color: __SURFACE__; }
-        QCheckBox::indicator:checked { background-color: __ACCENT__; border-color: __ACCENT_HOVER__; }
-        QSplitter::handle { background-color: __BORDER__; }
-        QSplitter::handle:hover { background-color: __ACCENT__; }
-        QScrollBar:vertical, QScrollBar:horizontal { background: __SURFACE__; border: none; margin: 0; }
-        QScrollBar::handle:vertical, QScrollBar::handle:horizontal { background: __BORDER__; border-radius: 4px; min-height: 24px; min-width: 24px; }
-        QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover { background: __ACCENT__; }
-        QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page { background: none; border: none; width: 0; height: 0; }
-        QToolTip { background-color: __PANEL__; color: __TEXT__; border: 1px solid __ACCENT__; padding: 4px; }
-    )");
-    style.replace(QStringLiteral("__WINDOW__"),      colorName(t.window));
-    style.replace(QStringLiteral("__SURFACE__"),     colorName(t.surface));
-    style.replace(QStringLiteral("__PANEL__"),       colorName(t.panel));
-    style.replace(QStringLiteral("__PANEL_ALT__"),   colorName(t.panelAlt));
-    style.replace(QStringLiteral("__TEXT__"),        colorName(t.text));
-    style.replace(QStringLiteral("__MUTED__"),       colorName(t.mutedText));
-    style.replace(QStringLiteral("__BORDER__"),      colorName(t.border));
-    style.replace(QStringLiteral("__ACCENT__"),      colorName(t.accent));
-    style.replace(QStringLiteral("__ACCENT_HOVER__"),colorName(t.accentHover));
-    style.replace(QStringLiteral("__DANGER__"),      colorName(t.danger));
-    return style;
-}
-
-static void applyTheme(const ThemeSpec &theme)
-{
-    QApplication::setStyle(QStringLiteral("Fusion"));
-    QPalette palette;
-    palette.setColor(QPalette::Window,          theme.window);
-    palette.setColor(QPalette::WindowText,      theme.text);
-    palette.setColor(QPalette::Base,            theme.surface);
-    palette.setColor(QPalette::AlternateBase,   theme.panel);
-    palette.setColor(QPalette::ToolTipBase,     theme.panel);
-    palette.setColor(QPalette::ToolTipText,     theme.text);
-    palette.setColor(QPalette::Text,            theme.text);
-    palette.setColor(QPalette::Button,          theme.panel);
-    palette.setColor(QPalette::ButtonText,      theme.text);
-    palette.setColor(QPalette::BrightText,      theme.danger);
-    palette.setColor(QPalette::Highlight,       theme.accent);
-    palette.setColor(QPalette::HighlightedText, QColor("#ffffff"));
-    palette.setColor(QPalette::Disabled, QPalette::Text,       theme.mutedText);
-    palette.setColor(QPalette::Disabled, QPalette::ButtonText, theme.mutedText);
-    palette.setColor(QPalette::Disabled, QPalette::WindowText, theme.mutedText);
-    qApp->setPalette(palette);
-    qApp->setStyleSheet(themeStyleSheet(theme));
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// AnimatedTitleBar
-// ────────────────────────────────────────────────────────────────────────────
-
-class AnimatedTitleBar : public QWidget
-{
-public:
-    explicit AnimatedTitleBar(QWidget *parent = nullptr)
-        : QWidget(parent)
-        , m_titleLabel(new QLabel(this))
-        , m_minimizeButton(new QToolButton(this))
-        , m_maximizeButton(new QToolButton(this))
-        , m_closeButton(new QToolButton(this))
-        , m_pulse(new QVariantAnimation(this))
-    {
-        setFixedHeight(34);
-        setAttribute(Qt::WA_Hover, true);
-        m_titleLabel->setText(QStringLiteral("OpenSCAD Visual Editor Prototype"));
-        m_titleLabel->setContentsMargins(10, 0, 0, 0);
-        m_minimizeButton->setText(QStringLiteral("_"));
-        m_maximizeButton->setText(QStringLiteral("[]"));
-        m_closeButton->setText(QStringLiteral("X"));
-        for (QToolButton *b : {m_minimizeButton, m_maximizeButton, m_closeButton}) {
-            b->setFixedSize(36, 24);
-            b->setAutoRaise(true);
-            b->setFocusPolicy(Qt::NoFocus);
-        }
-        auto *layout = new QHBoxLayout(this);
-        layout->setContentsMargins(0, 0, 4, 0);
-        layout->setSpacing(4);
-        layout->addWidget(m_titleLabel, 1);
-        layout->addWidget(m_minimizeButton);
-        layout->addWidget(m_maximizeButton);
-        layout->addWidget(m_closeButton);
-
-        m_pulse->setDuration(1200);
-        m_pulse->setLoopCount(-1);
-        m_pulse->setEasingCurve(QEasingCurve::InOutSine);
-        m_pulse->setStartValue(0.0);
-        m_pulse->setKeyValueAt(0.5, 1.0);
-        m_pulse->setEndValue(0.0);
-        connect(m_pulse, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
-            m_currentColor = mix(m_baseColor, m_pulseColor, v.toReal());
-            update();
-        });
-        connect(m_minimizeButton, &QToolButton::clicked, this, [this]() {
-            if (QWidget *w = window()) w->showMinimized();
-        });
-        connect(m_maximizeButton, &QToolButton::clicked, this, [this]() { toggleMaximized(); });
-        connect(m_closeButton,    &QToolButton::clicked, this, [this]() {
-            if (QWidget *w = window()) w->close();
-        });
-    }
-
-    void setTitle(const QString &title) { m_titleLabel->setText(title); }
-
-    void setTheme(const ThemeSpec &theme)
-    {
-        m_baseColor   = theme.titleBase;
-        m_pulseColor  = theme.titlePulse;
-        m_currentColor = m_baseColor;
-        m_textColor   = theme.text;
-        m_borderColor = theme.border;
-        m_accentColor = theme.accent;
-        m_dangerColor = theme.danger;
-
-        const QString btn = QStringLiteral(
-            "QToolButton { background-color: transparent; color: %1; border: none; border-radius: 5px; padding: 0; font-weight: 600; }"
-            "QToolButton:hover { background-color: %2; color: #ffffff; }"
-            "QToolButton:pressed { background-color: %3; color: #ffffff; }")
-            .arg(colorName(m_textColor), colorName(m_accentColor), colorName(theme.accentHover));
-        const QString cls = QStringLiteral(
-            "QToolButton { background-color: transparent; color: %1; border: none; border-radius: 5px; padding: 0; font-weight: 700; }"
-            "QToolButton:hover { background-color: %2; color: #ffffff; }"
-            "QToolButton:pressed { background-color: %3; color: #ffffff; }")
-            .arg(colorName(m_textColor), colorName(m_dangerColor), colorName(theme.accentHover));
-
-        m_titleLabel->setStyleSheet(
-            QStringLiteral("background: transparent; color: %1; font-weight: 600;")
-                .arg(colorName(m_textColor)));
-        m_minimizeButton->setStyleSheet(btn);
-        m_maximizeButton->setStyleSheet(btn);
-        m_closeButton->setStyleSheet(cls);
-        update();
-    }
-
-protected:
-    void paintEvent(QPaintEvent *) override
-    {
-        QPainter p(this);
-        p.fillRect(rect(), m_currentColor);
-        QColor line = m_borderColor; line.setAlpha(180);
-        p.setPen(QPen(line, 1));
-        p.drawLine(QPoint(0, height() - 1), QPoint(width(), height() - 1));
-    }
-    void enterEvent(QEvent *) override { m_pulse->start(); }
-    void leaveEvent(QEvent *) override { m_pulse->stop(); m_currentColor = m_baseColor; update(); }
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton) {
-            m_dragging = true;
-            m_dragOffset = event->globalPos() - window()->frameGeometry().topLeft();
-            event->accept(); return;
-        }
-        QWidget::mousePressEvent(event);
-    }
-    void mouseMoveEvent(QMouseEvent *event) override
-    {
-        if (m_dragging && (event->buttons() & Qt::LeftButton)) {
-            QWidget *w = window();
-            if (w && !w->isMaximized()) w->move(event->globalPos() - m_dragOffset);
-            event->accept(); return;
-        }
-        QWidget::mouseMoveEvent(event);
-    }
-    void mouseReleaseEvent(QMouseEvent *event) override
-    {
-        m_dragging = false; QWidget::mouseReleaseEvent(event);
-    }
-    void mouseDoubleClickEvent(QMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton) { toggleMaximized(); event->accept(); return; }
-        QWidget::mouseDoubleClickEvent(event);
-    }
-
-private:
-    static QColor mix(const QColor &a, const QColor &b, qreal t)
-    {
-        return QColor::fromRgbF(a.redF() + (b.redF()-a.redF())*t,
-                                a.greenF()+(b.greenF()-a.greenF())*t,
-                                a.blueF() +(b.blueF()-a.blueF())*t);
-    }
-    void toggleMaximized()
-    {
-        QWidget *w = window(); if (!w) return;
-        if (w->isMaximized()) { w->showNormal(); return; }
-        if (QScreen *s = QApplication::screenAt(w->frameGeometry().center()))
-            w->move(s->availableGeometry().topLeft());
-        w->showMaximized();
-    }
-    QLabel *m_titleLabel; QToolButton *m_minimizeButton, *m_maximizeButton, *m_closeButton;
-    QVariantAnimation *m_pulse;
-    QColor m_baseColor{QStringLiteral("#111827")}, m_pulseColor{QStringLiteral("#3b4252")},
-           m_currentColor{QStringLiteral("#111827")}, m_textColor{QStringLiteral("#eceff4")},
-           m_borderColor{QStringLiteral("#4c566a")}, m_accentColor{QStringLiteral("#5e81ac")},
-           m_dangerColor{QStringLiteral("#bf616a")};
-    bool   m_dragging = false;
-    QPoint m_dragOffset;
-};
 
 // ────────────────────────────────────────────────────────────────────────────
 // MainWindow

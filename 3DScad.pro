@@ -15,7 +15,9 @@ contains(CONFIG, opengl_renderer) {
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    animatedtitlebar.cpp \
     csgevaluator.cpp \
+    theme.cpp \
     examplepreviewpopup.cpp \
     main.cpp \
     nodethumbnailcache.cpp \
@@ -40,7 +42,9 @@ SOURCES += \
     viewportwidget.cpp
 
 HEADERS += \
+    animatedtitlebar.h \
     csgevaluator.h \
+    theme.h \
     examplepreviewpopup.h \
     scenecontroller.h \
     nodethumbnailcache.h \
