@@ -244,18 +244,11 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
                           target.slotMarkerRect.isValid() ? target.slotMarkerRect : target.placeholderRect,
                           88.0);
 
-        // If an existing variable is being moved, show its real name/expression
-        // instead of the generic "var = 0" or "par = 0" stub.
         bool renderedPlaceholder = false;
         if (movingNodeId > 0 && target.placeholderRect.isValid() && m_document) {
             const SceneDocument::TreeNode *moving = m_document->treeNodeById(movingNodeId);
-            if (moving && moving->type == SceneDocument::TreeNode::Variable) {
-                SceneTreeNodeRenderer::renderPreviewVariable(m_scene, m_previewItems,
-                                                             moving->variableName,
-                                                             moving->variableExpression,
-                                                             moving->isParameter,
-                                                             target.placeholderRect,
-                                                             m_theme);
+            if (moving) {
+                addPreviewExistingNode(movingNodeId, target.placeholderRect);
                 renderedPlaceholder = true;
             }
         }
@@ -364,7 +357,12 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
         return;
     }
     if (node->type == SceneDocument::TreeNode::Primitive) {
-        SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect, m_theme);
+        const ShapeNode *shape = m_document->shapeById(node->shapeId);
+        if (shape) {
+            SceneTreeNodeRenderer::renderPreviewPrimitive(m_scene, m_previewItems, shape, node->shapeId, rect);
+        } else {
+            SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect, m_theme);
+        }
         return;
     }
 

@@ -62,6 +62,11 @@ public:
                                   const QString &tool,
                                   const QRectF &rect,
                                   int theme = 0);
+    static void renderPreviewPrimitive(QGraphicsScene *scene,
+                                       QVector<QGraphicsItem *> *items,
+                                       const ShapeNode *shape,
+                                       int shapeId,
+                                       const QRectF &rect);
     static void renderPreviewVariable(QGraphicsScene *scene,
                                       QVector<QGraphicsItem *> *items,
                                       const QString &name,

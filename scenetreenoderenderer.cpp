@@ -981,6 +981,24 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     appendPreviewItem(items, item);
 }
 
+void SceneTreeNodeRenderer::renderPreviewPrimitive(QGraphicsScene *scene,
+                                                   QVector<QGraphicsItem *> *items,
+                                                   const ShapeNode *shape,
+                                                   int shapeId,
+                                                   const QRectF &rect)
+{
+    auto *item = new PrimitiveCardItem(rect,
+                                      shape,
+                                      primitiveNumberText(QString(), shapeId),
+                                      false,
+                                      -1,
+                                      -1,
+                                      0.78,
+                                      58.0);
+    scene->addItem(item);
+    appendPreviewItem(items, item);
+}
+
 void SceneTreeNodeRenderer::renderPreviewVariable(QGraphicsScene *scene,
                                                   QVector<QGraphicsItem *> *items,
                                                   const QString &name,
