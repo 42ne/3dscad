@@ -20,6 +20,7 @@ SOURCES += \
     main.cpp \
     nodethumbnailcache.cpp \
     mainwindow.cpp \
+    scenecontroller.cpp \
     manifoldcsg.cpp \
     openscadgenerator.cpp \
     openscadparser.cpp \
@@ -41,6 +42,7 @@ SOURCES += \
 HEADERS += \
     csgevaluator.h \
     examplepreviewpopup.h \
+    scenecontroller.h \
     nodethumbnailcache.h \
     expression.h \
     mainwindow.h \

@@ -3,7 +3,7 @@
 
 #include "examplepreviewpopup.h"
 #include "openscadgenerator.h"
-#include "scenedocument.h"
+#include "scenecontroller.h"
 
 #include <QFutureWatcher>
 #include <QImage>
@@ -17,7 +17,6 @@ class QPushButton;
 class QAction;
 class QByteArray;
 class QTimer;
-class QUndoStack;
 class ViewportWidget;
 class SceneTreeGraphicsWidget;
 
@@ -44,32 +43,6 @@ private slots:
     void sendToOpenScad();
     void loadExample(const QString &filePath);
 
-    void onViewportShapeDragStarted(int index);
-    void onViewportShapeDragged(int index, const QVector3D &delta);
-    void onViewportShapeDragFinished(int index);
-    void onViewportShapeRotationDragStarted(int index);
-    void onViewportShapeRotated(int index, const QVector3D &deltaDegrees);
-    void onViewportShapeRotationDragFinished(int index);
-    void onViewportGroupDragStarted(int groupId);
-    void onViewportGroupDragged(int groupId, const QVector3D &delta);
-    void onViewportGroupDragFinished(int groupId);
-    void onViewportGroupRotationDragStarted(int groupId);
-    void onViewportGroupRotated(int groupId, const QVector3D &deltaDegrees);
-    void onViewportGroupRotationDragFinished(int groupId);
-    void onGraphicsTreeToolDropped(const QString &toolName, int parentGroupId, int insertIndex);
-    void onGraphicsTreeModuleCallDropped(int moduleGroupId, int parentGroupId, int insertIndex);
-    void onGraphicsTreeNodeSelected(int nodeId);
-    void onGraphicsTreeNodeDeleteRequested(int nodeId);
-    void onGraphicsTreeTransformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);
-    void onGraphicsTreeTransformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
-    void onGraphicsTreeModuleRenameRequested(int groupId, const QString &newName);
-    void onGraphicsTreeVariableRenameRequested(int variableId, const QString &newName);
-    void onGraphicsTreeShapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
-    void onGraphicsTreeShapeParameterHovered(int shapeId, int parameter);
-    void onGraphicsTreeVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
-    void onGraphicsTreeModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId, int start, int length, qreal delta);
-    void onGraphicsTreeForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
-
 private:
     void buildUi();
     void refreshShapeList();
@@ -77,65 +50,39 @@ private:
     void refreshOpenScadCode();
     void refreshCsgStatus();
     void refreshSceneViews();
+    void onSelectionChanged(int nodeId);
     void highlightOpenScadSelection();
-    void selectShapeInSceneTree(int shapeId);
-    void selectTreeNodeInSceneTree(int treeNodeId);
     void clearSelection();
-    int selectedTreeNodeIdForCodeHighlight() const;
-    int selectedTreeGroupId() const;
-    int selectedDirectGroupId() const;
-    void addGroup(SceneDocument::TreeNode::Operation operation);
-    void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
+    void applyCtrlParamHighlight();
+    void scrollCodeEditorToShowCursor(const QTextCursor &cursor);
     QString previewScadPath() const;
     QString examplesPath() const;
     void populateExamplesMenu(QMenu *menu);
     void hideExamplePreview();
-    void applyCtrlParamHighlight();
-    void scrollCodeEditorToShowCursor(const QTextCursor &cursor);
-
-    struct CtrlParamHighlight {
-        bool    active        = false;
-        int     nodeId        = 0;
-        QString contextPrefix; // unique text immediately before expression in generated code
-        QString expression;    // full expression containing the number
-        int     numberStart   = 0;  // offset of number within expression
-        int     numberLength  = 0;  // length of number in expression
-    } m_ctrlHighlight;
     bool writeOpenScadPreview(bool notify);
 
 private:
-    SceneDocument m_scene;
-    QUndoStack *m_undoStack = nullptr;
-    QAction *m_undoAction = nullptr;
-    QAction *m_redoAction = nullptr;
-    bool m_viewportDragActive = false;
-    ShapeNode m_viewportDragStartShape;
-    bool m_viewportGroupDragActive = false;
-    int m_viewportDragGroupId = 0;
-    QVector3D m_viewportDragStartGroupPosition;
-    QVector3D m_viewportDragStartGroupRotation;
-    QVector3D m_viewportDragStartGroupScale;
-    QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
+    SceneController *m_controller = nullptr;
 
     // Example hover preview
-    ExamplePreviewPopup      *m_examplePreview      = nullptr;
-    QTimer                   *m_exampleHoverTimer   = nullptr;
-    QFutureWatcher<QImage>   *m_thumbnailWatcher    = nullptr;
-    QString                   m_pendingPreviewFile;
-    QString                   m_pendingPreviewName;
-    int                       m_pendingMenuRight    = 0;  // global X of menu's right edge
-    int                       m_pendingCursorY      = 0;  // global Y at hover time
+    ExamplePreviewPopup    *m_examplePreview    = nullptr;
+    QTimer                 *m_exampleHoverTimer = nullptr;
+    QFutureWatcher<QImage> *m_thumbnailWatcher  = nullptr;
+    QString                 m_pendingPreviewFile;
+    QString                 m_pendingPreviewName;
+    int                     m_pendingMenuRight   = 0;
+    int                     m_pendingCursorY     = 0;
 
-    ViewportWidget *m_viewport = nullptr;
-    SceneTreeGraphicsWidget *m_sceneTreeGraphics = nullptr;
-    int m_selectedTreeNodeId = 0;
-    QTextEdit *m_codeEditor = nullptr;
-    QPushButton *m_applyCodeButton = nullptr;
-    QPushButton *m_sendToOpenScadButton = nullptr;
-    QLabel *m_csgStatusLabel = nullptr;
-    QLabel *m_openScadPreviewLabel = nullptr;
-    QLabel *m_parseErrorLabel = nullptr;
+    ViewportWidget           *m_viewport         = nullptr;
+    SceneTreeGraphicsWidget  *m_sceneTreeGraphics = nullptr;
+    QTextEdit                *m_codeEditor        = nullptr;
+    QPushButton              *m_applyCodeButton   = nullptr;
+    QPushButton              *m_sendToOpenScadButton = nullptr;
+    QLabel                   *m_csgStatusLabel    = nullptr;
+    QLabel                   *m_openScadPreviewLabel = nullptr;
+    QLabel                   *m_parseErrorLabel   = nullptr;
 
+    QVector<OpenScadGenerator::SourceRange> m_openScadSourceRanges;
 };
 
 #endif
