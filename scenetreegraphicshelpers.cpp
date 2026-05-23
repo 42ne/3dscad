@@ -187,7 +187,10 @@ void paintOperationIcon(QPainter *painter,
     } else if (operation == SceneDocument::TreeNode::Difference) {
         painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
     } else if (operation == SceneDocument::TreeNode::Intersection) {
-        painter->setPen(QPen(accent.darker(150), 1));
+        QPen intersectionPen(accent.darker(150), 2.0);
+        intersectionPen.setCapStyle(Qt::RoundCap);
+        intersectionPen.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(intersectionPen);
         painter->setBrush(QColor(255, 255, 255, 60));
         painter->drawEllipse(QRectF(symbolRect.left(), symbolRect.top() + 1.0, symbolRect.width() * 0.62, symbolRect.height() - 2.0));
         painter->drawEllipse(QRectF(symbolRect.center().x() - symbolRect.width() * 0.31,
@@ -227,8 +230,14 @@ void paintOperationIcon(QPainter *painter,
             for (int col = -1; col <= 1; ++col)
                 painter->drawEllipse(QPointF(cx + col * gap, cy + row * gap), dotR, dotR);
     } else {
-        painter->setPen(accent.darker(160));
+        painter->save();
+        QFont moduleFont = painter->font();
+        moduleFont.setBold(true);
+        moduleFont.setPointSizeF(qMax<qreal>(8.0, moduleFont.pointSizeF() + 1.0));
+        painter->setFont(moduleFont);
+        painter->setPen(QPen(accent.darker(165), 1.6));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
+        painter->restore();
     }
 }
 
