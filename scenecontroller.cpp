@@ -4,6 +4,7 @@
 #include "openscadparser.h"
 #include "scenecommands.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenestringutils.h"
 
 #include <QApplication>
 #include <QUndoStack>
@@ -24,67 +25,6 @@ static bool decodeModuleParameterInsertIndex(int *insertIndex)
         return false;
     *insertIndex = -ModuleParameterInsertSentinel - *insertIndex;
     return true;
-}
-
-static QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0, start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar ch = text[i];
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))      ++depth;
-        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']')) --depth;
-        else if (ch == QLatin1Char(',') && depth == 0) {
-            const QString part = text.mid(start, i - start).trimmed();
-            if (!part.isEmpty()) result.append(part);
-            start = i + 1;
-        }
-    }
-    const QString tail = text.mid(start).trimmed();
-    if (!tail.isEmpty()) result.append(tail);
-    return result;
-}
-
-static QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
-{
-    QHash<QString, QString> result;
-    for (const QString &part : splitAtTopLevelCommas(arguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal <= 0) continue;
-        const QString name = part.left(equal).trimmed();
-        const QString expr = part.mid(equal + 1).trimmed();
-        if (!name.isEmpty() && !expr.isEmpty())
-            result[name] = expr;
-    }
-    return result;
-}
-
-static QHash<QString, QString> resolveModuleArguments(
-    const QString &callArguments,
-    const SceneDocument::TreeNode &moduleNode)
-{
-    QStringList paramOrder;
-    for (const SceneDocument::TreeNode &child : moduleNode.children)
-        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
-            paramOrder.append(child.variableName);
-
-    QHash<QString, QString> result;
-    int positionalIndex = 0;
-    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal > 0) {
-            const QString name = part.left(equal).trimmed();
-            const QString expr = part.mid(equal + 1).trimmed();
-            if (!name.isEmpty() && !expr.isEmpty())
-                result[name] = expr;
-        } else {
-            const QString expr = part.trimmed();
-            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
-                result[paramOrder[positionalIndex]] = expr;
-            ++positionalIndex;
-        }
-    }
-    return result;
 }
 
 static float normalizedRotationDegrees(float value)
@@ -572,10 +512,7 @@ void SceneController::handleToolDrop(const QString &toolName, int parentGroupId,
         return;
     }
 
-    if (toolName != QStringLiteral("cube")
-        && toolName != QStringLiteral("sphere")
-        && toolName != QStringLiteral("cylinder")
-        && toolName != QStringLiteral("cone"))
+    if (!ShapeNode::isPrimitiveTool(toolName))
         return;
 
     ShapeNode shape = makeShapeForTool(toolName, m_scene.shapeCount() + 1);
@@ -847,31 +784,12 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
 
     qreal newNumericValue = replacement.toDouble();
     ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
-    const qreal rawNumericValue = newNumericValue; // save before generic 0.1 clamp
-    newNumericValue = qMax(0.1, newNumericValue);
 
     ShapeNode updatedShape = *shape;
     while (updatedShape.parameterExpressions.size() < controls.size())
         updatedShape.parameterExpressions.append(QString());
     updatedShape.parameterExpressions[paramIndex] = newExpr;
-
-    if (updatedShape.type == ShapeNode::Cube) {
-        QVector3D size = updatedShape.size;
-        if (paramIndex == 0)      size.setX(newNumericValue);
-        else if (paramIndex == 1) size.setY(newNumericValue);
-        else if (paramIndex == 2) size.setZ(newNumericValue);
-        updatedShape.size = size;
-    } else if (updatedShape.type == ShapeNode::Sphere) {
-        if (paramIndex == 0) updatedShape.radius = newNumericValue;
-    } else if (updatedShape.type == ShapeNode::Cylinder) {
-        if (paramIndex == 0)      updatedShape.radius = newNumericValue;
-        else if (paramIndex == 1) updatedShape.height = newNumericValue;
-    } else if (updatedShape.type == ShapeNode::Cone) {
-        // R2 (top radius, index 1) may be 0.0 for a true cone apex — use rawNumericValue.
-        if (paramIndex == 0)      updatedShape.radius  = static_cast<float>(qMax<qreal>(0.1, rawNumericValue));
-        else if (paramIndex == 1) updatedShape.radius2 = static_cast<float>(qMax<qreal>(0.0, rawNumericValue));
-        else if (paramIndex == 2) updatedShape.height  = static_cast<float>(qMax<qreal>(0.1, rawNumericValue));
-    }
+    updatedShape.applyParameterValue(paramIndex, newNumericValue);
 
     auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape,
                                            [this]() { emit sceneChanged(); });

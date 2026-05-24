@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QVector3D>
+#include <QtGlobal>
 
 struct ShapeNode
 {
@@ -36,6 +37,50 @@ struct ShapeNode
     // One expression string per parameter, in shapeParameterControls() order.
     // Empty list = plain numeric mode (use size/radius/height directly).
     QStringList parameterExpressions;
+
+    // Apply a parameter value by index, clamping to the type-appropriate minimum.
+    // Pass the raw (pre-clamp) evaluated value — this method owns all clamping logic.
+    // Cone R2 (index 1) may be 0.0 for a true pointed apex; every other param ≥ 0.1.
+    void applyParameterValue(int paramIndex, qreal rawValue)
+    {
+        switch (type) {
+        case Cube:
+            if      (paramIndex == 0) size.setX(static_cast<float>(qMax<qreal>(0.1, rawValue)));
+            else if (paramIndex == 1) size.setY(static_cast<float>(qMax<qreal>(0.1, rawValue)));
+            else if (paramIndex == 2) size.setZ(static_cast<float>(qMax<qreal>(0.1, rawValue)));
+            break;
+        case Sphere:
+            if (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            break;
+        case Cylinder:
+            if      (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            else if (paramIndex == 1) height = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            break;
+        case Cone:
+            if      (paramIndex == 0) radius  = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            else if (paramIndex == 1) radius2 = static_cast<float>(qMax<qreal>(0.0, rawValue));
+            else if (paramIndex == 2) height  = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            break;
+        }
+    }
+
+    // Returns true if toolName names a primitive shape (cube / sphere / cylinder / cone).
+    static bool isPrimitiveTool(const QString &toolName)
+    {
+        return toolName == QLatin1String("cube")
+            || toolName == QLatin1String("sphere")
+            || toolName == QLatin1String("cylinder")
+            || toolName == QLatin1String("cone");
+    }
+
+    // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
+    static Type typeFromToolName(const QString &toolName)
+    {
+        if (toolName == QLatin1String("sphere"))   return Sphere;
+        if (toolName == QLatin1String("cylinder")) return Cylinder;
+        if (toolName == QLatin1String("cone"))     return Cone;
+        return Cube;
+    }
 };
 
 inline bool operator==(const ShapeNode &left, const ShapeNode &right)

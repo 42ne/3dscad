@@ -7,6 +7,7 @@
 #include "scenetreepreviewrenderer.h"
 #include "scenetreenoderenderer.h"
 #include "scenetreetoolbarrenderer.h"
+#include "scenestringutils.h"
 
 #include <QApplication>
 #include <QFontMetricsF>
@@ -94,59 +95,6 @@ SceneTreeLayout::DropTarget freeFloatingDropTarget(const QPointF &scenePosition,
     return target;
 }
 
-QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0;
-    int start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar ch = text[i];
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
-            ++depth;
-        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
-            --depth;
-        else if (ch == QLatin1Char(',') && depth == 0) {
-            const QString part = text.mid(start, i - start).trimmed();
-            if (!part.isEmpty())
-                result.append(part);
-            start = i + 1;
-        }
-    }
-    const QString tail = text.mid(start).trimmed();
-    if (!tail.isEmpty())
-        result.append(tail);
-    return result;
-}
-
-// Resolves both named and positional call arguments against a module's parameter list.
-static QHash<QString, QString> resolveModuleArguments(
-    const QString &callArguments,
-    const SceneDocument::TreeNode &moduleNode)
-{
-    QStringList paramOrder;
-    for (const SceneDocument::TreeNode &child : moduleNode.children)
-        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
-            paramOrder.append(child.variableName);
-
-    QHash<QString, QString> result;
-    int positionalIndex = 0;
-    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal > 0) {
-            const QString name = part.left(equal).trimmed();
-            const QString expr  = part.mid(equal + 1).trimmed();
-            if (!name.isEmpty() && !expr.isEmpty())
-                result[name] = expr;
-            // Named args don't consume positional slots in OpenSCAD
-        } else {
-            const QString expr = part.trimmed();
-            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
-                result[paramOrder[positionalIndex]] = expr;
-            ++positionalIndex;
-        }
-    }
-    return result;
-}
 
 qreal easeOutCubic(qreal value)
 {

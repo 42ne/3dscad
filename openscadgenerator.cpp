@@ -1,4 +1,5 @@
 #include "openscadgenerator.h"
+#include "scenestringutils.h"
 
 #include <QColor>
 #include <QStringList>
@@ -65,30 +66,6 @@ static QStringList moduleParameterArgs(const SceneDocument::TreeNode &moduleNode
         }
     }
     return args;
-}
-
-static QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0;
-    int start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar ch = text[i];
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
-            ++depth;
-        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
-            --depth;
-        else if (ch == QLatin1Char(',') && depth == 0) {
-            const QString part = text.mid(start, i - start).trimmed();
-            if (!part.isEmpty())
-                result.append(part);
-            start = i + 1;
-        }
-    }
-    const QString tail = text.mid(start).trimmed();
-    if (!tail.isEmpty())
-        result.append(tail);
-    return result;
 }
 
 // Return the module signature string "name(p1=e1, p2=e2)".

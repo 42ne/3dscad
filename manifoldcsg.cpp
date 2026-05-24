@@ -1,4 +1,5 @@
 #include "manifoldcsg.h"
+#include "scenestringutils.h"
 
 #ifdef HAVE_MANIFOLD_CSG
 #include "expression.h"
@@ -50,52 +51,6 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
 
     return result.Rotate(shape.rotation.x(), shape.rotation.y(), shape.rotation.z())
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
-}
-
-static ShapeNode shapeWithEvaluatedParameters(const ShapeNode &shape, const QHash<QString, qreal> &variables)
-{
-    ShapeNode evaluated = shape;
-    if (evaluated.parameterExpressions.isEmpty())
-        return evaluated;
-
-    for (int i = 0; i < evaluated.parameterExpressions.size(); ++i) {
-        const QString expression = evaluated.parameterExpressions[i].trimmed();
-        if (expression.isEmpty())
-            continue;
-
-        qreal value = 0.0;
-        if (!ExpressionSyntax::evaluate(expression, variables, &value))
-            continue;
-
-        const qreal rawValue = value; // saved before clamping — needed for Cone r2 (may be 0)
-        value = qMax<qreal>(0.1, value);
-        if (evaluated.type == ShapeNode::Cube) {
-            if (i == 0)
-                evaluated.size.setX(static_cast<float>(value));
-            else if (i == 1)
-                evaluated.size.setY(static_cast<float>(value));
-            else if (i == 2)
-                evaluated.size.setZ(static_cast<float>(value));
-        } else if (evaluated.type == ShapeNode::Sphere) {
-            if (i == 0)
-                evaluated.radius = static_cast<float>(value);
-        } else if (evaluated.type == ShapeNode::Cylinder) {
-            if (i == 0)
-                evaluated.radius = static_cast<float>(value);
-            else if (i == 1)
-                evaluated.height = static_cast<float>(value);
-        } else if (evaluated.type == ShapeNode::Cone) {
-            // param order: R1=0, R2=1, H=2; R2 may be 0.0 (true cone → use rawValue)
-            if (i == 0)
-                evaluated.radius  = static_cast<float>(qMax<qreal>(0.1, rawValue));
-            else if (i == 1)
-                evaluated.radius2 = static_cast<float>(qMax<qreal>(0.0, rawValue));
-            else if (i == 2)
-                evaluated.height  = static_cast<float>(qMax<qreal>(0.1, rawValue));
-        }
-    }
-
-    return evaluated;
 }
 
 static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::TreeNode &node,
@@ -192,59 +147,6 @@ static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::T
     }
 
     return variables;
-}
-
-static QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0;
-    int start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar ch = text[i];
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
-            ++depth;
-        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
-            --depth;
-        else if (ch == QLatin1Char(',') && depth == 0) {
-            const QString part = text.mid(start, i - start).trimmed();
-            if (!part.isEmpty())
-                result.append(part);
-            start = i + 1;
-        }
-    }
-    const QString tail = text.mid(start).trimmed();
-    if (!tail.isEmpty())
-        result.append(tail);
-    return result;
-}
-
-// Resolves both named and positional call arguments against a module's parameter list.
-static QHash<QString, QString> resolveModuleArguments(
-    const QString &callArguments,
-    const SceneDocument::TreeNode &moduleNode)
-{
-    QStringList paramOrder;
-    for (const SceneDocument::TreeNode &child : moduleNode.children)
-        if (child.type == SceneDocument::TreeNode::Variable && child.isParameter)
-            paramOrder.append(child.variableName);
-
-    QHash<QString, QString> result;
-    int positionalIndex = 0;
-    for (const QString &part : splitAtTopLevelCommas(callArguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal > 0) {
-            const QString name = part.left(equal).trimmed();
-            const QString expr  = part.mid(equal + 1).trimmed();
-            if (!name.isEmpty() && !expr.isEmpty())
-                result[name] = expr;
-        } else {
-            const QString expr = part.trimmed();
-            if (!expr.isEmpty() && positionalIndex < paramOrder.size())
-                result[paramOrder[positionalIndex]] = expr;
-            ++positionalIndex;
-        }
-    }
-    return result;
 }
 
 static QHash<QString, qreal> topLevelVariables(const SceneDocument::TreeNode &root)

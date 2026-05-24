@@ -1,5 +1,6 @@
 #include "scenedocument.h"
 #include "expression.h"
+#include "scenestringutils.h"
 
 #include <QHash>
 #include <QSet>
@@ -49,44 +50,6 @@ bool isValidIdentifier(const QString &name)
     }
 
     return true;
-}
-
-QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0;
-    int start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar ch = text[i];
-        if (ch == QLatin1Char('(') || ch == QLatin1Char('['))
-            ++depth;
-        else if (ch == QLatin1Char(')') || ch == QLatin1Char(']'))
-            --depth;
-        else if (ch == QLatin1Char(',') && depth == 0) {
-            result.append(text.mid(start, i - start).trimmed());
-            start = i + 1;
-        }
-    }
-    const QString tail = text.mid(start).trimmed();
-    if (!tail.isEmpty())
-        result.append(tail);
-    return result;
-}
-
-QHash<QString, QString> parseNamedArgumentExpressions(const QString &arguments)
-{
-    QHash<QString, QString> result;
-    for (const QString &part : splitAtTopLevelCommas(arguments)) {
-        const int equal = part.indexOf(QLatin1Char('='));
-        if (equal <= 0)
-            continue;
-
-        const QString name = part.left(equal).trimmed();
-        const QString expression = part.mid(equal + 1).trimmed();
-        if (isValidIdentifier(name) && !expression.isEmpty())
-            result[name] = expression;
-    }
-    return result;
 }
 
 QString buildNamedArgumentExpressions(const QHash<QString, QString> &arguments, const QStringList &order)
@@ -557,23 +520,7 @@ void SceneDocument::reEvaluateDependentExpressions()
             qreal val = 0.0;
             if (!ExpressionSyntax::evaluate(expr, varValues, &val))
                 continue;
-            const qreal rawVal = val; // save before generic 0.1 clamp
-            val = qMax(0.1, val);
-            if (shape.type == ShapeNode::Cube) {
-                if (i == 0)      shape.size.setX(static_cast<float>(val));
-                else if (i == 1) shape.size.setY(static_cast<float>(val));
-                else if (i == 2) shape.size.setZ(static_cast<float>(val));
-            } else if (shape.type == ShapeNode::Sphere) {
-                if (i == 0) shape.radius = val;
-            } else if (shape.type == ShapeNode::Cylinder) {
-                if (i == 0)      shape.radius = val;
-                else if (i == 1) shape.height = val;
-            } else if (shape.type == ShapeNode::Cone) {
-                // R2 (top radius, index 1) may be 0.0 for a true cone apex.
-                if (i == 0)      shape.radius  = static_cast<float>(qMax<qreal>(0.1, rawVal));
-                else if (i == 1) shape.radius2 = static_cast<float>(qMax<qreal>(0.0, rawVal));
-                else if (i == 2) shape.height  = static_cast<float>(qMax<qreal>(0.1, rawVal));
-            }
+            shape.applyParameterValue(i, val);
         }
     }
 
