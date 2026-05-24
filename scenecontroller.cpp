@@ -99,24 +99,6 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
     return shape;
 }
 
-static bool operationForTool(const QString &toolName,
-                              SceneDocument::TreeNode::Operation *operation)
-{
-    if (!operation) return false;
-    if (toolName == QStringLiteral("module"))       { *operation = SceneDocument::TreeNode::Module;       return true; }
-    if (toolName == QStringLiteral("union"))        { *operation = SceneDocument::TreeNode::Union;        return true; }
-    if (toolName == QStringLiteral("difference"))   { *operation = SceneDocument::TreeNode::Difference;   return true; }
-    if (toolName == QStringLiteral("intersection")) { *operation = SceneDocument::TreeNode::Intersection; return true; }
-    if (toolName == QStringLiteral("translate"))    { *operation = SceneDocument::TreeNode::Translate;    return true; }
-    if (toolName == QStringLiteral("rotate"))       { *operation = SceneDocument::TreeNode::Rotate;       return true; }
-    if (toolName == QStringLiteral("scale"))        { *operation = SceneDocument::TreeNode::Scale;        return true; }
-    if (toolName == QStringLiteral("mirror"))       { *operation = SceneDocument::TreeNode::Mirror;       return true; }
-    if (toolName == QStringLiteral("hull"))         { *operation = SceneDocument::TreeNode::Hull;         return true; }
-    if (toolName == QStringLiteral("minkowski"))    { *operation = SceneDocument::TreeNode::Minkowski;    return true; }
-    if (toolName == QStringLiteral("for"))          { *operation = SceneDocument::TreeNode::For;          return true; }
-    return false;
-}
-
 static bool isVariableTool(const QString &toolName)
 {
     return toolName == QStringLiteral("var") || toolName == QStringLiteral("variable");
@@ -496,7 +478,7 @@ void SceneController::handleToolDrop(const QString &toolName, int parentGroupId,
     }
 
     SceneDocument::TreeNode::Operation operation;
-    if (operationForTool(toolName, &operation)) {
+    if (SceneTreeGraphics::operationForToolName(toolName, &operation)) {
         if (operation == SceneDocument::TreeNode::Module) {
             if (parentGroupId > 0 && parentGroupId != m_scene.treeRoot().id)
                 return;

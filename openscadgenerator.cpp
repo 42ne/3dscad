@@ -1,4 +1,5 @@
 #include "openscadgenerator.h"
+#include "scenetreegraphicshelpers.h"
 #include "scenestringutils.h"
 
 #include <QColor>
@@ -33,18 +34,6 @@ QString OpenScadGenerator::generateWithSourceMap(const SceneDocument &scene, QVe
     return code;
 }
 
-static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
-{
-    if (operation == SceneDocument::TreeNode::Difference)
-        return "difference";
-    if (operation == SceneDocument::TreeNode::Intersection)
-        return "intersection";
-    if (operation == SceneDocument::TreeNode::Hull)
-        return "hull";
-    if (operation == SceneDocument::TreeNode::Minkowski)
-        return "minkowski";
-    return "union";
-}
 
 static QString colorLiteral(const QColor &color)
 {
@@ -304,7 +293,7 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
-    appendTreeGroup(code, treeOperationName(node.operation), node, scene, indent, ranges);
+    appendTreeGroup(code, SceneTreeGraphics::labelForOperation(node.operation), node, scene, indent, ranges);
     if (ranges)
         ranges->append({node.id, start, code->size() - start});
 }
