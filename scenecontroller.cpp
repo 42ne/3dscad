@@ -847,6 +847,7 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
 
     qreal newNumericValue = replacement.toDouble();
     ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
+    const qreal rawNumericValue = newNumericValue; // save before generic 0.1 clamp
     newNumericValue = qMax(0.1, newNumericValue);
 
     ShapeNode updatedShape = *shape;
@@ -865,6 +866,11 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
     } else if (updatedShape.type == ShapeNode::Cylinder) {
         if (paramIndex == 0)      updatedShape.radius = newNumericValue;
         else if (paramIndex == 1) updatedShape.height = newNumericValue;
+    } else if (updatedShape.type == ShapeNode::Cone) {
+        // R2 (top radius, index 1) may be 0.0 for a true cone apex — use rawNumericValue.
+        if (paramIndex == 0)      updatedShape.radius  = static_cast<float>(qMax<qreal>(0.1, rawNumericValue));
+        else if (paramIndex == 1) updatedShape.radius2 = static_cast<float>(qMax<qreal>(0.0, rawNumericValue));
+        else if (paramIndex == 2) updatedShape.height  = static_cast<float>(qMax<qreal>(0.1, rawNumericValue));
     }
 
     auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape,

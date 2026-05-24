@@ -557,6 +557,7 @@ void SceneDocument::reEvaluateDependentExpressions()
             qreal val = 0.0;
             if (!ExpressionSyntax::evaluate(expr, varValues, &val))
                 continue;
+            const qreal rawVal = val; // save before generic 0.1 clamp
             val = qMax(0.1, val);
             if (shape.type == ShapeNode::Cube) {
                 if (i == 0)      shape.size.setX(static_cast<float>(val));
@@ -567,6 +568,11 @@ void SceneDocument::reEvaluateDependentExpressions()
             } else if (shape.type == ShapeNode::Cylinder) {
                 if (i == 0)      shape.radius = val;
                 else if (i == 1) shape.height = val;
+            } else if (shape.type == ShapeNode::Cone) {
+                // R2 (top radius, index 1) may be 0.0 for a true cone apex.
+                if (i == 0)      shape.radius  = static_cast<float>(qMax<qreal>(0.1, rawVal));
+                else if (i == 1) shape.radius2 = static_cast<float>(qMax<qreal>(0.0, rawVal));
+                else if (i == 2) shape.height  = static_cast<float>(qMax<qreal>(0.1, rawVal));
             }
         }
     }
