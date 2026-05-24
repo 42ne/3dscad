@@ -8,7 +8,8 @@ CONFIG  += c++17
 SOURCES += \
     main.cpp \
     treedebugwindow.cpp \
-    nodethumbnailcache_stub.cpp
+    nodethumbnailcache_stub.cpp \
+    groupthumbnailcache_stub.cpp
 
 HEADERS += \
     treedebugwindow.h
@@ -31,6 +32,7 @@ SOURCES += \
 
 HEADERS += \
     $$PARENT/expression.h \
+    $$PARENT/groupthumbnailcache.h \
     $$PARENT/nodethumbnailcache.h \
     $$PARENT/scenedocument.h \
     $$PARENT/scenetree.h \

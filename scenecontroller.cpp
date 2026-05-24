@@ -257,6 +257,17 @@ void SceneController::moveTreeNodeToGroup(int nodeId, int parentGroupId, int ins
     const bool moduleParameterZone = decodeModuleParameterInsertIndex(&insertIndex);
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
 
+    // Safety guard: only Module and Scene groups may become direct root children.
+    // The widget filters these at drop time; this is a last-resort check.
+    const int rootId = m_scene.treeRoot().id;
+    if (parentGroupId == rootId && node) {
+        const bool rootEligible = node->type == SceneDocument::TreeNode::Group
+            && (node->operation == SceneDocument::TreeNode::Module
+             || node->operation == SceneDocument::TreeNode::Scene);
+        if (!rootEligible)
+            return;
+    }
+
     if (node && node->type == SceneDocument::TreeNode::Variable && parentGroupId > 0) {
         const SceneDocument::TreeNode *parentNode = m_scene.treeNodeById(parentGroupId);
         const bool targetIsRoot   = (parentGroupId == m_scene.treeRoot().id);

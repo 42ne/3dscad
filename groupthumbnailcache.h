@@ -3,6 +3,7 @@
 
 #include "scenedocument.h"
 
+#include <QFutureWatcher>
 #include <QHash>
 #include <QImage>
 #include <QObject>
@@ -44,6 +45,7 @@ signals:
 
 private slots:
     void onRenderTimerTimeout();
+    void onRenderFinished();
 
 private:
     static constexpr int RenderDelayMs = 2000; // debounce: render 2 s after last change
@@ -68,6 +70,11 @@ private:
 
     QTimer *m_renderTimer = nullptr;
     bool    m_suspended   = false;
+
+    // Background render state.
+    QFutureWatcher<QHash<int, QImage>> *m_watcher = nullptr;
+    QHash<int, QByteArray>              m_inflightFingerprints; // saved for onRenderFinished
+    bool                                m_renderInFlight = false;
 };
 
 #endif // GROUPTHUMBNAILCACHE_H

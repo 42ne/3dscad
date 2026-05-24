@@ -1571,6 +1571,38 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
     if (!target.zoneRect.isValid())
         target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
 
+    // ── Root-level guard ──────────────────────────────────────────────────────
+    // Only Module and Scene groups may live as direct children of the invisible
+    // root node.  All other drops that land at root level are silently rejected:
+    // the node shows the "no valid slot" animation but is not moved or deleted.
+    // (Module tool drops are handled by the isRootOnlyTreeTool branch above and
+    //  never reach this point, so we need not special-case them here.)
+    if (target.hasTarget && m_scene) {
+        const int rootId = m_scene->treeRoot().id;
+        if (target.parentGroupId == rootId) {
+            bool rootEligible = false;
+            if (movingNodeId > 0) {
+                const SceneDocument::TreeNode *n = m_scene->treeNodeById(movingNodeId);
+                rootEligible = n
+                    && n->type == SceneDocument::TreeNode::Group
+                    && (n->operation == SceneDocument::TreeNode::Module
+                     || n->operation == SceneDocument::TreeNode::Scene);
+            }
+            if (!rootEligible) {
+                // Preserve source fields so the drop-preview animation can still
+                // show the source group collapsing back smoothly.
+                DropTarget noTarget;
+                noTarget.sourceGroupRect      = target.sourceGroupRect;
+                noTarget.sourceGroupOperation = target.sourceGroupOperation;
+                noTarget.sourceCutSeparatorY  = target.sourceCutSeparatorY;
+                noTarget.sourceChildren       = target.sourceChildren;
+                noTarget.sourceRect           = target.sourceRect;
+                noTarget.zoneRect             = target.zoneRect;
+                return noTarget;
+            }
+        }
+    }
+
     if (isVariableToolName(previewTool) && m_scene) {
         const int rootId = m_scene->treeRoot().id;
         const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
@@ -1679,6 +1711,24 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
                                        && node->type == SceneDocument::TreeNode::Group
                                        && node->operation == SceneDocument::TreeNode::Module;
         if (moduleDeclaration) {
+            clearDropPreview();
+            return;
+        }
+
+        // Delete only when the drop lands in truly empty canvas space.
+        // If the preview rect overlaps an existing root-level block the user was
+        // probably trying to attach the node to something but missed a valid slot
+        // — cancel silently so the node stays where it was.
+        const bool overlapsExistingBlock = [&]() {
+            for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
+                const QRectF isect = target.zoneRect.intersected(h.blockRect);
+                if (isect.width() > 1.0 && isect.height() > 1.0)
+                    return true;
+            }
+            return false;
+        }();
+
+        if (overlapsExistingBlock) {
             clearDropPreview();
             return;
         }

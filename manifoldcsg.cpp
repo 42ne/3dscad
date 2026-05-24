@@ -7,8 +7,14 @@
 #include <manifold/manifold.h>
 
 #include <QHash>
+#include <QMutex>
 #include <QStringList>
 #include <QtMath>
+
+// Manifold is not re-entrant: serialise all calls with this process-wide lock.
+// Both the viewport background render and the group thumbnail background render
+// acquire this before entering evaluateDocumentGeometry().
+static QMutex s_manifoldMutex;
 
 using manifold::Manifold;
 using manifold::MeshGL;
@@ -255,6 +261,8 @@ bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *
 #ifdef HAVE_MANIFOLD_CSG
     if (!mesh)
         return false;
+
+    QMutexLocker locker(&s_manifoldMutex); // serialise concurrent calls from any thread
 
     const Manifold result = evaluateDocumentGeometry(scene);
 

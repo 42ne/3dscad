@@ -535,8 +535,10 @@ private:
                               headerIconSize);
         const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
 
-        if (!m_thumbnail.isNull()) {
+        if (!m_thumbnail.isNull() && !m_empty) {
             // Draw the live 3-D thumbnail in place of the abstract operation icon.
+            // Suppress when empty: the cached thumbnail may be from a previous non-empty
+            // state and would be misleading alongside the "empty" placeholder text.
             painter->save();
             QPainterPath clip;
             clip.addRoundedRect(iconRect.adjusted(0.5, 0.5, -0.5, -0.5), 4.0, 4.0);
@@ -583,12 +585,24 @@ private:
             painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
         } else {
-            paintLabel(painter, labelForOperation(m_operation),
-                       QPointF(iconRect.right() + 10.0, m_rect.top() + 7.0), cTextPrimary);
+            // Reserve space for the chevron (18 px from the right edge + 10 px gap)
+            // so the label text never overlaps the collapse indicator.
+            const qreal labelLeft  = iconRect.right() + 10.0;
+            const qreal labelWidth = qMax(0.0, m_rect.right() - labelLeft - 28.0);
+            painter->setPen(cTextPrimary);
+            painter->drawText(QRectF(labelLeft, m_rect.top() + 7.0, labelWidth, 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              labelForOperation(m_operation));
         }
 
-        if (!isTransformOperation(m_operation))
-            paintHeaderChevron(painter, headerRect, dark ? QColor(220, 228, 238, 210) : QColor(54, 64, 76, 210));
+        if (!isTransformOperation(m_operation)) {
+            // Dim the chevron when the group is empty — collapsing an empty container
+            // is pointless, so the indicator is visually de-emphasised.
+            const QColor chevronColor = m_empty
+                ? (dark ? QColor(220, 228, 238, 65) : QColor(54, 64, 76, 65))
+                : (dark ? QColor(220, 228, 238, 210) : QColor(54, 64, 76, 210));
+            paintHeaderChevron(painter, headerRect, chevronColor);
+        }
 
         // Thin separator between header and body.
         const QColor sepColor = dark ? fill.lighter(148) : fill.darker(120);

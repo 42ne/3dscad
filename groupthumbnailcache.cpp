@@ -2,6 +2,7 @@
 #include "viewportwidget.h"
 
 #include <QDataStream>
+#include <QtConcurrent>
 #include <algorithm>
 
 // Background colour for group thumbnails — slightly cooler than the primitive card
@@ -131,15 +132,22 @@ GroupThumbnailCache::GroupThumbnailCache(QSize size, QObject *parent)
     : QObject(parent)
     , m_size(size)
     , m_renderTimer(new QTimer(this))
+    , m_watcher(new QFutureWatcher<QHash<int, QImage>>(this))
 {
     m_renderTimer->setSingleShot(true);
     connect(m_renderTimer, &QTimer::timeout,
             this, &GroupThumbnailCache::onRenderTimerTimeout);
+    connect(m_watcher, &QFutureWatcher<QHash<int, QImage>>::finished,
+            this, &GroupThumbnailCache::onRenderFinished);
 }
 
 GroupThumbnailCache::~GroupThumbnailCache()
 {
     m_renderTimer->stop();
+    if (m_watcher->isRunning()) {
+        m_watcher->cancel();
+        m_watcher->waitForFinished();
+    }
 }
 
 void GroupThumbnailCache::syncGroups(const SceneDocument &scene)
@@ -220,18 +228,23 @@ static const SceneDocument::TreeNode *findNodeInTree(const SceneDocument::TreeNo
 
 void GroupThumbnailCache::onRenderTimerTimeout()
 {
-    if (m_suspended || m_pending.isEmpty())
+    // If a render is already running we leave m_pending intact; onRenderFinished
+    // will restart the timer once the current batch completes.
+    if (m_suspended || m_pending.isEmpty() || m_renderInFlight)
         return;
 
     const QSet<int> toRender = m_pending;
     m_pending.clear();
 
-    // Shape lookup from the captured snapshot.
+    // Shape lookup from the captured snapshot (used for fingerprinting only).
     QHash<int, ShapeNode> shapesById;
     for (const ShapeNode &shape : m_pendingSnapshot.shapes)
         shapesById[shape.id] = shape;
 
-    bool anyRendered = false;
+    // Build per-group sub-snapshots on the main thread; rendering happens off it.
+    using SubItem = QPair<int, SceneDocument::Snapshot>; // {groupId, subSnap}
+    QVector<SubItem> items;
+    m_inflightFingerprints.clear();
 
     for (int groupId : toRender) {
         const SceneDocument::TreeNode *groupNode =
@@ -244,8 +257,7 @@ void GroupThumbnailCache::onRenderTimerTimeout()
             continue;
         }
 
-        // Build a minimal sub-document: global variables + the target group.
-        // Keep all shapes so the tree's primitive references resolve correctly.
+        // Minimal sub-document: global variables + the target group node.
         SceneDocument::Snapshot subSnap = m_pendingSnapshot;
         subSnap.treeRoot.children.clear();
         for (const SceneDocument::TreeNode &var : m_globalVars)
@@ -256,18 +268,59 @@ void GroupThumbnailCache::onRenderTimerTimeout()
         // SceneDocument::restoreSnapshot takes the treeSnapshot path (id > 0).
         subSnap.treeSnapshot.treeRoot = subSnap.treeRoot;
 
-        SceneDocument subDoc;
-        subDoc.restoreSnapshot(subSnap);
-
-        m_cache[groupId] = ViewportWidget::renderThumbnail(subDoc, m_size, GroupThumbnailBg);
-
-        // Update the stored fingerprint so subsequent unchanged syncs are cheap.
-        m_lastFingerprint[groupId] =
+        items.append({groupId, subSnap});
+        m_inflightFingerprints[groupId] =
             computeFingerprint(*groupNode, shapesById, m_globalVars);
-
-        anyRendered = true;
     }
+
+    if (items.isEmpty())
+        return;
+
+    // Launch the render on a pool thread so the GUI stays responsive.
+    // buildManifoldCsgMesh() is guarded by s_manifoldMutex in manifoldcsg.cpp,
+    // so concurrent calls from the viewport thread and this thread are serialised.
+    m_renderInFlight = true;
+    const QSize size    = m_size;
+    const QColor bgColor = GroupThumbnailBg;
+
+    auto future = QtConcurrent::run([items, size, bgColor]() -> QHash<int, QImage> {
+        QHash<int, QImage> results;
+        for (const SubItem &item : items) {
+            SceneDocument subDoc;
+            subDoc.restoreSnapshot(item.second);
+            results[item.first] = ViewportWidget::renderThumbnail(subDoc, size, bgColor);
+        }
+        return results;
+    });
+    m_watcher->setFuture(future);
+}
+
+void GroupThumbnailCache::onRenderFinished()
+{
+    m_renderInFlight = false;
+
+    const QHash<int, QImage> results = m_watcher->result();
+    bool anyRendered = false;
+
+    for (auto it = results.constBegin(); it != results.constEnd(); ++it) {
+        if (!it.value().isNull()) {
+            m_cache[it.key()] = it.value();
+            anyRendered = true;
+        }
+    }
+
+    // Commit fingerprints only for groups whose render succeeded.
+    for (auto it = m_inflightFingerprints.constBegin();
+         it != m_inflightFingerprints.constEnd(); ++it) {
+        if (m_cache.contains(it.key()))
+            m_lastFingerprint[it.key()] = it.value();
+    }
+    m_inflightFingerprints.clear();
 
     if (anyRendered)
         emit thumbnailsUpdated();
+
+    // Groups that were dirtied while the render was in flight can go now.
+    if (!m_pending.isEmpty() && !m_suspended)
+        m_renderTimer->start(RenderDelayMs);
 }
