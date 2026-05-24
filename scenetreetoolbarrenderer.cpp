@@ -79,6 +79,7 @@ SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene,
 QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                         PreviewFinishedCallback onPreviewFinished,
                                         ToolDroppedCallback onDropped,
+                                        ToolHoverChangedCallback onHoverChanged,
                                         const QPointF &viewportTopLeft,
                                         qreal viewportWidth,
                                         qreal viewportScale)
@@ -130,7 +131,8 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                            m_theme,
                                            onPreviewMoved,
                                            onPreviewFinished,
-                                           onDropped);
+                                           onDropped,
+                                           onHoverChanged);
         const int column = i % columns;
         const int row = i / columns;
         tool->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);

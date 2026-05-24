@@ -224,6 +224,22 @@ QRectF groupRectForPreviewContent(QRectF groupRect,
     return groupRect;
 }
 
+qreal moduleHeaderMinWidth(const SceneDocument::TreeNode &node)
+{
+    if (node.operation != SceneDocument::TreeNode::Module)
+        return minimumWidthForOperation(node.operation);
+
+    const QString name = node.moduleName.trimmed();
+    const QString label = name.isEmpty()
+                              ? QStringLiteral("module")
+                              : QStringLiteral("module %1").arg(name);
+    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+    const qreal gripAndIconWidth = 30.0 + (PrimitiveIconSize - 6.0) + 10.0;
+    const qreal chevronAndRightPadding = 28.0;
+    return qMax(minimumWidthForOperation(node.operation),
+                gripAndIconWidth + metrics.horizontalAdvance(label) + chevronAndRightPadding);
+}
+
 SceneTreeLayout::ChildLayout interpolatedChild(const SceneTreeLayout::ChildLayout &from,
                                                const SceneTreeLayout::ChildLayout &to,
                                                qreal progress)
@@ -1102,6 +1118,16 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
             [this](const QString &toolName, const QPointF &position) {
                 handleToolDrop(toolName, position);
             },
+            [this](const QString &toolName, bool hovered) {
+                if (hovered) {
+                    updateHoverHint(QStringLiteral("toolbar:%1").arg(toolName),
+                                    toolbarToolTip(toolName));
+                } else if (m_hoverHintKey == QStringLiteral("toolbar:%1").arg(toolName)) {
+                    updateControlTooltip(mapToGlobal(m_lastMousePosition),
+                                         mapToScene(m_lastMousePosition),
+                                         QApplication::keyboardModifiers() & Qt::ControlModifier);
+                }
+            },
             viewportTopLeft,
             viewportWidth,
             viewportScale);
@@ -1527,19 +1553,13 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     // Measure it so the card is never narrower than the rendered range expression.
     qreal forLoopHeaderMinWidth = 0.0;
     if (node.operation == SceneDocument::TreeNode::For) {
-        const QFontMetricsF fm(sceneTreeGraphicsFont());
-        const QString varName   = forLoopVariableName(node);
-        const QString rangeExpr = forLoopRangeExpression(node);
-        const QString prefix    = QStringLiteral("for (%1 = ").arg(varName);
-        // 68 = grip + operation icon + label gap, 8 = right padding inside card
-        forLoopHeaderMinWidth = 68.0
-            + fm.horizontalAdvance(prefix)
-            + fm.horizontalAdvance(rangeExpr)
-            + fm.horizontalAdvance(QStringLiteral(")"))
-            + 8.0;
+        forLoopHeaderMinWidth = SceneTreeGraphics::forLoopHeaderMinWidth(
+            forLoopVariableName(node),
+            forLoopRangeExpression(node),
+            QFontMetricsF(sceneTreeGraphicsFont()));
     }
 
-    const QSizeF size(qMax(qMax(minimumWidthForOperation(node.operation),
+    const QSizeF size(qMax(qMax(moduleHeaderMinWidth(node),
                                 headerWidth + maxChildWidth + GroupPadding * 2.0),
                            forLoopHeaderMinWidth),
                       headerHeight + GroupPadding * 2.0 + childrenHeight);

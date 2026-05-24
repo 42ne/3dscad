@@ -5,6 +5,7 @@
 #include <QBrush>
 #include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
+#include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSimpleTextItem>
 #include <QFontMetricsF>
@@ -25,6 +26,55 @@ const QColor CanvasBackground(31, 41, 55);
 const QColor MinorGridColor(96, 106, 121);
 const QColor MajorGridColor(139, 150, 166);
 constexpr SceneTreePalette::Theme FixedToolbarTheme = SceneTreePalette::Theme::Ocean;
+
+QString toolbarToolTip(const QString &tool)
+{
+    if (tool == QStringLiteral("module")) {
+        return QStringLiteral(
+            "Module declaration\n"
+            "Drop at the scene level. Add variables to its parameters lane or body, "
+            "then drag the module call chip into the scene, groups, loops, or module bodies.");
+    }
+
+    if (isVariableToolName(tool)) {
+        return QStringLiteral(
+            "Variable / parameter\n"
+            "Drop at the scene level for a global variable, or into a module's parameters lane or body.");
+    }
+
+    if (ShapeNode::isPrimitiveTool(tool)) {
+        const QString name = tool.left(1).toUpper() + tool.mid(1);
+        return QStringLiteral(
+            "%1 primitive\n"
+            "Drop into the scene, groups, loops, transforms, or module bodies.").arg(name);
+    }
+
+    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    if (operationForToolName(tool, &operation)) {
+        if (isTransformOperation(operation)) {
+            return QStringLiteral(
+                "%1 transform\n"
+                "Drop into the scene, groups, loops, or module bodies; then drop child objects inside it.")
+                .arg(tool.left(1).toUpper() + tool.mid(1));
+        }
+        if (operation == SceneDocument::TreeNode::For) {
+            return QStringLiteral(
+                "For loop\n"
+                "Drop into the scene, groups, transforms, or module bodies; then drop repeated objects inside it.");
+        }
+        if (operation == SceneDocument::TreeNode::Color) {
+            return QStringLiteral(
+                "Color group\n"
+                "Drop into the scene, groups, loops, transforms, or module bodies; then drop objects inside it.");
+        }
+        return QStringLiteral(
+            "%1 group\n"
+            "Drop into the scene, groups, loops, transforms, or module bodies; then drop child objects inside it.")
+            .arg(tool.left(1).toUpper() + tool.mid(1));
+    }
+
+    return QStringLiteral("Tool\nDrop into a highlighted slot in the scene tree.");
+}
 
 QFont sceneTreeGraphicsFont()
 {
@@ -588,6 +638,23 @@ QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName
                   16.0);
 }
 
+qreal forLoopHeaderMinWidth(const QString &variableName,
+                            const QString &rangeExpression,
+                            const QFontMetricsF &metrics)
+{
+    const QString name = variableName.trimmed().isEmpty() ? QStringLiteral("i") : variableName.trimmed();
+    const QString range = rangeExpression.trimmed().isEmpty() ? QStringLiteral("[0 : 1 : 3]") : rangeExpression.trimmed();
+    const QString prefix = QStringLiteral("for (%1 = ").arg(name);
+    const QRectF measureRect(0.0, 0.0, 2048.0, GroupHeaderHeight);
+
+    qreal right = 64.0 + metrics.horizontalAdvance(prefix);
+    const QVector<ExpressionTextSpan> spans = forLoopRangeTextSpans(measureRect, name, range, metrics);
+    for (const ExpressionTextSpan &span : spans)
+        right = qMax(right, span.rect.right());
+
+    return right + metrics.horizontalAdvance(QStringLiteral(")")) + 12.0;
+}
+
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect,
                                                   const QString &variableName,
                                                   const QString &rangeExpression,
@@ -872,7 +939,11 @@ QSizeF previewSizeForTool(const QString &tool)
     if (tool == "module")
         return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight * 2.0 + ChildGap * 2.0);
     if (tool == "for")
-        return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+        return QSizeF(qMax(GroupWideMinWidth,
+                           forLoopHeaderMinWidth(QStringLiteral("i"),
+                                                 QStringLiteral("[0 : 1 : 3]"),
+                                                 QFontMetricsF(sceneTreeGraphicsFont()))),
+                      GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "color")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
@@ -1331,15 +1402,18 @@ public:
                     int theme,
                     std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved,
                     std::function<void()> onPreviewFinished,
-                    std::function<void(const QString &, const QPointF &)> onDropped)
+                    std::function<void(const QString &, const QPointF &)> onDropped,
+                    std::function<void(const QString &, bool)> onHoverChanged)
         : m_label(label)
         , m_fill(fill)
         , m_theme(theme)
         , m_onPreviewMoved(onPreviewMoved)
         , m_onPreviewFinished(onPreviewFinished)
         , m_onDropped(onDropped)
+        , m_onHoverChanged(onHoverChanged)
     {
         setAcceptedMouseButtons(Qt::LeftButton);
+        setAcceptHoverEvents(true);
         setZValue(100.0);
     }
 
@@ -1366,8 +1440,10 @@ public:
             if (s < 55) {
                 if (operation == SceneDocument::TreeNode::Module)
                     iconAccent = QColor(182, 205, 230);
+                else if (operation == SceneDocument::TreeNode::Minkowski)
+                    iconAccent = QColor(64, 86, 116);
                 else if (operation == SceneDocument::TreeNode::For)
-                    iconAccent = QColor(205, 214, 226);
+                    iconAccent = QColor(82, 104, 132);
                 else
                     iconAccent.setHsv(h < 0 ? 210 : h, 82, qMax(v, 210));
             } else {
@@ -1396,13 +1472,31 @@ public:
             painter->setPen(QColor(61, 48, 24));
             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
         } else if (operationTool) {
-            paintOperationIcon(painter, operation, glyphRect, iconAccent.lighter(130));
+            const QColor operationIconAccent = operation == SceneDocument::TreeNode::For
+                                                   || operation == SceneDocument::TreeNode::Minkowski
+                                                   ? iconAccent
+                                                   : iconAccent.lighter(130);
+            paintOperationIcon(painter, operation, glyphRect, operationIconAccent);
         } else {
             paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect);
         }
     }
 
 protected:
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        if (m_onHoverChanged)
+            m_onHoverChanged(m_label, true);
+        event->accept();
+    }
+
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        if (m_onHoverChanged)
+            m_onHoverChanged(m_label, false);
+        event->accept();
+    }
+
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
 
@@ -1435,6 +1529,7 @@ private:
     std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
     std::function<void()> m_onPreviewFinished;
     std::function<void(const QString &, const QPointF &)> m_onDropped;
+    std::function<void(const QString &, bool)> m_onHoverChanged;
 };
 
 QColor fillForTool(const QString &tool)
@@ -1469,9 +1564,9 @@ QGraphicsItem *createTreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal
     return new TreeNodeSelectionItem(nodeId, rect, zValue, onSelected);
 }
 
-QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped)
+QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped, std::function<void(const QString &, bool)> onHoverChanged)
 {
-    return new PaletteToolItem(label, fill, theme, onPreviewMoved, onPreviewFinished, onDropped);
+    return new PaletteToolItem(label, fill, theme, onPreviewMoved, onPreviewFinished, onDropped, onHoverChanged);
 }
 
 } // namespace SceneTreeGraphics

@@ -127,6 +127,7 @@ QVector<ExpressionNumberControl> transformParameterNumberControls(const QRectF &
 QString forLoopVariableName(const SceneDocument::TreeNode &node);
 QString forLoopRangeExpression(const SceneDocument::TreeNode &node);
 QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName, const QFontMetricsF &metrics);
+qreal forLoopHeaderMinWidth(const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
@@ -156,7 +157,8 @@ QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene, QVector<QGraphicsIte
 
 QGraphicsItem *createTreeNodeDragHandleItem(int nodeId, const QString &label, const QRectF &rect, const QRectF &sourceRect, std::function<void(int)> onSelected, const QSizeF &previewSize, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(int, const QPointF &)> onDropped);
 QGraphicsItem *createTreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal zValue, std::function<void(int)> onSelected);
-QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped);
+QString toolbarToolTip(const QString &tool);
+QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped, std::function<void(const QString &, bool)> onHoverChanged = {});
 
 } // namespace SceneTreeGraphics
 

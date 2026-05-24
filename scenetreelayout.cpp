@@ -146,8 +146,7 @@ bool variablePreviewHitsModuleParameterZone(const QPointF &scenePosition,
                                contentRect.width(),
                                parameterSeparatorY - contentRect.top());
     const QRectF overlap = previewRect.intersected(parameterRect);
-    const qreal requiredOverlap = qMin<qreal>(effectiveSize.height(), VariableHeight) * 0.45;
-    return overlap.width() > 1.0 && overlap.height() >= requiredOverlap;
+    return overlap.width() > 1.0 && previewRect.top() < parameterSeparatorY;
 }
 
 void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
@@ -362,7 +361,20 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
             target.previewCutSeparatorY = target.placeholderRect.bottom() + ChildGap * 0.5;
     }
 
-    if (sourceArea == bestArea && sourceChildIndex >= 0 && target.insertIndex == sourceChildIndex) {
+    bool sameModuleParameterZone = true;
+    if (sourceArea == bestArea
+        && sourceChildIndex >= 0
+        && variableDrop
+        && bestArea->operation == SceneDocument::TreeNode::Module
+        && bestArea->moduleParameterSeparatorY > 0.0) {
+        const bool sourceParameterZone = sourceChildIndex < sourceArea->moduleParameterCount;
+        sameModuleParameterZone = target.moduleParameterZone == sourceParameterZone;
+    }
+
+    if (sourceArea == bestArea
+        && sourceChildIndex >= 0
+        && target.insertIndex == sourceChildIndex
+        && sameModuleParameterZone) {
         cancelTargetPreview(&target);
         buildSourcePreview(sourceArea,
                            movingNodeId,

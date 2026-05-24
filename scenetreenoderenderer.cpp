@@ -297,6 +297,13 @@ public:
             const QColor rowBorder = dark ? rowBg.lighter(148) : rowBg.darker(122);
             paintRoundedPanel(painter, m_rect, 5.0,
                               QPen(rowBorder, 1.0), QBrush(rowBg));
+            if (m_selected) {
+                paintRoundedPanel(painter,
+                                  m_rect.adjusted(-3.0, -3.0, 3.0, 3.0),
+                                  7.0,
+                                  QPen(QColor(255, 203, 87), 2.4),
+                                  Qt::NoBrush);
+            }
         }
 
         // Badge pill — vertically centred in VariableHeight.
@@ -382,6 +389,7 @@ public:
                   int activeForLoopNumberStart = -1,
                   const QColor &color = QColor(),
                   const QImage &thumbnail = QImage(),
+                  const QString &moduleName = QString(),
                   int depth = 0,
                   int theme = 0)
         : m_rect(rect)
@@ -396,6 +404,7 @@ public:
         , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_color(color)
         , m_thumbnail(thumbnail)
+        , m_moduleName(moduleName)
         , m_operation(operation)
         , m_selected(selected)
         , m_empty(empty)
@@ -586,9 +595,12 @@ private:
             const qreal labelLeft  = iconRect.right() + 10.0;
             const qreal labelWidth = qMax(0.0, m_rect.right() - labelLeft - 28.0);
             painter->setPen(cTextPrimary);
+            QString label = labelForOperation(m_operation);
+            if (m_operation == SceneDocument::TreeNode::Module && !m_moduleName.trimmed().isEmpty())
+                label += QStringLiteral(" ") + m_moduleName.trimmed();
             painter->drawText(QRectF(labelLeft, m_rect.top() + 7.0, labelWidth, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter,
-                              labelForOperation(m_operation));
+                              label);
         }
 
         if (!isTransformOperation(m_operation)) {
@@ -739,6 +751,7 @@ private:
     int         m_activeTransformNumberStart = -1;
     QColor      m_color;
     QImage      m_thumbnail;
+    QString     m_moduleName;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
     bool        m_selected            = false;
     bool        m_empty               = false;
@@ -985,7 +998,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformValues, activeAxis, activeNumberStart,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
-                                       node.color, thumbnail,
+                                       node.color, thumbnail, node.moduleName,
                                        depth, m_theme));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
@@ -1017,7 +1030,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
-                                 QColor(), QImage(),
+                                 QColor(), QImage(), QString(),
                                  0, theme);
     } else {
         ShapeNode shape;
@@ -1072,7 +1085,7 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
-                                   color, QImage(),
+                                   color, QImage(), QString(),
                                    depth, theme);
     scene->addItem(item);
     appendPreviewItem(items, item);

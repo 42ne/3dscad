@@ -8,6 +8,7 @@
 // Background colour for group thumbnails — slightly cooler than the primitive card
 // bg (219, 231, 246) to keep them visually distinct while blending with the group card.
 static const QColor GroupThumbnailBg(210, 225, 240);
+static constexpr int MaxRenderItemsPerBatch = 3;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,68 @@ static void collectReferencedModules(const SceneDocument::TreeNode &node,
     }
     for (const SceneDocument::TreeNode &child : node.children)
         collectReferencedModules(child, treeRoot, modules, visited);
+}
+
+static bool moduleReferencesModule(const SceneDocument::TreeNode &node,
+                                   const SceneDocument::TreeNode &treeRoot,
+                                   int targetModuleId,
+                                   QSet<int> &visited)
+{
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        if (node.shapeId == targetModuleId)
+            return true;
+        if (visited.contains(node.shapeId))
+            return false;
+
+        visited.insert(node.shapeId);
+        const SceneDocument::TreeNode *modDecl = findNodeInTree(treeRoot, node.shapeId);
+        return modDecl && moduleReferencesModule(*modDecl, treeRoot, targetModuleId, visited);
+    }
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (moduleReferencesModule(child, treeRoot, targetModuleId, visited))
+            return true;
+    }
+    return false;
+}
+
+static bool moduleHasRecursiveCall(const SceneDocument::TreeNode &moduleNode,
+                                   const SceneDocument::TreeNode &treeRoot)
+{
+    QSet<int> visited;
+    visited.insert(moduleNode.id);
+    for (const SceneDocument::TreeNode &child : moduleNode.children) {
+        if (moduleReferencesModule(child, treeRoot, moduleNode.id, visited))
+            return true;
+    }
+    return false;
+}
+
+static void collectShapeIdsForThumbnail(const SceneDocument::TreeNode &node, QSet<int> &shapeIds)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive)
+        shapeIds.insert(node.shapeId);
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectShapeIdsForThumbnail(child, shapeIds);
+}
+
+static QVector<ShapeNode> filteredShapesForThumbnail(
+    const QVector<ShapeNode> &allShapes,
+    const SceneDocument::TreeNode &primaryNode,
+    const QHash<int, SceneDocument::TreeNode> &referencedModules)
+{
+    QSet<int> shapeIds;
+    collectShapeIdsForThumbnail(primaryNode, shapeIds);
+    for (const SceneDocument::TreeNode &modDecl : referencedModules)
+        collectShapeIdsForThumbnail(modDecl, shapeIds);
+
+    QVector<ShapeNode> filtered;
+    filtered.reserve(shapeIds.size());
+    for (const ShapeNode &shape : allShapes) {
+        if (shapeIds.contains(shape.id))
+            filtered.append(shape);
+    }
+    return filtered;
 }
 
 // ── Fingerprinting ───────────────────────────────────────────────────────────
@@ -379,8 +442,12 @@ void GroupThumbnailCache::onRenderTimerTimeout()
     if (m_suspended || m_pending.isEmpty() || m_renderInFlight)
         return;
 
-    const QSet<int> toRender = m_pending;
-    m_pending.clear();
+    QSet<int> toRender;
+    const QList<int> pendingIds = m_pending.values();
+    for (int i = 0; i < pendingIds.size() && toRender.size() < MaxRenderItemsPerBatch; ++i) {
+        toRender.insert(pendingIds[i]);
+        m_pending.remove(pendingIds[i]);
+    }
 
     // Shape lookup from the captured snapshot (used for fingerprinting).
     QHash<int, ShapeNode> shapesById;
@@ -435,6 +502,8 @@ void GroupThumbnailCache::onRenderTimerTimeout()
 
             subSnap.treeRoot.children.append(*modDecl);
             subSnap.treeRoot.children.append(*nodePtr);
+            subSnap.shapes = filteredShapesForThumbnail(
+                m_pendingSnapshot.shapes, *modDecl, referencedModules);
             fp = computeModuleCallFingerprint(
                 *nodePtr, *modDecl, shapesById, m_globalVars, referencedModules);
         } else {
@@ -453,6 +522,23 @@ void GroupThumbnailCache::onRenderTimerTimeout()
                 subSnap.treeRoot.children.append(referencedModules[modId]);
 
             subSnap.treeRoot.children.append(*nodePtr);
+
+            // Module declarations are definitions, so they do not render any
+            // geometry by themselves.  Add an ephemeral call with no arguments
+            // to preview the module using its declared default parameter values.
+            if (nodePtr->type == SceneDocument::TreeNode::Group
+                && nodePtr->operation == SceneDocument::TreeNode::Module
+                && !moduleHasRecursiveCall(*nodePtr, m_pendingSnapshot.treeRoot)) {
+                SceneDocument::TreeNode syntheticCall;
+                syntheticCall.id = subSnap.nextTreeNodeId++;
+                syntheticCall.type = SceneDocument::TreeNode::ModuleCall;
+                syntheticCall.shapeId = nodePtr->id;
+                syntheticCall.moduleName = nodePtr->moduleName;
+                subSnap.treeRoot.children.append(syntheticCall);
+            }
+
+            subSnap.shapes = filteredShapesForThumbnail(
+                m_pendingSnapshot.shapes, *nodePtr, referencedModules);
             fp = computeFingerprint(*nodePtr, shapesById, m_globalVars, referencedModules);
         }
 
@@ -464,8 +550,11 @@ void GroupThumbnailCache::onRenderTimerTimeout()
         m_inflightFingerprints[nodeId] = fp;
     }
 
-    if (items.isEmpty())
+    if (items.isEmpty()) {
+        if (!m_pending.isEmpty() && !m_suspended)
+            m_renderTimer->start(RenderDelayMs);
         return;
+    }
 
     // Launch the render on a pool thread so the GUI stays responsive.
     // buildManifoldCsgMesh() is guarded by s_manifoldMutex in manifoldcsg.cpp,
