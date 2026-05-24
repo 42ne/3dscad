@@ -348,6 +348,23 @@ UpdateForLoopCommand::UpdateForLoopCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
+UpdateGroupColorCommand::UpdateGroupColorCommand(SceneDocument *scene,
+                                                 int groupId,
+                                                 const QColor &color,
+                                                 std::function<void()> onChanged)
+    : SnapshotCommand("Update group color", scene, std::move(onChanged))
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateGroupColor(groupId, color);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
 MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene,
                                          int nodeId,
                                          int parentGroupId,

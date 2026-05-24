@@ -455,14 +455,14 @@ public:
         const QColor bodyFill = m_insertedPreview ? translucent(fill, qMin(fill.alpha() + 55, 230)) : fill;
         paintRoundedPanel(painter, m_rect, CornerRadius, bodyBorderPen, QBrush(bodyFill));
 
-        if (isTransformOperation(m_operation)) {
+        if (isVerticalHeaderOperation(m_operation)) {
             paintVerticalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
         } else {
             paintHorizontalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
         }
 
         if (m_empty) {
-            const QPointF emptyPosition = isTransformOperation(m_operation)
+            const QPointF emptyPosition = isVerticalHeaderOperation(m_operation)
                 ? QPointF(m_rect.left() + TransformHeaderWidth + GroupPadding + PrimitiveIconSize + 8.0,
                           m_rect.top() + GroupPadding + 10.0)
                 : QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0,
@@ -603,7 +603,7 @@ private:
                               label);
         }
 
-        if (!isTransformOperation(m_operation)) {
+        if (!isVerticalHeaderOperation(m_operation)) {
             // Dim the chevron when the group is empty — collapsing an empty container
             // is pointless, so the indicator is visually de-emphasised.
             const QColor chevronColor = m_empty
@@ -659,6 +659,7 @@ private:
         const QString opLabel = m_operation == SceneDocument::TreeNode::Translate ? QStringLiteral("T")
                               : m_operation == SceneDocument::TreeNode::Rotate   ? QStringLiteral("R")
                               : m_operation == SceneDocument::TreeNode::Mirror   ? QStringLiteral("M")
+                              : m_operation == SceneDocument::TreeNode::Color    ? QStringLiteral("C")
                                                                                  : QStringLiteral("S");
         const QRectF opBadgeRect(iconRect.left() + 1.0,
                                  iconRect.bottom() - 1.0,
@@ -675,6 +676,9 @@ private:
         } else if (m_operation == SceneDocument::TreeNode::Mirror) {
             badgeTop = QColor(252, 215, 238);
             badgeBottom = QColor(175, 85, 138);
+        } else if (m_operation == SceneDocument::TreeNode::Color) {
+            badgeTop = QColor(255, 235, 126);
+            badgeBottom = QColor(79, 163, 255);
         } else {
             badgeTop = QColor(205, 242, 218);
             badgeBottom = QColor(84, 158, 105);
@@ -691,6 +695,45 @@ private:
         // Axis label colour: on dark themes, derive from the fill so it reads
         // against the dark background; on light themes, use the traditional darker.
         const QColor axisLabelColor = dark ? fill.lighter(220) : fill.darker(160);
+
+        if (m_operation == SceneDocument::TreeNode::Color) {
+            const QColor color = m_color.isValid() ? m_color : QColor(79, 163, 255);
+            static const QString channelLabels[3] = {QStringLiteral("R"), QStringLiteral("G"), QStringLiteral("B")};
+            const int channelValues[3] = {color.red(), color.green(), color.blue()};
+            for (int channel = 0; channel < 3; ++channel) {
+                const QRectF rowRect = transformParameterControlRect(m_rect, channel, m_transformHeaderWidth);
+                const bool rowActive = (channel == m_activeTransformAxis);
+                const QString expr = QString::number(channelValues[channel]);
+
+                painter->setFont(valueFont);
+                painter->setPen(axisLabelColor);
+                painter->drawText(QRectF(rowRect.left(), rowRect.top(), TransformParamLabelArea - 2.0, rowRect.height()),
+                                  Qt::AlignLeft | Qt::AlignVCenter,
+                                  channelLabels[channel] + QStringLiteral(" ="));
+
+                const QRectF textRect(rowRect.left() + TransformParamLabelArea,
+                                      rowRect.top(),
+                                      rowRect.width() - TransformParamLabelArea,
+                                      rowRect.height());
+                const QVector<ExpressionTextSpan> spans = expressionSpansInTextRect(textRect, expr, metrics);
+                for (const ExpressionTextSpan &span : spans) {
+                    const bool numActive = rowActive && span.number && (span.start == m_activeTransformNumberStart);
+                    if (span.number) {
+                        paintRoundedPanel(painter, span.rect, 3.0,
+                                          QPen(numActive ? SceneTreePalette::pillBorderActive() : cPillBorder,
+                                               numActive ? 2 : 1),
+                                          QBrush(numActive ? SceneTreePalette::pillFillActive() : cPillFill));
+                    }
+                    painter->setPen(span.number ? cTextPrimary
+                                                : (dark ? QColor(140, 175, 220) : QColor(80, 110, 160)));
+                    const Qt::Alignment align = span.number
+                        ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                        : (Qt::AlignLeft | Qt::AlignVCenter);
+                    painter->drawText(span.rect, align, span.text);
+                }
+            }
+            return;
+        }
 
         static const QString axisLabels[3] = {QStringLiteral("X"), QStringLiteral("Y"), QStringLiteral("Z")};
         for (int axis = 0; axis < 3; ++axis) {

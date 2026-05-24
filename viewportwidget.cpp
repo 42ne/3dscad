@@ -978,6 +978,7 @@ static uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed = 0)
     seed = qHash(node.scale.x(), seed);
     seed = qHash(node.scale.y(), seed);
     seed = qHash(node.scale.z(), seed);
+    seed = qHash(node.color.rgba(), seed);
     for (const QString &expression : node.transformExpressions)
         seed = qHash(expression, seed);
     seed = qHash(node.children.size(), seed);

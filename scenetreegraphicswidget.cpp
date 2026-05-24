@@ -215,7 +215,7 @@ QRectF groupRectForPreviewContent(QRectF groupRect,
         return groupRect;
 
     const QRectF content = previewContentBounds(children, placeholderRect);
-    const qreal headerHeight = isTransformOperation(operation) ? 0.0 : GroupHeaderHeight;
+    const qreal headerHeight = isVerticalHeaderOperation(operation) ? 0.0 : GroupHeaderHeight;
     const qreal minBottom = groupRect.top() + headerHeight + GroupPadding * 2.0 + PrimitiveHeight;
     const qreal contentBottom = content.isValid() ? content.bottom() + GroupPadding : minBottom;
     groupRect.setBottom(qMax(minBottom, contentBottom));
@@ -612,6 +612,7 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
     // Hover overlays — drawn on top of all tree items.
     const bool hasActiveScrollControl = m_activeTransformControlNodeId > 0
+                                        || m_activeColorNodeId > 0
                                         || m_activeShapeParameterNodeId > 0
                                         || m_activeVariableNodeId > 0
                                         || m_activeForLoopNodeId > 0
@@ -651,6 +652,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
         const QPointF scenePosition = mapToScene(m_lastMousePosition);
         updateControlTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
         updateActiveTransformControl(scenePosition, true);
+        updateActiveColorChannelControl(scenePosition, true);
         updateActiveShapeParameterControl(scenePosition, true);
         updateActiveVariableNumberControl(scenePosition, true);
         updateActiveForLoopRangeControl(scenePosition, true);
@@ -894,6 +896,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     // ── Normal flow ──────────────────────────────────────────────────────────
     updateControlTooltip(event->globalPos(), scenePosition, controlDown);
     updateActiveTransformControl(scenePosition, controlDown);
+    updateActiveColorChannelControl(scenePosition, controlDown);
     updateActiveShapeParameterControl(scenePosition, controlDown);
     updateActiveVariableNumberControl(scenePosition, controlDown);
     updateActiveForLoopRangeControl(scenePosition, controlDown);
@@ -1046,6 +1049,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Control) {
         updateControlTooltip(mapToGlobal(m_lastMousePosition), mapToScene(m_lastMousePosition), false);
         updateActiveTransformControl(QPointF(), false);
+        updateActiveColorChannelControl(QPointF(), false);
         updateActiveShapeParameterControl(QPointF(), false);
         updateActiveVariableNumberControl(QPointF(), false);
         updateActiveForLoopRangeControl(QPointF(), false);
@@ -1087,6 +1091,10 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
             return;
         }
         if (wheelSteps != 0 && handleShapeParameterWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
+        if (wheelSteps != 0 && handleColorChannelWheel(scenePosition, wheelSteps)) {
             event->accept();
             return;
         }
@@ -1486,9 +1494,11 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
 QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth)
 {
     QVector<ChildLayout> children;
-    const bool transformGroup = isTransformOperation(node.operation);
-    const qreal headerWidth = transformGroup ? transformHeaderWidthForNode(node) : 0.0;
-    const qreal headerHeight = transformGroup ? 0.0 : GroupHeaderHeight;
+    const bool verticalHeaderGroup = isVerticalHeaderOperation(node.operation);
+    const qreal headerWidth = isTransformOperation(node.operation)
+                                  ? transformHeaderWidthForNode(node)
+                                  : verticalHeaderGroup ? TransformHeaderWidth : 0.0;
+    const qreal headerHeight = verticalHeaderGroup ? 0.0 : GroupHeaderHeight;
     QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;
     int moduleParameterCount = 0;
@@ -1576,12 +1586,22 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                       ? m_groupThumbnailCache->thumbnail(node.id)
                                       : QImage();
 
+    const int activeVerticalNodeId = m_activeColorNodeId > 0
+                                     ? m_activeColorNodeId
+                                     : m_activeTransformControlNodeId;
+    const int activeVerticalAxis = m_activeColorNodeId > 0
+                                   ? m_activeColorChannel
+                                   : m_activeTransformControlAxis;
+    const int activeVerticalNumberStart = m_activeColorNodeId > 0
+                                          ? 0
+                                          : m_activeTransformControlNumberStart;
+
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
                           [this](int nodeId) { handleTreeNodeSelected(nodeId); },
-                          m_activeTransformControlNodeId,
-                          m_activeTransformControlAxis,
-                          m_activeTransformControlNumberStart,
+                          activeVerticalNodeId,
+                          activeVerticalAxis,
+                          activeVerticalNumberStart,
                           0,
                           -1,
                           -1,
@@ -1671,7 +1691,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     // Root-level groups (depth == 0) are repositioned via the canvas-move grip strip,
     // not via the tree-structure drag handle — which always returns no-target for them.
     if (node.operation != SceneDocument::TreeNode::Scene && depth > 0) {
-        const QRectF handleRect = transformGroup
+        const QRectF handleRect = verticalHeaderGroup
                                       ? QRectF(rect.topLeft(), QSizeF(headerWidth, rect.height()))
                                       : QRectF(rect.topLeft(), QSizeF(rect.width(), GroupHeaderHeight));
         addNodeDragHandle(node.id, groupLabel, handleRect, rect, rect.size());
@@ -1994,6 +2014,21 @@ bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition,
     return true;
 }
 
+bool SceneTreeGraphicsWidget::handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    if (!m_scene)
+        return false;
+
+    int groupId = 0;
+    int channel = -1;
+    if (!colorChannelControlAt(scenePosition, &groupId, &channel))
+        return false;
+
+    emit colorChannelAdjusted(groupId, channel, static_cast<qreal>(wheelSteps));
+    updateActiveColorChannelControl(scenePosition, true);
+    return true;
+}
+
 bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps)
 {
     if (!m_scene)
@@ -2042,6 +2077,40 @@ bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePositi
 
     emit forLoopRangeAdjusted(nodeId, start, length, wheelSteps);
     updateActiveForLoopRangeControl(scenePosition, true);
+    return true;
+}
+
+bool SceneTreeGraphicsWidget::colorChannelControlAt(const QPointF &scenePosition,
+                                                    int *groupId,
+                                                    int *channel) const
+{
+    const GroupHitArea *bestArea = nullptr;
+    int bestChannel = -1;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.operation != SceneDocument::TreeNode::Color || !area.rect.contains(scenePosition))
+            continue;
+
+        int hitChannel = -1;
+        for (int i = 0; i < 3; ++i) {
+            if (transformParameterControlRect(area.rect, i, TransformHeaderWidth).contains(scenePosition)) {
+                hitChannel = i;
+                break;
+            }
+        }
+        if (hitChannel < 0)
+            continue;
+
+        if (!bestArea || area.depth > bestArea->depth) {
+            bestArea = &area;
+            bestChannel = hitChannel;
+        }
+    }
+
+    if (!bestArea)
+        return false;
+
+    if (groupId) *groupId = bestArea->groupId;
+    if (channel) *channel = bestChannel;
     return true;
 }
 
@@ -2332,6 +2401,17 @@ QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePo
                   .arg(labelForOperation(operation), axisName);
     }
 
+    int colorGroupId = 0;
+    int colorChannel = -1;
+    if (colorChannelControlAt(scenePosition, &colorGroupId, &colorChannel)) {
+        static const char *ChannelNames[] = {"R", "G", "B"};
+        const QString channelName = QString::fromLatin1(ChannelNames[qBound(0, colorChannel, 2)]);
+        setKey(QStringLiteral("color:%1:%2:%3").arg(colorGroupId).arg(colorChannel).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("Color %1 channel\nMouse wheel: change channel\nShift makes bigger steps").arg(channelName)
+            : QStringLiteral("Color %1 channel\nHold Ctrl + mouse wheel: change channel\nDrop blocks into the color body").arg(channelName);
+    }
+
     int variableNodeId = 0;
     int numberStart = -1;
     int numberLength = 0;
@@ -2446,6 +2526,24 @@ void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &sceneP
         refresh();
 
     emit transformControlHovered(groupId, operation, axis);
+}
+
+void SceneTreeGraphicsWidget::updateActiveColorChannelControl(const QPointF &scenePosition, bool enabled)
+{
+    int groupId = 0;
+    int channel = -1;
+    if (!enabled || !colorChannelControlAt(scenePosition, &groupId, &channel)) {
+        groupId = 0;
+        channel = -1;
+    }
+
+    if (m_activeColorNodeId == groupId && m_activeColorChannel == channel)
+        return;
+
+    m_activeColorNodeId = groupId;
+    m_activeColorChannel = channel;
+    if (!m_dragActive)
+        refresh();
 }
 
 void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled)
@@ -2685,6 +2783,22 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
                     if (ctl.start == numStart)
                         return ctl.rect;
                 }
+            }
+        }
+    }
+    {
+        int groupId = 0, channel = -1;
+        if (colorChannelControlAt(scenePosition, &groupId, &channel) && channel >= 0) {
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(groupId) : nullptr;
+            if (node) {
+                const QColor color = node->color.isValid() ? node->color : QColor(79, 163, 255);
+                const int channelValues[3] = {color.red(), color.green(), color.blue()};
+                const QString expr = QString::number(channelValues[qBound(0, channel, 2)]);
+                const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                const auto controls = transformParameterNumberControls(
+                    groupRectForNode(groupId), channel, expr, metrics, TransformHeaderWidth);
+                if (!controls.isEmpty())
+                    return controls.first().rect;
             }
         }
     }

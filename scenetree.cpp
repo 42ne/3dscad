@@ -307,6 +307,19 @@ bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, con
     return true;
 }
 
+bool SceneTree::updateGroupColor(int groupId, const QColor &color)
+{
+    TreeNode *node = nodeById(groupId);
+    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::Color)
+        return false;
+
+    if (node->color == color)
+        return false;
+
+    node->color = color;
+    return true;
+}
+
 bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId, int insertIndex)
 {
     if (m_root.id <= 0)

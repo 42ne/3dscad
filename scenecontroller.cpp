@@ -694,6 +694,31 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
 
 // ── Graphics-tree: module rename ──────────────────────────────────────────────
 
+void SceneController::handleColorChannelAdjusted(int groupId, int channel, qreal delta)
+{
+    if (channel < 0 || channel > 2 || qFuzzyIsNull(delta))
+        return;
+
+    const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group
+        || group->operation != SceneDocument::TreeNode::Color) {
+        return;
+    }
+
+    QColor color = group->color.isValid() ? group->color : QColor(79, 163, 255);
+    const int step = (QApplication::keyboardModifiers() & Qt::ShiftModifier) ? 10 : 5;
+    int channels[3] = {color.red(), color.green(), color.blue()};
+    channels[channel] = qBound(0, channels[channel] + int(delta) * step, 255);
+    color.setRgb(channels[0], channels[1], channels[2], color.alpha());
+
+    auto *command = new UpdateGroupColorCommand(&m_scene, groupId, color,
+                                                [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
+
 void SceneController::handleModuleRenameRequested(int groupId, const QString &newName)
 {
     auto *command = new RenameModuleCommand(&m_scene, groupId, newName,

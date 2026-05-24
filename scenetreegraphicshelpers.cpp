@@ -1055,7 +1055,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
-    {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), GroupMinWidth},
+    {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
 };
 
@@ -1086,6 +1086,12 @@ bool isTransformOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Rotate
            || operation == SceneDocument::TreeNode::Scale
            || operation == SceneDocument::TreeNode::Mirror;
+}
+
+bool isVerticalHeaderOperation(SceneDocument::TreeNode::Operation operation)
+{
+    return isTransformOperation(operation)
+           || operation == SceneDocument::TreeNode::Color;
 }
 
 QRectF placeholderRectForInsertIndex(const QRectF &contentRect, const QVector<QRectF> &childRects, int insertIndex, const QSizeF &previewSize)

@@ -89,6 +89,7 @@ public:
     void handleTransformValueAdjusted(int groupId, int axis,
                                        int numberStart, int numberLength,
                                        qreal delta);
+    void handleColorChannelAdjusted(int groupId, int channel, qreal delta);
     void handleModuleRenameRequested(int groupId, const QString &newName);
     void handleVariableRenameRequested(int variableId, const QString &newName);
     void handleShapeParameterAdjusted(int nodeId, int paramIndex,

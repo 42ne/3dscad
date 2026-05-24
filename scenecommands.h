@@ -155,6 +155,12 @@ public:
     UpdateForLoopCommand(SceneDocument *scene, int groupId, const QString &loopVariable, const QString &rangeExpression, std::function<void()> onChanged);
 };
 
+class UpdateGroupColorCommand : public SnapshotCommand
+{
+public:
+    UpdateGroupColorCommand(SceneDocument *scene, int groupId, const QColor &color, std::function<void()> onChanged);
+};
+
 class MoveTreeNodeCommand : public SnapshotCommand
 {
 public:

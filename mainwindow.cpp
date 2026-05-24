@@ -170,6 +170,8 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handleNodeDeleteRequested);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformValueAdjusted,
             m_controller, &SceneController::handleTransformValueAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::colorChannelAdjusted,
+            m_controller, &SceneController::handleColorChannelAdjusted);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformControlHovered,
             this, [this](int groupId, SceneDocument::TreeNode::Operation op, int axis) {
                 if (m_viewport) m_viewport->setTreeTransformControlPreview(groupId, op, axis);

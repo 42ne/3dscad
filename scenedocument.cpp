@@ -633,6 +633,11 @@ bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position,
     return m_tree.updateGroupTransform(groupId, position, rotation, scale, transformExpressions);
 }
 
+bool SceneDocument::updateGroupColor(int groupId, const QColor &color)
+{
+    return m_tree.updateGroupColor(groupId, color);
+}
+
 bool SceneDocument::isValidIndex(int index) const
 {
     return index >= 0 && index < m_shapes.size();

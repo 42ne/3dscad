@@ -79,6 +79,7 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool);
 QString toolNameForPrimitiveType(ShapeNode::Type type);
 bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operation *operation);
 bool isTransformOperation(SceneDocument::TreeNode::Operation operation);
+bool isVerticalHeaderOperation(SceneDocument::TreeNode::Operation operation);
 struct OperationVisual {
     SceneDocument::TreeNode::Operation operation;
     const char *toolName;

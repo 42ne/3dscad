@@ -10,7 +10,7 @@ namespace {
 
 QRectF groupContentRect(const QRectF &groupRect, SceneDocument::TreeNode::Operation operation)
 {
-    if (isTransformOperation(operation)) {
+    if (isVerticalHeaderOperation(operation)) {
         return groupRect.adjusted(TransformHeaderWidth + GroupPadding,
                                   GroupPadding,
                                   -GroupPadding,
@@ -261,7 +261,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     target.previewGroupOperation = bestArea->operation;
     target.previewCutSeparatorY = bestArea->cutSeparatorY;
     QRectF contentRect = groupContentRect(bestArea->rect, bestArea->operation);
-    if (isTransformOperation(bestArea->operation) && !bestArea->children.isEmpty())
+    if (isVerticalHeaderOperation(bestArea->operation) && !bestArea->children.isEmpty())
         contentRect.setLeft(bestArea->children.first().rect.left());
     const bool reorderInSourceGroup = sourceArea == bestArea && sourceChildIndex >= 0;
     QVector<ChildLayout> candidateChildren = childrenWithoutMovingNode(*bestArea,
@@ -473,7 +473,7 @@ void SceneTreeLayout::buildSourcePreview(const GroupHitArea *sourceArea,
     if (sourceArea->operation == SceneDocument::TreeNode::Difference)
         minContentHeight = DifferenceMinContentHeight;
 
-    const qreal headerHeight = isTransformOperation(sourceArea->operation) ? 0.0 : GroupHeaderHeight;
+    const qreal headerHeight = isVerticalHeaderOperation(sourceArea->operation) ? 0.0 : GroupHeaderHeight;
     const qreal minBottom = sourceArea->rect.top() + headerHeight + GroupPadding * 2.0 + minContentHeight;
     const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
     target->sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
@@ -555,8 +555,7 @@ const SceneTreeLayout::GroupHitArea *SceneTreeLayout::findBestDropArea(const QPo
         const bool pointHitsArea = area.rect.contains(scenePosition);
         const bool centerYHitsArea = scenePosition.y() >= area.rect.top()
                                      && scenePosition.y() <= area.rect.bottom();
-        const bool draggedRectHitsArea = movingNodeId > 0
-                                         && centerYHitsArea
+        const bool draggedRectHitsArea = centerYHitsArea
                                          && overlap.width() >= GroupPadding
                                          && overlap.height() >= qMin<qreal>(PrimitiveHeight, previewSize.height()) * 0.35;
 

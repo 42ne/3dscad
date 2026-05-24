@@ -50,6 +50,7 @@ signals:
     void treeNodeSelected(int nodeId);
     void treeNodeDeleteRequested(int nodeId);
     void transformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);
+    void colorChannelAdjusted(int groupId, int channel, qreal delta);
     void transformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void shapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
     void shapeParameterHovered(int shapeId, int parameter);
@@ -111,6 +112,7 @@ private:
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
+    bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
@@ -123,6 +125,7 @@ private:
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
+    bool colorChannelControlAt(const QPointF &scenePosition, int *groupId, int *channel) const;
     bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter, int *numberStart, int *numberLength) const;
     bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
@@ -131,6 +134,7 @@ private:
     void updateHoverHint(const QString &key, const QString &text);
     QString hoverHintTextForPosition(const QPointF &scenePosition, bool controlDown, QString *key) const;
     void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
+    void updateActiveColorChannelControl(const QPointF &scenePosition, bool enabled);
     void updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled);
     void updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled);
     void updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled);
@@ -234,6 +238,8 @@ private:
     int m_activeTransformControlAxis = -1;
     int m_activeTransformControlNumberStart = -1;
     SceneDocument::TreeNode::Operation m_activeTransformControlOperation = SceneDocument::TreeNode::Union;
+    int m_activeColorNodeId = 0;
+    int m_activeColorChannel = -1;
     int m_activeShapeParameterNodeId = 0;
     int m_activeShapeParameter = -1;
     int m_activeShapeParameterNumberStart = -1;

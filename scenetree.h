@@ -87,6 +87,7 @@ public:
     bool setVariableIsParameter(int variableId, bool isParameter);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
+    bool updateGroupColor(int groupId, const QColor &color);
 
     // Primitive management
     bool addPrimitive(int shapeId, TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
