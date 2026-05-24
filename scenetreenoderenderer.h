@@ -46,7 +46,8 @@ public:
 
     void renderModuleCall(const SceneDocument::TreeNode &node,
                           const QRectF &rect,
-                          const QVector<SceneTreeGraphics::ModuleCallParam> &params = {});
+                          const QVector<SceneTreeGraphics::ModuleCallParam> &params = {},
+                          const QImage &thumbnail = QImage());
 
     void renderGroup(const SceneDocument::TreeNode &node,
                      const QRectF &rect,

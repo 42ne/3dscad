@@ -760,7 +760,8 @@ public:
                        int activeParamVarNodeId,
                        int activeNumberStart,
                        qreal opacity,
-                       qreal zValue)
+                       qreal zValue,
+                       const QImage &thumbnail = QImage())
         : m_rect(rect)
         , m_moduleName(moduleName)
         , m_params(params)
@@ -768,6 +769,7 @@ public:
         , m_activeParamVarNodeId(activeParamVarNodeId)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_thumbnail(thumbnail)
     {
         setZValue(zValue);
     }
@@ -789,7 +791,7 @@ public:
                               Qt::NoBrush);
         }
 
-        // CALL badge
+        // CALL badge — shows thumbnail when one is available, "CALL" text otherwise.
         const qreal badgeH = 16.0;
         const QRectF badgeRect(m_rect.left() + 6.0,
                                m_rect.top() + (VariableHeight - badgeH) * 0.5,
@@ -803,7 +805,17 @@ public:
         badgeGradient.setColorAt(0.0, QColor(82, 145, 205));
         badgeGradient.setColorAt(1.0, QColor(24, 82, 135));
         paintRoundedPanel(painter, badgeRect, 4.0, QPen(QColor(170, 215, 255, 150), 1.0), QBrush(badgeGradient));
-        {
+
+        if (!m_thumbnail.isNull()) {
+            // Thumbnail replaces "CALL" text inside the badge.
+            const QRectF thumbRect = badgeRect.adjusted(1.5, 1.5, -1.5, -1.5);
+            QPainterPath clip;
+            clip.addRoundedRect(thumbRect, 2.5, 2.5);
+            painter->save();
+            painter->setClipPath(clip);
+            painter->drawImage(thumbRect, m_thumbnail);
+            painter->restore();
+        } else {
             painter->save();
             QFont badgeFont = painter->font();
             badgeFont.setBold(true);
@@ -878,6 +890,7 @@ private:
     int m_activeParamVarNodeId = 0;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    QImage m_thumbnail;
 };
 
 } // namespace
@@ -940,11 +953,12 @@ void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, 
 
 void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
                                              const QRectF &rect,
-                                             const QVector<SceneTreeGraphics::ModuleCallParam> &params)
+                                             const QVector<SceneTreeGraphics::ModuleCallParam> &params,
+                                             const QImage &thumbnail)
 {
     const int activeVarNodeId = node.id == m_activeModuleCallNodeId ? m_activeModuleCallVarNodeId : 0;
     const int activeNumStart = node.id == m_activeModuleCallNodeId ? m_activeModuleCallNumberStart : -1;
-    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0));
+    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0, thumbnail));
     m_scene->addItem(createTreeNodeSelectionItem(node.id, rect, 5.0, m_onSelected));
 }
 

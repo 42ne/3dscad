@@ -1441,12 +1441,16 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
     const int activeMCVarNodeId = (m_activeModuleCallNodeId == node.id) ? m_activeModuleCallVarNodeId : 0;
     const int activeMCNumberStart = (m_activeModuleCallNodeId == node.id) ? m_activeModuleCallNumberStart : -1;
 
+    const QImage callThumbnail = m_groupThumbnailCache
+        ? m_groupThumbnailCache->thumbnail(node.id)
+        : QImage();
+
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
                           [this](int nodeId) { handleTreeNodeSelected(nodeId); },
                           0, -1, -1, 0, -1, -1, 0, -1, 0, -1,
                           node.id, activeMCVarNodeId, activeMCNumberStart)
-        .renderModuleCall(node, rect, params);
+        .renderModuleCall(node, rect, params, callThumbnail);
 
     // Pass "call" (canonical tool name) not the module name — same reason as "var".
     addNodeDragHandle(node.id, QStringLiteral("call"), rect, rect, rect.size());

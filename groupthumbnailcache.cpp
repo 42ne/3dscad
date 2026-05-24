@@ -19,7 +19,8 @@ bool GroupThumbnailCache::isEligibleOperation(SceneDocument::TreeNode::Operation
         || op == Op::Intersection
         || op == Op::Hull
         || op == Op::Minkowski
-        || op == Op::Module;
+        || op == Op::Module
+        || op == Op::For;
 }
 
 void GroupThumbnailCache::collectEligibleGroups(const SceneDocument::TreeNode &node,
@@ -55,6 +56,60 @@ void GroupThumbnailCache::collectShapeIds(const SceneDocument::TreeNode &node, Q
         shapeIds.insert(node.shapeId);
     for (const SceneDocument::TreeNode &child : node.children)
         collectShapeIds(child, shapeIds);
+}
+
+void GroupThumbnailCache::collectModuleCalls(const SceneDocument::TreeNode &node,
+                                             QHash<int, SceneDocument::TreeNode> &calls)
+{
+    if (node.type == SceneDocument::TreeNode::ModuleCall)
+        calls[node.id] = node;
+    // Do NOT recurse into module declaration bodies.  Calls inside a module
+    // body are implementation details; rendering them in isolation (with the
+    // loop variable undefined, etc.) produces misleading results and can crash
+    // when the geometry references undefined variables or is too complex.
+    if (node.type == SceneDocument::TreeNode::Group
+        && node.operation == SceneDocument::TreeNode::Module)
+        return;
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectModuleCalls(child, calls);
+}
+
+// ── Node lookup ──────────────────────────────────────────────────────────────
+// Placed before fingerprinting so both fingerprint and rendering code can use it.
+
+static const SceneDocument::TreeNode *findNodeInTree(const SceneDocument::TreeNode &root, int id)
+{
+    if (root.id == id)
+        return &root;
+    for (const SceneDocument::TreeNode &child : root.children) {
+        const SceneDocument::TreeNode *found = findNodeInTree(child, id);
+        if (found)
+            return found;
+    }
+    return nullptr;
+}
+
+// Collects all module declarations transitively referenced by ModuleCall nodes
+// within `node`'s subtree.  `treeRoot` is used to look up declarations by ID.
+// `visited` prevents infinite recursion in case of pathological circular refs.
+static void collectReferencedModules(const SceneDocument::TreeNode &node,
+                                     const SceneDocument::TreeNode &treeRoot,
+                                     QHash<int, SceneDocument::TreeNode> &modules,
+                                     QSet<int> &visited)
+{
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        if (!visited.contains(node.shapeId)) {
+            visited.insert(node.shapeId);
+            const SceneDocument::TreeNode *modDecl = findNodeInTree(treeRoot, node.shapeId);
+            if (modDecl) {
+                modules[modDecl->id] = *modDecl;
+                // Recurse to capture modules that *this* module calls.
+                collectReferencedModules(*modDecl, treeRoot, modules, visited);
+            }
+        }
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectReferencedModules(child, treeRoot, modules, visited);
 }
 
 // ── Fingerprinting ───────────────────────────────────────────────────────────
@@ -96,9 +151,11 @@ static void serializeShapeNode(QDataStream &ds, const ShapeNode &shape)
        << shape.parameterExpressions;
 }
 
-QByteArray GroupThumbnailCache::computeFingerprint(const SceneDocument::TreeNode &groupNode,
-                                                   const QHash<int, ShapeNode> &allShapes,
-                                                   const QVector<SceneDocument::TreeNode> &globalVars)
+QByteArray GroupThumbnailCache::computeFingerprint(
+    const SceneDocument::TreeNode &groupNode,
+    const QHash<int, ShapeNode> &allShapes,
+    const QVector<SceneDocument::TreeNode> &globalVars,
+    const QHash<int, SceneDocument::TreeNode> &referencedModules)
 {
     QByteArray data;
     QDataStream ds(&data, QIODevice::WriteOnly);
@@ -111,9 +168,13 @@ QByteArray GroupThumbnailCache::computeFingerprint(const SceneDocument::TreeNode
     // The group's full tree structure.
     serializeTreeNode(ds, groupNode);
 
-    // Shapes referenced anywhere within the group subtree.
+    // Shapes referenced within the group subtree AND within any referenced modules
+    // (so that changing a module's primitive dimensions triggers a re-render here).
     QSet<int> shapeIds;
     collectShapeIds(groupNode, shapeIds);
+    for (const SceneDocument::TreeNode &modDecl : referencedModules)
+        collectShapeIds(modDecl, shapeIds);
+
     QList<int> sortedIds = shapeIds.values();
     std::sort(sortedIds.begin(), sortedIds.end());
     ds << static_cast<int>(sortedIds.size());
@@ -122,6 +183,60 @@ QByteArray GroupThumbnailCache::computeFingerprint(const SceneDocument::TreeNode
         if (it != allShapes.end())
             serializeShapeNode(ds, *it);
     }
+
+    // Serialize referenced module declarations (sorted by id for determinism).
+    // This ensures changes to a called module propagate to this group's fingerprint.
+    QList<int> sortedModIds = referencedModules.keys();
+    std::sort(sortedModIds.begin(), sortedModIds.end());
+    ds << static_cast<int>(sortedModIds.size());
+    for (int id : sortedModIds)
+        serializeTreeNode(ds, referencedModules[id]);
+
+    return data;
+}
+
+QByteArray GroupThumbnailCache::computeModuleCallFingerprint(
+    const SceneDocument::TreeNode &callNode,
+    const SceneDocument::TreeNode &modDecl,
+    const QHash<int, ShapeNode> &allShapes,
+    const QVector<SceneDocument::TreeNode> &globalVars,
+    const QHash<int, SceneDocument::TreeNode> &referencedModules)
+{
+    QByteArray data;
+    QDataStream ds(&data, QIODevice::WriteOnly);
+
+    // Global variables influence expressions inside the module.
+    ds << static_cast<int>(globalVars.size());
+    for (const SceneDocument::TreeNode &var : globalVars)
+        serializeTreeNode(ds, var);
+
+    // The call node (holds argument overrides).
+    serializeTreeNode(ds, callNode);
+
+    // The full module declaration subtree.
+    serializeTreeNode(ds, modDecl);
+
+    // Shapes referenced in the module body AND in any modules it calls.
+    QSet<int> shapeIds;
+    collectShapeIds(modDecl, shapeIds);
+    for (const SceneDocument::TreeNode &mod : referencedModules)
+        collectShapeIds(mod, shapeIds);
+
+    QList<int> sortedIds = shapeIds.values();
+    std::sort(sortedIds.begin(), sortedIds.end());
+    ds << static_cast<int>(sortedIds.size());
+    for (int id : sortedIds) {
+        auto it = allShapes.find(id);
+        if (it != allShapes.end())
+            serializeShapeNode(ds, *it);
+    }
+
+    // Serialize transitively referenced module declarations.
+    QList<int> sortedModIds = referencedModules.keys();
+    std::sort(sortedModIds.begin(), sortedModIds.end());
+    ds << static_cast<int>(sortedModIds.size());
+    for (int id : sortedModIds)
+        serializeTreeNode(ds, referencedModules[id]);
 
     return data;
 }
@@ -152,14 +267,26 @@ GroupThumbnailCache::~GroupThumbnailCache()
 
 void GroupThumbnailCache::syncGroups(const SceneDocument &scene)
 {
-    // Collect all eligible group nodes.
+    // Collect eligible groups and module calls.
+    //
+    // IMPORTANT: iterate treeRoot().children rather than passing treeRoot()
+    // itself.  The synthetic scene root is Group+Module, so passing it
+    // directly to collectEligibleGroups would add the root node as an eligible
+    // group (Module is an eligible operation).  The resulting sub-document
+    // would try to render the entire scene multiple times inside a union,
+    // causing excessive Manifold CSG work and a crash on complex scenes.
     QHash<int, SceneDocument::TreeNode> currentGroups;
-    collectEligibleGroups(scene.treeRoot(), currentGroups);
+    for (const SceneDocument::TreeNode &child : scene.treeRoot().children)
+        collectEligibleGroups(child, currentGroups);
 
-    // Purge cache entries for groups that no longer exist.
+    QHash<int, SceneDocument::TreeNode> currentCalls;
+    for (const SceneDocument::TreeNode &child : scene.treeRoot().children)
+        collectModuleCalls(child, currentCalls);
+
+    // Purge cache entries for nodes that no longer exist.
     const QList<int> cachedIds = m_cache.keys();
     for (int id : cachedIds) {
-        if (!currentGroups.contains(id)) {
+        if (!currentGroups.contains(id) && !currentCalls.contains(id)) {
             m_cache.remove(id);
             m_lastFingerprint.remove(id);
             m_pending.remove(id);
@@ -175,13 +302,44 @@ void GroupThumbnailCache::syncGroups(const SceneDocument &scene)
     QVector<SceneDocument::TreeNode> globalVars;
     collectGlobalVariables(scene.treeRoot(), globalVars);
 
-    // Mark groups whose fingerprint changed since the last render.
     bool anyDirty = false;
+
+    // Mark groups whose fingerprint changed since the last render.
+    // Include module declarations transitively called by the group so that
+    // changes inside a module (e.g. tooth dimensions) invalidate any for-loop
+    // or other group that calls it.
     for (auto it = currentGroups.constBegin(); it != currentGroups.constEnd(); ++it) {
         const int groupId = it.key();
-        const QByteArray fp = computeFingerprint(it.value(), shapesById, globalVars);
+
+        QHash<int, SceneDocument::TreeNode> referencedModules;
+        QSet<int> visited;
+        collectReferencedModules(it.value(), scene.treeRoot(), referencedModules, visited);
+
+        const QByteArray fp = computeFingerprint(it.value(), shapesById, globalVars, referencedModules);
         if (!m_lastFingerprint.contains(groupId) || m_lastFingerprint[groupId] != fp) {
             m_pending.insert(groupId);
+            anyDirty = true;
+        }
+    }
+
+    // Mark module calls whose fingerprint changed since the last render.
+    for (auto it = currentCalls.constBegin(); it != currentCalls.constEnd(); ++it) {
+        const int callId = it.key();
+        const SceneDocument::TreeNode *modDecl = scene.treeNodeById(it.value().shapeId);
+        if (!modDecl)
+            continue; // orphaned call — skip, will be purged next cycle
+
+        // Collect modules called (transitively) by the module body so that
+        // changes inside a called module propagate to this call's fingerprint.
+        QHash<int, SceneDocument::TreeNode> referencedModules;
+        QSet<int> visited;
+        visited.insert(modDecl->id); // skip the module itself if it recurses
+        collectReferencedModules(*modDecl, scene.treeRoot(), referencedModules, visited);
+
+        const QByteArray fp = computeModuleCallFingerprint(
+            it.value(), *modDecl, shapesById, globalVars, referencedModules);
+        if (!m_lastFingerprint.contains(callId) || m_lastFingerprint[callId] != fp) {
+            m_pending.insert(callId);
             anyDirty = true;
         }
     }
@@ -214,18 +372,6 @@ void GroupThumbnailCache::setSuspended(bool suspended)
 
 // ── Rendering ────────────────────────────────────────────────────────────────
 
-static const SceneDocument::TreeNode *findNodeInTree(const SceneDocument::TreeNode &root, int id)
-{
-    if (root.id == id)
-        return &root;
-    for (const SceneDocument::TreeNode &child : root.children) {
-        const SceneDocument::TreeNode *found = findNodeInTree(child, id);
-        if (found)
-            return found;
-    }
-    return nullptr;
-}
-
 void GroupThumbnailCache::onRenderTimerTimeout()
 {
     // If a render is already running we leave m_pending intact; onRenderFinished
@@ -236,41 +382,86 @@ void GroupThumbnailCache::onRenderTimerTimeout()
     const QSet<int> toRender = m_pending;
     m_pending.clear();
 
-    // Shape lookup from the captured snapshot (used for fingerprinting only).
+    // Shape lookup from the captured snapshot (used for fingerprinting).
     QHash<int, ShapeNode> shapesById;
     for (const ShapeNode &shape : m_pendingSnapshot.shapes)
         shapesById[shape.id] = shape;
 
-    // Build per-group sub-snapshots on the main thread; rendering happens off it.
-    using SubItem = QPair<int, SceneDocument::Snapshot>; // {groupId, subSnap}
+    // Build per-node sub-snapshots on the main thread; rendering happens off it.
+    using SubItem = QPair<int, SceneDocument::Snapshot>; // {nodeId, subSnap}
     QVector<SubItem> items;
     m_inflightFingerprints.clear();
 
-    for (int groupId : toRender) {
-        const SceneDocument::TreeNode *groupNode =
-            findNodeInTree(m_pendingSnapshot.treeRoot, groupId);
+    for (int nodeId : toRender) {
+        const SceneDocument::TreeNode *nodePtr =
+            findNodeInTree(m_pendingSnapshot.treeRoot, nodeId);
 
-        if (!groupNode) {
-            // Group was removed between syncGroups() and the timer firing.
-            m_cache.remove(groupId);
-            m_lastFingerprint.remove(groupId);
+        if (!nodePtr) {
+            // Node was removed between syncGroups() and the timer firing.
+            m_cache.remove(nodeId);
+            m_lastFingerprint.remove(nodeId);
             continue;
         }
 
-        // Minimal sub-document: global variables + the target group node.
+        // Minimal sub-document: global variables + node-specific content.
         SceneDocument::Snapshot subSnap = m_pendingSnapshot;
         subSnap.treeRoot.children.clear();
         for (const SceneDocument::TreeNode &var : m_globalVars)
             subSnap.treeRoot.children.append(var);
-        subSnap.treeRoot.children.append(*groupNode);
+
+        QByteArray fp;
+        if (nodePtr->type == SceneDocument::TreeNode::ModuleCall) {
+            // Sub-document: module declaration (+ all modules it calls) + call node.
+            const SceneDocument::TreeNode *modDecl =
+                findNodeInTree(m_pendingSnapshot.treeRoot, nodePtr->shapeId);
+            if (!modDecl) {
+                m_cache.remove(nodeId);
+                m_lastFingerprint.remove(nodeId);
+                continue;
+            }
+
+            // Collect modules transitively called by the module body.
+            QHash<int, SceneDocument::TreeNode> referencedModules;
+            QSet<int> visited;
+            visited.insert(modDecl->id);
+            collectReferencedModules(*modDecl, m_pendingSnapshot.treeRoot,
+                                     referencedModules, visited);
+
+            // Append transitively called module declarations first.
+            QList<int> sortedModIds = referencedModules.keys();
+            std::sort(sortedModIds.begin(), sortedModIds.end());
+            for (int modId : sortedModIds)
+                subSnap.treeRoot.children.append(referencedModules[modId]);
+
+            subSnap.treeRoot.children.append(*modDecl);
+            subSnap.treeRoot.children.append(*nodePtr);
+            fp = computeModuleCallFingerprint(
+                *nodePtr, *modDecl, shapesById, m_globalVars, referencedModules);
+        } else {
+            // Collect module declarations called (transitively) within this group
+            // so they are present in the sub-document for the renderer.
+            QHash<int, SceneDocument::TreeNode> referencedModules;
+            QSet<int> visited;
+            collectReferencedModules(*nodePtr, m_pendingSnapshot.treeRoot,
+                                     referencedModules, visited);
+
+            // Append module declarations before the group node so the code
+            // generator encounters the definitions before any calls.
+            QList<int> sortedModIds = referencedModules.keys();
+            std::sort(sortedModIds.begin(), sortedModIds.end());
+            for (int modId : sortedModIds)
+                subSnap.treeRoot.children.append(referencedModules[modId]);
+
+            subSnap.treeRoot.children.append(*nodePtr);
+            fp = computeFingerprint(*nodePtr, shapesById, m_globalVars, referencedModules);
+        }
 
         // CRITICAL: treeSnapshot.treeRoot must match treeRoot so that
         // SceneDocument::restoreSnapshot takes the treeSnapshot path (id > 0).
         subSnap.treeSnapshot.treeRoot = subSnap.treeRoot;
 
-        items.append({groupId, subSnap});
-        m_inflightFingerprints[groupId] =
-            computeFingerprint(*groupNode, shapesById, m_globalVars);
+        items.append({nodeId, subSnap});
+        m_inflightFingerprints[nodeId] = fp;
     }
 
     if (items.isEmpty())
@@ -309,7 +500,7 @@ void GroupThumbnailCache::onRenderFinished()
         }
     }
 
-    // Commit fingerprints only for groups whose render succeeded.
+    // Commit fingerprints only for nodes whose render succeeded.
     for (auto it = m_inflightFingerprints.constBegin();
          it != m_inflightFingerprints.constEnd(); ++it) {
         if (m_cache.contains(it.key()))
@@ -320,7 +511,7 @@ void GroupThumbnailCache::onRenderFinished()
     if (anyRendered)
         emit thumbnailsUpdated();
 
-    // Groups that were dirtied while the render was in flight can go now.
+    // Nodes that were dirtied while the render was in flight can go now.
     if (!m_pending.isEmpty() && !m_suspended)
         m_renderTimer->start(RenderDelayMs);
 }

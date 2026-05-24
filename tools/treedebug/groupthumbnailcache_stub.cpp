@@ -14,7 +14,8 @@ bool GroupThumbnailCache::isEligibleOperation(SceneDocument::TreeNode::Operation
         || op == Op::Intersection
         || op == Op::Hull
         || op == Op::Minkowski
-        || op == Op::Module;
+        || op == Op::Module
+        || op == Op::For;
 }
 
 GroupThumbnailCache::GroupThumbnailCache(QSize size, QObject *parent)

@@ -13,12 +13,13 @@
 #include <QVector>
 
 // Manages thumbnail renders for scene tree group nodes (Union, Difference,
-// Intersection, Hull, Minkowski, Module).
+// Intersection, Hull, Minkowski, Module, For) and ModuleCall nodes.
 // Works identically to NodeThumbnailCache: syncGroups() detects changed groups
 // and schedules a deferred render; results arrive via thumbnailsUpdated().
 //
 // The thumbnail replaces the abstract operation icon in the group card header,
 // giving the user a small live preview of what the group produces.
+// For ModuleCall nodes the thumbnail is shown inside the CALL badge.
 class GroupThumbnailCache : public QObject
 {
     Q_OBJECT
@@ -31,7 +32,8 @@ public:
     static bool isEligibleOperation(SceneDocument::TreeNode::Operation op);
 
     // Compare the current scene state with the last-rendered set.
-    // Groups whose subtree or referenced shapes changed are queued for re-render.
+    // Groups and module calls whose subtree or referenced shapes changed are
+    // queued for re-render.
     void syncGroups(const SceneDocument &scene);
 
     // Return cached thumbnail for groupNodeId, or a null QImage if not yet ready.
@@ -52,12 +54,25 @@ private:
 
     static void collectEligibleGroups(const SceneDocument::TreeNode &node,
                                       QHash<int, SceneDocument::TreeNode> &groups);
+    static void collectModuleCalls(const SceneDocument::TreeNode &node,
+                                   QHash<int, SceneDocument::TreeNode> &calls);
     static void collectGlobalVariables(const SceneDocument::TreeNode &treeRoot,
                                        QVector<SceneDocument::TreeNode> &vars);
     static void collectShapeIds(const SceneDocument::TreeNode &node, QSet<int> &shapeIds);
-    static QByteArray computeFingerprint(const SceneDocument::TreeNode &groupNode,
-                                         const QHash<int, ShapeNode> &allShapes,
-                                         const QVector<SceneDocument::TreeNode> &globalVars);
+    // referencedModules: module declarations (transitively) called by the group;
+    // included in the hash so module body changes propagate to the group's fingerprint.
+    static QByteArray computeFingerprint(
+        const SceneDocument::TreeNode &groupNode,
+        const QHash<int, ShapeNode> &allShapes,
+        const QVector<SceneDocument::TreeNode> &globalVars,
+        const QHash<int, SceneDocument::TreeNode> &referencedModules = {});
+    // referencedModules: module declarations transitively called by modDecl's body.
+    static QByteArray computeModuleCallFingerprint(
+        const SceneDocument::TreeNode &callNode,
+        const SceneDocument::TreeNode &modDecl,
+        const QHash<int, ShapeNode> &allShapes,
+        const QVector<SceneDocument::TreeNode> &globalVars,
+        const QHash<int, SceneDocument::TreeNode> &referencedModules = {});
 
     QSize m_size;
     QHash<int, QImage>     m_cache;           // groupId → ready thumbnail
