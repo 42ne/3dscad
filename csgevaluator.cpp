@@ -1019,21 +1019,16 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
     return preview;
 }
 
-static bool treeHasBooleanOperation(const SceneDocument::TreeNode &node)
+// ── Single-pass tree capability detection ─────────────────────────────────────
+// Replaces five separate recursive traversals with one.
+struct TreeCapabilities
 {
-    if (node.type == SceneDocument::TreeNode::Group
-        && (node.operation == SceneDocument::TreeNode::Difference
-            || node.operation == SceneDocument::TreeNode::Intersection)) {
-        return true;
-    }
-
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (treeHasBooleanOperation(child))
-            return true;
-    }
-
-    return false;
-}
+    bool hasBoolean    = false; // Difference or Intersection group anywhere in tree
+    bool hasTransform  = false; // non-trivial Translate/Rotate/Scale/Mirror/Hull/Minkowski
+    bool hasFor        = false; // For group anywhere in tree
+    bool hasModuleCall = false; // ModuleCall node anywhere in tree
+    bool hasColor      = false; // Color group anywhere in tree
+};
 
 static bool hasVectorValue(const QVector3D &vector)
 {
@@ -1047,75 +1042,50 @@ static bool hasScaleValue(const QVector3D &vector)
            || !qFuzzyCompare(vector.z(), 1.0f);
 }
 
-static bool treeHasGroupTransform(const SceneDocument::TreeNode &node)
+static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCapabilities &caps)
 {
-    if (node.type == SceneDocument::TreeNode::Group) {
-        if (node.operation == SceneDocument::TreeNode::Translate && hasVectorValue(node.position))
-            return true;
-        if (node.operation == SceneDocument::TreeNode::Rotate && hasVectorValue(node.rotation))
-            return true;
-        if (node.operation == SceneDocument::TreeNode::Scale && hasScaleValue(node.scale))
-            return true;
-        if (node.operation == SceneDocument::TreeNode::Mirror)
-            return true;
-        if (node.operation == SceneDocument::TreeNode::Hull)
-            return true;
-        if (node.operation == SceneDocument::TreeNode::Minkowski)
-            return true;
+    // Early exit once every flag is set — no point descending further.
+    if (caps.hasBoolean && caps.hasTransform && caps.hasFor && caps.hasModuleCall && caps.hasColor)
+        return;
+
+    if (node.type == SceneDocument::TreeNode::ModuleCall) {
+        caps.hasModuleCall = true;
+    } else if (node.type == SceneDocument::TreeNode::Group) {
+        switch (node.operation) {
+        case SceneDocument::TreeNode::Difference:
+        case SceneDocument::TreeNode::Intersection:
+            caps.hasBoolean = true;
+            break;
+        case SceneDocument::TreeNode::Translate:
+            if (hasVectorValue(node.position))
+                caps.hasTransform = true;
+            break;
+        case SceneDocument::TreeNode::Rotate:
+            if (hasVectorValue(node.rotation))
+                caps.hasTransform = true;
+            break;
+        case SceneDocument::TreeNode::Scale:
+            if (hasScaleValue(node.scale))
+                caps.hasTransform = true;
+            break;
+        case SceneDocument::TreeNode::Mirror:
+        case SceneDocument::TreeNode::Hull:
+        case SceneDocument::TreeNode::Minkowski:
+            caps.hasTransform = true;
+            break;
+        case SceneDocument::TreeNode::For:
+            caps.hasFor = true;
+            break;
+        case SceneDocument::TreeNode::Color:
+            caps.hasColor = true;
+            break;
+        default:
+            break;
+        }
     }
 
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (treeHasGroupTransform(child))
-            return true;
-    }
-
-    return false;
-}
-
-static bool treeHasForOperation(const SceneDocument::TreeNode &node)
-{
-    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::For)
-        return true;
-
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (treeHasForOperation(child))
-            return true;
-    }
-
-    return false;
-}
-
-static bool treeHasModuleCall(const SceneDocument::TreeNode &node)
-{
-    if (node.type == SceneDocument::TreeNode::ModuleCall)
-        return true;
-
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (treeHasModuleCall(child))
-            return true;
-    }
-
-    return false;
-}
-
-static bool treeHasColorOperation(const SceneDocument::TreeNode &node)
-{
-    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::Color)
-        return true;
-
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (treeHasColorOperation(child))
-            return true;
-    }
-
-    return false;
-}
-
-static bool treeHasModuleDeclarationChild(const SceneDocument::TreeNode &node)
-{
-    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::Module)
-        return true;
-    return false;
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectTreeCapabilities(child, caps);
 }
 
 static CsgPreview buildColoredTreePreview(const SceneDocument &scene)
@@ -1156,14 +1126,18 @@ static QColor firstTreeColor(const SceneDocument::TreeNode &node, const QColor &
 CsgPreview buildCsgPreview(const SceneDocument &scene)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
-    const bool hasTreeBoolean = treeHasBooleanOperation(scene.treeRoot());
-    const bool hasGroupTransform = treeHasGroupTransform(scene.treeRoot());
-    const bool hasForOperation = treeHasForOperation(scene.treeRoot());
-    const bool hasModuleCall = treeHasModuleCall(scene.treeRoot());
-    const bool hasColorOperation = treeHasColorOperation(scene.treeRoot());
+
+    TreeCapabilities caps;
+    collectTreeCapabilities(scene.treeRoot(), caps);
+    const bool hasTreeBoolean    = caps.hasBoolean;
+    const bool hasGroupTransform = caps.hasTransform;
+    const bool hasForOperation   = caps.hasFor;
+    const bool hasModuleCall     = caps.hasModuleCall;
+    const bool hasColorOperation = caps.hasColor;
+
     bool hasModuleDeclaration = false;
     for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
-        if (treeHasModuleDeclarationChild(child)) {
+        if (isTopLevelModuleDeclaration(child)) {
             hasModuleDeclaration = true;
             break;
         }
