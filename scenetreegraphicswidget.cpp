@@ -1,4 +1,5 @@
 #include "scenetreegraphicswidget.h"
+#include "groupthumbnailcache.h"
 #include "nodethumbnailcache.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenetreepalette.h"
@@ -352,6 +353,10 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
             this, &SceneTreeGraphicsWidget::refresh);
 
+    m_groupThumbnailCache = new GroupThumbnailCache(QSize(64, 64), this);
+    connect(m_groupThumbnailCache, &GroupThumbnailCache::thumbnailsUpdated,
+            this, &SceneTreeGraphicsWidget::refresh);
+
 }
 
 void SceneTreeGraphicsWidget::setSceneDocument(const SceneDocument *scene)
@@ -386,6 +391,7 @@ void SceneTreeGraphicsWidget::refresh()
     updateSceneRect();
     updateToolbarOverlay();
     syncThumbnailCache();
+    syncGroupThumbnailCache();
 }
 
 void SceneTreeGraphicsWidget::resetGraphicsScene()
@@ -1346,6 +1352,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     }
     m_treeLayout.addGroup({rect, node.id, depth, node.operation, cutSeparatorY, moduleParameterSeparatorY, moduleParameterCount, children});
 
+    const QImage groupThumbnail = (m_groupThumbnailCache && GroupThumbnailCache::isEligibleOperation(node.operation))
+                                      ? m_groupThumbnailCache->thumbnail(node.id)
+                                      : QImage();
+
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
                           [this](int nodeId) { handleTreeNodeSelected(nodeId); },
@@ -1360,7 +1370,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           m_activeForLoopNodeId,
                           m_activeForLoopNumberStart)
         .setTheme(m_treeTheme)
-        .renderGroup(node, rect, depth, cutSeparatorY);
+        .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail);
 
     if (node.operation == SceneDocument::TreeNode::Module) {
         const qreal labelLeft = rect.left() + GroupPadding + PrimitiveIconSize + 10.0;
@@ -2552,6 +2562,8 @@ void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, cons
     m_dragActive = true;
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(true);
+    if (m_groupThumbnailCache)
+        m_groupThumbnailCache->setSuspended(true);
 
     const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
     const DropTarget target = dropTargetForToolAt(scenePosition,
@@ -2596,6 +2608,8 @@ void SceneTreeGraphicsWidget::clearDropPreview()
     setTreeItemsVisible(true);
     if (m_thumbnailCache)
         m_thumbnailCache->setSuspended(false);
+    if (m_groupThumbnailCache)
+        m_groupThumbnailCache->setSuspended(false);
 }
 
 void SceneTreeGraphicsWidget::startDropPreviewAnimation(const DropTarget &target,
@@ -2729,6 +2743,14 @@ void SceneTreeGraphicsWidget::syncThumbnailCache()
     QHash<int, ShapeNode> primitiveShapes;
     collectPrimitiveNodeShapes(m_scene->treeRoot(), &primitiveShapes);
     m_thumbnailCache->syncPrimitives(primitiveShapes);
+}
+
+void SceneTreeGraphicsWidget::syncGroupThumbnailCache()
+{
+    if (!m_groupThumbnailCache || !m_scene)
+        return;
+
+    m_groupThumbnailCache->syncGroups(*m_scene);
 }
 
 void SceneTreeGraphicsWidget::collectPrimitiveNodeShapes(const SceneDocument::TreeNode &node,

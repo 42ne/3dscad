@@ -21,6 +21,7 @@ class QPainter;
 class QResizeEvent;
 class QShowEvent;
 class QTimer;
+class GroupThumbnailCache;
 class NodeThumbnailCache;
 class SceneTreeInlineTextInput;
 
@@ -142,6 +143,7 @@ private:
     QString labelForPrimitive(int shapeId) const;
     ShapeNode::Type typeForPrimitive(int shapeId) const;
     void syncThumbnailCache();
+    void syncGroupThumbnailCache();
     void collectPrimitiveNodeShapes(const SceneDocument::TreeNode &node,
                                     QHash<int, ShapeNode> *out) const;
 
@@ -149,6 +151,7 @@ private:
     QGraphicsScene *m_graphicsScene = nullptr;
     const SceneDocument *m_scene = nullptr;
     NodeThumbnailCache *m_thumbnailCache = nullptr;
+    GroupThumbnailCache *m_groupThumbnailCache = nullptr;
     SceneTreeLayout m_treeLayout;
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_toolbarItems;

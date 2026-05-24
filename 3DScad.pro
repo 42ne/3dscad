@@ -21,6 +21,7 @@ SOURCES += \
     examplebrowsermenu.cpp \
     theme.cpp \
     examplepreviewpopup.cpp \
+    groupthumbnailcache.cpp \
     main.cpp \
     nodethumbnailcache.cpp \
     mainwindow.cpp \
@@ -50,6 +51,7 @@ HEADERS += \
     examplebrowsermenu.h \
     theme.h \
     examplepreviewpopup.h \
+    groupthumbnailcache.h \
     scenecontroller.h \
     nodethumbnailcache.h \
     expression.h \

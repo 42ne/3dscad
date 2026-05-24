@@ -51,7 +51,8 @@ public:
     void renderGroup(const SceneDocument::TreeNode &node,
                      const QRectF &rect,
                      int depth,
-                     qreal cutSeparatorY);
+                     qreal cutSeparatorY,
+                     const QImage &thumbnail = QImage());
 
     // Set the active visual theme (0 = Frost, 1 = Glass, 2 = Embers, 3 = Deep).
     // Returns *this so it can be chained: SceneTreeNodeRenderer(...).setTheme(t).renderXxx(...)

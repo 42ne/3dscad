@@ -387,6 +387,7 @@ public:
                   const QString &loopRangeExpression = QString(),
                   int activeForLoopNumberStart = -1,
                   const QColor &color = QColor(),
+                  const QImage &thumbnail = QImage(),
                   int depth = 0,
                   int theme = 0)
         : m_rect(rect)
@@ -400,6 +401,7 @@ public:
         , m_activeTransformAxis(activeTransformAxis)
         , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_color(color)
+        , m_thumbnail(thumbnail)
         , m_operation(operation)
         , m_selected(selected)
         , m_empty(empty)
@@ -534,7 +536,18 @@ private:
                               headerIconSize,
                               headerIconSize);
         const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
-        paintOperationIcon(painter, m_operation, iconRect, iconAccent);
+
+        if (!m_thumbnail.isNull()) {
+            // Draw the live 3-D thumbnail in place of the abstract operation icon.
+            painter->save();
+            QPainterPath clip;
+            clip.addRoundedRect(iconRect.adjusted(0.5, 0.5, -0.5, -0.5), 4.0, 4.0);
+            painter->setClipPath(clip);
+            painter->drawImage(iconRect, m_thumbnail);
+            painter->restore();
+        } else {
+            paintOperationIcon(painter, m_operation, iconRect, iconAccent);
+        }
 
         if (m_operation == SceneDocument::TreeNode::For) {
             const QString variableName    = m_loopVariable.trimmed().isEmpty()      ? QStringLiteral("i")         : m_loopVariable.trimmed();
@@ -717,6 +730,7 @@ private:
     int         m_activeTransformAxis        = -1;
     int         m_activeTransformNumberStart = -1;
     QColor      m_color;
+    QImage      m_thumbnail;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
     bool        m_selected            = false;
     bool        m_empty               = false;
@@ -929,7 +943,8 @@ void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node
 void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         const QRectF &rect,
                                         int depth,
-                                        qreal cutSeparatorY)
+                                        qreal cutSeparatorY,
+                                        const QImage &thumbnail)
 {
     const QVector3D transformValues = node.operation == SceneDocument::TreeNode::Translate ? node.position
                                     : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
@@ -948,7 +963,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformValues, activeAxis, activeNumberStart,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
-                                       node.color,
+                                       node.color, thumbnail,
                                        depth, m_theme));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
@@ -980,7 +995,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
-                                 QColor(),
+                                 QColor(), QImage(),
                                  0, theme);
     } else {
         ShapeNode shape;
@@ -1035,7 +1050,7 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
-                                   color,
+                                   color, QImage(),
                                    depth, theme);
     scene->addItem(item);
     appendPreviewItem(items, item);
