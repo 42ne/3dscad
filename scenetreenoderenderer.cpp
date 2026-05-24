@@ -131,6 +131,73 @@ void paintGlossBadge(QPainter *painter,
     painter->restore();
 }
 
+// Returns a QPainterPath tracing the outer silhouette of the primitive icon,
+// expanded by `ex` pixels on all sides so the selection glow appears as a
+// visible halo around the icon's own contour.
+//
+// arcTo(rect, startAngle, spanAngle): positive spanAngle = counter-clockwise
+// in mathematical convention (visually counter-clockwise with Qt's Y-down coords,
+// meaning positive span goes from right→top→left).
+// Negative span goes right→bottom→left (clockwise on screen).
+// We use negative spans to draw the visible "over the top" and "under the bottom"
+// arcs for cylinders and cones.
+static QPainterPath primitiveSelectionPath(ShapeNode::Type type, const QRectF &r)
+{
+    constexpr qreal ex = 5.0; // expand beyond icon rect (same as old ellipse adjustment)
+    QPainterPath path;
+
+    // ── Sphere ── simple ellipse, same size as before
+    if (type == ShapeNode::Sphere) {
+        path.addEllipse(r.adjusted(-ex, -ex, ex, ex));
+        return path;
+    }
+
+    // ── Cylinder ── stadium: top elliptical cap + straight sides + bottom cap
+    if (type == ShapeNode::Cylinder) {
+        // Icon geometry uses inset=3; we pull it back by ex to expand the silhouette.
+        const qreal topH  = r.height() * 0.34;
+        const qreal inset = 3.0 - ex;                  // negative → expand outward
+        const QRectF top(r.left()  + inset, r.top()    + inset,
+                         r.width() - inset * 2.0,      topH);
+        const QRectF bot(top.left(), r.bottom() - topH - inset, top.width(), topH);
+        path.moveTo(top.left(), top.center().y());
+        path.arcTo(top, 180, -180);                    // clockwise over top cap
+        path.lineTo(bot.right(), bot.center().y());
+        path.arcTo(bot, 0, -180);                      // clockwise under bottom cap
+        path.closeSubpath();                            // straight left side
+        return path;
+    }
+
+    // ── Cone ── apex + slant sides + arc base
+    if (type == ShapeNode::Cone) {
+        const qreal bh   = r.height() * 0.30 + ex;    // expand base height
+        const QRectF base(r.left()  + 2.0 - ex,
+                          r.bottom() - bh - 2.0 + ex,
+                          r.width()  - 4.0 + ex * 2.0,
+                          bh);
+        const QPointF apex(r.center().x(), r.top() + 3.0 - ex);
+        path.moveTo(apex);
+        path.lineTo(base.right(), base.center().y());  // right slant
+        path.arcTo(base, 0, -180);                     // clockwise under base arc
+        path.lineTo(apex);                             // left slant
+        path.closeSubpath();
+        return path;
+    }
+
+    // ── Cube ── hexagonal silhouette (6 outer vertices of the isometric icon)
+    const QRectF er = r.adjusted(-ex, -ex, ex, ex);
+    const qreal w = er.width(), h = er.height();
+    const qreal l = er.left(),  t = er.top();
+    path.moveTo(l + w * 0.48, t + h * 0.12);          // top vertex
+    path.lineTo(l + w * 0.82, t + h * 0.28);          // top-right
+    path.lineTo(l + w * 0.82, t + h * 0.64);          // right-bottom
+    path.lineTo(l + w * 0.56, t + h * 0.86);          // bottom
+    path.lineTo(l + w * 0.22, t + h * 0.70);          // bottom-left
+    path.lineTo(l + w * 0.22, t + h * 0.34);          // top-left
+    path.closeSubpath();
+    return path;
+}
+
 class PrimitiveCardItem final : public QGraphicsItem
 {
 public:
@@ -175,9 +242,11 @@ public:
                               iconSize,
                               iconSize);
         if (m_selected) {
-            painter->setPen(QPen(QColor(255, 203, 87), 2, Qt::DashLine));
+            const QPainterPath selPath = primitiveSelectionPath(m_shape.type, iconRect);
+            painter->setPen(QPen(QColor(255, 203, 87), 2.0, Qt::SolidLine,
+                                 Qt::RoundCap, Qt::RoundJoin));
             painter->setBrush(QColor(255, 203, 87, 32));
-            painter->drawEllipse(iconRect.adjusted(-5.0, -5.0, 5.0, 5.0));
+            painter->drawPath(selPath);
         }
 
         if (!m_thumbnail.isNull())
