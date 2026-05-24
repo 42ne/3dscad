@@ -104,6 +104,45 @@ bool SceneTreeGraphicsWidget::applyMagneticSnap(const QPointF &candidate,
 
 // ── Ghost outline / drag placeholder ─────────────────────────────────────────
 
+QPointF SceneTreeGraphicsWidget::nonOverlappingCanvasPosition(const QPointF &candidate,
+                                                              const QSizeF &size,
+                                                              const QVector<QRectF> &placedBlocks) const
+{
+    if (placedBlocks.isEmpty() || !size.isValid())
+        return candidate;
+
+    constexpr int MaxIterations = 80;
+    QPointF pos = candidate;
+
+    auto overlaps = [&](const QRectF &rect, QRectF *blockingRect) {
+        for (const QRectF &placed : placedBlocks) {
+            const QRectF overlap = rect.intersected(placed);
+            if (overlap.width() > 0.5 && overlap.height() > 0.5) {
+                if (blockingRect)
+                    *blockingRect = placed;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (int i = 0; i < MaxIterations; ++i) {
+        const QRectF rect(pos, size);
+        QRectF blocker;
+        if (!overlaps(rect, &blocker))
+            return pos;
+
+        const qreal pushRight = blocker.right() - rect.left();
+        const qreal pushDown = blocker.bottom() - rect.top();
+        if (pushRight <= pushDown)
+            pos.rx() += qMax<qreal>(1.0, pushRight);
+        else
+            pos.ry() += qMax<qreal>(1.0, pushDown);
+    }
+
+    return pos;
+}
+
 void SceneTreeGraphicsWidget::clearCanvasDragGhost()
 {
     if (m_canvasDragGhost) {

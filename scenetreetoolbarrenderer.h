@@ -18,7 +18,9 @@ public:
     using PreviewFinishedCallback = std::function<void()>;
     using ToolDroppedCallback = std::function<void(const QString &, const QPointF &)>;
 
-    explicit SceneTreeToolbarRenderer(QGraphicsScene *scene, QVector<QGraphicsItem *> *toolbarItems = nullptr);
+    explicit SceneTreeToolbarRenderer(QGraphicsScene *scene,
+                                      QVector<QGraphicsItem *> *toolbarItems = nullptr,
+                                      int theme = 0);
 
     QRectF render(PreviewMovedCallback onPreviewMoved,
                   PreviewFinishedCallback onPreviewFinished,
@@ -33,6 +35,7 @@ private:
 private:
     QGraphicsScene *m_scene = nullptr;
     QVector<QGraphicsItem *> *m_toolbarItems = nullptr;
+    int m_theme = 0;
 };
 
 #endif

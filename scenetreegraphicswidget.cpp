@@ -15,16 +15,18 @@
 #include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsTextItem>
 #include <QHash>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QScrollBar>
-#include <QToolTip>
+#include <QTextDocument>
 #include <QTimer>
 #include <QWheelEvent>
 #include <QStringList>
+#include <cmath>
 
 using namespace SceneTreeGraphics;
 
@@ -394,6 +396,81 @@ void SceneTreeGraphicsWidget::refresh()
     syncGroupThumbnailCache();
 }
 
+void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
+{
+    if (!m_scene)
+        return;
+
+    if (m_canvasMoveHandles.size() != m_scene->treeRoot().children.size())
+        refresh();
+
+    QHash<int, QSizeF> blockSizes;
+    qreal totalArea = 0.0;
+    qreal maxBlockWidth = 0.0;
+    qreal maxBlockHeight = 0.0;
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        if (handle.nodeId <= 0 || handle.blockRect.isEmpty())
+            continue;
+        const QSizeF size = handle.blockRect.size();
+        blockSizes.insert(handle.nodeId, size);
+        totalArea += size.width() * size.height();
+        maxBlockWidth = qMax(maxBlockWidth, size.width());
+        maxBlockHeight = qMax(maxBlockHeight, size.height());
+    }
+
+    if (blockSizes.isEmpty())
+        return;
+
+    const qreal viewportTarget = viewport() ? viewport()->height() * 0.82 / qMax<qreal>(0.25, transform().m11()) : 620.0;
+    const qreal areaTarget = std::sqrt(qMax<qreal>(1.0, totalArea) * 1.25);
+    const qreal targetColumnHeight = qMax(maxBlockHeight, qMax<qreal>(viewportTarget, areaTarget));
+
+    QPointF cursor(TreeX, TreeY);
+    qreal columnWidth = 0.0;
+    bool columnHasBlocks = false;
+    bool changed = false;
+    QHash<int, QPointF> compactPositions;
+
+    for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children) {
+        const QSizeF size = blockSizes.value(child.id);
+        if (!size.isValid())
+            continue;
+
+        if (columnHasBlocks && cursor.y() + size.height() > TreeY + targetColumnHeight) {
+            cursor.setX(cursor.x() + columnWidth);
+            cursor.setY(TreeY);
+            columnWidth = 0.0;
+            columnHasBlocks = false;
+        }
+
+        compactPositions.insert(child.id, cursor);
+        if (m_nodeCanvasPositions.value(child.id, QPointF()) != cursor)
+            changed = true;
+
+        cursor.ry() += size.height();
+        columnWidth = qMax(columnWidth, size.width());
+        columnHasBlocks = true;
+    }
+
+    if (changed) {
+        for (auto it = compactPositions.constBegin(); it != compactPositions.constEnd(); ++it)
+            m_nodeCanvasPositions[it.key()] = it.value();
+        refresh();
+    }
+
+    QRectF bounds;
+    bool hasBounds = false;
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        bounds = hasBounds ? bounds.united(handle.blockRect) : handle.blockRect;
+        hasBounds = true;
+    }
+    bounds = bounds.adjusted(-36.0, -36.0, 36.0, 36.0);
+    if (bounds.isValid() && viewport()) {
+        fitInView(bounds, Qt::KeepAspectRatio);
+        updateToolbarOverlay();
+    }
+}
+
 void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
     clearDropPreview();
@@ -448,13 +525,36 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
     const QList<QGraphicsItem *> existingItems = m_graphicsScene->items();
     QPointF autoPos(TreeX, TreeY);
+    QVector<QRectF> placedRootBlocks;
 
     for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children) {
         // Position: stored custom or auto-layout fallback.
-        const QPointF blockTopLeft = m_nodeCanvasPositions.value(child.id, autoPos);
+        QPointF blockTopLeft = m_nodeCanvasPositions.value(child.id, autoPos);
+        const QList<QGraphicsItem *> beforeBlockItems = m_graphicsScene->items();
         // Draw the node content kGripStripH px below the block top (grip strip occupies top).
         const QRectF drawn = drawNode(child, blockTopLeft + QPointF(0.0, kGripStripH), 0);
-        const QRectF fullBlock(blockTopLeft, QSizeF(drawn.width(), kGripStripH + drawn.height()));
+        QRectF fullBlock(blockTopLeft, QSizeF(drawn.width(), kGripStripH + drawn.height()));
+
+        const QPointF resolvedTopLeft = nonOverlappingCanvasPosition(blockTopLeft,
+                                                                     fullBlock.size(),
+                                                                     placedRootBlocks);
+        if (!qFuzzyCompare(resolvedTopLeft.x() + 1.0, blockTopLeft.x() + 1.0)
+            || !qFuzzyCompare(resolvedTopLeft.y() + 1.0, blockTopLeft.y() + 1.0)) {
+            const QPointF delta = resolvedTopLeft - blockTopLeft;
+            const QList<QGraphicsItem *> afterBlockItems = m_graphicsScene->items();
+            for (QGraphicsItem *item : afterBlockItems) {
+                if (!beforeBlockItems.contains(item))
+                    item->setPos(item->pos() + delta);
+            }
+            m_treeLayout.translateRootBlock(child.id, delta);
+            for (RenameZone &zone : m_renameZones) {
+                if (fullBlock.contains(zone.rect.center()))
+                    zone.rect.translate(delta);
+            }
+            blockTopLeft = resolvedTopLeft;
+            fullBlock.moveTo(blockTopLeft);
+            m_nodeCanvasPositions[child.id] = blockTopLeft;
+        }
 
         // ── Grip strip ───────────────────────────────────────────────────────
         const QRectF gripRect(blockTopLeft, QSizeF(drawn.width(), kGripStripH));
@@ -482,6 +582,7 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
         // Record handle and block rect for hit-testing and magnetic snap.
         m_canvasMoveHandles.append({gripRect, fullBlock, child.id});
+        placedRootBlocks.append(fullBlock);
 
         // Advance auto-layout cursor (whether this node is custom-positioned or not).
         autoPos.ry() += fullBlock.height() + ChildGap * 2.0;
@@ -902,6 +1003,8 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
     const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
     m_hoveredScrollRect = QRectF();
     m_hoveredRenameRect = QRectF();
+    updateHoverHint(QStringLiteral("canvas"),
+                    QStringLiteral("Scene tree canvas\nWheel: zoom tree view\nDrag empty space: pan; drag toolbar icons to create blocks"));
     if (!m_panning)
         setCursor(Qt::OpenHandCursor);
     if (changed && !m_dragActive)
@@ -990,7 +1093,7 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
     const qreal viewportWidth = viewport() ? viewport()->width() : 640.0;
     const qreal viewportScale = transform().m11();
 
-    return SceneTreeToolbarRenderer(m_graphicsScene, &m_toolbarItems)
+    return SceneTreeToolbarRenderer(m_graphicsScene, &m_toolbarItems, m_treeTheme)
         .render(
             [this](const QPointF &position, const QSizeF &previewSize, const QString &previewTool) {
                 showDropPreview(position, previewSize, previewTool);
@@ -1023,6 +1126,7 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
     clearToolbar();
     drawToolbar();
     drawThemeSwitcher();
+    drawHoverHintOverlay();
 }
 
 void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
@@ -1073,6 +1177,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
                                              Qt::NoPen,
                                              QBrush(QColor(0, 0, 0, 90)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setAcceptedMouseButtons(Qt::NoButton);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
     shadow->setOpacity(0.65);
@@ -1085,6 +1190,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
                                             QPen(QColor(148, 163, 184, 82), 1.0),
                                             QBrush(QColor(10, 16, 24, 178)));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
     panel->setZValue(LocalOverlayZ - 1.0);
     m_toolbarItems.append(panel);
@@ -1127,6 +1233,96 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         m_graphicsScene->addItem(circle);
         m_toolbarItems.append(circle);
     }
+}
+
+void SceneTreeGraphicsWidget::drawHoverHintOverlay()
+{
+    if (!m_graphicsScene || !viewport())
+        return;
+
+    const QString hint = m_hoverHintText.trimmed().isEmpty()
+                             ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
+                             : m_hoverHintText;
+
+    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
+    const qreal viewportWidth = viewport()->width();
+    const qreal viewportHeight = viewport()->height();
+    const qreal viewportScale = transform().m11();
+    const qreal safeScale = qMax<qreal>(0.001, std::abs(viewportScale));
+
+    const auto scenePoint = [&](qreal x, qreal y) {
+        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
+    };
+
+    constexpr qreal OverlayMargin = 12.0;
+    constexpr qreal ThemePanelWidth = 123.0;
+    constexpr qreal ThemePanelHeight = 26.0;
+    constexpr qreal Gap = 14.0;
+    constexpr qreal PadH = 12.0;
+    constexpr qreal PadV = 9.0;
+    constexpr qreal BottomGap = 12.0;
+    constexpr qreal LocalOverlayZ = 10020.0;
+
+    qreal panelX = OverlayMargin + ThemePanelWidth + Gap;
+    qreal availableW = viewportWidth - panelX - OverlayMargin;
+    if (availableW < 260.0) {
+        panelX = OverlayMargin;
+        availableW = viewportWidth - OverlayMargin * 2.0;
+    }
+    availableW = qBound<qreal>(220.0, availableW, 640.0);
+
+    QFont font = sceneTreeGraphicsFont();
+    font.setPointSizeF(qMax<qreal>(8.0, font.pointSizeF() - 0.2));
+    const qreal textW = availableW - PadH * 2.0;
+    QTextDocument textMeasure;
+    textMeasure.setDefaultFont(font);
+    textMeasure.setDocumentMargin(0.0);
+    textMeasure.setTextWidth(textW);
+    textMeasure.setPlainText(hint);
+    const qreal maxPanelH = qMax<qreal>(84.0, viewportHeight * 0.38);
+    const qreal panelH = qBound<qreal>(42.0,
+                                       textMeasure.size().height() + PadV * 2.0 + 4.0,
+                                       maxPanelH);
+    qreal panelY = viewportHeight - BottomGap - panelH;
+    if (panelX <= OverlayMargin + 0.5)
+        panelY -= ThemePanelHeight + Gap;
+
+    const QRectF panelLocal(0.0, 0.0, availableW, panelH);
+    const QPointF panelTopLeft = scenePoint(panelX, qMax<qreal>(OverlayMargin, panelY));
+
+    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(3.0, 4.0),
+                                            Qt::NoPen,
+                                            QBrush(QColor(0, 0, 0, 115)));
+    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setAcceptedMouseButtons(Qt::NoButton);
+    shadow->setPos(panelTopLeft);
+    shadow->setZValue(LocalOverlayZ - 2.0);
+    shadow->setOpacity(0.72);
+    m_toolbarItems.append(shadow);
+
+    QPainterPath path;
+    path.addRoundedRect(panelLocal, 8.0, 8.0);
+    QLinearGradient glass(QPointF(0.0, 0.0), QPointF(0.0, panelH));
+    glass.setColorAt(0.0, QColor(24, 34, 50, 218));
+    glass.setColorAt(1.0, QColor(8, 13, 22, 196));
+    auto *panel = m_graphicsScene->addPath(path,
+                                           QPen(QColor(142, 178, 215, 120), 1.0),
+                                           QBrush(glass));
+    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setAcceptedMouseButtons(Qt::NoButton);
+    panel->setPos(panelTopLeft);
+    panel->setZValue(LocalOverlayZ - 1.0);
+    m_toolbarItems.append(panel);
+
+    auto *text = m_graphicsScene->addText(hint, font);
+    text->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    text->setAcceptedMouseButtons(Qt::NoButton);
+    text->document()->setDocumentMargin(0.0);
+    text->setTextWidth(textW);
+    text->setDefaultTextColor(QColor(232, 242, 255));
+    text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
+    text->setZValue(LocalOverlayZ);
+    m_toolbarItems.append(text);
 }
 
 void SceneTreeGraphicsWidget::addNodeDragHandle(int nodeId,
@@ -2053,93 +2249,145 @@ void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
                                                    const QPointF &scenePosition,
                                                    bool controlDown)
 {
-    QString key;
-    QString message;
+    Q_UNUSED(globalPosition);
+    if (m_dragActive)
+        return;
 
-    int groupId = 0;
-    int axis = -1;
-    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    QString key;
+    const QString message = hoverHintTextForPosition(scenePosition, controlDown, &key);
+    updateHoverHint(key, message);
+}
+
+void SceneTreeGraphicsWidget::updateHoverHint(const QString &key, const QString &text)
+{
+    if (key == m_hoverHintKey && text == m_hoverHintText)
+        return;
+
+    m_hoverHintKey = key;
+    m_hoverHintText = text;
+    if (m_dragActive)
+        return;
+
+    updateToolbarOverlay();
+}
+
+QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePosition,
+                                                          bool controlDown,
+                                                          QString *key) const
+{
+    auto setKey = [key](const QString &value) {
+        if (key)
+            *key = value;
+    };
+
     int forNodeId = 0;
     int forNumberStart = -1;
     int forNumberLength = 0;
     if (forLoopRangeControlAt(scenePosition, &forNodeId, &forNumberStart, &forNumberLength)) {
-        key = QStringLiteral("for:%1:%2").arg(forNodeId).arg(forNumberStart);
-        message = controlDown
-                      ? QStringLiteral("Use mouse wheel to change this for range number")
-                      : QStringLiteral("Hold Ctrl and use mouse wheel to change this for range number");
-    } else {
-        int transformNumberStart = -1;
-        int transformNumberLength = 0;
-        if (transformControlAt(scenePosition,
-                               &groupId,
-                               &operation,
-                               &axis,
-                               &transformNumberStart,
-                               &transformNumberLength)
-            && transformNumberStart >= 0
-            && transformNumberLength > 0) {
+        setKey(QStringLiteral("for:%1:%2:%3").arg(forNodeId).arg(forNumberStart).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("For range number\nMouse wheel: change this range value\nDouble-click module/variable labels to rename")
+            : QStringLiteral("For range number\nHold Ctrl + mouse wheel: change this value\nDrag child blocks into the loop body");
+    }
+
+    int groupId = 0;
+    int axis = -1;
+    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+    int transformNumberStart = -1;
+    int transformNumberLength = 0;
+    if (transformControlAt(scenePosition, &groupId, &operation, &axis, &transformNumberStart, &transformNumberLength)
+        && transformNumberStart >= 0
+        && transformNumberLength > 0) {
         static const char *AxisNames[] = {"X", "Y", "Z"};
-        const QString axisName = QString::fromLatin1(AxisNames[axis]);
-        key = QStringLiteral("transform:%1:%2").arg(groupId).arg(transformNumberStart);
-        message = controlDown
-                      ? QStringLiteral("Use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName)
-                      : QStringLiteral("Hold Ctrl and use mouse wheel to change %1 %2").arg(labelForOperation(operation), axisName);
+        const QString axisName = QString::fromLatin1(AxisNames[qBound(0, axis, 2)]);
+        setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("%1 %2 value\nMouse wheel: change value\nDrag selected viewport axes: move/rotate when supported")
+                  .arg(labelForOperation(operation), axisName)
+            : QStringLiteral("%1 %2 value\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group")
+                  .arg(labelForOperation(operation), axisName);
+    }
+
+    int variableNodeId = 0;
+    int numberStart = -1;
+    int numberLength = 0;
+    if (variableNumberControlAt(scenePosition, &variableNodeId, &numberStart, &numberLength)) {
+        setKey(QStringLiteral("variable:%1:%2:%3").arg(variableNodeId).arg(numberStart).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("Variable value\nMouse wheel: change this number\nDouble-click variable name: rename")
+            : QStringLiteral("Variable value\nHold Ctrl + mouse wheel: change this number\nDrag VAR into module parameters/body");
+    }
+
+    int moduleCallNodeId = 0;
+    int moduleCallVarNodeId = 0;
+    int moduleCallStart = -1;
+    int moduleCallLength = 0;
+    if (moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &moduleCallVarNodeId, &moduleCallStart, &moduleCallLength)) {
+        setKey(QStringLiteral("modulecall:%1:%2:%3").arg(moduleCallNodeId).arg(moduleCallStart).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("Module call argument\nMouse wheel: change this argument\nDrop the call into groups like any block")
+            : QStringLiteral("Module call argument\nHold Ctrl + mouse wheel: change this argument\nDrag module call handles from module blocks");
+    }
+
+    int shapeId = -1;
+    int nodeId = 0;
+    int parameter = -1;
+    int shapeNumberStart = -1;
+    int shapeNumberLength = 0;
+    if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter, &shapeNumberStart, &shapeNumberLength)) {
+        const ShapeNode *shape = m_scene ? m_scene->shapeById(shapeId) : nullptr;
+        const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
+        const QString label = parameter >= 0 && parameter < controls.size() ? controls[parameter].label : QStringLiteral("parameter");
+        setKey(QStringLiteral("shape:%1:%2:%3").arg(nodeId).arg(parameter).arg(controlDown));
+        return controlDown
+            ? QStringLiteral("Shape %1\nMouse wheel: change value\nDrag card: reorder or move into a group").arg(label)
+            : QStringLiteral("Shape %1\nHold Ctrl + mouse wheel: change value\nClick card: select object").arg(label);
+    }
+
+    int renameNodeId = 0;
+    QRectF renameRect;
+    if (hoverRenameZoneAt(scenePosition, &renameNodeId, &renameRect)) {
+        const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(renameNodeId) : nullptr;
+        const bool isModule = node && node->type == SceneDocument::TreeNode::Group
+                              && node->operation == SceneDocument::TreeNode::Module;
+        setKey(QStringLiteral("rename:%1").arg(renameNodeId));
+        return isModule
+            ? QStringLiteral("Module name\nDouble-click: rename module\nModule calls update through the tree")
+            : QStringLiteral("Variable name\nDouble-click: rename variable\nCtrl + wheel works on numeric values");
+    }
+
+    const QRectF scrollRect = hoverScrollZoneRect(scenePosition);
+    if (scrollRect.isValid()) {
+        setKey(QStringLiteral("scrollzone:%1:%2").arg(qRound(scrollRect.x())).arg(qRound(scrollRect.y())));
+        return QStringLiteral("Editable number\nHold Ctrl + mouse wheel: change value\nThe highlighted field shows the active target");
+    }
+
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        if (handle.gripRect.contains(scenePosition)) {
+            setKey(QStringLiteral("grip:%1").arg(handle.nodeId));
+            return QStringLiteral("Canvas block handle\nDrag: move block on the tree canvas\nSlow drag moves touching blocks; fast drag detaches");
         }
     }
-    if (key.isEmpty()) {
-        int variableNodeId = 0;
-        int numberStart = -1;
-        int numberLength = 0;
-        if (variableNumberControlAt(scenePosition, &variableNodeId, &numberStart, &numberLength)) {
-            key = QStringLiteral("variable:%1:%2").arg(variableNodeId).arg(numberStart);
-            message = controlDown
-                          ? QStringLiteral("Use mouse wheel to change this number")
-                          : QStringLiteral("Hold Ctrl and use mouse wheel to change this number");
-        } else {
-            int mcNodeId = 0;
-            int mcVarNodeId = 0;
-            int mcStart = -1;
-            int mcLength = 0;
-            if (moduleCallParamControlAt(scenePosition, &mcNodeId, &mcVarNodeId, &mcStart, &mcLength)) {
-                key = QStringLiteral("modulecall:%1:%2").arg(mcNodeId).arg(mcStart);
-                message = controlDown
-                              ? QStringLiteral("Use mouse wheel to change this parameter")
-                              : QStringLiteral("Hold Ctrl and use mouse wheel to change this parameter");
-            }
-        }
-        if (key.isEmpty()) {
-            int shapeId = -1;
-            int nodeId = 0;
-            int parameter = -1;
-            int numStart = -1;
-            int numLen = 0;
-            if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter, &numStart, &numLen)) {
-            Q_UNUSED(numStart); Q_UNUSED(numLen);
-            const ShapeNode *shape = m_scene ? m_scene->shapeById(shapeId) : nullptr;
-            const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
-            if (parameter >= 0 && parameter < controls.size()) {
-                key = QStringLiteral("shape:%1:%2").arg(nodeId).arg(parameter);
-                message = controlDown
-                              ? QStringLiteral("Use mouse wheel to change %1").arg(controls[parameter].label)
-                              : QStringLiteral("Hold Ctrl and use mouse wheel to change %1").arg(controls[parameter].label);
-            }
+
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        for (const ChildLayout &child : area.children) {
+            if (child.rect.contains(scenePosition)) {
+                setKey(QStringLiteral("node:%1").arg(child.nodeId));
+                return QStringLiteral("Tree block\nClick: select\nDrag: move between groups; Delete removes selected");
             }
         }
     }
 
-    if (key.isEmpty()) {
-        if (!m_lastControlTooltipKey.isEmpty()) {
-            QToolTip::hideText();
-            m_lastControlTooltipKey.clear();
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.rect.contains(scenePosition)) {
+            setKey(QStringLiteral("group:%1").arg(area.groupId));
+            return QStringLiteral("%1 group\nDrop blocks into gaps to reorder or nest\nRight-click/left-click: select; Delete: remove selected")
+                .arg(labelForOperation(area.operation));
         }
-        return;
     }
 
-    if (key == m_lastControlTooltipKey)
-        return;
-
-    m_lastControlTooltipKey = key;
-    QToolTip::showText(globalPosition + QPoint(12, 18), message, this);
+    setKey(QStringLiteral("canvas"));
+    return QStringLiteral("Scene tree canvas\nWheel: zoom tree view\nDrag empty space: pan; drag toolbar icons to create blocks");
 }
 
 void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &scenePosition, bool enabled)

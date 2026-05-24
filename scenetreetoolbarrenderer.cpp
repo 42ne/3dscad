@@ -67,9 +67,12 @@ int columnCountForWidth(qreal viewportWidth, int toolCount, qreal toolbarScale)
 
 } // namespace
 
-SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene, QVector<QGraphicsItem *> *toolbarItems)
+SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene,
+                                                   QVector<QGraphicsItem *> *toolbarItems,
+                                                   int theme)
     : m_scene(scene)
     , m_toolbarItems(toolbarItems)
+    , m_theme(theme)
 {
 }
 
@@ -104,6 +107,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                              Qt::NoPen,
                                              QBrush(QColor(0, 0, 0, 96)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setAcceptedMouseButtons(Qt::NoButton);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(OverlayZ - 2.0);
     shadow->setOpacity(0.70);
@@ -115,6 +119,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                             QPen(QColor(148, 163, 184, 82), 1.0),
                                             QBrush(QColor(10, 16, 24, 178)));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
     panel->setZValue(OverlayZ - 1.0);
     trackToolbarItem(panel);
@@ -122,6 +127,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     for (int i = 0; i < tools.size(); ++i) {
         auto *tool = createPaletteToolItem(tools[i],
                                            fillForTool(tools[i]),
+                                           m_theme,
                                            onPreviewMoved,
                                            onPreviewFinished,
                                            onDropped);

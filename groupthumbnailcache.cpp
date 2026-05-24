@@ -280,7 +280,7 @@ void GroupThumbnailCache::onRenderTimerTimeout()
     // buildManifoldCsgMesh() is guarded by s_manifoldMutex in manifoldcsg.cpp,
     // so concurrent calls from the viewport thread and this thread are serialised.
     m_renderInFlight = true;
-    const QSize size    = m_size;
+    const QSize size    = m_size * 2;
     const QColor bgColor = GroupThumbnailBg;
 
     auto future = QtConcurrent::run([items, size, bgColor]() -> QHash<int, QImage> {

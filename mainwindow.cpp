@@ -393,5 +393,7 @@ void MainWindow::loadExample(const QString &filePath)
         m_codeEditorPanel->showParseError(errorMsg, errorLine);
     } else {
         m_codeEditorPanel->clearParseError();
+        if (m_sceneTreeGraphics)
+            m_sceneTreeGraphics->compactRootBlocksAndFit();
     }
 }

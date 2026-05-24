@@ -62,6 +62,7 @@ public:
 
     void clear();
     void addGroup(const GroupHitArea &area);
+    void translateRootBlock(int rootGroupId, const QPointF &delta);
     const QVector<GroupHitArea> &groupHitAreas() const;
 
     DropTarget dropTargetAt(const QPointF &scenePosition,

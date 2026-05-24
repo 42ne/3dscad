@@ -7,6 +7,7 @@
 #include <QtConcurrent>
 #include <QComboBox>
 #include <QHash>
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -547,17 +548,48 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal,
         baseColor.alpha());
 }
 
+static QColor thumbnailLitColor(const QColor &baseColor, const QVector3D &normal,
+                                const QVector<SceneLight> &lights)
+{
+    constexpr float ambient = 0.24f;
+    float red   = baseColor.redF()   * ambient;
+    float green = baseColor.greenF() * ambient;
+    float blue  = baseColor.blueF()  * ambient;
+    const QVector3D n = normal.normalized();
+
+    for (const SceneLight &light : lights) {
+        const QVector3D l = light.direction.normalized();
+        const float front = qMax(0.0f, QVector3D::dotProduct(n, l));
+        const float back  = qMax(0.0f, QVector3D::dotProduct(-n, l)) * 0.38f;
+        const float amount = (front + back) * light.intensity;
+        red   += baseColor.redF()   * light.color.redF()   * amount;
+        green += baseColor.greenF() * light.color.greenF() * amount;
+        blue  += baseColor.blueF()  * light.color.blueF()  * amount;
+    }
+
+    const float lift = 0.08f;
+    red   += lift;
+    green += lift;
+    blue  += lift;
+
+    return QColor(
+        clampColorChannel(red * 255.0f),
+        clampColorChannel(green * 255.0f),
+        clampColorChannel(blue * 255.0f),
+        baseColor.alpha());
+}
+
 // Specialised lighting for tree-card thumbnails: strong key + warm rim from behind
 // to make silhouettes crisp; lower ambient for more contrast at small sizes.
 static QVector<SceneLight> thumbnailLights()
 {
     return {
         // Key: upper-left-front, warm white, punchy
-        { QVector3D(-0.40f, -0.30f, 1.0f).normalized(), QColor(255, 248, 225), 1.05f },
+        { QVector3D(-0.55f, -0.42f, 1.0f).normalized(), QColor(255, 250, 232), 1.18f },
         // Fill: right side, cool blue — prevents the shadow side going pure black
-        { QVector3D( 0.90f,  0.10f, 0.30f).normalized(), QColor(130, 185, 255), 0.22f },
+        { QVector3D( 0.78f,  0.10f, 0.45f).normalized(), QColor(110, 176, 255), 0.30f },
         // Rim: back-right at a low angle — catches top and right edges
-        { QVector3D( 0.55f,  0.85f, -0.10f).normalized(), QColor(255, 235, 195), 0.38f }
+        { QVector3D( 0.45f,  0.82f, -0.08f).normalized(), QColor(255, 195, 130), 0.42f }
     };
 }
 
@@ -1424,7 +1456,23 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
                                        const QColor &bgColor)
 {
     QImage image(thumbnailSize, QImage::Format_ARGB32_Premultiplied);
-    image.fill(bgColor);
+    if (bgColor.alpha() == 0) {
+        image.fill(Qt::transparent);
+    } else {
+        QPainter bgPainter(&image);
+        QLinearGradient bg(QPointF(0.0, 0.0), QPointF(0.0, thumbnailSize.height()));
+        bg.setColorAt(0.0, bgColor.lighter(145));
+        bg.setColorAt(0.55, bgColor);
+        bg.setColorAt(1.0, bgColor.darker(132));
+        bgPainter.fillRect(image.rect(), bg);
+        bgPainter.setPen(Qt::NoPen);
+        bgPainter.setBrush(QColor(255, 255, 255, 18));
+        const qreal spot = qMin(thumbnailSize.width(), thumbnailSize.height()) * 0.52;
+        bgPainter.drawEllipse(QRectF(thumbnailSize.width() * 0.18,
+                                     thumbnailSize.height() * 0.08,
+                                     spot,
+                                     spot * 0.58));
+    }
 
     const CsgPreview preview = buildCsgPreview(scene);
     if (preview.items.isEmpty())
@@ -1453,15 +1501,14 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
 
     const QVector3D cameraTarget = (bbMin + bbMax) * 0.5f;
     const float extent = (bbMax - bbMin).length();
-    // Fill ~86 % of the shorter side so the shape sits close to the card edges.
+    // Fill most of the shorter side so the shape reads as a solid object in small cards.
     // focalLength 420 matches projectWorldPoint's hardcoded value.
     const float shortSide = static_cast<float>(qMin(thumbnailSize.width(), thumbnailSize.height()));
-    const float cameraDistance = qMax(extent * 420.0f / (shortSide * 0.86f), 20.0f);
+    const float cameraDistance = qMax(extent * 420.0f / (shortSide * 0.94f), 20.0f);
 
     const float yaw   = -38.0f;
     const float pitch = -26.0f;
     const QVector<SceneLight> lights = thumbnailLights();
-    constexpr float thumbnailAmbient = 0.14f; // darker shadows for crisper read
 
     auto project = [&](const QVector3D &world) {
         return projectWorldPoint(world, thumbnailSize, yaw, pitch, cameraDistance, cameraTarget);
@@ -1482,7 +1529,7 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
             tri.a      = a.point;  tri.depthA = a.depth;
             tri.b      = b.point;  tri.depthB = b.depth;
             tri.c      = c.point;  tri.depthC = c.depth;
-            tri.color  = litColor(baseColor.lighter(mt.shade), mt.normal, lights, thumbnailAmbient);
+            tri.color  = thumbnailLitColor(baseColor.lighter(qMax(mt.shade, 112)), mt.normal, lights);
             tri.shapeIndex = item.shapeIndex;
             triangles.append(tri);
         }
@@ -1521,10 +1568,12 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
 
                 if (edge) {
                     const QRgb px = mainRow[x];
-                    // Darken edge pixel to ~35 % brightness for a dark contour.
-                    mainRow[x] = qRgb(qBound(0, int(qRed(px)   * 0.35f), 255),
-                                      qBound(0, int(qGreen(px) * 0.35f), 255),
-                                      qBound(0, int(qBlue(px)  * 0.35f), 255));
+                    // A very light silhouette treatment keeps edges readable
+                    // without making small primitives look like contour icons.
+                    mainRow[x] = qRgba(qBound(0, int(qRed(px)   * 0.78f), 255),
+                                       qBound(0, int(qGreen(px) * 0.78f), 255),
+                                       qBound(0, int(qBlue(px)  * 0.78f), 255),
+                                       qAlpha(px));
                 }
             }
         }

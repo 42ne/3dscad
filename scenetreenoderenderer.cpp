@@ -163,25 +163,21 @@ public:
         painter->setOpacity(m_opacity);
         painter->setFont(sceneTreeGraphicsFont());
 
-        // Card border — covers only the icon area (left PrimitiveCardWidth pixels).
-        // When selected: golden border (same style as GroupCardItem), no separate overlay.
         const QRectF cardRect(m_rect.left(), m_rect.top(), PrimitiveCardWidth, m_rect.height());
-        const QPen cardBorderPen = m_selected
-            ? QPen(QColor(255, 203, 87), 3.0)
-            : QPen(QColor(86, 117, 150), 1.0);
-        paintRoundedPanel(painter, cardRect, CornerRadius, cardBorderPen,
-                          QBrush(QColor(219, 231, 246)));
+        QRectF iconRect;
 
-        const qreal iconSize = PrimitiveIconSize;
-        const QRectF iconRect(m_rect.left() + 8.0,
-                              m_rect.top() + (PrimitiveHeight - iconSize) * 0.5,
-                              iconSize,
-                              iconSize);
-
-        if (!m_thumbnail.isNull())
+        if (!m_thumbnail.isNull()) {
+            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected);
+            QPainterPath clip;
+            clip.addRoundedRect(iconRect.adjusted(0.5, 0.5, -0.5, -0.5), 3.5, 3.5);
+            painter->save();
+            painter->setClipPath(clip);
             painter->drawImage(iconRect, m_thumbnail);
-        else
+            painter->restore();
+        } else {
+            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected);
             paintPrimitiveIcon(painter, m_shape.type, iconRect);
+        }
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
 

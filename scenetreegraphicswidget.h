@@ -37,6 +37,7 @@ public:
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
     void refresh();
+    void compactRootBlocksAndFit();
 
     // Debug/inspection — for use by debug tools only.
     QRectF debugGroupRect(int groupId) const;
@@ -88,6 +89,7 @@ private:
 
     QRectF drawToolbar();
     void drawThemeSwitcher();
+    void drawHoverHintOverlay();
     void clearToolbar();
     void updateToolbarOverlay();
     void handleThemeSwitcherClick(int themeIndex);
@@ -126,6 +128,8 @@ private:
     bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool moduleCallParamControlAt(const QPointF &scenePosition, int *moduleCallNodeId, int *paramVarNodeId, int *start, int *length) const;
     void updateControlTooltip(const QPoint &globalPosition, const QPointF &scenePosition, bool controlDown);
+    void updateHoverHint(const QString &key, const QString &text);
+    QString hoverHintTextForPosition(const QPointF &scenePosition, bool controlDown, QString *key) const;
     void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
     void updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled);
     void updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled);
@@ -203,6 +207,9 @@ private:
 
     bool applyMagneticSnap(const QPointF &candidate, const QSizeF &size,
                            int excludeId, QPointF *snapped) const;
+    QPointF nonOverlappingCanvasPosition(const QPointF &candidate,
+                                         const QSizeF &size,
+                                         const QVector<QRectF> &placedBlocks) const;
     void showDragPlaceholder(const QPointF &pos, const QSizeF &size);
     void clearCanvasDragGhost();
     QVector<int>              findConnectedCluster(int startNodeId) const;
@@ -221,7 +228,7 @@ private:
     bool                      m_inlineInputActive = false;
     QRectF                    m_inlineInputSceneRect;
 
-    int m_treeTheme = 0;    // SceneTreePalette::Theme cast to int; 0 = Frost
+    int m_treeTheme = 1;    // SceneTreePalette::Theme cast to int; 1 = second tree theme
     int m_selectedTreeNodeId = 0;
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;
@@ -237,7 +244,8 @@ private:
     int m_activeModuleCallNodeId = 0;
     int m_activeModuleCallVarNodeId = 0;
     int m_activeModuleCallNumberStart = -1;
-    QString m_lastControlTooltipKey;
+    QString m_hoverHintKey;
+    QString m_hoverHintText;
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;

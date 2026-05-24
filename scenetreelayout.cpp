@@ -127,6 +127,29 @@ qreal moduleBodyContentTop(qreal parameterSeparatorY)
            + ChildGap;
 }
 
+bool variablePreviewHitsModuleParameterZone(const QPointF &scenePosition,
+                                            const QSizeF &previewSize,
+                                            const QRectF &contentRect,
+                                            qreal parameterSeparatorY)
+{
+    if (parameterSeparatorY <= contentRect.top())
+        return false;
+    if (scenePosition.y() < parameterSeparatorY)
+        return true;
+
+    const QSizeF effectiveSize = previewSize.isValid() ? previewSize : variablePreviewSize();
+    const QRectF previewRect(scenePosition - QPointF(effectiveSize.width() * 0.5,
+                                                     effectiveSize.height() * 0.5),
+                             effectiveSize);
+    const QRectF parameterRect(contentRect.left(),
+                               contentRect.top(),
+                               contentRect.width(),
+                               parameterSeparatorY - contentRect.top());
+    const QRectF overlap = previewRect.intersected(parameterRect);
+    const qreal requiredOverlap = qMin<qreal>(effectiveSize.height(), VariableHeight) * 0.45;
+    return overlap.width() > 1.0 && overlap.height() >= requiredOverlap;
+}
+
 void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
 {
     if (!target || qFuzzyIsNull(dy))
@@ -154,6 +177,36 @@ void SceneTreeLayout::clear()
 void SceneTreeLayout::addGroup(const GroupHitArea &area)
 {
     m_groupHitAreas.append(area);
+}
+
+void SceneTreeLayout::translateRootBlock(int rootGroupId, const QPointF &delta)
+{
+    if (rootGroupId <= 0 || delta.isNull())
+        return;
+
+    QRectF rootRect;
+    for (const GroupHitArea &area : m_groupHitAreas) {
+        if (area.groupId == rootGroupId) {
+            rootRect = area.rect;
+            break;
+        }
+    }
+
+    if (!rootRect.isValid())
+        return;
+
+    for (GroupHitArea &area : m_groupHitAreas) {
+        if (area.groupId != rootGroupId && !rootRect.contains(area.rect.center()))
+            continue;
+
+        area.rect.translate(delta);
+        if (area.cutSeparatorY > 0.0)
+            area.cutSeparatorY += delta.y();
+        if (area.moduleParameterSeparatorY > 0.0)
+            area.moduleParameterSeparatorY += delta.y();
+        for (ChildLayout &child : area.children)
+            child.rect.translate(delta);
+    }
 }
 
 const QVector<SceneTreeLayout::GroupHitArea> &SceneTreeLayout::groupHitAreas() const
@@ -229,7 +282,11 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     if (bestArea->operation == SceneDocument::TreeNode::Module
         && bestArea->moduleParameterSeparatorY > 0.0) {
         const int parameterCount = qBound(0, bestArea->moduleParameterCount, candidateChildren.size());
-        const bool parameterZone = variableDrop && scenePosition.y() < bestArea->moduleParameterSeparatorY;
+        const bool parameterZone = variableDrop
+                                   && variablePreviewHitsModuleParameterZone(scenePosition,
+                                                                             effectivePreviewSize,
+                                                                             contentRect,
+                                                                             bestArea->moduleParameterSeparatorY);
         target.moduleParameterZone = parameterZone;
 
         QVector<QRectF> zoneChildRects;
@@ -245,7 +302,10 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
         } else {
             for (int i = parameterCount; i < candidateChildren.size(); ++i)
                 zoneChildRects.append(candidateChildren[i].rect);
-            const qreal bodyContentTop = moduleBodyContentTop(bestArea->moduleParameterSeparatorY);
+            const qreal preferredBodyContentTop = moduleBodyContentTop(bestArea->moduleParameterSeparatorY);
+            const qreal latestBodyContentTop = qMax(bestArea->moduleParameterSeparatorY + ChildGap,
+                                                    contentRect.bottom() - PrimitiveHeight);
+            const qreal bodyContentTop = qMin(preferredBodyContentTop, latestBodyContentTop);
             target.zoneRect = QRectF(contentRect.left(),
                                      bodyContentTop,
                                      contentRect.width(),

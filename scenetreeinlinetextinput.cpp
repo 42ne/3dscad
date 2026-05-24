@@ -182,9 +182,16 @@ void SceneTreeInlineTextInput::paintEvent(QPaintEvent *)
     painter.setFont(font());
 
     const QRectF panel = rect().adjusted(1, 1, -1, -1);
-    painter.setPen(QPen(QColor(164, 119, 23), qMax<qreal>(1.0, height() * 0.045)));
-    painter.setBrush(QColor(26, 26, 26));
-    painter.drawRoundedRect(panel, qMax<qreal>(3.0, height() * 0.16), qMax<qreal>(3.0, height() * 0.16));
+    const qreal radius = qMax<qreal>(3.0, height() * 0.16);
+    QLinearGradient panelGradient(panel.topLeft(), panel.bottomLeft());
+    panelGradient.setColorAt(0.0, QColor(232, 242, 255, 238));
+    panelGradient.setColorAt(1.0, QColor(190, 214, 238, 224));
+    painter.setPen(QPen(QColor(67, 117, 158, 220), qMax<qreal>(1.0, height() * 0.045)));
+    painter.setBrush(panelGradient);
+    painter.drawRoundedRect(panel, radius, radius);
+
+    painter.setPen(QPen(QColor(255, 255, 255, 155), 1.0));
+    painter.drawRoundedRect(panel.adjusted(1.0, 1.0, -1.0, -1.0), radius - 1.0, radius - 1.0);
 
     const QRect tr = textRect();
     const QFontMetrics metrics(font());
@@ -195,20 +202,20 @@ void SceneTreeInlineTextInput::paintEvent(QPaintEvent *)
         const int right = qMax(m_cursor, m_selectionAnchor);
         const int sx = qRound(tr.left() + metrics.horizontalAdvance(m_text.left(left)) * m_textScale - m_textScroll);
         const int sw = qRound(metrics.horizontalAdvance(m_text.mid(left, right - left)) * m_textScale);
-        painter.fillRect(QRect(sx, tr.top() + 1, qMax(1, sw), tr.height() - 2), QColor(0, 96, 180));
+        painter.fillRect(QRect(sx, tr.top() + 1, qMax(1, sw), tr.height() - 2), QColor(95, 143, 185, 150));
     }
 
     painter.save();
     painter.setClipRect(tr);
     painter.translate(tr.left() - m_textScroll, baseline);
     painter.scale(m_textScale, 1.0);
-    painter.setPen(QColor(255, 200, 50));
+    painter.setPen(QColor(20, 50, 78));
     painter.drawText(QPointF(0.0, 0.0), m_text);
     painter.restore();
 
     if (hasFocus()) {
         const int cursorX = qRound(tr.left() + metrics.horizontalAdvance(m_text.left(m_cursor)) * m_textScale - m_textScroll);
-        painter.setPen(QPen(QColor(255, 218, 92), qMax<qreal>(1.0, height() * 0.045)));
+        painter.setPen(QPen(QColor(44, 104, 152), qMax<qreal>(1.0, height() * 0.045)));
         painter.drawLine(QPointF(cursorX, tr.top() + 3), QPointF(cursorX, tr.bottom() - 3));
     }
 }

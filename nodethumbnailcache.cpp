@@ -2,9 +2,9 @@
 #include "scenedocument.h"
 #include "viewportwidget.h"
 
-// Background color matching the primitive card background (QColor(219, 231, 246)).
-// Using the card's own colour means the thumbnail blends seamlessly into the card.
-static const QColor ThumbnailBg(219, 231, 246);
+// Primitive thumbnails are drawn inside the toolbar-like frame, so the render
+// itself must not bring a second background rectangle.
+static const QColor ThumbnailBg(0, 0, 0, 0);
 
 NodeThumbnailCache::NodeThumbnailCache(QSize size, QObject *parent)
     : QObject(parent)
@@ -89,7 +89,7 @@ void NodeThumbnailCache::onRenderTimerTimeout()
         copy.id = -1; // let addShape assign a fresh id
         doc.addShape(copy);
 
-        m_cache[nodeId] = ViewportWidget::renderThumbnail(doc, m_size, ThumbnailBg);
+        m_cache[nodeId] = ViewportWidget::renderThumbnail(doc, m_size * 2, ThumbnailBg);
         m_lastRendered[nodeId] = shape;
     }
 

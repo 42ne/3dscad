@@ -642,7 +642,8 @@ void TreeDebugWindow::buildUi()
     connect(m_treeWidget, &SceneTreeGraphicsWidget::toolDropped,
             this, [this](const QString &tool, int parentId, int idx) {
         // idx < -100000 → insert into module parameter zone (idx = -100000 - insertIndex)
-        const int insertIndex = (idx < -100000) ? (-idx - 100000) : idx;
+        const bool moduleParameterZone = idx < -100000;
+        const int insertIndex = moduleParameterZone ? (-idx - 100000) : idx;
 
         // Create the actual node in the scene document.
         if (tool == QStringLiteral("cube")) {
@@ -673,7 +674,7 @@ void TreeDebugWindow::buildUi()
             const bool intoModule = parentNode
                                     && parentNode->operation == SceneDocument::TreeNode::Module;
             if (intoModule) {
-                const bool isParam = (tool == QStringLiteral("par"));
+                const bool isParam = (tool == QStringLiteral("par")) || moduleParameterZone;
                 const int varId = m_scene.addVariableToModule(parentId, isParam, insertIndex);
                 m_scene.updateVariableExpression(varId, QStringLiteral("0"));
             } else {

@@ -1,4 +1,5 @@
 #include "scenetreegraphicshelpers.h"
+#include "scenetreepalette.h"
 
 #include <QApplication>
 #include <QBrush>
@@ -23,6 +24,7 @@ namespace SceneTreeGraphics {
 const QColor CanvasBackground(31, 41, 55);
 const QColor MinorGridColor(96, 106, 121);
 const QColor MajorGridColor(139, 150, 166);
+constexpr SceneTreePalette::Theme FixedToolbarTheme = SceneTreePalette::Theme::Ocean;
 
 QFont sceneTreeGraphicsFont()
 {
@@ -183,6 +185,42 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
     painter->drawPolygon(rightFace);
     painter->setBrush(faceLight);
     painter->drawPolygon(topFace);
+}
+
+QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected)
+{
+    const QRectF frameRect = rect.adjusted(2.0, 2.0, -2.0, -2.0);
+    QPainterPath glassPath;
+    glassPath.addRoundedRect(frameRect, 7.0, 7.0);
+
+    QLinearGradient glass(frameRect.topLeft(), frameRect.bottomLeft());
+    glass.setColorAt(0.0, QColor(32, 42, 58, 224));
+    glass.setColorAt(1.0, QColor(7, 11, 18, 205));
+    painter->setPen(QPen(selected ? QColor(255, 203, 87) : accent.lighter(120),
+                         selected ? 1.8 : 1.15));
+    painter->setBrush(glass);
+    painter->drawPath(glassPath);
+
+    QPainterPath tintPath;
+    tintPath.addRoundedRect(rect.adjusted(5.0, 5.0, -5.0, -5.0), 6.0, 6.0);
+    QColor tint = accent;
+    tint.setAlpha(34);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(tint);
+    painter->drawPath(tintPath);
+
+    const qreal side = qMin(rect.width(), rect.height()) * (34.0 / ToolSize);
+    const QPointF center = rect.center() + QPointF(0.0, -rect.height() * (1.0 / ToolSize));
+    return QRectF(center.x() - side * 0.5,
+                  center.y() - side * 0.5,
+                  side,
+                  side);
+}
+
+void paintToolbarPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect, bool selected)
+{
+    const QRectF glyphRect = paintToolbarIconFrame(painter, rect, QColor(178, 207, 238), selected);
+    paintPrimitiveIcon(painter, type, glyphRect);
 }
 
 void paintOperationIcon(QPainter *painter,
@@ -1290,11 +1328,13 @@ class PaletteToolItem : public QGraphicsItem
 public:
     PaletteToolItem(const QString &label,
                     const QColor &fill,
+                    int theme,
                     std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved,
                     std::function<void()> onPreviewFinished,
                     std::function<void(const QString &, const QPointF &)> onDropped)
         : m_label(label)
         , m_fill(fill)
+        , m_theme(theme)
         , m_onPreviewMoved(onPreviewMoved)
         , m_onPreviewFinished(onPreviewFinished)
         , m_onDropped(onDropped)
@@ -1308,14 +1348,36 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->setPen(QPen(m_fill.darker(145)));
-        painter->setBrush(Qt::white);
-        painter->drawRect(boundingRect());
+        const auto theme = FixedToolbarTheme;
+        QColor accent = m_fill;
+        if (isVariableToolName(m_label))
+            accent = QColor(226, 185, 88);
+        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+        const bool operationTool = operationForToolName(m_label, &operation);
+        if (operationTool)
+            accent = SceneTreePalette::groupFill(operation, 0, theme);
 
-        QRectF glyphRect(10.0, 8.0, 34.0, 34.0);
+        QColor iconAccent = accent;
+        if (operationTool) {
+            int h = 0;
+            int s = 0;
+            int v = 0;
+            iconAccent.getHsv(&h, &s, &v);
+            if (s < 55) {
+                if (operation == SceneDocument::TreeNode::Module)
+                    iconAccent = QColor(182, 205, 230);
+                else if (operation == SceneDocument::TreeNode::For)
+                    iconAccent = QColor(205, 214, 226);
+                else
+                    iconAccent.setHsv(h < 0 ? 210 : h, 82, qMax(v, 210));
+            } else {
+                iconAccent.setHsv(h, qMax(s, 95), qMax(v, 214));
+            }
+        }
+
+        QRectF glyphRect = paintToolbarIconFrame(painter, boundingRect(), iconAccent);
         if (m_label == QStringLiteral("module"))
             glyphRect = QRectF(8.0, 6.0, 38.0, 40.0);
-        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         if (isVariableToolName(m_label)) {
             const QRectF badgeRect = glyphRect.adjusted(0.0, 8.0, 0.0, -8.0);
             painter->setPen(Qt::NoPen);
@@ -1333,8 +1395,8 @@ public:
             painter->setFont(font);
             painter->setPen(QColor(61, 48, 24));
             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
-        } else if (operationForToolName(m_label, &operation)) {
-            paintOperationIcon(painter, operation, glyphRect, m_fill.darker(125));
+        } else if (operationTool) {
+            paintOperationIcon(painter, operation, glyphRect, iconAccent.lighter(130));
         } else {
             paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect);
         }
@@ -1369,6 +1431,7 @@ private:
 
     QString m_label;
     QColor m_fill;
+    int m_theme = 0;
     std::function<void(const QPointF &, const QSizeF &, const QString &)> m_onPreviewMoved;
     std::function<void()> m_onPreviewFinished;
     std::function<void(const QString &, const QPointF &)> m_onDropped;
@@ -1406,9 +1469,9 @@ QGraphicsItem *createTreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal
     return new TreeNodeSelectionItem(nodeId, rect, zValue, onSelected);
 }
 
-QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped)
+QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped)
 {
-    return new PaletteToolItem(label, fill, onPreviewMoved, onPreviewFinished, onDropped);
+    return new PaletteToolItem(label, fill, theme, onPreviewMoved, onPreviewFinished, onDropped);
 }
 
 } // namespace SceneTreeGraphics
