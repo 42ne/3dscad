@@ -341,7 +341,8 @@ int SceneDocument::addVariable(int insertIndex)
 
 int SceneDocument::addVariableToModule(int moduleGroupId, bool isParameter, int insertIndex)
 {
-    return m_tree.addVariable(uniqueVariableName(), QStringLiteral("0"), 0.0,
+    const QString name = isParameter ? uniqueParameterName() : uniqueVariableName();
+    return m_tree.addVariable(name, QStringLiteral("0"), 0.0,
                               moduleGroupId, isParameter, insertIndex);
 }
 
