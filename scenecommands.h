@@ -6,6 +6,28 @@
 #include <QUndoCommand>
 #include <functional>
 
+// ── Base for snapshot-based commands ─────────────────────────────────────────
+// Subclasses only need to provide a constructor that sets m_oldSnapshot,
+// m_newSnapshot, and m_valid.  isValid / undo / redo are implemented here.
+class SnapshotCommand : public QUndoCommand
+{
+public:
+    bool isValid() const;
+    void undo() override;
+    void redo() override;
+
+protected:
+    explicit SnapshotCommand(const QString &text,
+                             SceneDocument *scene,
+                             std::function<void()> onChanged);
+
+    SceneDocument *m_scene = nullptr;
+    SceneDocument::Snapshot m_oldSnapshot;
+    SceneDocument::Snapshot m_newSnapshot;
+    bool m_valid = false;
+    std::function<void()> m_onChanged;
+};
+
 class AddShapeCommand : public QUndoCommand
 {
 public:
@@ -60,26 +82,14 @@ private:
     std::function<void()> m_onChanged;
 };
 
-class ReplaceSceneCommand : public QUndoCommand
+class ReplaceSceneCommand : public SnapshotCommand
 {
 public:
     ReplaceSceneCommand(SceneDocument *scene, const QVector<ShapeNode> &newShapes, std::function<void()> onChanged);
     ReplaceSceneCommand(SceneDocument *scene, const SceneDocument::Snapshot &newSnapshot, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    QVector<ShapeNode> m_newShapes;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class AddGroupCommand : public QUndoCommand
+class AddGroupCommand : public SnapshotCommand
 {
 public:
     AddGroupCommand(SceneDocument *scene,
@@ -87,54 +97,21 @@ public:
                     int parentGroupId,
                     int insertIndex,
                     std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class RemoveGroupCommand : public QUndoCommand
+class RemoveGroupCommand : public SnapshotCommand
 {
 public:
     RemoveGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class AddVariableCommand : public QUndoCommand
+class AddVariableCommand : public SnapshotCommand
 {
 public:
     AddVariableCommand(SceneDocument *scene, int insertIndex, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class AddModuleCallCommand : public QUndoCommand
+class AddModuleCallCommand : public SnapshotCommand
 {
 public:
     AddModuleCallCommand(SceneDocument *scene,
@@ -142,71 +119,27 @@ public:
                          int parentGroupId,
                          int insertIndex,
                          std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class RemoveVariableCommand : public QUndoCommand
+class RemoveVariableCommand : public SnapshotCommand
 {
 public:
     RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class RemoveModuleCallCommand : public QUndoCommand
+class RemoveModuleCallCommand : public SnapshotCommand
 {
 public:
     RemoveModuleCallCommand(SceneDocument *scene, int moduleCallId, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class UpdateVariableExpressionCommand : public QUndoCommand
+class UpdateVariableExpressionCommand : public SnapshotCommand
 {
 public:
     UpdateVariableExpressionCommand(SceneDocument *scene, int variableId, const QString &expression, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class UpdateModuleCallArgumentCommand : public QUndoCommand
+class UpdateModuleCallArgumentCommand : public SnapshotCommand
 {
 public:
     UpdateModuleCallArgumentCommand(SceneDocument *scene,
@@ -214,88 +147,33 @@ public:
                                     const QString &parameterName,
                                     const QString &expression,
                                     std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class UpdateForLoopCommand : public QUndoCommand
+class UpdateForLoopCommand : public SnapshotCommand
 {
 public:
     UpdateForLoopCommand(SceneDocument *scene, int groupId, const QString &loopVariable, const QString &rangeExpression, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class MoveTreeNodeCommand : public QUndoCommand
+class MoveTreeNodeCommand : public SnapshotCommand
 {
 public:
     MoveTreeNodeCommand(SceneDocument *scene, int nodeId, int parentGroupId, int insertIndex, std::function<void()> onChanged, bool moduleParameterZone = false);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class RenameModuleCommand : public QUndoCommand
+class RenameModuleCommand : public SnapshotCommand
 {
 public:
     RenameModuleCommand(SceneDocument *scene, int groupId, const QString &newName, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class RenameVariableCommand : public QUndoCommand
+class RenameVariableCommand : public SnapshotCommand
 {
 public:
     RenameVariableCommand(SceneDocument *scene, int variableId, const QString &newName, std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
-class UpdateGroupTransformCommand : public QUndoCommand
+class UpdateGroupTransformCommand : public SnapshotCommand
 {
 public:
     UpdateGroupTransformCommand(SceneDocument *scene,
@@ -317,17 +195,6 @@ public:
                                 const SceneDocument::Snapshot &oldSnapshot,
                                 const SceneDocument::Snapshot &newSnapshot,
                                 std::function<void()> onChanged);
-
-    bool isValid() const;
-    void undo() override;
-    void redo() override;
-
-private:
-    SceneDocument *m_scene = nullptr;
-    SceneDocument::Snapshot m_oldSnapshot;
-    SceneDocument::Snapshot m_newSnapshot;
-    bool m_valid = false;
-    std::function<void()> m_onChanged;
 };
 
 #endif

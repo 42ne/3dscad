@@ -1,5 +1,45 @@
 #include "scenecommands.h"
 
+// ── SnapshotCommand ──────────────────────────────────────────────────────────
+
+SnapshotCommand::SnapshotCommand(const QString &text,
+                                 SceneDocument *scene,
+                                 std::function<void()> onChanged)
+    : QUndoCommand(text)
+    , m_scene(scene)
+    , m_onChanged(std::move(onChanged))
+{
+}
+
+bool SnapshotCommand::isValid() const
+{
+    return m_valid;
+}
+
+void SnapshotCommand::undo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+void SnapshotCommand::redo()
+{
+    if (!m_scene || !m_valid)
+        return;
+
+    m_scene->restoreSnapshot(m_newSnapshot);
+
+    if (m_onChanged)
+        m_onChanged();
+}
+
+// ── AddShapeCommand ──────────────────────────────────────────────────────────
+
 AddShapeCommand::AddShapeCommand(SceneDocument *scene, const ShapeNode &shape, std::function<void()> onChanged)
     : AddShapeCommand(scene, shape, 0, onChanged)
 {
@@ -137,59 +177,27 @@ void UpdateShapeCommand::redo()
 }
 
 ReplaceSceneCommand::ReplaceSceneCommand(SceneDocument *scene, const QVector<ShapeNode> &newShapes, std::function<void()> onChanged)
-    : QUndoCommand("Apply OpenSCAD code")
-    , m_scene(scene)
-    , m_newShapes(newShapes)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Apply OpenSCAD code", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
 
     m_oldSnapshot = m_scene->snapshot();
     SceneDocument previewScene;
-    previewScene.replaceShapes(m_newShapes);
+    previewScene.replaceShapes(newShapes);
     m_newSnapshot = previewScene.snapshot();
-    m_valid = m_oldSnapshot.shapes != m_newShapes;
+    m_valid = m_oldSnapshot.shapes != newShapes;
 }
 
 ReplaceSceneCommand::ReplaceSceneCommand(SceneDocument *scene, const SceneDocument::Snapshot &newSnapshot, std::function<void()> onChanged)
-    : QUndoCommand("Apply OpenSCAD code")
-    , m_scene(scene)
-    , m_newSnapshot(newSnapshot)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Apply OpenSCAD code", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
 
     m_oldSnapshot = m_scene->snapshot();
+    m_newSnapshot = newSnapshot;
     m_valid = true;
-}
-
-bool ReplaceSceneCommand::isValid() const
-{
-    return m_valid;
-}
-
-void ReplaceSceneCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void ReplaceSceneCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
 }
 
 AddGroupCommand::AddGroupCommand(SceneDocument *scene,
@@ -197,9 +205,7 @@ AddGroupCommand::AddGroupCommand(SceneDocument *scene,
                                  int parentGroupId,
                                  int insertIndex,
                                  std::function<void()> onChanged)
-    : QUndoCommand("Add group")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Add group", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -213,37 +219,8 @@ AddGroupCommand::AddGroupCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool AddGroupCommand::isValid() const
-{
-    return m_valid;
-}
-
-void AddGroupCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void AddGroupCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 RemoveGroupCommand::RemoveGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged)
-    : QUndoCommand("Remove group")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Remove group", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -256,37 +233,8 @@ RemoveGroupCommand::RemoveGroupCommand(SceneDocument *scene, int groupId, std::f
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool RemoveGroupCommand::isValid() const
-{
-    return m_valid;
-}
-
-void RemoveGroupCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void RemoveGroupCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 AddVariableCommand::AddVariableCommand(SceneDocument *scene, int insertIndex, std::function<void()> onChanged)
-    : QUndoCommand("Add variable")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Add variable", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -300,41 +248,12 @@ AddVariableCommand::AddVariableCommand(SceneDocument *scene, int insertIndex, st
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool AddVariableCommand::isValid() const
-{
-    return m_valid;
-}
-
-void AddVariableCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void AddVariableCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 AddModuleCallCommand::AddModuleCallCommand(SceneDocument *scene,
                                            int moduleGroupId,
                                            int parentGroupId,
                                            int insertIndex,
                                            std::function<void()> onChanged)
-    : QUndoCommand("Add module call")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Add module call", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -348,37 +267,8 @@ AddModuleCallCommand::AddModuleCallCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool AddModuleCallCommand::isValid() const
-{
-    return m_valid;
-}
-
-void AddModuleCallCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void AddModuleCallCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 RemoveVariableCommand::RemoveVariableCommand(SceneDocument *scene, int variableId, std::function<void()> onChanged)
-    : QUndoCommand("Remove variable")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Remove variable", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -391,37 +281,8 @@ RemoveVariableCommand::RemoveVariableCommand(SceneDocument *scene, int variableI
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool RemoveVariableCommand::isValid() const
-{
-    return m_valid;
-}
-
-void RemoveVariableCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void RemoveVariableCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 RemoveModuleCallCommand::RemoveModuleCallCommand(SceneDocument *scene, int moduleCallId, std::function<void()> onChanged)
-    : QUndoCommand("Remove module call")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Remove module call", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -434,40 +295,11 @@ RemoveModuleCallCommand::RemoveModuleCallCommand(SceneDocument *scene, int modul
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool RemoveModuleCallCommand::isValid() const
-{
-    return m_valid;
-}
-
-void RemoveModuleCallCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void RemoveModuleCallCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 UpdateVariableExpressionCommand::UpdateVariableExpressionCommand(SceneDocument *scene,
                                                                  int variableId,
                                                                  const QString &expression,
                                                                  std::function<void()> onChanged)
-    : QUndoCommand("Update variable expression")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update variable expression", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -480,41 +312,12 @@ UpdateVariableExpressionCommand::UpdateVariableExpressionCommand(SceneDocument *
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool UpdateVariableExpressionCommand::isValid() const
-{
-    return m_valid;
-}
-
-void UpdateVariableExpressionCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void UpdateVariableExpressionCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 UpdateModuleCallArgumentCommand::UpdateModuleCallArgumentCommand(SceneDocument *scene,
                                                                  int moduleCallId,
                                                                  const QString &parameterName,
                                                                  const QString &expression,
                                                                  std::function<void()> onChanged)
-    : QUndoCommand("Update module call argument")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update module call argument", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -527,41 +330,12 @@ UpdateModuleCallArgumentCommand::UpdateModuleCallArgumentCommand(SceneDocument *
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool UpdateModuleCallArgumentCommand::isValid() const
-{
-    return m_valid;
-}
-
-void UpdateModuleCallArgumentCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void UpdateModuleCallArgumentCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 UpdateForLoopCommand::UpdateForLoopCommand(SceneDocument *scene,
                                            int groupId,
                                            const QString &loopVariable,
                                            const QString &rangeExpression,
                                            std::function<void()> onChanged)
-    : QUndoCommand("Update for loop")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update for loop", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -574,42 +348,13 @@ UpdateForLoopCommand::UpdateForLoopCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool UpdateForLoopCommand::isValid() const
-{
-    return m_valid;
-}
-
-void UpdateForLoopCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void UpdateForLoopCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene,
                                          int nodeId,
                                          int parentGroupId,
                                          int insertIndex,
                                          std::function<void()> onChanged,
                                          bool moduleParameterZone)
-    : QUndoCommand("Move tree node")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Move tree node", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -622,42 +367,13 @@ MoveTreeNodeCommand::MoveTreeNodeCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool MoveTreeNodeCommand::isValid() const
-{
-    return m_valid;
-}
-
-void MoveTreeNodeCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void MoveTreeNodeCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
                                                          int groupId,
                                                          const QVector3D &position,
                                                          const QVector3D &rotation,
                                                          const QVector3D &scale,
                                                          std::function<void()> onChanged)
-    : QUndoCommand("Update group transform")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update group transform", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -679,9 +395,7 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
                                                          const QVector3D &oldPosition,
                                                          const QVector3D &oldRotation,
                                                          const QVector3D &oldScale)
-    : QUndoCommand("Update group transform")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update group transform", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -701,46 +415,15 @@ UpdateGroupTransformCommand::UpdateGroupTransformCommand(SceneDocument *scene,
                                                          const SceneDocument::Snapshot &oldSnapshot,
                                                          const SceneDocument::Snapshot &newSnapshot,
                                                          std::function<void()> onChanged)
-    : QUndoCommand("Update group transform")
-    , m_scene(scene)
-    , m_oldSnapshot(oldSnapshot)
-    , m_newSnapshot(newSnapshot)
-    , m_valid(true)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Update group transform", scene, std::move(onChanged))
 {
-}
-
-bool UpdateGroupTransformCommand::isValid() const
-{
-    return m_valid;
-}
-
-void UpdateGroupTransformCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void UpdateGroupTransformCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
+    m_oldSnapshot = oldSnapshot;
+    m_newSnapshot = newSnapshot;
+    m_valid = true;
 }
 
 RenameModuleCommand::RenameModuleCommand(SceneDocument *scene, int groupId, const QString &newName, std::function<void()> onChanged)
-    : QUndoCommand("Rename module")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Rename module", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -753,37 +436,8 @@ RenameModuleCommand::RenameModuleCommand(SceneDocument *scene, int groupId, cons
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
-bool RenameModuleCommand::isValid() const
-{
-    return m_valid;
-}
-
-void RenameModuleCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void RenameModuleCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
 RenameVariableCommand::RenameVariableCommand(SceneDocument *scene, int variableId, const QString &newName, std::function<void()> onChanged)
-    : QUndoCommand("Rename variable")
-    , m_scene(scene)
-    , m_onChanged(onChanged)
+    : SnapshotCommand("Rename variable", scene, std::move(onChanged))
 {
     if (!m_scene)
         return;
@@ -794,31 +448,4 @@ RenameVariableCommand::RenameVariableCommand(SceneDocument *scene, int variableI
         m_newSnapshot = m_scene->snapshot();
 
     m_scene->restoreSnapshot(m_oldSnapshot);
-}
-
-bool RenameVariableCommand::isValid() const
-{
-    return m_valid;
-}
-
-void RenameVariableCommand::undo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_oldSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
-}
-
-void RenameVariableCommand::redo()
-{
-    if (!m_scene || !m_valid)
-        return;
-
-    m_scene->restoreSnapshot(m_newSnapshot);
-
-    if (m_onChanged)
-        m_onChanged();
 }
