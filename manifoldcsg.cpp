@@ -157,7 +157,8 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Translate
            || operation == SceneDocument::TreeNode::Rotate
            || operation == SceneDocument::TreeNode::Scale
-           || operation == SceneDocument::TreeNode::Mirror;
+           || operation == SceneDocument::TreeNode::Mirror
+           || operation == SceneDocument::TreeNode::Color;
 }
 
 static bool isTopLevelModuleDeclaration(const SceneDocument::TreeNode &node)

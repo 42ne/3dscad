@@ -1,6 +1,7 @@
 #ifndef SCENETREE_H
 #define SCENETREE_H
 
+#include <QColor>
 #include <QStringList>
 #include <QVector>
 #include <QVector3D>
@@ -38,6 +39,7 @@ public:
             Hull,       // convex hull of children; no parameters
             Minkowski,  // Minkowski sum of children; no parameters
             For,
+            Color,
             Scene // top-level container; flattened in code generation, never emitted as a block
         };
 
@@ -57,6 +59,7 @@ public:
         QStringList transformExpressions; // 3 entries (x,y,z) for Translate/Rotate/Scale
         QString loopVariable = QStringLiteral("i");
         QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
+        QColor color = QColor(79, 163, 255);
         QVector<TreeNode> children;
     };
 

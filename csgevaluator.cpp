@@ -888,7 +888,9 @@ static void appendTreeHelpers(CsgPreview *preview,
                               const QHash<QString, qreal> &variables,
                               QVector<SceneDocument::TreeNode> groupStack = {},
                               const QHash<QString, QString> &moduleArgumentOverrides = {},
-                              int ownerTreeNodeId = 0)
+                              int ownerTreeNodeId = 0,
+                              const QColor &inheritedColor = QColor(),
+                              bool helperItems = true)
 {
     if (node.type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = scene.shapeById(node.shapeId);
@@ -901,7 +903,8 @@ static void appendTreeHelpers(CsgPreview *preview,
                                                    ownerTreeNodeId > 0 ? ownerTreeNodeId : node.id);
         helper.mesh = transformedMesh(helper.mesh, groupStack);
         helper.booleanMode = inheritedMode;
-        helper.helper = true;
+        helper.color = inheritedColor;
+        helper.helper = helperItems;
         preview->items.append(helper);
         return;
     }
@@ -920,7 +923,9 @@ static void appendTreeHelpers(CsgPreview *preview,
                               variables,
                               groupStack,
                               resolveModuleArguments(node.moduleCallArguments, *module),
-                              node.id);
+                              node.id,
+                              inheritedColor,
+                              helperItems);
         }
         return;
     }
@@ -940,7 +945,7 @@ static void appendTreeHelpers(CsgPreview *preview,
             QHash<QString, qreal> iterationVariables = variables;
             iterationVariables[variableName] = value;
             for (int i = 0; i < node.children.size(); ++i)
-                appendTreeHelpers(preview, scene, node.children[i], inheritedMode, iterationVariables, groupStack, {}, ownerTreeNodeId);
+                appendTreeHelpers(preview, scene, node.children[i], inheritedMode, iterationVariables, groupStack, {}, ownerTreeNodeId, inheritedColor, helperItems);
         }
         return;
     }
@@ -948,6 +953,7 @@ static void appendTreeHelpers(CsgPreview *preview,
     const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
+    const QColor localColor = node.operation == SceneDocument::TreeNode::Color ? node.color : inheritedColor;
     for (int i = 0; i < node.children.size(); ++i) {
         if (node.id == scene.treeRoot().id && isTopLevelModuleDeclaration(node.children[i]))
             continue;
@@ -958,7 +964,7 @@ static void appendTreeHelpers(CsgPreview *preview,
         else if (node.operation == SceneDocument::TreeNode::Intersection)
             childMode = ShapeNode::Intersect;
 
-        appendTreeHelpers(preview, scene, node.children[i], childMode, localVariables, groupStack, {}, ownerTreeNodeId);
+        appendTreeHelpers(preview, scene, node.children[i], childMode, localVariables, groupStack, {}, ownerTreeNodeId, localColor, helperItems);
     }
 }
 
@@ -1349,11 +1355,59 @@ static bool treeHasModuleCall(const SceneDocument::TreeNode &node)
     return false;
 }
 
+static bool treeHasColorOperation(const SceneDocument::TreeNode &node)
+{
+    if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::Color)
+        return true;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (treeHasColorOperation(child))
+            return true;
+    }
+
+    return false;
+}
+
 static bool treeHasModuleDeclarationChild(const SceneDocument::TreeNode &node)
 {
     if (node.type == SceneDocument::TreeNode::Group && node.operation == SceneDocument::TreeNode::Module)
         return true;
     return false;
+}
+
+static CsgPreview buildColoredTreePreview(const SceneDocument &scene)
+{
+    CsgPreview preview;
+    appendTreeHelpers(&preview,
+                      scene,
+                      scene.treeRoot(),
+                      ShapeNode::Add,
+                      topLevelVariables(scene.treeRoot()),
+                      {},
+                      {},
+                      0,
+                      QColor(),
+                      false);
+    preview.mode = CsgPreview::Plain;
+    preview.statusText = QStringLiteral("CSG preview: colored tree mesh");
+    return preview;
+}
+
+static QColor firstTreeColor(const SceneDocument::TreeNode &node, const QColor &inheritedColor = QColor())
+{
+    if (node.type == SceneDocument::TreeNode::Primitive)
+        return inheritedColor;
+
+    if (node.type != SceneDocument::TreeNode::Group)
+        return QColor();
+
+    const QColor localColor = node.operation == SceneDocument::TreeNode::Color ? node.color : inheritedColor;
+    for (const SceneDocument::TreeNode &child : node.children) {
+        const QColor color = firstTreeColor(child, localColor);
+        if (color.isValid())
+            return color;
+    }
+    return QColor();
 }
 
 CsgPreview buildCsgPreview(const SceneDocument &scene)
@@ -1363,6 +1417,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
     const bool hasGroupTransform = treeHasGroupTransform(scene.treeRoot());
     const bool hasForOperation = treeHasForOperation(scene.treeRoot());
     const bool hasModuleCall = treeHasModuleCall(scene.treeRoot());
+    const bool hasColorOperation = treeHasColorOperation(scene.treeRoot());
     bool hasModuleDeclaration = false;
     for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
         if (treeHasModuleDeclarationChild(child)) {
@@ -1371,7 +1426,10 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
         }
     }
 
-    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration) && !shapes.isEmpty()) {
+    if (hasColorOperation && !hasTreeBoolean && !hasModuleDeclaration && !shapes.isEmpty())
+        return buildColoredTreePreview(scene);
+
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration || hasColorOperation) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -1380,6 +1438,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             item.mesh = manifoldMesh;
             item.shapeIndex = -1;
             item.booleanMode = ShapeNode::Add;
+            item.color = firstTreeColor(scene.treeRoot());
             item.computed = true;
 
             preview.mode = CsgPreview::ManifoldComputed;

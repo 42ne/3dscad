@@ -31,6 +31,7 @@ QStringList paletteTools()
         QStringLiteral("rotate"),
         QStringLiteral("scale"),
         QStringLiteral("mirror"),
+        QStringLiteral("color"),
         // ── Geometry algorithms ───────────────────────────────────────────────
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),

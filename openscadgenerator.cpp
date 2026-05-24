@@ -1,5 +1,6 @@
 #include "openscadgenerator.h"
 
+#include <QColor>
 #include <QStringList>
 
 void OpenScadGenerator::appendShape(QString *code, const ShapeNode &shape, const QString &indent)
@@ -42,6 +43,14 @@ static QString treeOperationName(SceneDocument::TreeNode::Operation operation)
     if (operation == SceneDocument::TreeNode::Minkowski)
         return "minkowski";
     return "union";
+}
+
+static QString colorLiteral(const QColor &color)
+{
+    return QStringLiteral("\"#%1%2%3\"")
+        .arg(color.red(), 2, 16, QLatin1Char('0'))
+        .arg(color.green(), 2, 16, QLatin1Char('0'))
+        .arg(color.blue(), 2, 16, QLatin1Char('0'));
 }
 
 static QStringList moduleParameterArgs(const SceneDocument::TreeNode &moduleNode)
@@ -296,6 +305,18 @@ void OpenScadGenerator::appendTreeNode(QString *code,
                      .arg(txExpr(0, transformVector.x()),
                           txExpr(1, transformVector.y()),
                           txExpr(2, transformVector.z()));
+
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    if (node.operation == SceneDocument::TreeNode::Color) {
+        *code += QString("%1color(%2) {\n").arg(indent, colorLiteral(node.color));
 
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent + "    ", ranges);

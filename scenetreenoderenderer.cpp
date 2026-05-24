@@ -386,6 +386,7 @@ public:
                   const QString &loopVariable = QString(),
                   const QString &loopRangeExpression = QString(),
                   int activeForLoopNumberStart = -1,
+                  const QColor &color = QColor(),
                   int depth = 0,
                   int theme = 0)
         : m_rect(rect)
@@ -398,6 +399,7 @@ public:
         , m_activeForLoopNumberStart(activeForLoopNumberStart)
         , m_activeTransformAxis(activeTransformAxis)
         , m_activeTransformNumberStart(activeTransformNumberStart)
+        , m_color(color)
         , m_operation(operation)
         , m_selected(selected)
         , m_empty(empty)
@@ -420,7 +422,11 @@ public:
         // ----- Palette-derived colours -----
         const auto pt   = static_cast<SceneTreePalette::Theme>(m_theme);
         const bool dark = SceneTreePalette::isDarkTheme(pt);
-        const QColor fill = SceneTreePalette::groupFill(m_operation, m_depth, pt);
+        QColor fill = SceneTreePalette::groupFill(m_operation, m_depth, pt);
+        if (m_operation == SceneDocument::TreeNode::Color && m_color.isValid()) {
+            fill = m_color.lighter(dark ? 82 : 168);
+            fill.setAlpha(dark ? 185 : 215);
+        }
 
         // Body border: selected = golden; otherwise lighter above fill on dark themes.
         const QPen bodyBorderPen = m_selected
@@ -710,6 +716,7 @@ private:
     int         m_activeForLoopNumberStart   = -1;
     int         m_activeTransformAxis        = -1;
     int         m_activeTransformNumberStart = -1;
+    QColor      m_color;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
     bool        m_selected            = false;
     bool        m_empty               = false;
@@ -941,6 +948,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformValues, activeAxis, activeNumberStart,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
+                                       node.color,
                                        depth, m_theme));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
@@ -972,6 +980,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
+                                 QColor(),
                                  0, theme);
     } else {
         ShapeNode shape;
@@ -1020,11 +1029,13 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
                                                const QRectF &rect,
                                                qreal cutSeparatorY,
                                                int theme,
-                                               int depth)
+                                               int depth,
+                                               const QColor &color)
 {
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
+                                   color,
                                    depth, theme);
     scene->addItem(item);
     appendPreviewItem(items, item);

@@ -385,7 +385,7 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
     if (area)
         cutSeparatorY = area->cutSeparatorY + (rect.top() - area->rect.top());
 
-    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY, m_theme, area ? area->depth : 0);
+    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY, m_theme, area ? area->depth : 0, node->color);
 
     if (!area)
         return;

@@ -280,6 +280,20 @@ void paintOperationIcon(QPainter *painter,
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
+    } else if (operation == SceneDocument::TreeNode::Color) {
+        QLinearGradient swatch(symbolRect.topLeft(), symbolRect.bottomRight());
+        swatch.setColorAt(0.0, QColor(255, 235, 126));
+        swatch.setColorAt(0.45, QColor(79, 163, 255));
+        swatch.setColorAt(1.0, QColor(106, 222, 148));
+        painter->setPen(QPen(accent.darker(160), 1.4));
+        painter->setBrush(swatch);
+        painter->drawEllipse(symbolRect.adjusted(1.0, 1.0, -1.0, -1.0));
+        painter->setBrush(QColor(255, 255, 255, 150));
+        painter->setPen(Qt::NoPen);
+        painter->drawEllipse(QRectF(symbolRect.left() + symbolRect.width() * 0.18,
+                                    symbolRect.top() + symbolRect.height() * 0.18,
+                                    symbolRect.width() * 0.22,
+                                    symbolRect.height() * 0.22));
     } else if (operation == SceneDocument::TreeNode::Scene) {
         // Draw a small grid of dots to represent the top-level scene container.
         painter->setPen(Qt::NoPen);
@@ -821,6 +835,8 @@ QSizeF previewSizeForTool(const QString &tool)
         return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight * 2.0 + ChildGap * 2.0);
     if (tool == "for")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "color")
+        return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
         return transformPreviewSize();
 
@@ -909,6 +925,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::For;
         return true;
     }
+    if (normalized == QStringLiteral("color") || normalized == QStringLiteral("colour")) {
+        *operation = SceneDocument::TreeNode::Color;
+        return true;
+    }
     return false;
 }
 
@@ -926,6 +946,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), GroupMinWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
 };
 

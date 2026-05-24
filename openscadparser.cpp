@@ -1,6 +1,7 @@
 #include "openscadparser.h"
 #include "expression.h"
 
+#include <QColor>
 #include <QRegularExpression>
 #include <QStringList>
 
@@ -121,6 +122,47 @@ static bool parseVector3WithExpressions(const QString &text, const QHash<QString
     if (expressions)
         *expressions = exprs;
     return true;
+}
+
+static bool parseColorArgument(const QString &text, QColor *color)
+{
+    if (!color)
+        return false;
+
+    const QString firstArg = splitAtTopLevelCommas(text).value(0).trimmed();
+    if (firstArg.isEmpty())
+        return false;
+
+    QString literal = firstArg;
+    if ((literal.startsWith('"') && literal.endsWith('"'))
+        || (literal.startsWith('\'') && literal.endsWith('\''))) {
+        literal = literal.mid(1, literal.size() - 2).trimmed();
+    }
+
+    QColor parsed(literal);
+    if (parsed.isValid()) {
+        *color = parsed;
+        return true;
+    }
+
+    if (firstArg.startsWith('[') && firstArg.endsWith(']')) {
+        const QStringList parts = splitAtTopLevelCommas(firstArg.mid(1, firstArg.size() - 2));
+        if (parts.size() < 3)
+            return false;
+
+        qreal channels[3] = {0.0, 0.0, 0.0};
+        for (int i = 0; i < 3; ++i) {
+            if (!parseReal(parts[i].trimmed(), &channels[i]))
+                return false;
+        }
+
+        *color = QColor(qBound(0, qRound(channels[0] * 255.0), 255),
+                        qBound(0, qRound(channels[1] * 255.0), 255),
+                        qBound(0, qRound(channels[2] * 255.0), 255));
+        return true;
+    }
+
+    return false;
 }
 
 // Parses named and/or positional arguments from an arg-list string.
@@ -253,7 +295,8 @@ static bool parseOperationLine(const QString &line,
                                const QHash<QString, qreal> &varValues,
                                QStringList *expressions = nullptr,
                                QString *loopVariable = nullptr,
-                               QString *loopRangeExpression = nullptr)
+                               QString *loopRangeExpression = nullptr,
+                               QColor *color = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
@@ -265,6 +308,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression scaleRegex("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression mirrorRegex("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression forRegex("^for\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(\\[[^\\]]+\\])\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression colorRegex("^color\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     if (unionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Union;
@@ -284,6 +328,16 @@ static bool parseOperationLine(const QString &line,
     }
     if (minkowskiRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Minkowski;
+        return true;
+    }
+    QRegularExpressionMatch colorMatch = colorRegex.match(line);
+    if (colorMatch.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Color;
+        QColor parsedColor(79, 163, 255);
+        if (!parseColorArgument(colorMatch.captured(1), &parsedColor))
+            return false;
+        if (color)
+            *color = parsedColor;
         return true;
     }
 
@@ -556,7 +610,7 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "minkowski", "for",
+        "union", "difference", "intersection", "hull", "minkowski", "for", "color",
         "cube", "sphere", "cylinder"
     };
     for (const QString &kw : known)
@@ -664,8 +718,9 @@ static bool parseBlock(ParserState *state,
         QVector3D transformVector;
         QStringList transformExpressions;
         QString loopVariable, loopRangeExpression;
+        QColor operationColor;
         if (parseOperationLine(line, &operation, &transformVector, state->variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -678,6 +733,8 @@ static bool parseBlock(ParserState *state,
             else if (operation == SceneDocument::TreeNode::For) {
                 group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
+            } else if (operation == SceneDocument::TreeNode::Color) {
+                group.color = operationColor;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
@@ -780,8 +837,9 @@ static bool parseBlock(ParserState *state,
                             QVector3D childVec;
                             QStringList childExprs;
                             QString childLoopVar, childLoopRange;
+                            QColor childColor;
                             if (parseOperationLine(ct, &childOp, &childVec, state->variableValues,
-                                                   &childExprs, &childLoopVar, &childLoopRange)) {
+                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;
@@ -792,6 +850,8 @@ static bool parseBlock(ParserState *state,
                                 else if (childOp == SceneDocument::TreeNode::For) {
                                     childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
                                     childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
+                                } else if (childOp == SceneDocument::TreeNode::Color) {
+                                    childGroup.color = childColor;
                                 }
                                 if (childOp == SceneDocument::TreeNode::Translate
                                     || childOp == SceneDocument::TreeNode::Rotate
@@ -1058,8 +1118,9 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         QVector3D transformVector;
         QStringList transformExpressions;
         QString loopVariable, loopRangeExpression;
+        QColor operationColor;
         if (parseOperationLine(line, &operation, &transformVector, state.variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor)) {
             ++state.index;
             SceneDocument::TreeNode group = makeGroupNode(operation, &state);
             if (operation == SceneDocument::TreeNode::Translate)
@@ -1073,6 +1134,8 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             else if (operation == SceneDocument::TreeNode::For) {
                 group.loopVariable = loopVariable.isEmpty() ? QStringLiteral("i") : loopVariable;
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
+            } else if (operation == SceneDocument::TreeNode::Color) {
+                group.color = operationColor;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
@@ -1157,8 +1220,9 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                             QVector3D childVec;
                             QStringList childExprs;
                             QString childLoopVar, childLoopRange;
+                            QColor childColor;
                             if (parseOperationLine(ct, &childOp, &childVec, state.variableValues,
-                                                   &childExprs, &childLoopVar, &childLoopRange)) {
+                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, &state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;
@@ -1169,6 +1233,8 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                                 else if (childOp == SceneDocument::TreeNode::For) {
                                     childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
                                     childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
+                                } else if (childOp == SceneDocument::TreeNode::Color) {
+                                    childGroup.color = childColor;
                                 }
                                 if (childOp == SceneDocument::TreeNode::Translate
                                     || childOp == SceneDocument::TreeNode::Rotate

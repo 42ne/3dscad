@@ -80,7 +80,8 @@ public:
                                    const QRectF &rect,
                                    qreal cutSeparatorY = 0.0,
                                    int theme = 0,
-                                   int depth = 0);
+                                   int depth = 0,
+                                   const QColor &color = QColor());
 
 private:
     qreal zForDepth(int depth, qreal offset) const;

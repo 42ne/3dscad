@@ -1766,7 +1766,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     color = QColor(150, 115, 240);
 
                 if (item.computed)
-                    color = viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant);
+                    color = item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant);
+                else if (item.color.isValid())
+                    color = item.color;
 
                 if (selected) {
                     if (item.booleanMode == ShapeNode::Subtract)
@@ -2079,8 +2081,10 @@ void ViewportWidget::paintOpenGLPreview()
                 }
 
                 QColor color = item.computed
-                    ? viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant)
+                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant))
                     : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant);
+                if (!item.computed && item.color.isValid())
+                    color = item.color;
                 if (!item.computed && item.booleanMode == ShapeNode::Subtract)
                     color = QColor(225, 95, 95);
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)

@@ -4,6 +4,7 @@
 #include "scenedocument.h"
 #include "scenemesh.h"
 
+#include <QColor>
 #include <QString>
 #include <QVector>
 
@@ -13,6 +14,7 @@ struct CsgRenderItem
     int shapeIndex = -1;
     int treeNodeId = 0;
     ShapeNode::BooleanMode booleanMode = ShapeNode::Add;
+    QColor color;
     bool computed = false;
     bool helper = false;
 };
