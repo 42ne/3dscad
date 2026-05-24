@@ -53,57 +53,6 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
 }
 
-static SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::TreeNode &node,
-                                                          const QHash<QString, qreal> &variables)
-{
-    SceneDocument::TreeNode evaluated = node;
-    if (evaluated.transformExpressions.isEmpty())
-        return evaluated;
-
-    for (int axis = 0; axis < evaluated.transformExpressions.size() && axis < 3; ++axis) {
-        const QString expression = evaluated.transformExpressions[axis].trimmed();
-        if (expression.isEmpty())
-            continue;
-
-        qreal value = 0.0;
-        if (!ExpressionSyntax::evaluate(expression, variables, &value))
-            continue;
-
-        if (evaluated.operation == SceneDocument::TreeNode::Translate) {
-            if (axis == 0)
-                evaluated.position.setX(static_cast<float>(value));
-            else if (axis == 1)
-                evaluated.position.setY(static_cast<float>(value));
-            else
-                evaluated.position.setZ(static_cast<float>(value));
-        } else if (evaluated.operation == SceneDocument::TreeNode::Rotate) {
-            if (axis == 0)
-                evaluated.rotation.setX(static_cast<float>(value));
-            else if (axis == 1)
-                evaluated.rotation.setY(static_cast<float>(value));
-            else
-                evaluated.rotation.setZ(static_cast<float>(value));
-        } else if (evaluated.operation == SceneDocument::TreeNode::Scale) {
-            value = qMax<qreal>(0.01, value);
-            if (axis == 0)
-                evaluated.scale.setX(static_cast<float>(value));
-            else if (axis == 1)
-                evaluated.scale.setY(static_cast<float>(value));
-            else
-                evaluated.scale.setZ(static_cast<float>(value));
-        } else if (evaluated.operation == SceneDocument::TreeNode::Mirror) {
-            if (axis == 0)
-                evaluated.position.setX(static_cast<float>(value));
-            else if (axis == 1)
-                evaluated.position.setY(static_cast<float>(value));
-            else
-                evaluated.position.setZ(static_cast<float>(value));
-        }
-    }
-
-    return evaluated;
-}
-
 static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
 {
     return operation == SceneDocument::TreeNode::Union
@@ -114,56 +63,6 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Scale
            || operation == SceneDocument::TreeNode::Mirror
            || operation == SceneDocument::TreeNode::Color;
-}
-
-static bool isTopLevelModuleDeclaration(const SceneDocument::TreeNode &node)
-{
-    return node.type == SceneDocument::TreeNode::Group
-           && node.operation == SceneDocument::TreeNode::Module;
-}
-
-static QHash<QString, qreal> variablesWithScopedVariables(const SceneDocument::TreeNode &node,
-                                                          QHash<QString, qreal> variables,
-                                                          const QHash<QString, QString> &argumentOverrides = {})
-{
-    if (node.type != SceneDocument::TreeNode::Group)
-        return variables;
-
-    if (node.operation != SceneDocument::TreeNode::Module
-        && node.operation != SceneDocument::TreeNode::Scene)
-        return variables;
-
-    for (const SceneDocument::TreeNode &child : node.children) {
-        if (child.type != SceneDocument::TreeNode::Variable)
-            continue;
-
-        qreal value = child.variableValue;
-        const QString expression = child.isParameter && argumentOverrides.contains(child.variableName)
-                                       ? argumentOverrides.value(child.variableName).trimmed()
-                                       : child.variableExpression.trimmed();
-        if (!expression.isEmpty())
-            ExpressionSyntax::evaluate(expression, variables, &value);
-        variables[child.variableName] = value;
-    }
-
-    return variables;
-}
-
-static QHash<QString, qreal> topLevelVariables(const SceneDocument::TreeNode &root)
-{
-    QHash<QString, qreal> variables;
-    for (const SceneDocument::TreeNode &child : root.children) {
-        if (child.type == SceneDocument::TreeNode::Variable) {
-            variables[child.variableName] = child.variableValue;
-        } else if (child.type == SceneDocument::TreeNode::Group
-                   && child.operation == SceneDocument::TreeNode::Scene) {
-            for (const SceneDocument::TreeNode &sceneChild : child.children) {
-                if (sceneChild.type == SceneDocument::TreeNode::Variable)
-                    variables[sceneChild.variableName] = sceneChild.variableValue;
-            }
-        }
-    }
-    return variables;
 }
 
 static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::TreeNode &node)
@@ -182,65 +81,6 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
     }
 
     return source;
-}
-
-static bool evaluateRangeExpression(const QString &rangeExpression,
-                                    const QHash<QString, qreal> &variables,
-                                    QVector<qreal> *values)
-{
-    if (!values)
-        return false;
-
-    values->clear();
-
-    const QString range = rangeExpression.trimmed();
-    if (!range.startsWith(QLatin1Char('[')) || !range.endsWith(QLatin1Char(']')))
-        return false;
-
-    const QStringList parts = range.mid(1, range.size() - 2).split(QLatin1Char(':'));
-    if (parts.size() != 2 && parts.size() != 3) {
-        // Might be a comma-separated list: [45, 135, 225, 315]
-        const QStringList listParts = splitAtTopLevelCommas(range.mid(1, range.size() - 2));
-        if (listParts.size() < 1)
-            return false;
-        for (const QString &p : listParts) {
-            qreal v = 0.0;
-            if (!ExpressionSyntax::evaluate(p.trimmed(), variables, &v))
-                return false;
-            values->append(v);
-        }
-        return !values->isEmpty();
-    }
-
-    qreal start = 0.0;
-    qreal step = 1.0;
-    qreal end = 0.0;
-    if (!ExpressionSyntax::evaluate(parts[0].trimmed(), variables, &start))
-        return false;
-    if (parts.size() == 2) {
-        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &end))
-            return false;
-    } else {
-        if (!ExpressionSyntax::evaluate(parts[1].trimmed(), variables, &step))
-            return false;
-        if (!ExpressionSyntax::evaluate(parts[2].trimmed(), variables, &end))
-            return false;
-    }
-
-    if (qFuzzyIsNull(step))
-        return false;
-
-    constexpr int MaxForIterations = 200;
-    const qreal epsilon = qAbs(step) * 0.0001 + 0.0001;
-    for (qreal value = start;
-         step > 0.0 ? value <= end + epsilon : value >= end - epsilon;
-         value += step) {
-        values->append(value);
-        if (values->size() >= MaxForIterations)
-            break;
-    }
-
-    return true;
 }
 
 static Manifold evaluateNode(const SceneDocument::TreeNode &node,
