@@ -128,30 +128,24 @@ qreal moduleBodyContentTop(qreal parameterSeparatorY)
 }
 
 bool variablePreviewHitsModuleParameterZone(const QPointF &scenePosition,
-                                            const QSizeF &previewSize,
+                                            const QSizeF &/*previewSize*/,
                                             const QRectF &contentRect,
                                             qreal parameterSeparatorY)
 {
     if (parameterSeparatorY <= contentRect.top())
         return false;
 
-    // Extend the hit zone to include the call-handle template row (the space
-    // between the parameter separator and the start of body content).  This
-    // gives the user a much larger target: any hover position above the first
-    // body child — including the separator line itself and the "call handle"
-    // area below it — routes a var drop into the parameter zone.
-    const qreal effectiveBoundary = moduleBodyContentTop(parameterSeparatorY);
+    // Ideally extend the parameter zone to include the entire call-handle
+    // template row (~73 px below the separator).  But always guarantee at
+    // least PrimitiveHeight of body-zone hit area at the bottom of the card;
+    // when the module is small (e.g. no body children yet) the preferred
+    // boundary would exceed contentRect.bottom(), making the body unreachable.
+    const qreal preferredBoundary = moduleBodyContentTop(parameterSeparatorY);
+    const qreal maxBoundary = qMax(parameterSeparatorY,
+                                   contentRect.bottom() - PrimitiveHeight);
+    const qreal effectiveBoundary = qMin(preferredBoundary, maxBoundary);
 
-    if (scenePosition.y() < effectiveBoundary)
-        return true;
-
-    // Cursor is past the body-content start — still accept if the dragged
-    // preview rect overlaps the effective parameter zone (half-height tolerance).
-    const QSizeF effectiveSize = previewSize.isValid() ? previewSize : variablePreviewSize();
-    const QRectF previewRect(scenePosition - QPointF(effectiveSize.width() * 0.5,
-                                                     effectiveSize.height() * 0.5),
-                             effectiveSize);
-    return previewRect.top() < effectiveBoundary;
+    return scenePosition.y() < effectiveBoundary;
 }
 
 void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
