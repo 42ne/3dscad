@@ -22,6 +22,7 @@ class QPainter;
 class QResizeEvent;
 class QShowEvent;
 class QTimer;
+class QVariantAnimation;
 class GroupThumbnailCache;
 class NodeThumbnailCache;
 class SceneTreeInlineTextInput;
@@ -41,6 +42,7 @@ public:
     int  treeTheme() const { return m_treeTheme; }
     void refresh();
     void compactRootBlocksAndFit();
+    void focusSelectedNodeAnimated();
 
     // Debug/inspection — for use by debug tools only.
     QRectF debugGroupRect(int groupId) const;
@@ -173,6 +175,7 @@ private:
     QVector<QGraphicsItem *> m_toolbarItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
+    QVariantAnimation *m_focusAnimation = nullptr;
     // Throttle state for canvas-drag debug logging (not used in production paths).
     bool    m_dbgPrevSnapped    = false;
     QPointF m_dbgLastLoggedPos;

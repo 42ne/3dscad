@@ -65,7 +65,7 @@ struct OpenGLMeshVertex
 struct OpenGLLineVertex
 {
     QVector3D position;
-    QVector3D color;
+    QVector4D color;
 };
 
 struct OpenGLFlatVertex
@@ -528,7 +528,7 @@ static QVector3D rotationVectorForMode(ViewportWidget::DragMode dragMode, float 
 }
 
 static QColor litColor(const QColor &baseColor, const QVector3D &normal,
-                       const QVector<SceneLight> &lights, float ambient = 0.22f)
+                       const QVector<SceneLight> &lights, float ambient = 0.30f)
 {
     float red   = baseColor.redF()   * ambient;
     float green = baseColor.greenF() * ambient;
@@ -540,6 +540,11 @@ static QColor litColor(const QColor &baseColor, const QVector3D &normal,
         green += baseColor.greenF() * light.color.greenF() * amount;
         blue  += baseColor.blueF()  * light.color.blueF()  * amount;
     }
+
+    // Preserve the material tint on shadowed faces instead of letting them read as gray.
+    red   += baseColor.redF() * 0.06f;
+    green += baseColor.greenF() * 0.06f;
+    blue  += baseColor.blueF() * 0.06f;
 
     return QColor(
         clampColorChannel(red * 255.0f),
@@ -700,20 +705,12 @@ static QColor viewportPlainSolidColor(bool darkTheme, int variant)
     }
 }
 
-static QColor viewportSelectedSolidColor(bool darkTheme, int variant)
+static QColor subduedViewportColor(QColor color, float factor)
 {
-    switch (variant) {
-    case 1:
-        return darkTheme ? QColor(190, 244, 200) : QColor(48, 178, 126);
-    case 2:
-        return darkTheme ? QColor(255, 188, 129) : QColor(220, 108, 54);
-    case 3:
-        return darkTheme ? QColor(198, 214, 238) : QColor(94, 130, 184);
-    case 4:
-        return darkTheme ? QColor(255, 218, 118) : QColor(224, 139, 42);
-    default:
-        return darkTheme ? QColor(166, 224, 205) : QColor(236, 142, 54);
-    }
+    color.setRed(clampColorChannel(color.red() * factor));
+    color.setGreen(clampColorChannel(color.green() * factor));
+    color.setBlue(clampColorChannel(color.blue() * factor));
+    return color;
 }
 
 static void collectPrimitiveShapeIds(const SceneDocument::TreeNode &node, QSet<int> *shapeIds)
@@ -764,21 +761,6 @@ static bool itemBelongsToSelection(const CsgRenderItem &item,
     return selectedShapeIds.contains(shapes->at(item.shapeIndex).id);
 }
 
-static QColor dimmedViewportColor(QColor color)
-{
-    color.setRed(clampColorChannel(color.red() * 0.58f));
-    color.setGreen(clampColorChannel(color.green() * 0.58f));
-    color.setBlue(clampColorChannel(color.blue() * 0.58f));
-    return color;
-}
-
-static QColor pulsedViewportColor(QColor color, float pulse)
-{
-    return QColor(clampColorChannel(color.red() * pulse),
-                  clampColorChannel(color.green() * pulse),
-                  clampColorChannel(color.blue() * pulse),
-                  color.alpha());
-}
 
 
 static float edgeValue(const QPointF &a, const QPointF &b, const QPointF &point)
@@ -925,6 +907,141 @@ static QVector<QPair<QVector3D, QVector3D>> meshEdges(const SceneMesh &mesh)
     return edges;
 }
 
+static QVector<QPair<QVector3D, QVector3D>> characteristicMeshEdges(const SceneMesh &mesh,
+                                                                     float cameraYaw,
+                                                                     float cameraPitch,
+                                                                     bool visibleFacesOnly = true,
+                                                                     bool includeViewSilhouette = true,
+                                                                     bool includeStructural = true)
+{
+    struct EdgeInfo
+    {
+        QVector3D from;
+        QVector3D to;
+        QVector<QVector3D> normals;
+        QVector<bool> frontFacing;
+    };
+
+    auto pointKey = [](const QVector3D &point) {
+        return QStringLiteral("%1,%2,%3")
+            .arg(qRound64(point.x() * 1000.0f))
+            .arg(qRound64(point.y() * 1000.0f))
+            .arg(qRound64(point.z() * 1000.0f));
+    };
+    auto edgeKey = [&](const QVector3D &a, const QVector3D &b) {
+        const QString aKey = pointKey(a);
+        const QString bKey = pointKey(b);
+        return aKey < bKey ? aKey + QLatin1Char('|') + bKey : bKey + QLatin1Char('|') + aKey;
+    };
+    auto appendEdge = [&](QHash<QString, EdgeInfo> *edges,
+                          const QVector3D &a,
+                          const QVector3D &b,
+                          const QVector3D &normal) {
+        EdgeInfo &edge = (*edges)[edgeKey(a, b)];
+        edge.from = a;
+        edge.to = b;
+        edge.normals.append(normal.normalized());
+        edge.frontFacing.append(toCameraDirection(normal, cameraYaw, cameraPitch).z() < 0.0f);
+    };
+
+    QHash<QString, EdgeInfo> edges;
+    for (const MeshTriangle &triangle : mesh.triangles) {
+        appendEdge(&edges, triangle.a, triangle.b, triangle.normal);
+        appendEdge(&edges, triangle.b, triangle.c, triangle.normal);
+        appendEdge(&edges, triangle.c, triangle.a, triangle.normal);
+    }
+
+    QVector<QPair<QVector3D, QVector3D>> result;
+    // Rounded primitives are tessellated (cylinders use 24-32 side facets).
+    // Their tangent side edge is useful on the visible outline, but must not
+    // be repeated through the body by the hidden/x-ray pass.
+    constexpr float structuralCreaseDotLimit = 0.80f; // about 37 degrees
+    for (const EdgeInfo &edge : edges) {
+        const bool hasVisibleFace = edge.frontFacing.contains(true);
+        if (visibleFacesOnly && !hasVisibleFace)
+            continue;
+
+        const bool boundary = edge.normals.size() == 1;
+        bool structuralCrease = false;
+        for (int i = 0; i < edge.normals.size() && !structuralCrease; ++i) {
+            for (int j = i + 1; j < edge.normals.size(); ++j) {
+                if (qAbs(QVector3D::dotProduct(edge.normals[i], edge.normals[j]))
+                    < structuralCreaseDotLimit) {
+                    structuralCrease = true;
+                    break;
+                }
+            }
+        }
+        bool silhouette = false;
+        if (includeViewSilhouette && !structuralCrease) {
+            bool hasFront = false;
+            bool hasBack = false;
+            for (bool frontFacing : edge.frontFacing) {
+                hasFront = hasFront || frontFacing;
+                hasBack = hasBack || !frontFacing;
+            }
+            silhouette = hasFront && hasBack;
+        }
+
+        if ((includeStructural && (boundary || structuralCrease)) || silhouette)
+            result.append({edge.from, edge.to});
+    }
+    return result;
+}
+
+static QVector<ViewportSelectionEdgeCandidate> selectionEdgeTopology(const SceneMesh &mesh)
+{
+    struct EdgeInfo
+    {
+        QVector3D from;
+        QVector3D to;
+        QVector<QVector3D> normals;
+    };
+
+    auto pointKey = [](const QVector3D &point) {
+        return QStringLiteral("%1,%2,%3")
+            .arg(qRound64(point.x() * 1000.0f))
+            .arg(qRound64(point.y() * 1000.0f))
+            .arg(qRound64(point.z() * 1000.0f));
+    };
+    auto edgeKey = [&](const QVector3D &a, const QVector3D &b) {
+        const QString aKey = pointKey(a);
+        const QString bKey = pointKey(b);
+        return aKey < bKey ? aKey + QLatin1Char('|') + bKey : bKey + QLatin1Char('|') + aKey;
+    };
+
+    QHash<QString, EdgeInfo> edges;
+    auto appendEdge = [&](const QVector3D &a, const QVector3D &b, const QVector3D &normal) {
+        EdgeInfo &edge = edges[edgeKey(a, b)];
+        edge.from = a;
+        edge.to = b;
+        edge.normals.append(normal.normalized());
+    };
+    for (const MeshTriangle &triangle : mesh.triangles) {
+        appendEdge(triangle.a, triangle.b, triangle.normal);
+        appendEdge(triangle.b, triangle.c, triangle.normal);
+        appendEdge(triangle.c, triangle.a, triangle.normal);
+    }
+
+    constexpr float structuralCreaseDotLimit = 0.80f;
+    QVector<ViewportSelectionEdgeCandidate> result;
+    result.reserve(edges.size());
+    for (const EdgeInfo &edge : edges) {
+        bool structural = edge.normals.size() == 1;
+        for (int i = 0; i < edge.normals.size() && !structural; ++i) {
+            for (int j = i + 1; j < edge.normals.size(); ++j) {
+                if (qAbs(QVector3D::dotProduct(edge.normals[i], edge.normals[j]))
+                    < structuralCreaseDotLimit) {
+                    structural = true;
+                    break;
+                }
+            }
+        }
+        result.append({edge.from, edge.to, edge.normals, structural});
+    }
+    return result;
+}
+
 static uint shapeFingerprint(const ShapeNode &shape, uint seed)
 {
     seed = qHash(shape.id, seed);
@@ -1054,17 +1171,11 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         m_lightingPreset = qMax(0, index);
         update();
     });
-    m_selectionPulseTimer.setInterval(80);
-    connect(&m_selectionPulseTimer, &QTimer::timeout, this, [this]() {
-        ++m_selectionPulseFrame;
-        update();
-    });
-
     connect(&m_csgWatcher, &QFutureWatcher<CsgPreview>::finished,
             this, &ViewportWidget::onCsgPreviewReady);
 
     updateViewportControls();
-    updateSelectionPulseTimer();
+
 }
 
 void ViewportWidget::setScene(const SceneDocument *scene)
@@ -1072,7 +1183,7 @@ void ViewportWidget::setScene(const SceneDocument *scene)
     m_scene = scene;
     m_shapes = scene ? &scene->shapes() : nullptr;
     invalidateCsgPreview();
-    updateSelectionPulseTimer();
+
     update();
 }
 
@@ -1081,7 +1192,7 @@ void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
     m_scene = nullptr;
     m_shapes = shapes;
     invalidateCsgPreview();
-    updateSelectionPulseTimer();
+
     update();
 }
 
@@ -1091,7 +1202,7 @@ void ViewportWidget::setSelectedIndex(int index)
     if (index >= 0)
         m_selectedGroupId = 0;
     m_vboMeshKey.clear();
-    updateSelectionPulseTimer();
+
     update();
 }
 
@@ -1101,7 +1212,7 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     if (groupId > 0)
         m_selectedIndex = -1;
     m_vboMeshKey.clear();
-    updateSelectionPulseTimer();
+
     update();
 }
 
@@ -1138,13 +1249,13 @@ void ViewportWidget::setRenderBackend(RenderBackend backend)
 
     if (m_renderBackend == backend) {
         updateViewportControls();
-        updateSelectionPulseTimer();
+
         return;
     }
 
     m_renderBackend = backend;
     updateViewportControls();
-    updateSelectionPulseTimer();
+
     update();
 }
 
@@ -1331,11 +1442,12 @@ void ViewportWidget::initializeGL()
         "    vec3 warmLight = u_light_color_a * diffuseA * u_light_intensity_a;\n"
         "    vec3 coolLight = u_light_color_b * diffuseB * u_light_intensity_b;\n"
         "    vec3 sideLight = u_light_color_c * diffuseC * u_light_intensity_c;\n"
-        "    vec3 shaded = v_color * (vec3(u_ambient) + warmLight + coolLight + sideLight);\n"
-        "    shaded = mix(shaded, environment, 0.07 + fresnel * 0.14);\n"
+        "    vec3 shaded = v_color * (vec3(u_ambient + 0.10) + warmLight + coolLight + sideLight);\n"
+        "    vec3 tintedEnvironment = mix(environment, v_color, 0.68);\n"
+        "    shaded = mix(shaded, tintedEnvironment, 0.04 + fresnel * 0.09);\n"
         "    shaded += vec3(1.0, 0.92, 0.74) * specA * u_specular_strength;\n"
         "    shaded += vec3(0.70, 0.86, 1.0) * specB * (u_specular_strength * 0.43);\n"
-        "    shaded += vec3(0.55, 0.75, 1.0) * rim * 0.09;\n"
+        "    shaded += mix(vec3(0.55, 0.75, 1.0), v_color, 0.45) * rim * 0.055;\n"
         "    gl_FragColor = vec4(clamp(shaded, 0.0, 1.0), 1.0);\n"
         "}\n");
     m_glMeshProgram->link();
@@ -1344,9 +1456,9 @@ void ViewportWidget::initializeGL()
     m_glLineProgram->addShaderFromSourceCode(
         QOpenGLShader::Vertex,
         "attribute vec3 a_position;\n"  // world space
-        "attribute vec3 a_color;\n"
+        "attribute vec4 a_color;\n"
         "uniform mat4 u_mvp;\n"
-        "varying vec3 v_color;\n"
+        "varying vec4 v_color;\n"
         "void main() {\n"
         "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
         "    v_color = a_color;\n"
@@ -1356,9 +1468,9 @@ void ViewportWidget::initializeGL()
         "#ifdef GL_ES\n"
         "precision mediump float;\n"
         "#endif\n"
-        "varying vec3 v_color;\n"
+        "varying vec4 v_color;\n"
         "void main() {\n"
-        "    gl_FragColor = vec4(v_color, 1.0);\n"
+        "    gl_FragColor = v_color;\n"
         "}\n");
     m_glLineProgram->link();
 
@@ -1393,7 +1505,7 @@ void ViewportWidget::initializeGL()
         QVector<OpenGLLineVertex> gridVerts;
         gridVerts.reserve(504 + 6);
         auto appendLine = [&](const QVector3D &from, const QVector3D &to, const QColor &color) {
-            const QVector3D c = colorToVector(color);
+            const QVector4D c = colorToVector4(color);
             gridVerts.append({from, c});
             gridVerts.append({to,   c});
         };
@@ -1413,6 +1525,7 @@ void ViewportWidget::initializeGL()
 
     // ── Mesh / helper / shadow VBOs — created here, filled on first draw ───────
     m_vboMesh.create();        m_vboMesh.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_vboSelectionEdges.create(); m_vboSelectionEdges.setUsagePattern(QOpenGLBuffer::DynamicDraw);
     m_vboHelperFront.create(); m_vboHelperFront.setUsagePattern(QOpenGLBuffer::DynamicDraw);
     m_vboHelperXray.create();  m_vboHelperXray.setUsagePattern(QOpenGLBuffer::DynamicDraw);
     m_vboShadow.create();      m_vboShadow.setUsagePattern(QOpenGLBuffer::DynamicDraw);
@@ -1674,16 +1787,6 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
     };
 
-    auto appendWireframe = [&](QVector<Line2D> &lines, const SceneMesh &mesh, const QColor &color) {
-        for (const auto &edge : meshEdges(mesh)) {
-            Line2D line;
-            line.a = project(edge.first).point;
-            line.b = project(edge.second).point;
-            line.color = color;
-            lines.append(line);
-        }
-    };
-
     auto appendProjectedHull = [&](QVector<QPair<QPolygonF, QColor>> &outlines,
                                    const SceneMesh &mesh,
                                    const QColor &color) {
@@ -1700,59 +1803,15 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             outlines.append({hull, color});
     };
 
-    auto appendCutFeatureEdges = [&](QVector<Line2D> &lines, const SceneMesh &mesh, const QColor &color) {
-        struct EdgeInfo
-        {
-            QVector3D from;
-            QVector3D to;
-            QVector<QVector3D> normals;
-            QVector<bool> frontFacing;
-        };
-
-        auto pointKey = [](const QVector3D &point) {
-            return QStringLiteral("%1,%2,%3")
-                .arg(qRound64(point.x() * 1000.0f))
-                .arg(qRound64(point.y() * 1000.0f))
-                .arg(qRound64(point.z() * 1000.0f));
-        };
-        auto edgeKey = [&](const QVector3D &a, const QVector3D &b) {
-            const QString aKey = pointKey(a);
-            const QString bKey = pointKey(b);
-            return aKey < bKey ? aKey + QLatin1Char('|') + bKey : bKey + QLatin1Char('|') + aKey;
-        };
-        auto appendEdge = [&](QHash<QString, EdgeInfo> *edges,
-                              const QVector3D &a,
-                              const QVector3D &b,
-                              const QVector3D &normal) {
-            EdgeInfo &edge = (*edges)[edgeKey(a, b)];
-            edge.from = a;
-            edge.to = b;
-            edge.normals.append(normal.normalized());
-            edge.frontFacing.append(toCameraDirection(normal, m_cameraYaw, m_cameraPitch).z() < 0.0f);
-        };
-
-        QHash<QString, EdgeInfo> edges;
-        for (const MeshTriangle &triangle : mesh.triangles) {
-            appendEdge(&edges, triangle.a, triangle.b, triangle.normal);
-            appendEdge(&edges, triangle.b, triangle.c, triangle.normal);
-            appendEdge(&edges, triangle.c, triangle.a, triangle.normal);
-        }
-
-        for (const EdgeInfo &edge : edges) {
-            bool useful = edge.normals.size() == 1;
-            if (edge.normals.size() >= 2) {
-                const float normalDot = qAbs(QVector3D::dotProduct(edge.normals[0], edge.normals[1]));
-                const bool sharpCrease = normalDot < 0.74f;
-                const bool silhouette = edge.frontFacing[0] != edge.frontFacing[1];
-                useful = sharpCrease || silhouette;
-            }
-
-            if (!useful)
-                continue;
-
+    auto appendCutFeatureEdges = [&](QVector<Line2D> &lines,
+                                     const SceneMesh &mesh,
+                                     const QColor &color,
+                                     bool visibleFacesOnly = false) {
+        const auto edges = characteristicMeshEdges(mesh, m_cameraYaw, m_cameraPitch, visibleFacesOnly);
+        for (const auto &edge : edges) {
             Line2D line;
-            line.a = project(edge.from).point;
-            line.b = project(edge.to).point;
+            line.a = project(edge.first).point;
+            line.b = project(edge.second).point;
             line.color = color;
             lines.append(line);
         }
@@ -1769,10 +1828,14 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                                                     m_selectedGroupId);
         const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
         const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
+        const QColor selectionFeatureColor(255, 211, 112, 240);
+        const QColor selectionGlowColor(255, 183, 64, 86);
+        const qreal selectionEdgeWidth = 1.65;
         QVector<Triangle2D> triangles;
         QVector<Triangle2D> translucentHelperTriangles;
         QVector<Line2D> backgroundHelperLines;
         QVector<Line2D> foregroundHelperLines;
+        QVector<Line2D> selectedFeatureLines;
         QVector<QPair<QPolygonF, QColor>> cutHelperOutlines;
 
         if (m_draggingShape) {
@@ -1787,45 +1850,28 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     color = QColor(150, 115, 240);
 
                 const bool selected = selectedShapeIds.contains(shape.id);
-                if (selected) {
-                    if (shape.booleanMode == ShapeNode::Subtract)
-                        color = QColor(255, 125, 80);
-                    else if (shape.booleanMode == ShapeNode::Intersect)
-                        color = QColor(185, 145, 255);
-                    else
-                        color = QColor(255, 180, 60);
-                } else if (hasViewportSelection) {
-                    color = dimmedViewportColor(color);
-                }
+                if (hasViewportSelection)
+                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
 
-                appendMesh(triangles, buildShapeMesh(shape), color, i);
+                const SceneMesh mesh = buildShapeMesh(shape);
+                appendMesh(triangles, mesh, color, i);
+                if (selected && drawSceneMeshes)
+                    appendCutFeatureEdges(selectedFeatureLines, mesh, selectionFeatureColor, true);
             }
         } else {
             const CsgPreview &preview = m_cachedCsgPreview;
             csgStatus = m_csgComputing ? QStringLiteral("CSG preview: computing…") : preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
-                QColor color = QColor(80, 160, 255);
-                if (item.booleanMode == ShapeNode::Subtract)
+                QColor color = item.computed
+                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant))
+                    : (item.color.isValid() ? item.color : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant));
+                if (!item.computed && item.booleanMode == ShapeNode::Subtract)
                     color = QColor(225, 95, 95);
-                else if (item.booleanMode == ShapeNode::Intersect)
+                else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
-
-                if (item.computed)
-                    color = item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant);
-                else if (item.color.isValid())
-                    color = item.color;
-
-                if (selected) {
-                    if (item.booleanMode == ShapeNode::Subtract)
-                        color = QColor(255, 125, 80);
-                    else if (item.booleanMode == ShapeNode::Intersect)
-                        color = QColor(185, 145, 255);
-                    else
-                        color = item.computed ? viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant) : QColor(255, 180, 60);
-                } else if (hasViewportSelection) {
-                    color = dimmedViewportColor(color);
-                }
+                if (!item.helper && hasViewportSelection)
+                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
 
                 if (item.helper) {
                     if (!drawSceneMeshes)
@@ -1838,18 +1884,19 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                               : (m_darkViewportTheme ? QColor(188, 210, 218, 14) : QColor(190, 205, 212, 22));
                         appendMesh(translucentHelperTriangles, item.mesh, cutColor, -1, false, true, false);
                         QColor cutEdgeColor = selectedCut
-                                                  ? (m_darkViewportTheme ? QColor(176, 216, 232, 178) : QColor(42, 68, 84, 178))
+                                                  ? selectionFeatureColor
                                                   : (m_darkViewportTheme ? QColor(176, 216, 232, 76) : QColor(42, 68, 84, 44));
                         appendProjectedHull(cutHelperOutlines, item.mesh, cutEdgeColor);
                         if (selectedCut)
                             appendCutFeatureEdges(foregroundHelperLines, item.mesh, cutEdgeColor);
                     } else if (selected) {
-                        QColor selectedColor = QColor(255, 190, 70).lighter(115);
-                        selectedColor.setAlpha(170);
-                        appendWireframe(foregroundHelperLines, item.mesh, selectedColor);
+                        appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
                     }
                 } else if (drawSceneMeshes) {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
+                }
+                if (!item.helper && selected && drawSceneMeshes) {
+                    appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
                 }
             }
         }
@@ -1874,7 +1921,17 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
 
         for (const Line2D &line : foregroundHelperLines) {
-            painter.setPen(QPen(line.color, 0.7, Qt::SolidLine, Qt::RoundCap));
+            painter.setPen(QPen(line.color, 1.15, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(line.a, line.b);
+        }
+
+        for (const Line2D &line : selectedFeatureLines) {
+            // Glow outer: wider, softer
+            painter.setPen(QPen(selectionGlowColor, selectionEdgeWidth + 2.3,
+                                Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(line.a, line.b);
+            // Core inner: thin, bright
+            painter.setPen(QPen(line.color, selectionEdgeWidth, Qt::SolidLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
         }
 
@@ -1959,7 +2016,7 @@ void ViewportWidget::paintOpenGLGrid()
 
     m_vboGrid.bind();
     m_glLineProgram->setAttributeBuffer(posLoc,   GL_FLOAT, offsetof(OpenGLLineVertex, position), 3, sizeof(OpenGLLineVertex));
-    m_glLineProgram->setAttributeBuffer(colorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color),    3, sizeof(OpenGLLineVertex));
+    m_glLineProgram->setAttributeBuffer(colorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color),    4, sizeof(OpenGLLineVertex));
 
     glDrawArrays(GL_LINES, 0, m_vboGridCount);
 
@@ -2057,17 +2114,12 @@ void ViewportWidget::paintOpenGLPreview()
                                                                 m_selectedGroupId);
     const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
     const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
-    const int pulseBucket = hasViewportSelection ? (m_selectionPulseFrame % 40) : 0;
-    const float pulse = hasViewportSelection
-                            ? 1.0f + 0.13f * qSin(static_cast<float>(pulseBucket) * 0.35f)
-                            : 1.0f;
 
     const QString meshKey = dragging
         ? QString()
         : (QString::number(m_cachedCsgFingerprint)
            + "|" + QString::number(m_selectedIndex)
            + "|" + QString::number(m_selectedGroupId)
-           + "|" + QString::number(pulseBucket)
            + "|" + (m_darkViewportTheme ? QChar('d') : QChar('l'))
            + "|" + QString::number(m_viewportColorVariant));
 
@@ -2092,10 +2144,9 @@ void ViewportWidget::paintOpenGLPreview()
                     color = QColor(225, 95, 95);
                 else if (shape.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
-                if (selectedShapeIds.contains(shape.id))
-                    color = pulsedViewportColor(QColor(255, 180, 60), pulse);
-                else if (hasViewportSelection)
-                    color = dimmedViewportColor(color);
+                const bool selected = selectedShapeIds.contains(shape.id);
+                if (hasViewportSelection)
+                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
                 appendMesh(buildShapeMesh(shape), color);
             }
         } else {
@@ -2104,14 +2155,15 @@ void ViewportWidget::paintOpenGLPreview()
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 if (item.helper) {
-                    if (item.booleanMode != ShapeNode::Subtract && !selected)
+                    // Ordinary selected helpers supply edge geometry below; filling them
+                    // would paint the selected object cyan instead of outlining it.
+                    if (item.booleanMode != ShapeNode::Subtract)
                         continue;
-                    const bool sel = selected;
-                    const QColor fc = sel
-                        ? pulsedViewportColor(QColor(255, 188, 72, 92), pulse)
+                    const QColor fc = selected
+                        ? QColor(188, 210, 218, 58)
                         : (m_darkViewportTheme ? QColor(188, 210, 218, 22) : QColor(60, 90, 110, 28));
-                    const QColor xc = sel
-                        ? pulsedViewportColor(QColor(255, 188, 72, 34), pulse)
+                    const QColor xc = selected
+                        ? QColor(188, 210, 218, 26)
                         : (m_darkViewportTheme ? QColor(188, 210, 218,  8) : QColor(60, 90, 110, 12));
                     const QVector4D cf = colorToVector4(fc);
                     const QVector4D cx = colorToVector4(xc);
@@ -2135,12 +2187,8 @@ void ViewportWidget::paintOpenGLPreview()
                     color = QColor(225, 95, 95);
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
-                if (selected)
-                    color = item.computed
-                        ? pulsedViewportColor(viewportSelectedSolidColor(m_darkViewportTheme, m_viewportColorVariant), pulse)
-                        : pulsedViewportColor(QColor(255, 180, 60), pulse);
-                else if (hasViewportSelection)
-                    color = dimmedViewportColor(color);
+                if (hasViewportSelection)
+                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
                 appendMesh(item.mesh, color);
             }
         }
@@ -2163,6 +2211,102 @@ void ViewportWidget::paintOpenGLPreview()
         // Don't store key during drag so the next non-drag frame always rebuilds from CSG.
         if (!dragging)
             m_vboMeshKey = meshKey;
+    }
+
+    const QString selectionTopologyKey = dragging
+        ? QString()
+        : (QString::number(m_cachedCsgFingerprint)
+           + "|" + QString::number(m_selectedIndex)
+           + "|" + QString::number(m_selectedGroupId));
+    auto forEachSelectedMesh = [&](const auto &visitor) {
+        if (dragging) {
+            for (const ShapeNode &shape : *m_shapes) {
+                if (selectedShapeIds.contains(shape.id))
+                    visitor(buildShapeMesh(shape));
+            }
+            return;
+        }
+        for (const CsgRenderItem &item : m_cachedCsgPreview.items) {
+            const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
+            if (selected && (!item.helper || item.booleanMode != ShapeNode::Subtract))
+                visitor(item.mesh);
+        }
+    };
+    if (dragging || selectionTopologyKey != m_selectionEdgeTopologyKey) {
+        m_selectionEdgeCandidates.clear();
+        forEachSelectedMesh([&](const SceneMesh &mesh) {
+            m_selectionEdgeCandidates += selectionEdgeTopology(mesh);
+        });
+        m_selectionEdgeTopologyKey = selectionTopologyKey;
+        m_vboSelectionEdgesKey.clear();
+    }
+
+    const QString selectionEdgesKey = dragging
+        ? QString()
+        : (selectionTopologyKey
+           + "|" + QString::number(m_cameraYaw, 'f', 2)
+           + "|" + QString::number(m_cameraPitch, 'f', 2));
+    if (dragging || selectionEdgesKey != m_vboSelectionEdgesKey) {
+        QVector<OpenGLLineVertex> hiddenEdgeGlowVerts;
+        QVector<OpenGLLineVertex> hiddenEdgeCoreVerts;
+        QVector<OpenGLLineVertex> structuralEdgeGlowVerts;
+        QVector<OpenGLLineVertex> structuralEdgeCoreVerts;
+        QVector<OpenGLLineVertex> silhouetteGlowVerts;
+        QVector<OpenGLLineVertex> silhouetteCoreVerts;
+        const QVector4D hiddenEdgeGlowColor = colorToVector4(QColor(244, 178, 82, 22));
+        const QVector4D hiddenEdgeCoreColor = colorToVector4(QColor(255, 214, 132, 38));
+        const QVector4D structuralEdgeGlowColor = colorToVector4(QColor(255, 183, 64, 72));
+        const QVector4D structuralEdgeCoreColor = colorToVector4(QColor(255, 211, 112, 192));
+        const QVector4D silhouetteGlowColor = colorToVector4(QColor(255, 178, 52, 142));
+        const QVector4D silhouetteCoreColor = colorToVector4(QColor(255, 222, 134, 255));
+        for (const ViewportSelectionEdgeCandidate &edge : m_selectionEdgeCandidates) {
+            bool hasVisibleFace = false;
+            bool hasHiddenFace = false;
+            for (const QVector3D &normal : edge.normals) {
+                const bool visible = toCameraDirection(normal, m_cameraYaw, m_cameraPitch).z() < 0.0f;
+                hasVisibleFace = hasVisibleFace || visible;
+                hasHiddenFace = hasHiddenFace || !visible;
+            }
+            if (edge.structural && hasVisibleFace) {
+                structuralEdgeGlowVerts.append({edge.from, structuralEdgeGlowColor});
+                structuralEdgeGlowVerts.append({edge.to, structuralEdgeGlowColor});
+                structuralEdgeCoreVerts.append({edge.from, structuralEdgeCoreColor});
+                structuralEdgeCoreVerts.append({edge.to, structuralEdgeCoreColor});
+            } else if (!edge.structural && hasVisibleFace && hasHiddenFace) {
+                silhouetteGlowVerts.append({edge.from, silhouetteGlowColor});
+                silhouetteGlowVerts.append({edge.to, silhouetteGlowColor});
+                silhouetteCoreVerts.append({edge.from, silhouetteCoreColor});
+                silhouetteCoreVerts.append({edge.to, silhouetteCoreColor});
+            }
+        }
+
+        // Topology is cached above, so the subdued x-ray halo is cheap enough
+        // to retain on dense selections while still keeping silhouettes depth-tested.
+        for (const ViewportSelectionEdgeCandidate &edge : m_selectionEdgeCandidates) {
+            if (!edge.structural)
+                continue;
+            hiddenEdgeGlowVerts.append({edge.from, hiddenEdgeGlowColor});
+            hiddenEdgeGlowVerts.append({edge.to, hiddenEdgeGlowColor});
+            hiddenEdgeCoreVerts.append({edge.from, hiddenEdgeCoreColor});
+            hiddenEdgeCoreVerts.append({edge.to, hiddenEdgeCoreColor});
+        }
+
+        const int hiddenEdgeSegmentCount = hiddenEdgeCoreVerts.size();
+        const int structuralEdgeSegmentCount = structuralEdgeCoreVerts.size();
+        const int silhouetteSegmentCount = silhouetteCoreVerts.size();
+        hiddenEdgeGlowVerts += hiddenEdgeCoreVerts;
+        hiddenEdgeGlowVerts += structuralEdgeGlowVerts;
+        hiddenEdgeGlowVerts += structuralEdgeCoreVerts;
+        hiddenEdgeGlowVerts += silhouetteGlowVerts;
+        hiddenEdgeGlowVerts += silhouetteCoreVerts;
+        m_vboSelectionEdges.bind();
+        m_vboSelectionEdges.allocate(hiddenEdgeGlowVerts.constData(),
+                                     hiddenEdgeGlowVerts.size() * int(sizeof(OpenGLLineVertex)));
+        m_vboSelectionEdges.release();
+        m_vboSelectionHiddenEdgeCount = hiddenEdgeSegmentCount;
+        m_vboSelectionEdgeCount = structuralEdgeSegmentCount;
+        m_vboSelectionSilhouetteCount = silhouetteSegmentCount;
+        m_vboSelectionEdgesKey = selectionEdgesKey;
     }
 
     if (m_vboMeshCount == 0)
@@ -2272,6 +2416,65 @@ void ViewportWidget::paintOpenGLPreview()
         glDisable(GL_POLYGON_OFFSET_FILL);
         glPolygonOffset(0.0f, 0.0f);
         glDisable(GL_BLEND);
+    }
+
+    if ((m_vboSelectionEdgeCount > 0 || m_vboSelectionHiddenEdgeCount > 0
+         || m_vboSelectionSilhouetteCount > 0)
+        && m_glLineProgram && m_glLineProgram->isLinked()) {
+        glDisable(GL_STENCIL_TEST);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_FALSE);
+
+        m_glLineProgram->bind();
+        m_glLineProgram->setUniformValue("u_mvp", mvp);
+        const int edgePosLoc = m_glLineProgram->attributeLocation("a_position");
+        const int edgeColorLoc = m_glLineProgram->attributeLocation("a_color");
+        m_glLineProgram->enableAttributeArray(edgePosLoc);
+        m_glLineProgram->enableAttributeArray(edgeColorLoc);
+        m_vboSelectionEdges.bind();
+        m_glLineProgram->setAttributeBuffer(edgePosLoc, GL_FLOAT, offsetof(OpenGLLineVertex, position), 3, sizeof(OpenGLLineVertex));
+        m_glLineProgram->setAttributeBuffer(edgeColorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color), 4, sizeof(OpenGLLineVertex));
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glDepthFunc(GL_GREATER);
+        if (m_vboSelectionHiddenEdgeCount > 0) {
+            // Hidden geometry is context only: a soft haze, not a competing outline.
+            glLineWidth(7.0f);
+            glDrawArrays(GL_LINES, 0, m_vboSelectionHiddenEdgeCount);
+            glLineWidth(1.0f);
+            glDrawArrays(GL_LINES, m_vboSelectionHiddenEdgeCount, m_vboSelectionHiddenEdgeCount);
+        }
+
+        glDepthFunc(GL_LEQUAL);
+        int visibleOffset = m_vboSelectionHiddenEdgeCount * 2;
+        if (m_vboSelectionEdgeCount > 0) {
+            glLineWidth(4.5f);
+            glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionEdgeCount);
+            glLineWidth(2.1f);
+            glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionEdgeCount, m_vboSelectionEdgeCount);
+            visibleOffset += m_vboSelectionEdgeCount * 2;
+        }
+
+        if (m_vboSelectionSilhouetteCount > 0) {
+            // Keep contours of occluded parts behind the visible surface. Drawing
+            // every local silhouette through a compound object overwhelms assemblies.
+            glDepthFunc(GL_LEQUAL);
+            glLineWidth(6.0f);
+            glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionSilhouetteCount);
+            glLineWidth(2.7f);
+            glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionSilhouetteCount, m_vboSelectionSilhouetteCount);
+        }
+        glLineWidth(1.0f);
+        m_vboSelectionEdges.release();
+        m_glLineProgram->disableAttributeArray(edgePosLoc);
+        m_glLineProgram->disableAttributeArray(edgeColorLoc);
+        m_glLineProgram->release();
+
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+        glDepthFunc(GL_LESS);
     }
 
     glDisable(GL_STENCIL_TEST);
@@ -2559,17 +2762,6 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
     return true;
-}
-
-void ViewportWidget::updateSelectionPulseTimer()
-{
-    const bool hasSelection = (m_selectedIndex >= 0 || m_selectedGroupId > 0) && m_shapes;
-    const bool shouldPulse = hasSelection && m_renderBackend == OpenGLRenderBackend;
-    if (shouldPulse && !m_selectionPulseTimer.isActive()) {
-        m_selectionPulseTimer.start();
-    } else if (!shouldPulse && m_selectionPulseTimer.isActive()) {
-        m_selectionPulseTimer.stop();
-    }
 }
 
 void ViewportWidget::updateViewportControls()

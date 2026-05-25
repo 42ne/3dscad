@@ -11,6 +11,7 @@
 #include "scenestringutils.h"
 
 #include <QApplication>
+#include <QEasingCurve>
 #include <QFontMetricsF>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
@@ -24,6 +25,7 @@
 #include <QScrollBar>
 #include <QTextDocument>
 #include <QTimer>
+#include <QVariantAnimation>
 #include <QWheelEvent>
 #include <QStringList>
 #include <cmath>
@@ -472,6 +474,86 @@ void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
 
     m_selectedTreeNodeId = nodeId;
     refresh();
+}
+
+void SceneTreeGraphicsWidget::focusSelectedNodeAnimated()
+{
+    if (!m_scene || m_selectedTreeNodeId <= 0 || !viewport()
+        || m_dragActive || m_canvasDragActive || m_inlineInputActive) {
+        return;
+    }
+
+    QVector<int> collapsedAncestors;
+    std::function<bool(const SceneDocument::TreeNode &)> revealNode =
+        [&](const SceneDocument::TreeNode &parent) {
+            for (const SceneDocument::TreeNode &child : parent.children) {
+                if (child.id == m_selectedTreeNodeId)
+                    return true;
+                if (child.type != SceneDocument::TreeNode::Group || !revealNode(child))
+                    continue;
+                if (child.operation != SceneDocument::TreeNode::Scene
+                    && m_collapsedGroupIds.contains(child.id))
+                    collapsedAncestors.append(child.id);
+                return true;
+            }
+            return false;
+        };
+    revealNode(m_scene->treeRoot());
+    for (int groupId : collapsedAncestors)
+        toggleGroupCollapsed(groupId);
+
+    QRectF targetRect = groupRectForNode(m_selectedTreeNodeId);
+    if (!targetRect.isValid())
+        targetRect = rectForChildNode(m_selectedTreeNodeId);
+    if (!targetRect.isValid())
+        return;
+
+    if (m_focusAnimation) {
+        m_focusAnimation->stop();
+        m_focusAnimation->deleteLater();
+        m_focusAnimation = nullptr;
+    }
+    m_panInertiaTimer->stop();
+    m_panVelocity = QPointF();
+    snapZoom();
+
+    const QPointF startCenter = mapToScene(viewport()->rect().center());
+    const QPointF targetCenter = targetRect.center();
+    const QTransform startTransform = transform();
+    const qreal startScale = qMax<qreal>(0.001, startTransform.m11());
+    const QSize viewportSize = viewport()->size();
+    const qreal targetWidth = qMax<qreal>(1.0, viewportSize.width() / 3.0);
+    const qreal targetHeight = qMax<qreal>(1.0, viewportSize.height() / 3.0);
+    const qreal fitScale = qMin(targetWidth / qMax<qreal>(1.0, targetRect.width()),
+                                targetHeight / qMax<qreal>(1.0, targetRect.height()));
+    const qreal targetScale = qBound<qreal>(0.28, fitScale, 2.4);
+
+    auto *animation = new QVariantAnimation(this);
+    m_focusAnimation = animation;
+    animation->setDuration(280);
+    animation->setStartValue(0.0);
+    animation->setEndValue(1.0);
+    animation->setEasingCurve(QEasingCurve::OutCubic);
+    connect(animation, &QVariantAnimation::valueChanged, this,
+            [this, animation, startCenter, targetCenter, startTransform, startScale, targetScale](const QVariant &value) {
+                if (animation != m_focusAnimation)
+                    return;
+                const qreal progress = value.toReal();
+                const qreal scale = startScale + (targetScale - startScale) * progress;
+                QTransform focusedTransform = startTransform;
+                focusedTransform.scale(scale / startScale, scale / startScale);
+                setTransform(focusedTransform);
+                m_zoomLevel = transform().m11();
+                centerOn(startCenter + (targetCenter - startCenter) * progress);
+                updateInlineInputGeometry();
+                updateToolbarOverlay();
+            });
+    connect(animation, &QVariantAnimation::finished, this, [this, animation]() {
+        if (m_focusAnimation == animation)
+            m_focusAnimation = nullptr;
+        animation->deleteLater();
+    });
+    animation->start();
 }
 
 void SceneTreeGraphicsWidget::setTreeTheme(int theme)

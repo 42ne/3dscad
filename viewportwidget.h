@@ -23,6 +23,14 @@ class QComboBox;
 class QResizeEvent;
 class QWheelEvent;
 
+struct ViewportSelectionEdgeCandidate
+{
+    QVector3D from;
+    QVector3D to;
+    QVector<QVector3D> normals;
+    bool structural = false;
+};
+
 class ViewportWidget : public QOpenGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
@@ -102,7 +110,6 @@ private:
     void drawTreeShapeParameterPreview(QPainter &painter) const;
     void updateViewportControls();
     bool canUseOpenGLRenderBackend() const;
-    void updateSelectionPulseTimer();
     void startAsyncCsgCompute();
     void onCsgPreviewReady();
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
@@ -125,8 +132,6 @@ private:
     int m_lightingPreset = 0;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
-    int m_selectionPulseFrame = 0;
-    QTimer m_selectionPulseTimer;
     int m_treeTransformPreviewGroupId = 0;
     int m_treeTransformPreviewAxis = -1;
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;
@@ -173,15 +178,22 @@ private:
     // or selection/theme changes. Camera movement only updates MVP uniforms.
     QOpenGLBuffer m_vboGrid        { QOpenGLBuffer::VertexBuffer };
     QOpenGLBuffer m_vboMesh        { QOpenGLBuffer::VertexBuffer };
+    QOpenGLBuffer m_vboSelectionEdges { QOpenGLBuffer::VertexBuffer };
     QOpenGLBuffer m_vboHelperFront { QOpenGLBuffer::VertexBuffer };
     QOpenGLBuffer m_vboHelperXray  { QOpenGLBuffer::VertexBuffer };
     QOpenGLBuffer m_vboShadow      { QOpenGLBuffer::VertexBuffer };
     int     m_vboGridCount        = 0;
     int     m_vboMeshCount        = 0;
+    int     m_vboSelectionHiddenEdgeCount = 0;
+    int     m_vboSelectionEdgeCount = 0;
+    int     m_vboSelectionSilhouetteCount = 0;
     int     m_vboHelperFrontCount = 0;
     int     m_vboHelperXrayCount  = 0;
     int     m_vboShadowCount      = 0;
     QString m_vboMeshKey;   // fingerprint|selectedIndex|theme|colorVariant
+    QVector<ViewportSelectionEdgeCandidate> m_selectionEdgeCandidates;
+    QString m_selectionEdgeTopologyKey; // fingerprint|selection; independent of camera
+    QString m_vboSelectionEdgesKey; // fingerprint|selection|camera direction
     QString m_vboShadowKey; // fingerprint only
 };
 

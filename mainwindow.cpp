@@ -231,6 +231,8 @@ void MainWindow::buildUi()
     connect(m_viewport, &ViewportWidget::shapeClicked, this, [this](int index) {
         const ShapeNode *shape = m_controller->scene().shapeAt(index);
         m_controller->selectShape(shape ? shape->id : -1);
+        if (shape && m_sceneTreeGraphics)
+            m_sceneTreeGraphics->focusSelectedNodeAnimated();
     });
     connect(m_viewport, &ViewportWidget::emptyClicked,
             this, &MainWindow::clearSelection);
