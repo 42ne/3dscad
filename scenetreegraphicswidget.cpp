@@ -1874,8 +1874,7 @@ SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt
 
         for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
             if (area.groupId != target.parentGroupId
-                || area.operation != SceneDocument::TreeNode::Module
-                || area.moduleParameterSeparatorY <= 0.0) {
+                || area.operation != SceneDocument::TreeNode::Module) {
                 continue;
             }
 

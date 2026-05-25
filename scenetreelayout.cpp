@@ -204,9 +204,9 @@ void SceneTreeLayout::translateRootBlock(int rootGroupId, const QPointF &delta)
             continue;
 
         area.rect.translate(delta);
-        if (area.cutSeparatorY > 0.0)
+        if (area.operation == SceneDocument::TreeNode::Difference)
             area.cutSeparatorY += delta.y();
-        if (area.moduleParameterSeparatorY > 0.0)
+        if (area.operation == SceneDocument::TreeNode::Module)
             area.moduleParameterSeparatorY += delta.y();
         for (ChildLayout &child : area.children)
             child.rect.translate(delta);
@@ -283,8 +283,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     QVector<QRectF> placementChildRects = candidateChildRects;
     int placementInsertIndex = target.insertIndex;
 
-    if (bestArea->operation == SceneDocument::TreeNode::Module
-        && bestArea->moduleParameterSeparatorY > 0.0) {
+    if (bestArea->operation == SceneDocument::TreeNode::Module) {
         const int parameterCount = qBound(0, bestArea->moduleParameterCount, candidateChildren.size());
         const bool parameterZone = variableDrop
                                    && variablePreviewHitsModuleParameterZone(scenePosition,
@@ -323,14 +322,12 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
 
     target.placeholderRect = placeholderRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex, effectivePreviewSize);
     if (bestArea->operation == SceneDocument::TreeNode::Module
-        && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop
         && !target.moduleParameterZone
         && target.placeholderRect.top() < bestArea->moduleParameterSeparatorY)
         target.placeholderRect.moveTop(bestArea->moduleParameterSeparatorY + ChildGap * 0.5);
     target.slotMarkerRect = slotMarkerRectForInsertIndex(target.zoneRect, placementChildRects, placementInsertIndex);
     if (bestArea->operation == SceneDocument::TreeNode::Module
-        && bestArea->moduleParameterSeparatorY > 0.0
         && variableDrop
         && !target.moduleParameterZone
         && target.slotMarkerRect.top() < bestArea->moduleParameterSeparatorY)
@@ -339,7 +336,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
                                                      target.insertIndex,
                                                      effectivePreviewSize.height() + ChildGap);
 
-    if (bestArea->operation == SceneDocument::TreeNode::Difference && bestArea->cutSeparatorY > 0.0) {
+    if (bestArea->operation == SceneDocument::TreeNode::Difference) {
         const bool baseZone = scenePosition.y() < bestArea->cutSeparatorY;
         target.insertIndex = baseZone
                                  ? 0
@@ -370,8 +367,7 @@ SceneTreeLayout::DropTarget SceneTreeLayout::dropTargetAt(const QPointF &scenePo
     if (sourceArea == bestArea
         && sourceChildIndex >= 0
         && variableDrop
-        && bestArea->operation == SceneDocument::TreeNode::Module
-        && bestArea->moduleParameterSeparatorY > 0.0) {
+        && bestArea->operation == SceneDocument::TreeNode::Module) {
         const bool sourceParameterZone = sourceChildIndex < sourceArea->moduleParameterCount;
         sameModuleParameterZone = target.moduleParameterZone == sourceParameterZone;
     }
@@ -482,7 +478,7 @@ void SceneTreeLayout::buildSourcePreview(const GroupHitArea *sourceArea,
     const qreal minBottom = sourceArea->rect.top() + headerHeight + GroupPadding * 2.0 + minContentHeight;
     const qreal contentBottom = hasFutureContent ? futureContent.bottom() + GroupPadding : minBottom;
     target->sourceGroupRect.setBottom(qMax(minBottom, contentBottom));
-    if (sourceArea->operation == SceneDocument::TreeNode::Difference && target->sourceCutSeparatorY > 0.0) {
+    if (sourceArea->operation == SceneDocument::TreeNode::Difference) {
         target->sourceCutSeparatorY = qMin(target->sourceCutSeparatorY,
                                           target->sourceGroupRect.bottom() - GroupPadding - PrimitiveHeight * 0.5);
     }
