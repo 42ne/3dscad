@@ -745,7 +745,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
             m_canvasDragActive         = true;
             m_canvasDragPrevEventScene = scenePosition; // start velocity tracking here
 
-            // Find cluster (blocks edge-touching the dragged block).
+            // Edge-touching root blocks stay together during a slow drag.
             m_canvasDragCluster = findConnectedCluster(m_canvasDragNodeId);
             m_canvasDragClusterOrigPos.clear();
             m_clusterDragItems.clear();
@@ -831,11 +831,15 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
             const QPointF rawCandidate = m_canvasDragOrigPos + delta;
             QPointF candidate = rawCandidate;
 
-            // Magnetic snap — but skip candidates that would put the block back at its
-            // original position (a neighbour that was adjacent generates exactly that).
+            // Snap against stationary blocks only. While the slow-drag cluster is
+            // attached, none of its members may attract the group to itself.
             QPointF snapped;
+            const QVector<int> movingCluster = m_canvasDragDetached
+                                                   ? QVector<int>()
+                                                   : m_canvasDragCluster;
             bool magnetic = applyMagneticSnap(candidate, m_canvasDragBlockSize,
-                                              m_canvasDragNodeId, &snapped);
+                                              m_canvasDragNodeId, &snapped,
+                                              movingCluster);
             if (magnetic && QLineF(snapped, m_canvasDragOrigPos).length() < 4.0)
                 magnetic = false;
             if (magnetic)

@@ -31,14 +31,19 @@ using namespace SceneTreeGraphics;
 bool SceneTreeGraphicsWidget::applyMagneticSnap(const QPointF &candidate,
                                                 const QSizeF  &size,
                                                 int            excludeId,
-                                                QPointF       *snapped) const
+                                                QPointF       *snapped,
+                                                const QVector<int> &additionalExcludeIds) const
 {
-    // Pre-collect all neighbour rects (excluding the block being dragged).
+    // Pre-collect stationary neighbours. During slow cluster drag every moving
+    // member is excluded, so a connected group cannot magnetise to itself.
     QVector<QRectF> neighbors;
     neighbors.reserve(m_canvasMoveHandles.size());
     for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
-        if (h.nodeId != excludeId && !h.blockRect.isEmpty())
+        if (h.nodeId != excludeId
+            && !additionalExcludeIds.contains(h.nodeId)
+            && !h.blockRect.isEmpty()) {
             neighbors.append(h.blockRect);
+        }
     }
 
     // Returns true if placing the dragged block at `pos` would overlap any neighbour.

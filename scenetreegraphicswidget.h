@@ -179,7 +179,7 @@ private:
     QVector<CanvasMoveHandle>  m_canvasMoveHandles;
     QHash<int, QPointF>        m_nodeCanvasPositions; // custom top-lefts; absent → auto
 
-    // Snap settings
+    // Snap settings for placement and root-block dragging.
     static constexpr qreal kGripStripH   = 20.0;
     static constexpr qreal kMagnetRadius = 80.0;
 
@@ -203,14 +203,15 @@ private:
     QVector<QGraphicsItem *>              m_canvasDragItems;
     QHash<int, QVector<QGraphicsItem *>>  m_clusterDragItems;
 
-    static constexpr qreal kClusterVelocityThreshold = 12.0; // px/event → detaches cluster
+    static constexpr qreal kClusterVelocityThreshold = 16.0; // px/event -> detaches cluster
 
     // Pending canvas position for the next toolbar-drop insertion.
     bool    m_hasPendingInsertPos         = false;
     QPointF m_pendingInsertCanvasPosition;
 
     bool applyMagneticSnap(const QPointF &candidate, const QSizeF &size,
-                           int excludeId, QPointF *snapped) const;
+                           int excludeId, QPointF *snapped,
+                           const QVector<int> &additionalExcludeIds = QVector<int>()) const;
     QPointF nonOverlappingCanvasPosition(const QPointF &candidate,
                                          const QSizeF &size,
                                          const QVector<QRectF> &placedBlocks) const;

@@ -9,10 +9,9 @@
 
 class QLabel;
 class QToolButton;
-class QVariantAnimation;
 
-// Frameless-window title bar with pulsing background animation,
-// drag-to-move, and minimize / maximize / close buttons.
+// Frameless-window title bar with hover feedback, drag-to-move,
+// and minimize / maximize / close buttons.
 class AnimatedTitleBar : public QWidget
 {
 public:
@@ -37,7 +36,6 @@ private:
     QToolButton    *m_minimizeButton;
     QToolButton    *m_maximizeButton;
     QToolButton    *m_closeButton;
-    QVariantAnimation *m_pulse;
 
     QColor m_baseColor    {QStringLiteral("#111827")};
     QColor m_pulseColor   {QStringLiteral("#3b4252")};

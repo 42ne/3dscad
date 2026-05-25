@@ -1,32 +1,12 @@
 #include "animatedtitlebar.h"
 
-#include <QApplication>
 #include <QColor>
-#include <QEasingCurve>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
-#include <QScreen>
 #include <QToolButton>
-#include <QVariantAnimation>
-
-#ifdef Q_OS_WIN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-static QColor mixColors(const QColor &a, const QColor &b, qreal t)
-{
-    return QColor::fromRgbF(a.redF()   + (b.redF()   - a.redF())   * t,
-                            a.greenF() + (b.greenF() - a.greenF()) * t,
-                            a.blueF()  + (b.blueF()  - a.blueF())  * t);
-}
 
 // ── AnimatedTitleBar ──────────────────────────────────────────────────────────
 
@@ -36,7 +16,6 @@ AnimatedTitleBar::AnimatedTitleBar(QWidget *parent)
     , m_minimizeButton(new QToolButton(this))
     , m_maximizeButton(new QToolButton(this))
     , m_closeButton   (new QToolButton(this))
-    , m_pulse         (new QVariantAnimation(this))
 {
     setFixedHeight(34);
     setAttribute(Qt::WA_Hover, true);
@@ -60,17 +39,6 @@ AnimatedTitleBar::AnimatedTitleBar(QWidget *parent)
     layout->addWidget(m_minimizeButton);
     layout->addWidget(m_maximizeButton);
     layout->addWidget(m_closeButton);
-
-    m_pulse->setDuration(1200);
-    m_pulse->setLoopCount(-1);
-    m_pulse->setEasingCurve(QEasingCurve::InOutSine);
-    m_pulse->setStartValue(0.0);
-    m_pulse->setKeyValueAt(0.5, 1.0);
-    m_pulse->setEndValue(0.0);
-    connect(m_pulse, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
-        m_currentColor = mixColors(m_baseColor, m_pulseColor, v.toReal());
-        update();
-    });
 
     connect(m_minimizeButton, &QToolButton::clicked, this, [this]() {
         if (QWidget *w = window()) w->showMinimized();
@@ -129,8 +97,17 @@ void AnimatedTitleBar::paintEvent(QPaintEvent *)
     p.drawLine(QPoint(0, height() - 1), QPoint(width(), height() - 1));
 }
 
-void AnimatedTitleBar::enterEvent(QEvent *)  { m_pulse->start(); }
-void AnimatedTitleBar::leaveEvent(QEvent *)  { m_pulse->stop(); m_currentColor = m_baseColor; update(); }
+void AnimatedTitleBar::enterEvent(QEvent *)
+{
+    m_currentColor = m_pulseColor;
+    update();
+}
+
+void AnimatedTitleBar::leaveEvent(QEvent *)
+{
+    m_currentColor = m_baseColor;
+    update();
+}
 
 void AnimatedTitleBar::mousePressEvent(QMouseEvent *event)
 {
@@ -171,24 +148,5 @@ void AnimatedTitleBar::toggleMaximized()
     QWidget *w = window();
     if (!w) return;
     if (w->isMaximized()) { w->showNormal(); return; }
-#ifdef Q_OS_WIN
-    // ShowWindow(SW_SHOWMAXIMIZED) picks the target monitor via MonitorFromWindow(),
-    // which relies on the window's current HWND position.  For a frameless Qt popup
-    // window this can resolve to the primary monitor even when the window is visually
-    // on a secondary screen.  Moving to the correct screen's origin first fixes the
-    // monitor lookup.
-    // SWP_NOREDRAW suppresses any repaint during the position change so the window
-    // never appears at the intermediate top-left position — eliminating the blink that
-    // would otherwise occur between the move and the maximise.
-    if (QScreen *s = QApplication::screenAt(w->frameGeometry().center())) {
-        const QPoint tl = s->availableGeometry().topLeft();
-        ::SetWindowPos(reinterpret_cast<HWND>(w->winId()),
-                       nullptr, tl.x(), tl.y(), 0, 0,
-                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
-    }
-#else
-    if (QScreen *s = QApplication::screenAt(w->frameGeometry().center()))
-        w->move(s->availableGeometry().topLeft());
-#endif
     w->showMaximized();
 }
