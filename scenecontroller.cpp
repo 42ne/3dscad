@@ -17,15 +17,6 @@
 // File-local helpers (moved here from mainwindow.cpp)
 // ────────────────────────────────────────────────────────────────────────────
 
-static constexpr int ModuleParameterInsertSentinel = -100000;
-
-static bool decodeModuleParameterInsertIndex(int *insertIndex)
-{
-    if (!insertIndex || *insertIndex > ModuleParameterInsertSentinel)
-        return false;
-    *insertIndex = -ModuleParameterInsertSentinel - *insertIndex;
-    return true;
-}
 
 static float normalizedRotationDegrees(float value)
 {
@@ -252,9 +243,9 @@ void SceneController::addGroup(SceneDocument::TreeNode::Operation operation)
     m_undoStack->push(command);
 }
 
-void SceneController::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex)
+void SceneController::moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex, bool isParameterZone)
 {
-    const bool moduleParameterZone = decodeModuleParameterInsertIndex(&insertIndex);
+    const bool moduleParameterZone = isParameterZone;
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
 
     // Safety guard: only Module and Scene groups may become direct root children.
@@ -445,9 +436,9 @@ void SceneController::handleGroupRotationDragFinished(int groupId)
 
 // ── Graphics-tree: tool drop ──────────────────────────────────────────────────
 
-void SceneController::handleToolDrop(const QString &toolName, int parentGroupId, int insertIndex)
+void SceneController::handleToolDrop(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone)
 {
-    const bool moduleParameterZone = decodeModuleParameterInsertIndex(&insertIndex);
+    const bool moduleParameterZone = isParameterZone;
 
     if (isVariableTool(toolName)) {
         const int rootId  = m_scene.treeRoot().id;

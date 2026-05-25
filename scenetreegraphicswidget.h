@@ -44,9 +44,9 @@ public:
     QRectF debugChildRect(int nodeId) const;
 
 signals:
-    void toolDropped(const QString &toolName, int parentGroupId, int insertIndex);
+    void toolDropped(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone);
     void moduleCallDropped(int moduleGroupId, int parentGroupId, int insertIndex);
-    void treeNodeDropped(int nodeId, int parentGroupId, int insertIndex);
+    void treeNodeDropped(int nodeId, int parentGroupId, int insertIndex, bool isParameterZone);
     void treeNodeSelected(int nodeId);
     void treeNodeDeleteRequested(int nodeId);
     void transformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);

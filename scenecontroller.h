@@ -51,7 +51,7 @@ public:
     void addCylinder();
     void addCone();
     void addGroup(SceneDocument::TreeNode::Operation operation);
-    void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1);
+    void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1, bool isParameterZone = false);
 
     // Returns false and fills errorMessage/errorLine when parsing fails.
     bool applyCode(const QString &code,
@@ -82,7 +82,7 @@ public:
     void handleGroupRotationDragFinished(int groupId);
 
     // ── Graphics-tree event handlers ──────────────────────────────────────────
-    void handleToolDrop(const QString &toolName, int parentGroupId, int insertIndex);
+    void handleToolDrop(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone = false);
     void handleModuleCallDrop(int moduleGroupId, int parentGroupId, int insertIndex);
     void handleNodeSelected(int nodeId);
     void handleNodeDeleteRequested(int nodeId);

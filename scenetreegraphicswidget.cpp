@@ -1722,7 +1722,8 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
     scheduleDropCommit([this, toolName, target]() {
         emit toolDropped(toolName,
                          target.parentGroupId,
-                         target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+                         target.insertIndex,
+                         target.moduleParameterZone);
     });
 }
 
@@ -1763,7 +1764,7 @@ void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, co
     scheduleDropCommit([this, moduleGroupId, target]() {
         emit moduleCallDropped(moduleGroupId,
                                target.parentGroupId,
-                               target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+                               target.insertIndex);
     });
 }
 
@@ -1982,7 +1983,8 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
     scheduleDropCommit([this, nodeId, target]() {
         emit treeNodeDropped(nodeId,
                              target.parentGroupId,
-                             target.moduleParameterZone ? -100000 - target.insertIndex : target.insertIndex);
+                             target.insertIndex,
+                             target.moduleParameterZone);
     });
 }
 

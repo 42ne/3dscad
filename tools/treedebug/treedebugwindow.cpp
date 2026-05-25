@@ -640,10 +640,7 @@ void TreeDebugWindow::buildUi()
     };
 
     connect(m_treeWidget, &SceneTreeGraphicsWidget::toolDropped,
-            this, [this](const QString &tool, int parentId, int idx) {
-        // idx < -100000 → insert into module parameter zone (idx = -100000 - insertIndex)
-        const bool moduleParameterZone = idx < -100000;
-        const int insertIndex = moduleParameterZone ? (-idx - 100000) : idx;
+            this, [this](const QString &tool, int parentId, int insertIndex, bool moduleParameterZone) {
 
         // Create the actual node in the scene document.
         if (tool == QStringLiteral("cube")) {
@@ -713,11 +710,12 @@ void TreeDebugWindow::buildUi()
         logSnapshot(QStringLiteral("after toolDrop"));
     });
     connect(m_treeWidget, &SceneTreeGraphicsWidget::treeNodeDropped,
-            this, [this](int nodeId, int parentId, int idx) {
-        const bool ok = m_scene.moveTreeNode(nodeId, parentId, idx);
-        log(QStringLiteral("[%1] nodeDrop  node=#%2  parent=#%3  idx=%4%5")
+            this, [this](int nodeId, int parentId, int insertIndex, bool isParameterZone) {
+        const bool ok = m_scene.moveTreeNode(nodeId, parentId, insertIndex, isParameterZone);
+        log(QStringLiteral("[%1] nodeDrop  node=#%2  parent=#%3  idx=%4  par=%5%6")
             .arg(++m_eventSeq, 4, 10, QLatin1Char('0'))
-            .arg(nodeId).arg(parentId).arg(idx)
+            .arg(nodeId).arg(parentId).arg(insertIndex)
+            .arg(isParameterZone ? QStringLiteral("yes") : QStringLiteral("no"))
             .arg(ok ? QString() : QStringLiteral("  ⚠ moveTreeNode failed")));
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after nodeDrop"));
