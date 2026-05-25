@@ -1332,10 +1332,10 @@ void ViewportWidget::initializeGL()
         "    vec3 coolLight = u_light_color_b * diffuseB * u_light_intensity_b;\n"
         "    vec3 sideLight = u_light_color_c * diffuseC * u_light_intensity_c;\n"
         "    vec3 shaded = v_color * (vec3(u_ambient) + warmLight + coolLight + sideLight);\n"
-        "    shaded = mix(shaded, environment, 0.14 + fresnel * 0.26);\n"
+        "    shaded = mix(shaded, environment, 0.07 + fresnel * 0.14);\n"
         "    shaded += vec3(1.0, 0.92, 0.74) * specA * u_specular_strength;\n"
         "    shaded += vec3(0.70, 0.86, 1.0) * specB * (u_specular_strength * 0.43);\n"
-        "    shaded += vec3(0.55, 0.75, 1.0) * rim * 0.16;\n"
+        "    shaded += vec3(0.55, 0.75, 1.0) * rim * 0.09;\n"
         "    gl_FragColor = vec4(clamp(shaded, 0.0, 1.0), 1.0);\n"
         "}\n");
     m_glMeshProgram->link();
