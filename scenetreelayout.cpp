@@ -134,19 +134,24 @@ bool variablePreviewHitsModuleParameterZone(const QPointF &scenePosition,
 {
     if (parameterSeparatorY <= contentRect.top())
         return false;
-    if (scenePosition.y() < parameterSeparatorY)
+
+    // Extend the hit zone to include the call-handle template row (the space
+    // between the parameter separator and the start of body content).  This
+    // gives the user a much larger target: any hover position above the first
+    // body child — including the separator line itself and the "call handle"
+    // area below it — routes a var drop into the parameter zone.
+    const qreal effectiveBoundary = moduleBodyContentTop(parameterSeparatorY);
+
+    if (scenePosition.y() < effectiveBoundary)
         return true;
 
+    // Cursor is past the body-content start — still accept if the dragged
+    // preview rect overlaps the effective parameter zone (half-height tolerance).
     const QSizeF effectiveSize = previewSize.isValid() ? previewSize : variablePreviewSize();
     const QRectF previewRect(scenePosition - QPointF(effectiveSize.width() * 0.5,
                                                      effectiveSize.height() * 0.5),
                              effectiveSize);
-    const QRectF parameterRect(contentRect.left(),
-                               contentRect.top(),
-                               contentRect.width(),
-                               parameterSeparatorY - contentRect.top());
-    const QRectF overlap = previewRect.intersected(parameterRect);
-    return overlap.width() > 1.0 && previewRect.top() < parameterSeparatorY;
+    return previewRect.top() < effectiveBoundary;
 }
 
 void translatePreview(SceneTreeLayout::DropTarget *target, qreal dy)
