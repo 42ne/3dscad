@@ -287,15 +287,25 @@ protected:
 
 // ─── TreeDebugWindow ──────────────────────────────────────────────────────────
 
-TreeDebugWindow::TreeDebugWindow(QWidget *parent)
+TreeDebugWindow::TreeDebugWindow(QWidget *parent, bool createDefaultDoc)
     : QMainWindow(parent)
 {
     applyTheme(defaultTheme());
     buildUi();
-    buildTestDocument();
+    if (createDefaultDoc)
+        buildTestDocument();
     m_treeWidget->setSceneDocument(&m_scene);
     m_treeWidget->refresh();
-    logSnapshot(QStringLiteral("initial build"));
+    logSnapshot(createDefaultDoc
+                ? QStringLiteral("initial build")
+                : QStringLiteral("empty scene"));
+}
+
+// ─── treeWidget() ─────────────────────────────────────────────────────────────
+
+SceneTreeGraphicsWidget *TreeDebugWindow::treeWidget() const
+{
+    return m_treeWidget;
 }
 
 // ─── formatRect helpers ───────────────────────────────────────────────────────

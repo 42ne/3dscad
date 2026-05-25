@@ -2,12 +2,11 @@
 #define TREEDEBUGWINDOW_H
 
 #include "../../scenedocument.h"
+#include "../../scenetreegraphicswidget.h"
 
 #include <QMainWindow>
 #include <QPoint>
 #include <QPointF>
-
-class SceneTreeGraphicsWidget;
 class QTextEdit;
 class QLabel;
 class QToolButton;
@@ -23,7 +22,11 @@ class TreeDebugWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit TreeDebugWindow(QWidget *parent = nullptr);
+    explicit TreeDebugWindow(QWidget *parent = nullptr, bool createDefaultDoc = true);
+    SceneDocument &sceneDocument() { return m_scene; }
+    const SceneDocument &sceneDocument() const { return m_scene; }
+    SceneTreeGraphicsWidget *treeWidget() const;
+    void buildTestDocument();
 
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
@@ -31,7 +34,6 @@ protected:
 
 private:
     void buildUi();
-    void buildTestDocument();
 
     // Logging helpers
     void log(const QString &line);

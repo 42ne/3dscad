@@ -33,6 +33,8 @@ public:
     explicit SceneTreeGraphicsWidget(QWidget *parent = nullptr);
 
     void setSceneDocument(const SceneDocument *scene);
+    const SceneDocument *sceneDocument() const { return m_scene; }
+    SceneDocument *sceneDocument() { return const_cast<SceneDocument*>(m_scene); }
     void setSelectedTreeNodeId(int nodeId);
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
