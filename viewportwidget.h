@@ -109,6 +109,7 @@ private:
     void drawTreeTransformControlPreview(QPainter &painter) const;
     void drawTreeShapeParameterPreview(QPainter &painter) const;
     void updateViewportControls();
+    void updateSelectionShimmerTimer();
     bool canUseOpenGLRenderBackend() const;
     void startAsyncCsgCompute();
     void onCsgPreviewReady();
@@ -160,6 +161,8 @@ private:
     bool m_csgPreviewDirty = true;
     bool m_csgComputing = false;
     QFutureWatcher<CsgPreview> m_csgWatcher;
+    QTimer m_selectionShimmerTimer;
+    float m_selectionShimmerPhase = 0.0f;
     QVector<int> m_pickBuffer;
     QVector<float> m_depthBuffer;
     QImage m_renderImage;

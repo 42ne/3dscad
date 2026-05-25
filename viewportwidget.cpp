@@ -1171,6 +1171,14 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         m_lightingPreset = qMax(0, index);
         update();
     });
+    m_selectionShimmerTimer.setInterval(40);
+    m_selectionShimmerTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_selectionShimmerTimer, &QTimer::timeout, this, [this]() {
+        m_selectionShimmerPhase += 0.13f;
+        if (m_selectionShimmerPhase >= 6.2831853f)
+            m_selectionShimmerPhase -= 6.2831853f;
+        update();
+    });
     connect(&m_csgWatcher, &QFutureWatcher<CsgPreview>::finished,
             this, &ViewportWidget::onCsgPreviewReady);
 
@@ -1183,6 +1191,7 @@ void ViewportWidget::setScene(const SceneDocument *scene)
     m_scene = scene;
     m_shapes = scene ? &scene->shapes() : nullptr;
     invalidateCsgPreview();
+    updateSelectionShimmerTimer();
 
     update();
 }
@@ -1192,6 +1201,7 @@ void ViewportWidget::setShapes(const QVector<ShapeNode> *shapes)
     m_scene = nullptr;
     m_shapes = shapes;
     invalidateCsgPreview();
+    updateSelectionShimmerTimer();
 
     update();
 }
@@ -1202,6 +1212,7 @@ void ViewportWidget::setSelectedIndex(int index)
     if (index >= 0)
         m_selectedGroupId = 0;
     m_vboMeshKey.clear();
+    updateSelectionShimmerTimer();
 
     update();
 }
@@ -1212,6 +1223,7 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     if (groupId > 0)
         m_selectedIndex = -1;
     m_vboMeshKey.clear();
+    updateSelectionShimmerTimer();
 
     update();
 }
@@ -1249,12 +1261,14 @@ void ViewportWidget::setRenderBackend(RenderBackend backend)
 
     if (m_renderBackend == backend) {
         updateViewportControls();
+        updateSelectionShimmerTimer();
 
         return;
     }
 
     m_renderBackend = backend;
     updateViewportControls();
+    updateSelectionShimmerTimer();
 
     update();
 }
@@ -1458,10 +1472,19 @@ void ViewportWidget::initializeGL()
         "attribute vec3 a_position;\n"  // world space
         "attribute vec4 a_color;\n"
         "uniform mat4 u_mvp;\n"
+        "uniform float u_shimmer_phase;\n"
+        "uniform float u_shimmer_amount;\n"
+        "uniform float u_shimmer_base_alpha;\n"   // 1.0 = normal pass, <1 = bloom pass
         "varying vec4 v_color;\n"
         "void main() {\n"
         "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-        "    v_color = a_color;\n"
+        "    float raw  = 0.5 + 0.5 * sin(dot(a_position, vec3(0.23, 0.14, 0.19)) + u_shimmer_phase);\n"
+        "    float wave = raw * raw;\n"    // square → sharp bright peaks, deep dark troughs
+        "    float s    = wave * u_shimmer_amount;\n"
+        "    vec3 brightened = a_color.rgb + (vec3(1.0) - a_color.rgb) * s;\n"
+        "    float alpha = a_color.a * u_shimmer_base_alpha\n"
+        "                * (1.0 - u_shimmer_amount * 0.75 + s * 0.75);\n"
+        "    v_color = vec4(brightened, clamp(alpha, 0.0, 1.0));\n"
         "}\n");
     m_glLineProgram->addShaderFromSourceCode(
         QOpenGLShader::Fragment,
@@ -2008,6 +2031,8 @@ void ViewportWidget::paintOpenGLGrid()
     const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()))
                           * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
     m_glLineProgram->setUniformValue("u_mvp", mvp);
+    m_glLineProgram->setUniformValue("u_shimmer_phase", 0.0f);
+    m_glLineProgram->setUniformValue("u_shimmer_amount", 0.0f);
 
     const int posLoc   = m_glLineProgram->attributeLocation("a_position");
     const int colorLoc = m_glLineProgram->attributeLocation("a_color");
@@ -2428,6 +2453,11 @@ void ViewportWidget::paintOpenGLPreview()
 
         m_glLineProgram->bind();
         m_glLineProgram->setUniformValue("u_mvp", mvp);
+        m_glLineProgram->setUniformValue("u_shimmer_phase", m_selectionShimmerPhase);
+        // Beat-envelope: slow global pulse de-correlated from the spatial wave.
+        // Creates a "breathing" thickness that tracks shimmer brightness.
+        const float pulseSin  = 0.5f + 0.5f * sinf(m_selectionShimmerPhase * 0.65f);
+        const float glowBoost = 1.0f + pulseSin * 0.7f;   // glow width ×1.0 … ×1.7
         const int edgePosLoc = m_glLineProgram->attributeLocation("a_position");
         const int edgeColorLoc = m_glLineProgram->attributeLocation("a_color");
         m_glLineProgram->enableAttributeArray(edgePosLoc);
@@ -2436,12 +2466,14 @@ void ViewportWidget::paintOpenGLPreview()
         m_glLineProgram->setAttributeBuffer(edgePosLoc, GL_FLOAT, offsetof(OpenGLLineVertex, position), 3, sizeof(OpenGLLineVertex));
         m_glLineProgram->setAttributeBuffer(edgeColorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color), 4, sizeof(OpenGLLineVertex));
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         glDepthFunc(GL_GREATER);
         if (m_vboSelectionHiddenEdgeCount > 0) {
             // Hidden geometry is context only: a soft haze, not a competing outline.
-            glLineWidth(7.0f);
+            m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 1.0f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.45f);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glLineWidth(7.0f * glowBoost);
             glDrawArrays(GL_LINES, 0, m_vboSelectionHiddenEdgeCount);
             glLineWidth(1.0f);
             glDrawArrays(GL_LINES, m_vboSelectionHiddenEdgeCount, m_vboSelectionHiddenEdgeCount);
@@ -2450,7 +2482,19 @@ void ViewportWidget::paintOpenGLPreview()
         glDepthFunc(GL_LEQUAL);
         int visibleOffset = m_vboSelectionHiddenEdgeCount * 2;
         if (m_vboSelectionEdgeCount > 0) {
-            glLineWidth(4.5f);
+            // Bloom pass: additive blend, very wide — spatial shimmer peaks appear to
+            // swell and glow outward without lightening the full edge at once.
+            m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 0.28f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.95f);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            glLineWidth(7.0f * glowBoost);
+            glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionEdgeCount);
+
+            // Normal glow + core
+            m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 1.0f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.78f);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glLineWidth(4.5f * glowBoost);
             glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionEdgeCount);
             glLineWidth(2.1f);
             glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionEdgeCount, m_vboSelectionEdgeCount);
@@ -2458,15 +2502,25 @@ void ViewportWidget::paintOpenGLPreview()
         }
 
         if (m_vboSelectionSilhouetteCount > 0) {
-            // Keep contours of occluded parts behind the visible surface. Drawing
-            // every local silhouette through a compound object overwhelms assemblies.
+            // Bloom pass: wide additive halo that spills outward only at shimmer peaks.
+            m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 0.22f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.95f);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
             glDepthFunc(GL_LEQUAL);
-            glLineWidth(6.0f);
+            glLineWidth(10.0f * glowBoost);
+            glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionSilhouetteCount);
+
+            // Normal glow + core
+            m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 1.0f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.92f);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glLineWidth(6.0f * glowBoost);
             glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionSilhouetteCount);
             glLineWidth(2.7f);
             glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionSilhouetteCount, m_vboSelectionSilhouetteCount);
         }
         glLineWidth(1.0f);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  // restore default
         m_vboSelectionEdges.release();
         m_glLineProgram->disableAttributeArray(edgePosLoc);
         m_glLineProgram->disableAttributeArray(edgeColorLoc);
@@ -2762,6 +2816,19 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
     return true;
+}
+
+void ViewportWidget::updateSelectionShimmerTimer()
+{
+    const bool hasSelection = m_shapes && (m_selectedIndex >= 0 || m_selectedGroupId > 0);
+    const bool animate = hasSelection && m_renderBackend == OpenGLRenderBackend;
+    if (animate) {
+        if (!m_selectionShimmerTimer.isActive())
+            m_selectionShimmerTimer.start();
+    } else {
+        m_selectionShimmerTimer.stop();
+        m_selectionShimmerPhase = 0.0f;
+    }
 }
 
 void ViewportWidget::updateViewportControls()
