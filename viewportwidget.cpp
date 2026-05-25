@@ -1466,13 +1466,9 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
         bg.setColorAt(0.55, bgColor);
         bg.setColorAt(1.0, bgColor.darker(132));
         bgPainter.fillRect(image.rect(), bg);
-        bgPainter.setPen(Qt::NoPen);
-        bgPainter.setBrush(QColor(255, 255, 255, 18));
-        const qreal spot = qMin(thumbnailSize.width(), thumbnailSize.height()) * 0.52;
-        bgPainter.drawEllipse(QRectF(thumbnailSize.width() * 0.18,
-                                     thumbnailSize.height() * 0.08,
-                                     spot,
-                                     spot * 0.58));
+        // Removed: an off-centre white ellipse (alpha 18) was added here as a
+        // "studio light spot", but it produced a visible grey oval on dark
+        // backgrounds that looked like a rendering artefact on many models.
     }
 
     const CsgPreview preview = buildCsgPreview(scene);
