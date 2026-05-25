@@ -36,8 +36,14 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent, Qt::FramelessWindowHint | Qt::Window)
 {
+    // WA_TranslucentBackground must be false (the default) for a solid frameless window.
+    // Setting it explicitly here — before any child widgets are created — ensures the
+    // native HWND is configured correctly from the start and never needs to be
+    // destroyed/recreated.
+    setAttribute(Qt::WA_TranslucentBackground, false);
+
     m_controller = new SceneController(this);
 
     // Wire controller signals to UI refresh slots.
@@ -88,8 +94,6 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
 void MainWindow::buildUi()
 {
     setWindowTitle("OpenSCAD Visual Editor Prototype");
-    setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
-    setAttribute(Qt::WA_TranslucentBackground, false);
 
     ThemeSpec activeTheme = defaultTheme();
     auto *titleBar = new AnimatedTitleBar(this);

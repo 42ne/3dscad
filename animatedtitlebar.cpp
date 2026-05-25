@@ -12,6 +12,13 @@
 #include <QToolButton>
 #include <QVariantAnimation>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 static QColor mixColors(const QColor &a, const QColor &b, qreal t)
@@ -164,7 +171,24 @@ void AnimatedTitleBar::toggleMaximized()
     QWidget *w = window();
     if (!w) return;
     if (w->isMaximized()) { w->showNormal(); return; }
+#ifdef Q_OS_WIN
+    // ShowWindow(SW_SHOWMAXIMIZED) picks the target monitor via MonitorFromWindow(),
+    // which relies on the window's current HWND position.  For a frameless Qt popup
+    // window this can resolve to the primary monitor even when the window is visually
+    // on a secondary screen.  Moving to the correct screen's origin first fixes the
+    // monitor lookup.
+    // SWP_NOREDRAW suppresses any repaint during the position change so the window
+    // never appears at the intermediate top-left position — eliminating the blink that
+    // would otherwise occur between the move and the maximise.
+    if (QScreen *s = QApplication::screenAt(w->frameGeometry().center())) {
+        const QPoint tl = s->availableGeometry().topLeft();
+        ::SetWindowPos(reinterpret_cast<HWND>(w->winId()),
+                       nullptr, tl.x(), tl.y(), 0, 0,
+                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+    }
+#else
     if (QScreen *s = QApplication::screenAt(w->frameGeometry().center()))
         w->move(s->availableGeometry().topLeft());
+#endif
     w->showMaximized();
 }
