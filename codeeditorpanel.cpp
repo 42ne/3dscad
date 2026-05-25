@@ -4,24 +4,125 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QLabel>
 #include <QList>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPaintEvent>
+#include <QPalette>
 #include <QPushButton>
 #include <QRect>
+#include <QResizeEvent>
 #include <QSaveFile>
 #include <QScrollBar>
+#include <QTextBlock>
 #include <QTextCharFormat>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QVBoxLayout>
+
+class CodeTextEdit;
+
+class LineNumberArea final : public QWidget
+{
+public:
+    explicit LineNumberArea(CodeTextEdit *editor);
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    CodeTextEdit *m_editor = nullptr;
+};
+
+class CodeTextEdit final : public QTextEdit
+{
+public:
+    explicit CodeTextEdit(QWidget *parent = nullptr)
+        : QTextEdit(parent), m_lineNumberArea(new LineNumberArea(this))
+    {
+        setLineWrapMode(QTextEdit::NoWrap);
+        connect(document(), &QTextDocument::blockCountChanged, this, [this]() {
+            updateLineNumberAreaWidth();
+            m_lineNumberArea->update();
+        });
+        connect(verticalScrollBar(), &QScrollBar::valueChanged, m_lineNumberArea, qOverload<>(&QWidget::update));
+        connect(this, &QTextEdit::textChanged, m_lineNumberArea, qOverload<>(&QWidget::update));
+        updateLineNumberAreaWidth();
+    }
+
+    int lineNumberAreaWidth() const
+    {
+        const int digits = qMax(2, QString::number(qMax(1, document()->blockCount())).size());
+        return 10 + fontMetrics().horizontalAdvance(QLatin1Char('9')) * digits;
+    }
+
+    void lineNumberAreaPaintEvent(QPaintEvent *event)
+    {
+        QPainter painter(m_lineNumberArea);
+        painter.fillRect(event->rect(), palette().color(QPalette::Base).darker(108));
+        painter.setPen(palette().color(QPalette::Mid));
+        painter.drawLine(m_lineNumberArea->width() - 1, event->rect().top(),
+                         m_lineNumberArea->width() - 1, event->rect().bottom());
+        painter.setPen(palette().color(QPalette::Text).darker(125));
+
+        for (QTextBlock block = document()->firstBlock(); block.isValid(); block = block.next()) {
+            const int top = cursorRect(QTextCursor(block)).top();
+            const int bottom = top + fontMetrics().height();
+            if (bottom < event->rect().top())
+                continue;
+            if (top > event->rect().bottom())
+                break;
+            painter.drawText(0, top, m_lineNumberArea->width() - 6, fontMetrics().height(),
+                             Qt::AlignRight | Qt::AlignVCenter,
+                             QString::number(block.blockNumber() + 1));
+        }
+    }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QTextEdit::resizeEvent(event);
+        const QRect contents = contentsRect();
+        m_lineNumberArea->setGeometry(contents.left(), contents.top(),
+                                      lineNumberAreaWidth(), contents.height());
+    }
+
+private:
+    void updateLineNumberAreaWidth()
+    {
+        setViewportMargins(lineNumberAreaWidth(), 0, 0, 0);
+        m_lineNumberArea->setFixedWidth(lineNumberAreaWidth());
+    }
+
+    LineNumberArea *m_lineNumberArea = nullptr;
+};
+
+LineNumberArea::LineNumberArea(CodeTextEdit *editor)
+    : QWidget(editor), m_editor(editor)
+{
+}
+
+QSize LineNumberArea::sizeHint() const
+{
+    return QSize(m_editor ? m_editor->lineNumberAreaWidth() : 0, 0);
+}
+
+void LineNumberArea::paintEvent(QPaintEvent *event)
+{
+    if (m_editor)
+        m_editor->lineNumberAreaPaintEvent(event);
+}
 
 // ── CodeEditorPanel ───────────────────────────────────────────────────────────
 
 CodeEditorPanel::CodeEditorPanel(QWidget *parent)
     : QWidget(parent)
 {
-    m_codeEditor = new QTextEdit;
+    m_codeEditor = new CodeTextEdit;
     m_codeEditor->setReadOnly(false);
     m_codeEditor->setMinimumHeight(180);
     m_codeEditor->setFontFamily("Consolas");

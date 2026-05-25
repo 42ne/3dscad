@@ -10,7 +10,7 @@
 class QLabel;
 class QPushButton;
 class QTextCursor;
-class QTextEdit;
+class CodeTextEdit;
 
 // Self-contained code editor panel: displays generated OpenSCAD code,
 // accepts edits, reports apply/send requests, and writes the live preview file.
@@ -56,7 +56,7 @@ signals:
 private:
     void scrollToShowCursor(const QTextCursor &cursor);
 
-    QTextEdit   *m_codeEditor           = nullptr;
+    CodeTextEdit *m_codeEditor          = nullptr;
     QPushButton *m_applyCodeButton      = nullptr;
     QPushButton *m_sendToOpenScadButton  = nullptr;
     QLabel      *m_openScadPreviewLabel  = nullptr;

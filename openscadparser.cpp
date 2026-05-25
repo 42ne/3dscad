@@ -1144,7 +1144,22 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
             SceneDocument::TreeNode &child = sceneNode.children.last();
-            if (!parseBlock(&state, &child, true, errorMessage)) {
+            const bool scopedLoop = operation == SceneDocument::TreeNode::For;
+            const QString scopedVar = child.loopVariable;
+            const bool hadPreviousValue = scopedLoop && state.variableValues.contains(scopedVar);
+            const qreal previousValue = hadPreviousValue ? state.variableValues.value(scopedVar) : 0.0;
+            if (scopedLoop)
+                state.variableValues[scopedVar] = 0.0;
+
+            const bool parsedBody = parseBlock(&state, &child, true, errorMessage);
+
+            if (scopedLoop) {
+                if (hadPreviousValue)
+                    state.variableValues[scopedVar] = previousValue;
+                else
+                    state.variableValues.remove(scopedVar);
+            }
+            if (!parsedBody) {
                 if (errorLine) *errorLine = state.errorLine;
                 return false;
             }
