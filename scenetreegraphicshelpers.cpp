@@ -652,7 +652,9 @@ qreal forLoopHeaderMinWidth(const QString &variableName,
     for (const ExpressionTextSpan &span : spans)
         right = qMax(right, span.rect.right());
 
-    return right + metrics.horizontalAdvance(QStringLiteral(")")) + 12.0;
+    // Keep the complete expression clear of the collapse chevron drawn at the
+    // right of the horizontal header.
+    return right + metrics.horizontalAdvance(QStringLiteral(")")) + 36.0;
 }
 
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect,

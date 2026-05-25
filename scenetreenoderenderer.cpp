@@ -92,13 +92,19 @@ void paintHeaderGripDots(QPainter *painter, const QRectF &rect, const QColor &co
     }
 }
 
-void paintHeaderChevron(QPainter *painter, const QRectF &headerRect, const QColor &color)
+void paintHeaderChevron(QPainter *painter, const QRectF &headerRect, const QColor &color, bool collapsed = false)
 {
     const QPointF center(headerRect.right() - 18.0, headerRect.center().y() + 1.0);
     QPainterPath path;
-    path.moveTo(center.x() - 4.5, center.y() - 2.0);
-    path.lineTo(center.x(), center.y() + 2.5);
-    path.lineTo(center.x() + 4.5, center.y() - 2.0);
+    if (collapsed) {
+        path.moveTo(center.x() - 2.0, center.y() - 4.5);
+        path.lineTo(center.x() + 2.5, center.y());
+        path.lineTo(center.x() - 2.0, center.y() + 4.5);
+    } else {
+        path.moveTo(center.x() - 4.5, center.y() - 2.0);
+        path.lineTo(center.x(), center.y() + 2.5);
+        path.lineTo(center.x() + 4.5, center.y() - 2.0);
+    }
     painter->setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter->setBrush(Qt::NoBrush);
     painter->drawPath(path);
@@ -391,7 +397,8 @@ public:
                   const QImage &thumbnail = QImage(),
                   const QString &moduleName = QString(),
                   int depth = 0,
-                  int theme = 0)
+                  int theme = 0,
+                  bool collapsed = false)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
@@ -413,6 +420,7 @@ public:
         , m_insertedPreview(insertedPreview)
         , m_depth(depth)
         , m_theme(theme)
+        , m_collapsed(collapsed)
     {
         setZValue(zValue);
     }
@@ -455,7 +463,7 @@ public:
         const QColor bodyFill = m_insertedPreview ? translucent(fill, qMin(fill.alpha() + 55, 230)) : fill;
         paintRoundedPanel(painter, m_rect, CornerRadius, bodyBorderPen, QBrush(bodyFill));
 
-        if (isVerticalHeaderOperation(m_operation)) {
+        if (isVerticalHeaderOperation(m_operation) && !m_collapsed) {
             paintVerticalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
         } else {
             paintHorizontalHeader(painter, fill, dark, cTextPrimary, cTextMuted, cPillBorder, cPillFill);
@@ -555,6 +563,8 @@ private:
         }
 
         if (m_operation == SceneDocument::TreeNode::For) {
+            painter->save();
+            painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
             const QString variableName    = m_loopVariable.trimmed().isEmpty()      ? QStringLiteral("i")         : m_loopVariable.trimmed();
             const QString rangeExpression = m_loopRangeExpression.trimmed().isEmpty() ? QStringLiteral("[0 : 1 : 3]") : m_loopRangeExpression.trimmed();
             const QString prefix = QStringLiteral("for (%1 = ").arg(variableName);
@@ -589,6 +599,7 @@ private:
             painter->setPen(cTextPrimary);
             painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+            painter->restore();
         } else {
             // Reserve space for the chevron (18 px from the right edge + 10 px gap)
             // so the label text never overlaps the collapse indicator.
@@ -603,13 +614,14 @@ private:
                               label);
         }
 
-        if (!isVerticalHeaderOperation(m_operation)) {
+        if (m_operation != SceneDocument::TreeNode::Scene
+            && (!isVerticalHeaderOperation(m_operation) || m_collapsed)) {
             // Dim the chevron when the group is empty — collapsing an empty container
             // is pointless, so the indicator is visually de-emphasised.
             const QColor chevronColor = m_empty
                 ? (dark ? QColor(220, 228, 238, 65) : QColor(54, 64, 76, 65))
                 : (dark ? QColor(220, 228, 238, 210) : QColor(54, 64, 76, 210));
-            paintHeaderChevron(painter, headerRect, chevronColor);
+            paintHeaderChevron(painter, headerRect, chevronColor, m_collapsed);
         }
 
         // Thin separator between header and body.
@@ -684,6 +696,14 @@ private:
             badgeBottom = QColor(84, 158, 105);
         }
         paintGlossBadge(painter, opBadgeRect, opLabel, badgeTop, badgeBottom, QColor(24, 34, 44), 3.0);
+
+        const QRectF collapseControlRect(m_rect.left(),
+                                         m_rect.bottom() - GroupHeaderHeight,
+                                         TransformIconWidth,
+                                         GroupHeaderHeight);
+        paintHeaderChevron(painter,
+                           collapseControlRect,
+                           dark ? QColor(220, 228, 238, 210) : QColor(54, 64, 76, 210));
 
         // X/Y/Z rows outside icon border.
         // Use the canonical scene font for metrics so pill rects are pixel-identical
@@ -803,6 +823,7 @@ private:
     bool        m_insertedPreview      = false;
     int         m_depth = 0;
     int         m_theme = 0;
+    bool        m_collapsed = false;
 };
 
 
@@ -1022,7 +1043,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         const QRectF &rect,
                                         int depth,
                                         qreal cutSeparatorY,
-                                        const QImage &thumbnail)
+                                        const QImage &thumbnail,
+                                        bool collapsed)
 {
     const QVector3D transformValues = node.operation == SceneDocument::TreeNode::Translate ? node.position
                                     : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
@@ -1033,7 +1055,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
     const qreal transformHeaderWidth = transformHeaderWidthForNode(node);
-    const bool showEmptyText = node.operation != SceneDocument::TreeNode::Module
+    const bool showEmptyText = !collapsed
+                               && node.operation != SceneDocument::TreeNode::Module
                                && node.operation != SceneDocument::TreeNode::Scene
                                && node.children.isEmpty();
     m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0),
@@ -1042,7 +1065,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
                                        node.color, thumbnail, node.moduleName,
-                                       depth, m_theme));
+                                       depth, m_theme, collapsed));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),

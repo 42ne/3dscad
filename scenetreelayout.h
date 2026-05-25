@@ -29,6 +29,7 @@ public:
         qreal cutSeparatorY = 0.0;
         qreal moduleParameterSeparatorY = 0.0;
         int moduleParameterCount = 0;
+        bool collapsed = false;
         QVector<ChildLayout> children;
     };
 

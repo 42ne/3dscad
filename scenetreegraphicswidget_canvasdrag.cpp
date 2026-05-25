@@ -182,6 +182,104 @@ static bool edgeTouching(const QRectF &a, const QRectF &b, qreal tol = 1.5)
     return hAdj || vAdj;
 }
 
+bool SceneTreeGraphicsWidget::groupCollapseControlAt(const QPointF &scenePosition, int *groupId) const
+{
+    const SceneTreeLayout::GroupHitArea *best = nullptr;
+    for (const SceneTreeLayout::GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.operation == SceneDocument::TreeNode::Scene)
+            continue;
+        const bool verticalExpanded = isVerticalHeaderOperation(area.operation) && !area.collapsed;
+        const QRectF chevronRect = verticalExpanded
+            ? QRectF(area.rect.left(), area.rect.bottom() - GroupHeaderHeight,
+                     TransformIconWidth, GroupHeaderHeight)
+            : QRectF(area.rect.right() - 34.0, area.rect.top(),
+                     34.0, GroupHeaderHeight);
+        if (!chevronRect.contains(scenePosition) || (best && best->depth >= area.depth))
+            continue;
+        best = &area;
+    }
+    if (!best)
+        return false;
+    if (groupId)
+        *groupId = best->groupId;
+    return true;
+}
+
+void SceneTreeGraphicsWidget::toggleGroupCollapsed(int groupId)
+{
+    if (groupId <= 0)
+        return;
+
+    const QRectF groupRect = groupRectForNode(groupId);
+    CanvasMoveHandle oldRoot;
+    bool hasRoot = false;
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        if (handle.blockRect.contains(groupRect.center())) {
+            oldRoot = handle;
+            hasRoot = true;
+            break;
+        }
+    }
+
+    struct AttachedBlock {
+        int id = 0;
+        QPointF topLeft;
+        bool followsRight = false;
+        bool followsBottom = false;
+    };
+    QVector<AttachedBlock> attachedBlocks;
+    if (hasRoot) {
+        constexpr qreal tolerance = 1.5;
+        for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+            if (handle.nodeId == oldRoot.nodeId)
+                continue;
+            const bool verticalOverlap = handle.blockRect.top() < oldRoot.blockRect.bottom() + tolerance
+                                         && oldRoot.blockRect.top() < handle.blockRect.bottom() + tolerance;
+            const bool horizontalOverlap = handle.blockRect.left() < oldRoot.blockRect.right() + tolerance
+                                           && oldRoot.blockRect.left() < handle.blockRect.right() + tolerance;
+            const bool followsRight = qAbs(handle.blockRect.left() - oldRoot.blockRect.right()) <= tolerance
+                                      && verticalOverlap;
+            const bool followsBottom = qAbs(handle.blockRect.top() - oldRoot.blockRect.bottom()) <= tolerance
+                                       && horizontalOverlap;
+            if (followsRight || followsBottom)
+                attachedBlocks.append({handle.nodeId, handle.blockRect.topLeft(), followsRight, followsBottom});
+        }
+    }
+
+    if (m_collapsedGroupIds.contains(groupId))
+        m_collapsedGroupIds.remove(groupId);
+    else
+        m_collapsedGroupIds.insert(groupId);
+    refresh();
+
+    if (!hasRoot || attachedBlocks.isEmpty())
+        return;
+
+    QRectF newRootRect;
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        if (handle.nodeId == oldRoot.nodeId) {
+            newRootRect = handle.blockRect;
+            break;
+        }
+    }
+    if (!newRootRect.isValid())
+        return;
+
+    const QPointF sizeDelta(newRootRect.width() - oldRoot.blockRect.width(),
+                            newRootRect.height() - oldRoot.blockRect.height());
+    if (qFuzzyIsNull(sizeDelta.x()) && qFuzzyIsNull(sizeDelta.y()))
+        return;
+    for (const AttachedBlock &block : attachedBlocks) {
+        QPointF adjusted = block.topLeft;
+        if (block.followsRight)
+            adjusted.rx() += sizeDelta.x();
+        if (block.followsBottom)
+            adjusted.ry() += sizeDelta.y();
+        m_nodeCanvasPositions[block.id] = adjusted;
+    }
+    refresh();
+}
+
 // Flood-fill all blocks edge-touching the starting block's connected component.
 QVector<int> SceneTreeGraphicsWidget::findConnectedCluster(int startNodeId) const
 {

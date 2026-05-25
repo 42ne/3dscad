@@ -53,7 +53,8 @@ public:
                      const QRectF &rect,
                      int depth,
                      qreal cutSeparatorY,
-                     const QImage &thumbnail = QImage());
+                     const QImage &thumbnail = QImage(),
+                     bool collapsed = false);
 
     // Set the active visual theme (0 = Frost, 1 = Glass, 2 = Embers, 3 = Deep).
     // Returns *this so it can be chained: SceneTreeNodeRenderer(...).setTheme(t).renderXxx(...)

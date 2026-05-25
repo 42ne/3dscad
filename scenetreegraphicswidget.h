@@ -9,6 +9,7 @@
 #include <QGraphicsView>
 #include <QHash>
 #include <QRectF>
+#include <QSet>
 #include <QVector>
 #include <functional>
 
@@ -114,6 +115,8 @@ private:
     void handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
+    bool groupCollapseControlAt(const QPointF &scenePosition, int *groupId) const;
+    void toggleGroupCollapsed(int groupId);
     void snapZoom();
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
@@ -165,6 +168,7 @@ private:
     NodeThumbnailCache *m_thumbnailCache = nullptr;
     GroupThumbnailCache *m_groupThumbnailCache = nullptr;
     SceneTreeLayout m_treeLayout;
+    QSet<int> m_collapsedGroupIds;
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_toolbarItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;

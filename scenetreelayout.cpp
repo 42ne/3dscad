@@ -545,6 +545,8 @@ const SceneTreeLayout::GroupHitArea *SceneTreeLayout::findBestDropArea(const QPo
                              previewSize);
 
     for (const GroupHitArea &area : m_groupHitAreas) {
+        if (area.collapsed)
+            continue;
         const QRectF hitRect = area.rect.adjusted(-GroupPadding, 0.0, GroupPadding, 0.0);
         const QRectF overlap = previewRect.intersected(hitRect);
         const bool pointHitsArea = area.rect.contains(scenePosition);
