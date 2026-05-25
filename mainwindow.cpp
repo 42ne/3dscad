@@ -20,7 +20,6 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QSplitter>
 #include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
@@ -146,12 +145,16 @@ void MainWindow::buildUi()
 
     m_codeEditorPanel = new CodeEditorPanel;
 
-    auto *mainSplitter = new QSplitter(Qt::Vertical);
-    mainSplitter->addWidget(m_viewport);
-    mainSplitter->addWidget(m_codeEditorPanel);
-    mainSplitter->setStretchFactor(0, 4);
-    mainSplitter->setStretchFactor(1, 1);
-    setCentralWidget(mainSplitter);
+    setCentralWidget(m_viewport);
+
+    // Code-editor dock — defaults to the right of the viewport; can be
+    // undocked or moved to any edge by the user.
+    auto *codeDock = new QDockWidget(tr("OpenSCAD Code"), this);
+    codeDock->setObjectName(QStringLiteral("CodeEditorDock"));
+    codeDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+                              | Qt::BottomDockWidgetArea);
+    codeDock->setWidget(m_codeEditorPanel);
+    addDockWidget(Qt::RightDockWidgetArea, codeDock);
 
     // Left dock
     auto *leftDock   = new QDockWidget("Shapes", this);

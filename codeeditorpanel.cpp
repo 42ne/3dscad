@@ -1,10 +1,12 @@
 #include "codeeditorpanel.h"
 
+#include <QCheckBox>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontMetrics>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QList>
 #include <QMessageBox>
@@ -122,37 +124,61 @@ void LineNumberArea::paintEvent(QPaintEvent *event)
 CodeEditorPanel::CodeEditorPanel(QWidget *parent)
     : QWidget(parent)
 {
+    setMinimumWidth(280);
+
     m_codeEditor = new CodeTextEdit;
     m_codeEditor->setReadOnly(false);
-    m_codeEditor->setMinimumHeight(180);
     m_codeEditor->setFontFamily("Consolas");
 
-    m_applyCodeButton       = new QPushButton(QStringLiteral("Apply code"));
-    m_sendToOpenScadButton  = new QPushButton(QStringLiteral("Send to OpenSCAD"));
+    m_applyCodeButton      = new QPushButton(QStringLiteral("Apply code"));
+    m_sendToOpenScadButton = new QPushButton(QStringLiteral("Send to OpenSCAD"));
+
+    m_syncCheckBox = new QCheckBox(QStringLiteral("Sync to file"));
+    m_syncCheckBox->setChecked(false);
+    m_syncCheckBox->setToolTip(
+        QStringLiteral("When checked, the OpenSCAD preview file is rewritten\n"
+                       "automatically on every scene change."));
 
     m_openScadPreviewLabel = new QLabel;
     m_openScadPreviewLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_openScadPreviewLabel->setWordWrap(true);
     m_openScadPreviewLabel->setText(
         QString("Preview file: %1").arg(QDir::toNativeSeparators(previewScadPath())));
+    m_openScadPreviewLabel->hide();   // hidden until sync is on or a manual send succeeds
 
     m_parseErrorLabel = new QLabel;
     m_parseErrorLabel->setWordWrap(true);
     m_parseErrorLabel->setContentsMargins(4, 2, 4, 2);
     m_parseErrorLabel->hide();
 
+    // ── Control bar: [Apply code]  ·  [☐ Sync to file]  [Send to OpenSCAD] ──
+    auto *controlBar = new QHBoxLayout;
+    controlBar->setContentsMargins(4, 2, 4, 2);
+    controlBar->setSpacing(6);
+    controlBar->addWidget(m_applyCodeButton);
+    controlBar->addStretch(1);
+    controlBar->addWidget(m_syncCheckBox);
+    controlBar->addWidget(m_sendToOpenScadButton);
+
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(m_codeEditor);
-    layout->addWidget(m_applyCodeButton);
+    layout->setSpacing(2);
+    layout->addWidget(m_codeEditor, 1);
+    layout->addLayout(controlBar);
     layout->addWidget(m_parseErrorLabel);
-    layout->addWidget(m_sendToOpenScadButton);
     layout->addWidget(m_openScadPreviewLabel);
 
     connect(m_applyCodeButton,      &QPushButton::clicked,
             this, &CodeEditorPanel::applyRequested);
     connect(m_sendToOpenScadButton, &QPushButton::clicked,
             this, &CodeEditorPanel::sendToOpenScadRequested);
+    connect(m_syncCheckBox, &QCheckBox::toggled,
+            this, &CodeEditorPanel::onSyncToggled);
+}
+
+void CodeEditorPanel::onSyncToggled(bool checked)
+{
+    m_openScadPreviewLabel->setVisible(checked);
 }
 
 void CodeEditorPanel::setCodeAndRanges(const QString &code,
@@ -284,6 +310,10 @@ QString CodeEditorPanel::previewScadPath() const
 
 bool CodeEditorPanel::writeOpenScadPreview(bool notify)
 {
+    // Automatic (non-user-initiated) writes are suppressed when sync is disabled.
+    if (!notify && !m_syncCheckBox->isChecked())
+        return true;
+
     const QString path = previewScadPath();
     QDir().mkpath(QFileInfo(path).absolutePath());
 
@@ -303,5 +333,8 @@ bool CodeEditorPanel::writeOpenScadPreview(bool notify)
     }
     m_openScadPreviewLabel->setText(
         QString("Preview file: %1").arg(QDir::toNativeSeparators(path)));
+    // After a successful manual send, briefly show the path even if sync is off.
+    if (notify)
+        m_openScadPreviewLabel->show();
     return true;
 }
