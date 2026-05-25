@@ -704,8 +704,9 @@ void TreeDebugWindow::buildUi()
             }
         }
 
-        log(QStringLiteral("[%1] toolDrop  \"%2\"  parent=#%3  idx=%4")
-            .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(tool).arg(parentId).arg(insertIndex));
+        log(QStringLiteral("[%1] toolDrop  \"%2\"  parent=#%3  idx=%4  par=%5")
+            .arg(++m_eventSeq, 4, 10, QLatin1Char('0')).arg(tool).arg(parentId).arg(insertIndex)
+            .arg(moduleParameterZone ? QStringLiteral("yes") : QStringLiteral("no")));
         m_treeWidget->refresh();
         logSnapshot(QStringLiteral("after toolDrop"));
     });
@@ -1001,13 +1002,14 @@ void TreeDebugWindow::buildUi()
             // group=   → the parent card that opens up to receive the item
             // marker=  → the thin slot-line drawn at the insertion point
             // ghost=   → the preview placeholder card rect
-            log(QStringLiteral("[....] preview  %1  →%2#%3[%4]"
-                               "  marker=(%5,%6 %7×%8)"
-                               "  ghost=(%9,%10 %11×%12)"
-                               "  group=(%13,%14 %15×%16)"
-                               "  cursor=(%17,%18)")
+            log(QStringLiteral("[....] preview  %1  →%2#%3[%4]  par=%5"
+                               "  marker=(%6,%7 %8×%9)"
+                               "  ghost=(%10,%11 %12×%13)"
+                               "  group=(%14,%15 %16×%17)"
+                               "  cursor=(%18,%19)")
                 .arg(subject)
                 .arg(parentType).arg(t.parentGroupId).arg(t.insertIndex)
+                .arg(t.moduleParameterZone ? QStringLiteral("yes") : QStringLiteral("no"))
                 .arg(qRound(t.slotMarkerRect.x())).arg(qRound(t.slotMarkerRect.y()))
                 .arg(qRound(t.slotMarkerRect.width())).arg(qRound(t.slotMarkerRect.height()))
                 .arg(qRound(t.placeholderRect.x())).arg(qRound(t.placeholderRect.y()))
