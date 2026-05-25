@@ -78,6 +78,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -113,6 +114,7 @@ private:
     void handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
+    void snapZoom();
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
@@ -268,6 +270,18 @@ private:
     qreal m_dropPreviewProgress = 0.0;
     qreal m_dropPreviewDurationMs = 180.0;
     bool m_panning = false;
+    QPointF m_panVelocity;
+    QTimer *m_panInertiaTimer = nullptr;
+    // ── Acceleration-based zoom ────────────────────────────────────────────────
+    //   wheel → m_zoomAccel → m_zoomVelocity → scale(1+v)
+    //   longer scroll = more accel = faster zoom
+    qreal   m_zoomAccel      = 0.0;
+    qreal   m_zoomVelocity   = 0.0;
+    qreal   m_zoomLevel      = 1.0;
+    bool    m_zoomIdle        = true;
+    QTimer *m_zoomAnimTimer  = nullptr;
+    QTimer *m_zoomIdleTimer  = nullptr;
+    QPointF m_zoomAnchorScene;
     bool m_dragActive = false;
     bool m_dropPreviewActive = false;
     bool m_dropPreviewFinishing = false;

@@ -76,6 +76,10 @@ private:
     TestScenario makeScenario_moduleCalls();
     TestScenario makeScenario_fullRegression();
     TestScenario makeScenario_clusterDrag();
+    TestScenario makeScenario_forLoops();
+    TestScenario makeScenario_geometryOps();
+    TestScenario makeScenario_mirrorScale();
+    TestScenario makeScenario_varInvalidDrop();
 
     // Shared step primitives
     void step_clearScene();

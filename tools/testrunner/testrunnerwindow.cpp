@@ -604,6 +604,245 @@ TestScenario TestRunnerWindow::makeScenario_clusterDrag()
     };
 }
 
+// ── Scenario 9: For Loops ───────────────────────────────────────────────────
+// Ref: scene_tree_behavior.md §7 (For Loops)
+TestScenario TestRunnerWindow::makeScenario_forLoops()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Create For loop"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::For, 0);
+        m_scene->updateForLoop(id, QStringLiteral("i"),
+                               QStringLiteral("[0 : 1 : 5]"));
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("For loop created id=#%1, range [0:1:5]").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Add Cube inside For"), [this]() {
+        int id = m_state.selectedNodeId;
+        step_addPrimitive(ShapeNode::Cube, id,
+                          {QStringLiteral("i*10"), QStringLiteral("10"), QStringLiteral("10")});
+        log(QStringLiteral("Cube with i*10 size added to For #%1").arg(id));
+    }});
+
+    steps.append({QStringLiteral("Add Translate inside For"), [this]() {
+        int id = m_state.selectedNodeId;
+        int transId = step_addGroup(SceneDocument::TreeNode::Translate, id);
+        m_scene->updateGroupTransform(transId, QVector3D(0, 0, 0), {}, QVector3D(1,1,1),
+                                      {QStringLiteral("i*15"), QStringLiteral("0"), QStringLiteral("0")});
+        step_addPrimitive(ShapeNode::Sphere, transId, {QStringLiteral("5")});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Translate(i*15) with Sphere added inside For #%1").arg(id));
+    }});
+
+    steps.append({QStringLiteral("Adjust For range with wheel"), [this]() {
+        int id = m_state.selectedNodeId;
+        // Wheel over the '5' endpoint in [0:1:5] — delta=120 to increment
+        wheelAt(id, 120);
+        log(QStringLiteral("Adjusted For #%1 range with +120 wheel").arg(id));
+    }});
+
+    return {
+        QStringLiteral("scenario_for"),
+        QStringLiteral("9. For Loops"),
+        QStringLiteral("For loop with range, children, wheel adjustment"),
+        QStringLiteral("scene_tree_behavior.md §7"),
+        steps
+    };
+}
+
+// ── Scenario 10: Intersection, Hull, Minkowski ──────────────────────────────
+// Ref: scene_tree_behavior.md §2 (Palette Blocks)
+TestScenario TestRunnerWindow::makeScenario_geometryOps()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Create Intersection group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Intersection, 0);
+        step_addPrimitive(ShapeNode::Cube, id,
+                          {QStringLiteral("30"), QStringLiteral("30"), QStringLiteral("30")});
+        step_addPrimitive(ShapeNode::Sphere, id, {QStringLiteral("20")});
+        log(QStringLiteral("Intersection #%1 with Cube + Sphere").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Create Hull group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Hull, 0);
+        step_addPrimitive(ShapeNode::Sphere, id, {QStringLiteral("10")});
+        step_addPrimitive(ShapeNode::Cube, id,
+                          {QStringLiteral("20"), QStringLiteral("5"), QStringLiteral("5")});
+        log(QStringLiteral("Hull #%1 with Sphere + Cube").arg(id));
+    }});
+
+    steps.append({QStringLiteral("Create Minkowski group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Minkowski, 0);
+        step_addPrimitive(ShapeNode::Cube, id,
+                          {QStringLiteral("15"), QStringLiteral("15"), QStringLiteral("15")});
+        step_addPrimitive(ShapeNode::Sphere, id, {QStringLiteral("3")});
+        log(QStringLiteral("Minkowski #%1 with Cube + Sphere").arg(id));
+    }});
+
+    steps.append({QStringLiteral("Verify all groups exist"), [this]() {
+        buildNodeRefs();
+        int inter = findGroupIdByOp(SceneDocument::TreeNode::Intersection);
+        int hull  = findGroupIdByOp(SceneDocument::TreeNode::Hull);
+        int mink  = findGroupIdByOp(SceneDocument::TreeNode::Minkowski);
+        log(inter > 0
+            ? QStringLiteral("Intersection #%1 OK").arg(inter)
+            : QStringLiteral("Intersection NOT FOUND"));
+        log(hull > 0
+            ? QStringLiteral("Hull #%1 OK").arg(hull)
+            : QStringLiteral("Hull NOT FOUND"));
+        log(mink > 0
+            ? QStringLiteral("Minkowski #%1 OK").arg(mink)
+            : QStringLiteral("Minkowski NOT FOUND"));
+    }});
+
+    return {
+        QStringLiteral("scenario_geo"),
+        QStringLiteral("10. Intersection / Hull / Minkowski"),
+        QStringLiteral("All three geometry operations with primitives"),
+        QStringLiteral("scene_tree_behavior.md §2"),
+        steps
+    };
+}
+
+// ── Scenario 11: Mirror & Scale Transforms ──────────────────────────────────
+// Ref: scene_tree_behavior.md §2 (Palette Blocks) + §8 (Mirror)
+TestScenario TestRunnerWindow::makeScenario_mirrorScale()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Create Mirror group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Mirror, 0);
+        m_scene->updateGroupTransform(id, QVector3D(1, 0, 0), {}, QVector3D(1,1,1),
+                                      {QStringLiteral("1"), QStringLiteral("0"), QStringLiteral("0")});
+        step_addPrimitive(ShapeNode::Cube, id,
+                          {QStringLiteral("20"), QStringLiteral("20"), QStringLiteral("20")});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Mirror #%1 across X axis with Cube").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Create Scale group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Scale, 0);
+        m_scene->updateGroupTransform(id, QVector3D(0,0,0), {}, QVector3D(2, 3, 1),
+                                      {QStringLiteral("2"), QStringLiteral("3"), QStringLiteral("1")});
+        step_addPrimitive(ShapeNode::Cylinder, id,
+                          {QStringLiteral("5"), QStringLiteral("20")});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Scale #%1 (2,3,1) with Cylinder").arg(id));
+    }});
+
+    steps.append({QStringLiteral("Create Color group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Color, 0);
+        m_scene->updateGroupColor(id, QColor(255, 0, 0));
+        step_addPrimitive(ShapeNode::Sphere, id, {QStringLiteral("15")});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Color #%1 (red) with Sphere").arg(id));
+    }});
+
+    return {
+        QStringLiteral("scenario_xform"),
+        QStringLiteral("11. Mirror / Scale / Color"),
+        QStringLiteral("Mirror across axis, Scale factor, Color group"),
+        QStringLiteral("scene_tree_behavior.md §2, §8"),
+        steps
+    };
+}
+
+// ── Scenario 12: VAR Invalid Drop Validation ─────────────────────────────────
+// Ref: scene_tree_behavior.md §4 (Variables) + §10-#8
+TestScenario TestRunnerWindow::makeScenario_varInvalidDrop()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Add global VAR"), [this]() {
+        int id = step_addVar(QStringLiteral("testVar"), QStringLiteral("42"));
+        log(QStringLiteral("Global VAR #%1 created").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Add Union group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Union, 0);
+        log(QStringLiteral("Union #%1 created").arg(id));
+        m_state.addedShapeNodeId = id; // reuse as groupId
+    }});
+
+    steps.append({QStringLiteral("Attempt move VAR -> Union (must FAIL)"), [this]() {
+        int varId = m_state.selectedNodeId;
+        int grpId = m_state.addedShapeNodeId;
+        bool ok = m_scene->moveTreeNode(varId, grpId, -1, false);
+        log(ok
+            ? QStringLiteral("FAIL: VAR was incorrectly moved into Union")
+            : QStringLiteral("OK: VAR rejected from Union (move returned false)"));
+    }});
+
+    steps.append({QStringLiteral("Add Translate group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::Translate, 0);
+        log(QStringLiteral("Translate #%1 created").arg(id));
+        m_state.addedShapeNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Attempt move VAR -> Translate (must FAIL)"), [this]() {
+        int varId = m_state.selectedNodeId;
+        int grpId = m_state.addedShapeNodeId;
+        bool ok = m_scene->moveTreeNode(varId, grpId, -1, false);
+        log(ok
+            ? QStringLiteral("FAIL: VAR was incorrectly moved into Translate")
+            : QStringLiteral("OK: VAR rejected from Translate (move returned false)"));
+    }});
+
+    steps.append({QStringLiteral("Add second Module"), [this]() {
+        int id = step_addModule(QStringLiteral("targetMod"));
+        log(QStringLiteral("Module #%1 created").arg(id));
+        m_state.addedShapeNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Attempt move VAR -> Module body (must SUCCEED)"), [this]() {
+        int varId = m_state.selectedNodeId;
+        int modId = m_state.addedShapeNodeId;
+        bool ok = m_scene->moveTreeNode(varId, modId, -1, false);
+        log(ok
+            ? QStringLiteral("OK: VAR moved into Module body #%1").arg(modId)
+            : QStringLiteral("FAIL: VAR rejected from Module body"));
+    }});
+
+    return {
+        QStringLiteral("scenario_var_drop"),
+        QStringLiteral("12. VAR Drop Validation"),
+        QStringLiteral("VAR allowed only in Scene/Module, rejected from Union/Translate"),
+        QStringLiteral("scene_tree_behavior.md §4, §10-#8"),
+        steps
+    };
+}
+
 void TestRunnerWindow::buildAllScenarios()
 {
     m_scenarios.clear();
@@ -616,6 +855,10 @@ void TestRunnerWindow::buildAllScenarios()
     m_scenarios.append(makeScenario_moduleCalls());
     m_scenarios.append(makeScenario_fullRegression());
     m_scenarios.append(makeScenario_clusterDrag());
+    m_scenarios.append(makeScenario_forLoops());
+    m_scenarios.append(makeScenario_geometryOps());
+    m_scenarios.append(makeScenario_mirrorScale());
+    m_scenarios.append(makeScenario_varInvalidDrop());
 
     for (int i = 0; i < m_scenarios.size(); ++i) {
         auto *item = new QListWidgetItem;

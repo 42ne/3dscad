@@ -367,6 +367,85 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         advanceDropPreviewAnimation();
     });
 
+    m_panInertiaTimer = new QTimer(this);
+    m_panInertiaTimer->setInterval(16);
+    connect(m_panInertiaTimer, &QTimer::timeout, this, [this]() {
+        if (qAbs(m_panVelocity.x()) < 2.0 && qAbs(m_panVelocity.y()) < 2.0) {
+            m_panInertiaTimer->stop();
+            m_panVelocity = QPointF();
+            return;
+        }
+        horizontalScrollBar()->setValue(
+            horizontalScrollBar()->value() - qRound(m_panVelocity.x()));
+        verticalScrollBar()->setValue(
+            verticalScrollBar()->value() - qRound(m_panVelocity.y()));
+        m_panVelocity *= 0.92;
+    });
+
+    m_zoomAnimTimer = new QTimer(this);
+    m_zoomAnimTimer->setInterval(24);
+
+    m_zoomIdleTimer = new QTimer(this);
+    m_zoomIdleTimer->setSingleShot(true);
+    m_zoomIdleTimer->setInterval(80);
+
+    connect(m_zoomIdleTimer, &QTimer::timeout, this, [this]() {
+        m_zoomIdle = true;
+    });
+
+    connect(m_zoomAnimTimer, &QTimer::timeout, this, [this]() {
+        // ── Physics step: accel → velocity → zoom ──────────────────────────
+        constexpr qreal kAccelDecay    = 0.70;
+        constexpr qreal kVelFriction   = 0.94;
+        constexpr qreal kMaxVel        = 0.12;
+        constexpr qreal kStepMin       = 0.89;
+        constexpr qreal kStepMax       = 1.12;
+
+        m_zoomVelocity += m_zoomAccel;
+        m_zoomVelocity = qBound(-kMaxVel, m_zoomVelocity, kMaxVel);
+
+        qreal step = 1.0 + m_zoomVelocity;
+        step = qBound(kStepMin, step, kStepMax);
+
+        // ── Damping ────────────────────────────────────────────────────────
+        //   Active:  gentle decay — accel persists, speed builds
+        //   Idle:    2× decay — fast stop when wheel stops
+        if (m_zoomIdle) {
+            m_zoomAccel    *= kAccelDecay  * kAccelDecay;   // 0.49
+            m_zoomVelocity *= kVelFriction * kVelFriction;  // 0.88
+        } else {
+            m_zoomAccel    *= kAccelDecay;                   // 0.70
+            m_zoomVelocity *= kVelFriction;                  // 0.94
+        }
+
+        // ── Apply zoom with stable anchor ───────────────────────────────────
+        QPointF anchorVp = mapFromScene(m_zoomAnchorScene);
+        scale(step, step);
+        QPointF anchorVpAfter = mapFromScene(m_zoomAnchorScene);
+        QPointF vpDelta = anchorVpAfter - anchorVp;
+        horizontalScrollBar()->setValue(
+            horizontalScrollBar()->value() + qRound(vpDelta.x()));
+        verticalScrollBar()->setValue(
+            verticalScrollBar()->value() + qRound(vpDelta.y()));
+
+        const qreal newLevel = transform().m11();
+
+        // ── Stop when both are negligible ───────────────────────────────────
+        if (qAbs(m_zoomVelocity) < 0.002 && qAbs(m_zoomAccel) < 0.0001) {
+            m_zoomAnimTimer->stop();
+            m_zoomIdleTimer->stop();
+            m_zoomVelocity = 0.0;
+            m_zoomAccel    = 0.0;
+        }
+
+        // ── Only redraw UI when zoom actually changed noticeably ──────────
+        if (qAbs(newLevel - m_zoomLevel) > 0.001) {
+            m_zoomLevel = newLevel;
+            updateInlineInputGeometry();
+            updateToolbarOverlay();
+        }
+    });
+
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
     connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
             this, &SceneTreeGraphicsWidget::refresh);
@@ -668,10 +747,32 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
     QGraphicsView::keyPressEvent(event);
 }
 
+void SceneTreeGraphicsWidget::snapZoom()
+{
+    m_zoomAnimTimer->stop();
+    m_zoomIdleTimer->stop();
+    m_zoomAccel    = 0.0;
+    m_zoomVelocity = 0.0;
+    m_zoomIdle     = true;
+}
+
+void SceneTreeGraphicsWidget::focusOutEvent(QFocusEvent *event)
+{
+    snapZoom();
+    QGraphicsView::focusOutEvent(event);
+}
+
 void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
 {
     setFocus();
     m_lastMousePosition = event->pos();
+
+    // Stop any ongoing pan / zoom inertia — scene must be stable for drags
+    if (event->button() == Qt::LeftButton) {
+        m_panInertiaTimer->stop();
+        m_panVelocity = QPointF();
+        snapZoom();
+    }
 
     // ── Canvas-move drag: check grip strip before anything else ──────────────
     if (event->button() == Qt::LeftButton) {
@@ -909,6 +1010,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     if (m_panning) {
         const QPoint delta = event->pos() - m_lastPanPoint;
         m_lastPanPoint = event->pos();
+        m_panVelocity = QPointF(delta.x(), delta.y());
         horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
         verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
         event->accept();
@@ -992,6 +1094,11 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton && m_panning) {
         m_panning = false;
         setCursor(Qt::OpenHandCursor);
+        // Start inertia if velocity is significant
+        if (qAbs(m_panVelocity.x()) > 8.0 || qAbs(m_panVelocity.y()) > 8.0)
+            m_panInertiaTimer->start();
+        else
+            m_panVelocity = QPointF();
         event->accept();
         return;
     }
@@ -1108,11 +1215,23 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
         }
     }
 
-    const qreal factor = event->angleDelta().y() > 0 ? 1.12 : 1.0 / 1.12;
-    scale(factor, factor);
-    updateInlineInputGeometry();
-    updateToolbarOverlay();
-    event->accept();
+    // Zoom: acceleration model
+    {
+        constexpr qreal kAccelPerStep = 0.008;
+        constexpr qreal kMaxAccel     = 0.020;
+
+        m_zoomAccel += (event->angleDelta().y() > 0 ? 1 : -1) * kAccelPerStep;
+        m_zoomAccel = qBound(-kMaxAccel, m_zoomAccel, kMaxAccel);
+        m_zoomAnchorScene = mapToScene(event->position().toPoint());
+
+        // Mark as active (triggers gentle decay in timer)
+        m_zoomIdle = false;
+        m_zoomIdleTimer->start();  // restart — will set idle after 80ms
+
+        if (!m_zoomAnimTimer->isActive())
+            m_zoomAnimTimer->start();
+        event->accept();
+    }
 }
 
 QRectF SceneTreeGraphicsWidget::drawToolbar()
