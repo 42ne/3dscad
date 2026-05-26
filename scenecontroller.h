@@ -65,7 +65,7 @@ public:
     void clearSelection();
 
     // ── Viewport drag handlers ────────────────────────────────────────────────
-    // Shape drag: directly mutates scene during move; commits undo on finish.
+    // Shape drag handlers are retained for legacy signal compatibility; viewport UI edits groups.
     void handleShapeDragStarted(int index);
     void handleShapeDragged(int index, const QVector3D &delta);
     void handleShapeDragFinished(int index);

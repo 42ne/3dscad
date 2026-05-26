@@ -845,7 +845,8 @@ static void drawTrianglesWithDepth(QPainter *painter,
                                    const QSize &viewportSize,
                                    QVector<int> *pickBuffer,
                                    QVector<float> *depthBuffer,
-                                   QImage *image)
+                                   QImage *image,
+                                   bool drawImage = true)
 {
     if (image->size() != viewportSize || image->format() != QImage::Format_ARGB32_Premultiplied)
         *image = QImage(viewportSize, QImage::Format_ARGB32_Premultiplied);
@@ -873,7 +874,8 @@ static void drawTrianglesWithDepth(QPainter *painter,
                           triangle.shapeIndex);
     }
 
-    painter->drawImage(0, 0, *image);
+    if (drawImage)
+        painter->drawImage(0, 0, *image);
 }
 
 static void drawTransparentTriangles(QPainter *painter, QVector<Triangle2D> triangles)
@@ -1346,13 +1348,20 @@ void ViewportWidget::startAsyncCsgCompute()
 
 void ViewportWidget::onCsgPreviewReady()
 {
-    m_cachedCsgPreview = m_csgWatcher.result();
-    m_cachedCsgFingerprint = m_pendingCsgFingerprint;
+    const CsgPreview completedPreview = m_csgWatcher.result();
+    const uint completedFingerprint = m_pendingCsgFingerprint;
     m_csgComputing = false;
 
-    // If the scene changed while we were computing, kick off another round.
-    if (m_csgPreviewDirty)
-        startAsyncCsgCompute();
+    // Do not flash a superseded transform during an interactive edit.
+    if (m_csgPreviewDirty) {
+        if (!m_draggingShape)
+            startAsyncCsgCompute();
+        update();
+        return;
+    }
+
+    m_cachedCsgPreview = completedPreview;
+    m_cachedCsgFingerprint = completedFingerprint;
 
     update();
     emit csgPreviewReady();
@@ -1361,6 +1370,9 @@ void ViewportWidget::onCsgPreviewReady()
 void ViewportWidget::invalidateCsgPreview()
 {
     m_csgPreviewDirty = true;
+    if (m_draggingShape)
+        return;
+
     startAsyncCsgCompute();
 }
 
@@ -1867,12 +1879,14 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
+        const bool buildPickBuffer = drawSceneMeshes || m_renderBackend == OpenGLRenderBackend;
         const QSet<int> selectedShapeIds = selectedViewportShapeIds(m_scene,
                                                                     m_shapes,
                                                                     m_selectedIndex,
                                                                     m_selectedGroupId);
         const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
-        const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
+        const bool hasViewportSelection = (!selectedShapeIds.isEmpty() || selectedTreeNodeId > 0)
+                                          && !m_draggingGroup;
         const QColor selectionFeatureColor(255, 211, 112, 240);
         const QColor selectionGlowColor(255, 183, 64, 86);
         const qreal selectionEdgeWidth = 1.65;
@@ -1907,7 +1921,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             const CsgPreview &preview = m_cachedCsgPreview;
             csgStatus = m_csgComputing ? QStringLiteral("CSG preview: computing…") : preview.statusText;
             for (const CsgRenderItem &item : preview.items) {
-                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
+                const bool selected = !m_draggingGroup
+                                      && itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 QColor color = item.computed
                     ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant))
                     : (item.color.isValid() ? item.color : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant));
@@ -1937,7 +1952,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     } else if (selected) {
                         appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
                     }
-                } else if (drawSceneMeshes) {
+                } else if (buildPickBuffer) {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
                 }
                 if (!item.helper && selected && drawSceneMeshes) {
@@ -1951,9 +1966,10 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             painter.drawLine(line.a, line.b);
         }
 
-        if (drawSceneMeshes) {
+        if (buildPickBuffer) {
             m_pickBufferSize = size();
-            drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
+            drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage,
+                                   drawSceneMeshes);
         }
 
         drawTransparentTriangles(&painter, translucentHelperTriangles);
@@ -1980,48 +1996,47 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             painter.drawLine(line.a, line.b);
         }
 
-        const bool hasSelectedGroup = m_scene && m_selectedGroupId > 0 && m_scene->treeNodeById(m_selectedGroupId);
-        if (hasSelectedGroup) {
-            const SceneDocument::TreeNode *selectedGroup = m_scene->treeNodeById(m_selectedGroupId);
-            const bool transformGroupSelected = selectedGroup->operation == SceneDocument::TreeNode::Translate
-                                                || selectedGroup->operation == SceneDocument::TreeNode::Rotate
-                                                || selectedGroup->operation == SceneDocument::TreeNode::Scale;
-            if (transformGroupSelected) {
-                const bool showMoveAxes = selectedGroup->operation == SceneDocument::TreeNode::Translate;
-                const bool showRotationRings = selectedGroup->operation == SceneDocument::TreeNode::Rotate;
-                const QVector3D origin = selectedTransformOrigin();
-                const QVector<QPair<QVector3D, QColor>> axes = {
-                    {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
-                    {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
-                    {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
-                };
+        const SceneDocument::TreeNode *selectedGroup = m_scene && m_selectedGroupId > 0
+                                                            ? m_scene->treeNodeById(m_selectedGroupId)
+                                                            : nullptr;
+        const bool editableTransformGroup = selectedGroup
+                                            && (selectedGroup->operation == SceneDocument::TreeNode::Translate
+                                                || selectedGroup->operation == SceneDocument::TreeNode::Rotate);
+        if (editableTransformGroup) {
+            const bool showMoveAxes = selectedGroup->operation == SceneDocument::TreeNode::Translate;
+            const bool showRotationRings = selectedGroup->operation == SceneDocument::TreeNode::Rotate;
+            const QVector3D origin = selectedTransformOrigin();
+            const QVector<QPair<QVector3D, QColor>> axes = {
+                {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
+                {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
+                {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
+            };
 
-                if (showMoveAxes) {
-                    for (const auto &axis : axes) {
-                        const QPointF start = project(origin).point;
-                        const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
-                        drawHaloLine(&painter, start, end, axis.second, 4.5);
-                        drawArrowHead(&painter, start, end, axis.second);
-                    }
+            if (showMoveAxes) {
+                for (const auto &axis : axes) {
+                    const QPointF start = project(origin).point;
+                    const QPointF end = project(origin + selectedWorldAxisVector(axis.first)).point;
+                    drawHaloLine(&painter, start, end, axis.second, 4.5);
+                    drawArrowHead(&painter, start, end, axis.second);
                 }
+            }
 
-                const QVector<QPair<DragMode, QColor>> rings = {
-                    {RotateXDrag, QColor(235, 80, 80, 185)},
-                    {RotateYDrag, QColor(80, 210, 120, 185)},
-                    {RotateZDrag, QColor(90, 155, 245, 185)}
-                };
+            const QVector<QPair<DragMode, QColor>> rings = {
+                {RotateXDrag, QColor(235, 80, 80, 185)},
+                {RotateYDrag, QColor(80, 210, 120, 185)},
+                {RotateZDrag, QColor(90, 155, 245, 185)}
+            };
 
-                if (showRotationRings) {
-                    for (const auto &ring : rings) {
-                        QPolygonF ringPath;
-                        for (int step = 0; step <= 72; ++step) {
-                            const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
-                            ringPath << project(worldPoint).point;
-                        }
-
-                        painter.setBrush(Qt::NoBrush);
-                        drawHaloPolyline(&painter, ringPath, ring.second, 2.2);
+            if (showRotationRings) {
+                for (const auto &ring : rings) {
+                    QPolygonF ringPath;
+                    for (int step = 0; step <= 72; ++step) {
+                        const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
+                        ringPath << project(worldPoint).point;
                     }
+
+                    painter.setBrush(Qt::NoBrush);
+                    drawHaloPolyline(&painter, ringPath, ring.second, 2.2);
                 }
             }
         }
@@ -2161,7 +2176,8 @@ void ViewportWidget::paintOpenGLPreview()
                                                                 m_selectedIndex,
                                                                 m_selectedGroupId);
     const int selectedTreeNodeId = selectionHasTreeNodeId(m_scene, m_selectedGroupId) ? m_selectedGroupId : 0;
-    const bool hasViewportSelection = !selectedShapeIds.isEmpty() || selectedTreeNodeId > 0;
+    const bool hasViewportSelection = (!selectedShapeIds.isEmpty() || selectedTreeNodeId > 0)
+                                      && !m_draggingGroup;
 
     const QString meshKey = dragging
         ? QString()
@@ -2169,7 +2185,8 @@ void ViewportWidget::paintOpenGLPreview()
            + "|" + QString::number(m_selectedIndex)
            + "|" + QString::number(m_selectedGroupId)
            + "|" + (m_darkViewportTheme ? QChar('d') : QChar('l'))
-           + "|" + QString::number(m_viewportColorVariant));
+           + "|" + QString::number(m_viewportColorVariant)
+           + (m_draggingGroup ? QStringLiteral("|drag") : QStringLiteral("|idle")));
 
     if (meshKey != m_vboMeshKey) {
         QVector<OpenGLMeshVertex> verts;
@@ -2201,7 +2218,8 @@ void ViewportWidget::paintOpenGLPreview()
             const CsgPreview &preview = m_cachedCsgPreview;
 
             for (const CsgRenderItem &item : preview.items) {
-                const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
+                const bool selected = !m_draggingGroup
+                                      && itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 if (item.helper) {
                     // Ordinary selected helpers supply edge geometry below; filling them
                     // would paint the selected object cyan instead of outlining it.
@@ -2261,7 +2279,9 @@ void ViewportWidget::paintOpenGLPreview()
             m_vboMeshKey = meshKey;
     }
 
-    const QString selectionTopologyKey = dragging
+    const QString selectionTopologyKey = m_draggingGroup
+        ? QStringLiteral("dragging-group-no-selection")
+        : dragging
         ? QString()
         : (QString::number(m_cachedCsgFingerprint)
            + "|" + QString::number(m_selectedIndex)
@@ -2275,7 +2295,8 @@ void ViewportWidget::paintOpenGLPreview()
             return;
         }
         for (const CsgRenderItem &item : m_cachedCsgPreview.items) {
-            const bool selected = itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
+            const bool selected = !m_draggingGroup
+                                  && itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
             if (selected && (!item.helper || item.booleanMode != ShapeNode::Subtract))
                 visitor(item.mesh);
         }
@@ -2873,7 +2894,9 @@ bool ViewportWidget::canUseOpenGLRenderBackend() const
 void ViewportWidget::updateSelectionShimmerTimer()
 {
     const bool hasSelection = m_shapes && (m_selectedIndex >= 0 || m_selectedGroupId > 0);
-    const bool animate = hasSelection && m_renderBackend == OpenGLRenderBackend;
+    const bool animate = hasSelection
+                         && !m_draggingGroup
+                         && m_renderBackend == OpenGLRenderBackend;
     if (animate) {
         if (!m_selectionShimmerTimer.isActive())
             m_selectionShimmerTimer.start();
@@ -3000,11 +3023,9 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
     const SceneDocument::TreeNode *selectedGroup = m_scene && m_selectedGroupId > 0
                                                        ? m_scene->treeNodeById(m_selectedGroupId)
                                                        : nullptr;
-    if (!selectedGroup)
-        return false;
-
-    if (selectedGroup->operation != SceneDocument::TreeNode::Translate
-        && selectedGroup->operation != SceneDocument::TreeNode::Rotate) {
+    if (!selectedGroup
+        || (selectedGroup->operation != SceneDocument::TreeNode::Translate
+            && selectedGroup->operation != SceneDocument::TreeNode::Rotate)) {
         return false;
     }
 
@@ -3153,6 +3174,9 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
             if (m_selectedGroupId > 0) {
                 m_draggingGroup = true;
                 m_dragGroupId = m_selectedGroupId;
+                m_vboMeshKey.clear();
+                m_vboSelectionEdgesKey.clear();
+                updateSelectionShimmerTimer();
                 if (isRotationDragMode(m_dragMode))
                     emit groupRotationDragStarted(m_selectedGroupId);
                 else
@@ -3192,14 +3216,6 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
 
         if (helperShapeIndex >= 0) {
             emit shapeClicked(helperShapeIndex);
-            if (event->modifiers() & Qt::ShiftModifier) {
-                m_draggingShape = true;
-                m_dragMode = PlaneDrag;
-                m_dragShapeIndex = helperShapeIndex;
-                m_dragStartMousePosition = event->pos();
-                m_lastDragDelta = QVector3D();
-                emit shapeDragStarted(helperShapeIndex);
-            }
             return;
         }
     }
@@ -3227,15 +3243,6 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
     }
 
     emit shapeClicked(shapeIndex);
-
-    if (event->modifiers() & Qt::ShiftModifier) {
-        m_draggingShape = true;
-        m_dragMode = PlaneDrag;
-        m_dragShapeIndex = shapeIndex;
-        m_dragStartMousePosition = event->pos();
-        m_lastDragDelta = QVector3D();
-        emit shapeDragStarted(shapeIndex);
-    }
 }
 
 void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
@@ -3322,6 +3329,9 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
         m_dragShapeIndex = -1;
         m_dragGroupId = 0;
         m_rotationDragScreenTangent = QVector2D();
+        m_vboMeshKey.clear();
+        m_vboSelectionEdgesKey.clear();
+        updateSelectionShimmerTimer();
         if (wasDraggingGroup) {
             if (wasRotating)
                 emit groupRotationDragFinished(groupId);

@@ -17,13 +17,13 @@ It stores:
 
 `SceneDocument` owns the ordered list of `ShapeNode` objects, selection state, stable ids, and snapshot/restore support.
 
-It also contains an explicit `TreeNode` hierarchy with scene, module, module-call, group, primitive, for-loop, and variable nodes. Add/delete/boolean-mode changes update this tree incrementally; transform and primitive parameter edits leave tree structure intact.
+It also contains an explicit `TreeNode` hierarchy with scene, module, module-call, group, primitive, for-loop, and variable nodes. Add/delete/boolean-mode changes update this tree incrementally; viewport interaction may edit an explicitly selected transform container but does not create or reorder containers.
 The service root is a non-deletable internal container. Its user-visible children are the permanent `scene` container and top-level OpenSCAD `module` declarations. User geometry lives in `scene`; module declarations live at root level and become geometry only through explicit `ModuleCall` nodes.
 Group `TreeNode` entries store position, rotation, and scale transforms. OpenSCAD generation wraps transformed groups with `translate`/`rotate`/`scale`, and Manifold CSG applies the same transform after evaluating the group operation.
 Transform groups are edited directly in the graphics tree through compact controls. Edits use `UpdateGroupTransformCommand` and document snapshots for undo/redo.
 Variable `TreeNode` entries live in the scene container, in module parameter sections, or directly inside module bodies. They store a generated unique name plus expression text and are emitted as assignment lines or module parameters.
 `ExpressionSyntax` is a small expression-syntax validator/evaluator used by parser, generator-facing controls, and preview. It accepts numbers, identifiers, `+`, `-`, `*`, `/`, parentheses, and unary `+/-`.
-Selected groups can also be moved from the viewport axis gizmo and rotated from the viewport rotation rings. Viewport group dragging updates the group transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
+Selected `Translate` and `Rotate` groups can be edited from the viewport axis gizmo or rotation rings. Viewport group dragging updates that explicit transform live and commits old/new document snapshots to an undoable `UpdateGroupTransformCommand` on release.
 The document model exposes tree operations used by the UI layer: add group, remove group by promoting children, add/remove variables in valid zones, add/remove module calls, and move a tree node to another valid container. Undo/redo commands wrap these operations by storing document snapshots before and after each tree edit.
 
 `MainWindow` owns the Qt UI, undo stack, scene tree, code editor, and coordination between scene, code, graphics tree, and viewport.
@@ -47,7 +47,7 @@ Graphics-tree selection flows back through `MainWindow`, which updates the class
 - dark/light viewport theme and material color variant controls
 - transform gizmo with move axes and rotation rings
 - helper cut-volume drawing
-- asynchronous CSG preview: `invalidateCsgPreview()` snapshots the scene and launches `buildCsgPreview` on a `QtConcurrent::run` thread; `QFutureWatcher<CsgPreview>` delivers the result back to the main thread via `onCsgPreviewReady()`, which updates the cached result, increments the fingerprint, and calls `update()` — paint paths always read `m_cachedCsgPreview` without blocking
+- asynchronous CSG preview: `invalidateCsgPreview()` snapshots the scene and launches `buildCsgPreview` on a `QtConcurrent::run` thread; `QFutureWatcher<CsgPreview>` delivers the result back to the main thread via `onCsgPreviewReady()`. If the scene changed while that worker was active, its superseded result is discarded and the newest state is evaluated next; paint paths never block on CSG.
 
 ## Code Generation And Parsing
 
@@ -95,7 +95,7 @@ Undo commands live in `scenecommands.*`:
 - `UpdateShapeCommand`
 - `ReplaceSceneCommand`, which can restore a parsed `SceneDocument::Snapshot` for generated-code roundtrip
 
-Viewport dragging updates the live scene during drag, then creates one `UpdateShapeCommand` on release.
+Viewport dragging applies only to an explicitly selected `Translate` or `Rotate` group and commits one `UpdateGroupTransformCommand` on release. Primitive selection does not imply a transform order, so viewport gestures do not wrap primitives in new containers.
 
 ## Mesh Layer
 
@@ -181,10 +181,9 @@ Selection:
 
 Dragging:
 
-- Axis gizmo drag emits shape drag signals and moves the selected primitive.
-- Rotation ring drag emits shape rotation signals and rotates the selected primitive.
-- If a group row is selected, the same gizmo emits group drag/rotation signals and updates the group transform.
-- `Shift + drag` supports plane dragging.
+- Selecting a `Translate` group exposes axis handles; dragging one updates that existing group's translation.
+- Selecting a `Rotate` group exposes rotation rings; dragging one updates that existing group's rotation.
+- Selecting a primitive highlights it for identification, but does not expose an implicit move/rotate gesture.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.
 - Graphics-tree palette dragging creates primitives or operation groups through undoable commands.
@@ -200,9 +199,9 @@ Dragging:
 - Moving a node between groups adjusts the moved node's local position to preserve its world position for translation-only group transforms.
 - Scene-tree context menus call the same add/delete commands as the Shapes dock buttons.
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
-- During active drag, CSG evaluation is paused to avoid expensive per-frame recomputation and memory churn.
-- Outside drag, CSG preview is computed asynchronously: `invalidateCsgPreview()` (called from `refreshShapeList()` on every scene change, and from drag-end handlers) snapshots the scene and dispatches a `QtConcurrent::run` task. Paint paths read the last valid `m_cachedCsgPreview` without blocking. When the background task finishes, `onCsgPreviewReady()` atomically updates `m_cachedCsgPreview` and `m_cachedCsgFingerprint`, then schedules a repaint and emits `csgPreviewReady()` so `MainWindow` can refresh the status label. A `m_csgComputing` guard ensures at most one background task runs at a time; if the scene changes again during a running compute, `m_csgPreviewDirty` is set and a new compute is started immediately when the current one finishes.
-- The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, and contact shadows are drawn by shader paths while gizmo, helper overlays, text, CPU-side projection, and picking still reuse the software path.
+- During transform-group drag, selection glow is suppressed because cached CSG geometry may temporarily represent the preceding transform state.
+- CSG preview is computed asynchronously: `invalidateCsgPreview()` snapshots the scene and dispatches a `QtConcurrent::run` task. Paint paths read the last accepted `m_cachedCsgPreview` without blocking. A `m_csgComputing` guard ensures at most one task runs at a time; when the scene changes while it is running, that completed frame is discarded and evaluation continues with the latest state instead of displaying out-of-order drag positions.
+- The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, contact shadows, and selection edges use shader paths and cached VBOs. Gizmo/helper overlays and text remain painter overlays; an off-screen software raster pass refreshes CPU picking each frame.
 - Graphics-tree transform and primitive parameter controls can be adjusted with `Ctrl + mouse wheel`. Hovering editable controls provides viewport hints for the affected axis, rotation, scale, or primitive dimension.
 
 ## Tools
@@ -258,7 +257,7 @@ See [docs/manifoldbuilder.md](docs/manifoldbuilder.md) for usage instructions.
 ## Current Technical Risks
 
 - Software rendering and CSG preview allocate enough data that 32-bit builds can hit memory pressure.
-- The experimental OpenGL backend does not yet use persistent GPU buffers, GPU-side projection, or GPU picking.
+- The experimental OpenGL backend uses cached VBOs, but does not yet use indexed geometry buffers, GPU-side projection, or GPU picking.
 - Optional Manifold integration currently depends on a local build artifact under `build/`.
 - Mesh approximate fallback is still only a fallback and can diverge from exact OpenSCAD output.
 - Shape boolean mode is still present as a legacy/simple editing control and can rewrite primitive placement in the explicit tree.
@@ -279,7 +278,7 @@ Short term:
 Medium term:
 
 - Continue isolating scene-tree UI/model code so the graphics tree can be developed independently from the main viewport.
-- Move the experimental OpenGL backend toward persistent vertex/index buffers and GPU picking.
+- Move the experimental OpenGL backend toward indexed geometry buffers and GPU picking.
 - Split viewport projection/raster/picking helpers out of `ViewportWidget`.
 
 Long term:

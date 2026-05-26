@@ -42,7 +42,7 @@ Implemented:
 - `difference()` and `intersection()` children are labeled in the tree so base/cut/mask roles are visible.
 - The old Properties dock has been removed; supported primitive, transform, variable, for-loop, and module-call edits happen directly in the graphics tree or viewport.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
-- Selected primitives and groups can be moved from the viewport with axis gizmo arrows and rotated with the gizmo rings.
+- Viewport manipulators edit only an explicitly selected `translate()` or `rotate()` container. Selecting a primitive never creates or reorders transform containers; compose transforms in the graphics tree first, then adjust that selected container in the viewport.
 - Graphics-tree transform containers support `translate`, `rotate`, and `scale`; their compact controls can be adjusted with `Ctrl + mouse wheel`.
 - Primitive size/radius/height controls are also exposed in the graphics tree and show viewport hints while editing.
 - Module declarations have a non-code `call handle`. Dragging it creates a real `ModuleCall` node in `scene`, transform/boolean/for groups, or another module body; the handle itself remains in the declaration.
@@ -108,7 +108,7 @@ Mesh approximate mode:
 - Filters triangles by centroid against subtract/intersect helper volumes.
 - Adds approximate subtract cut faces for some helper shapes, but is not a robust boolean solver.
 
-During drag, CSG evaluation is paused and the viewport shows a lightweight interaction preview. Full CSG preview recomputes after the drag is finished.
+During viewport editing of a selected transform container, the tree node changes live and commits as one undoable operation on release. Asynchronous CSG results superseded by a newer drag position are discarded instead of being flashed onscreen; selection glow is suppressed during the gesture until geometry catches up.
 
 ## Build
 
@@ -144,7 +144,7 @@ same Manifold build script without typing the PowerShell command. See
 
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 
-The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, and contact shadows are drawn through OpenGL shader paths with depth testing. Gizmos, helper overlays, text, CPU-side projection, and the pick buffer still reuse the existing software path, so large performance gains are not expected yet.
+The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, contact shadows, and selection edges are drawn through OpenGL shader paths with depth testing and cached VBOs. Gizmos, helper overlays, and text remain `QPainter` overlays; picking is kept accurate through an off-screen CPU raster pass, so camera motion and scene edits remain selectable in either backend.
 
 ## Sample Scenes
 
@@ -180,7 +180,7 @@ contract and known limitations for correct tree reconstruction.
 
 ## Limitations
 
-- The OpenGL viewport path is still experimental and mixed with QPainter overlays; it does not yet use persistent VBO/index buffers or GPU picking.
+- The OpenGL viewport path is still experimental and mixed with QPainter overlays; it uses cached vertex buffers but still performs CPU-side projection and picking rather than GPU picking.
 - OpenSCAD parser supports only the generated subset, but `Apply code` now restores the explicit tree structure for supported generated code instead of flattening back to shapes only.
 - Variables and module parameters support simple arithmetic expressions, but the UI still has no rename flow and the scope model is intentionally smaller than full OpenSCAD.
 - Manifold is currently an optional local build, not a vendored/submodule dependency.
@@ -194,6 +194,6 @@ contract and known limitations for correct tree reconstruction.
 
 1. Formalize Manifold dependency setup: submodule, bootstrap script, or CMake migration.
 2. Refine graphics-tree editing: rename groups, add explicit reorder affordances, keep improving difference base/cut behavior, and decide when the classic tree can be hidden.
-3. Move the experimental OpenGL backend toward persistent vertex/index buffers and GPU picking.
+3. Move the experimental OpenGL backend toward indexed geometry buffers and GPU picking.
 4. Add OpenSCAD CLI integration for validation/export.
 5. Improve parser into an AST-based roundtrip layer.
