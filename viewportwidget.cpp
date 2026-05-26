@@ -713,6 +713,24 @@ static QColor subduedViewportColor(QColor color, float factor)
     return color;
 }
 
+// Apply selection contrast: selected objects get a warm-gold tint that echoes
+// the outline colour; non-selected objects are strongly dimmed so the
+// selection clearly pops out.
+static QColor selectionHighlightColor(QColor color, bool selected)
+{
+    if (selected) {
+        // Slightly brighten, then nudge 14 % toward the warm golden outline hue.
+        color = subduedViewportColor(color, 0.90f);
+        constexpr int wr = 255, wg = 210, wb = 95;
+        return QColor(
+            clampColorChannel(color.red()   + (wr - color.red())   * 14 / 100),
+            clampColorChannel(color.green() + (wg - color.green()) * 14 / 100),
+            clampColorChannel(color.blue()  + (wb - color.blue())  * 14 / 100));
+    }
+    // Non-selected: dark and de-emphasised so the selected piece reads first.
+    return subduedViewportColor(color, 0.46f);
+}
+
 static void collectPrimitiveShapeIds(const SceneDocument::TreeNode &node, QSet<int> *shapeIds)
 {
     if (!shapeIds)
@@ -1475,15 +1493,19 @@ void ViewportWidget::initializeGL()
         "uniform float u_shimmer_phase;\n"
         "uniform float u_shimmer_amount;\n"
         "uniform float u_shimmer_base_alpha;\n"   // 1.0 = normal pass, <1 = bloom pass
+        "uniform float u_depth_pull;\n"           // pull lines toward camera to beat GL_LEQUAL
         "varying vec4 v_color;\n"
         "void main() {\n"
         "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+        "    gl_Position.z -= u_depth_pull * gl_Position.w;\n"
         "    float raw  = 0.5 + 0.5 * sin(dot(a_position, vec3(0.23, 0.14, 0.19)) + u_shimmer_phase);\n"
-        "    float wave = raw * raw;\n"    // square → sharp bright peaks, deep dark troughs
+        "    float wave = raw * raw;\n"    // square → sharper peaks
         "    float s    = wave * u_shimmer_amount;\n"
         "    vec3 brightened = a_color.rgb + (vec3(1.0) - a_color.rgb) * s;\n"
-        "    float alpha = a_color.a * u_shimmer_base_alpha\n"
-        "                * (1.0 - u_shimmer_amount * 0.75 + s * 0.75);\n"
+        // Alpha stays between 55 % (trough) and ~100 % (peak) of the base value.
+        // The previous (1 - amount*0.75 + s*0.75) formula dropped to 31 % at the
+        // trough — most edge positions were nearly invisible against dark backgrounds.
+        "    float alpha = a_color.a * u_shimmer_base_alpha * (0.55 + s * 0.45);\n"
         "    v_color = vec4(brightened, clamp(alpha, 0.0, 1.0));\n"
         "}\n");
     m_glLineProgram->addShaderFromSourceCode(
@@ -1874,7 +1896,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
                 const bool selected = selectedShapeIds.contains(shape.id);
                 if (hasViewportSelection)
-                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
+                    color = selectionHighlightColor(color, selected);
 
                 const SceneMesh mesh = buildShapeMesh(shape);
                 appendMesh(triangles, mesh, color, i);
@@ -1894,7 +1916,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
                 if (!item.helper && hasViewportSelection)
-                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
+                    color = selectionHighlightColor(color, selected);
 
                 if (item.helper) {
                     if (!drawSceneMeshes)
@@ -2033,6 +2055,7 @@ void ViewportWidget::paintOpenGLGrid()
     m_glLineProgram->setUniformValue("u_mvp", mvp);
     m_glLineProgram->setUniformValue("u_shimmer_phase", 0.0f);
     m_glLineProgram->setUniformValue("u_shimmer_amount", 0.0f);
+    m_glLineProgram->setUniformValue("u_depth_pull", 0.0f);
 
     const int posLoc   = m_glLineProgram->attributeLocation("a_position");
     const int colorLoc = m_glLineProgram->attributeLocation("a_color");
@@ -2171,7 +2194,7 @@ void ViewportWidget::paintOpenGLPreview()
                     color = QColor(150, 115, 240);
                 const bool selected = selectedShapeIds.contains(shape.id);
                 if (hasViewportSelection)
-                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
+                    color = selectionHighlightColor(color, selected);
                 appendMesh(buildShapeMesh(shape), color);
             }
         } else {
@@ -2213,7 +2236,7 @@ void ViewportWidget::paintOpenGLPreview()
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
                     color = QColor(150, 115, 240);
                 if (hasViewportSelection)
-                    color = subduedViewportColor(color, selected ? 0.84f : 0.62f);
+                    color = selectionHighlightColor(color, selected);
                 appendMesh(item.mesh, color);
             }
         }
@@ -2278,42 +2301,57 @@ void ViewportWidget::paintOpenGLPreview()
         QVector<OpenGLLineVertex> structuralEdgeCoreVerts;
         QVector<OpenGLLineVertex> silhouetteGlowVerts;
         QVector<OpenGLLineVertex> silhouetteCoreVerts;
-        const QVector4D hiddenEdgeGlowColor = colorToVector4(QColor(244, 178, 82, 22));
-        const QVector4D hiddenEdgeCoreColor = colorToVector4(QColor(255, 214, 132, 38));
-        const QVector4D structuralEdgeGlowColor = colorToVector4(QColor(255, 183, 64, 72));
-        const QVector4D structuralEdgeCoreColor = colorToVector4(QColor(255, 211, 112, 192));
-        const QVector4D silhouetteGlowColor = colorToVector4(QColor(255, 178, 52, 142));
+        // Hidden (x-ray) edges intentionally use a cool grey-blue — visually
+        // distinct from the warm-gold visible edges — so the viewer can tell
+        // immediately which lines are on the surface vs. behind it.
+        const QVector4D hiddenEdgeGlowColor = colorToVector4(QColor(180, 210, 240, 18));
+        const QVector4D hiddenEdgeCoreColor = colorToVector4(QColor(210, 228, 248, 40));
+        const QVector4D structuralEdgeGlowColor = colorToVector4(QColor(255, 183, 64, 110));
+        const QVector4D structuralEdgeCoreColor = colorToVector4(QColor(255, 218, 128, 220));
+        const QVector4D silhouetteGlowColor = colorToVector4(QColor(255, 185, 60, 175));
         const QVector4D silhouetteCoreColor = colorToVector4(QColor(255, 222, 134, 255));
+        // All structural edges go into BOTH the gold (GL_LEQUAL) and ghost (GL_GREATER)
+        // VBOs.  The GPU depth test decides which part of each edge shows in which
+        // colour: fragments that are at or in front of the mesh surface → warm gold;
+        // fragments that are behind the surface → cool ghost.  Because no CPU-side
+        // face-normal threshold is involved, there is no discontinuous "jump" as the
+        // camera rotates past a face's visibility boundary.
+        // The depth_pull applied to the gold pass (0.0003 NDC, set below) ensures
+        // co-planar gold fragments always beat the corresponding ghost fragments:
+        // gold depth = surface − 0.0003, ghost depth = surface → GL_GREATER fails.
+        //
+        // Non-structural silhouette edges (smooth-surface view outline) still use a
+        // CPU-side check because they are only meaningful at the mesh silhouette and
+        // their topology changes smoothly with camera angle.
         for (const ViewportSelectionEdgeCandidate &edge : m_selectionEdgeCandidates) {
-            bool hasVisibleFace = false;
-            bool hasHiddenFace = false;
-            for (const QVector3D &normal : edge.normals) {
-                const bool visible = toCameraDirection(normal, m_cameraYaw, m_cameraPitch).z() < 0.0f;
-                hasVisibleFace = hasVisibleFace || visible;
-                hasHiddenFace = hasHiddenFace || !visible;
-            }
-            if (edge.structural && hasVisibleFace) {
+            if (edge.structural) {
+                // Gold copy — drawn with GL_LEQUAL + depth_pull → visible surface parts.
                 structuralEdgeGlowVerts.append({edge.from, structuralEdgeGlowColor});
                 structuralEdgeGlowVerts.append({edge.to, structuralEdgeGlowColor});
                 structuralEdgeCoreVerts.append({edge.from, structuralEdgeCoreColor});
                 structuralEdgeCoreVerts.append({edge.to, structuralEdgeCoreColor});
-            } else if (!edge.structural && hasVisibleFace && hasHiddenFace) {
-                silhouetteGlowVerts.append({edge.from, silhouetteGlowColor});
-                silhouetteGlowVerts.append({edge.to, silhouetteGlowColor});
-                silhouetteCoreVerts.append({edge.from, silhouetteCoreColor});
-                silhouetteCoreVerts.append({edge.to, silhouetteCoreColor});
+                // Ghost copy — drawn with GL_GREATER → hidden/occluded parts.
+                hiddenEdgeGlowVerts.append({edge.from, hiddenEdgeGlowColor});
+                hiddenEdgeGlowVerts.append({edge.to, hiddenEdgeGlowColor});
+                hiddenEdgeCoreVerts.append({edge.from, hiddenEdgeCoreColor});
+                hiddenEdgeCoreVerts.append({edge.to, hiddenEdgeCoreColor});
+            } else {
+                // Non-structural: only emit as silhouette when it straddles the
+                // visibility boundary (one face toward camera, one away).
+                bool hasVisibleFace = false;
+                bool hasHiddenFace  = false;
+                for (const QVector3D &normal : edge.normals) {
+                    const bool visible = toCameraDirection(normal, m_cameraYaw, m_cameraPitch).z() >= 0.0f;
+                    hasVisibleFace = hasVisibleFace || visible;
+                    hasHiddenFace  = hasHiddenFace  || !visible;
+                }
+                if (hasVisibleFace && hasHiddenFace) {
+                    silhouetteGlowVerts.append({edge.from, silhouetteGlowColor});
+                    silhouetteGlowVerts.append({edge.to,   silhouetteGlowColor});
+                    silhouetteCoreVerts.append({edge.from, silhouetteCoreColor});
+                    silhouetteCoreVerts.append({edge.to,   silhouetteCoreColor});
+                }
             }
-        }
-
-        // Topology is cached above, so the subdued x-ray halo is cheap enough
-        // to retain on dense selections while still keeping silhouettes depth-tested.
-        for (const ViewportSelectionEdgeCandidate &edge : m_selectionEdgeCandidates) {
-            if (!edge.structural)
-                continue;
-            hiddenEdgeGlowVerts.append({edge.from, hiddenEdgeGlowColor});
-            hiddenEdgeGlowVerts.append({edge.to, hiddenEdgeGlowColor});
-            hiddenEdgeCoreVerts.append({edge.from, hiddenEdgeCoreColor});
-            hiddenEdgeCoreVerts.append({edge.to, hiddenEdgeCoreColor});
         }
 
         const int hiddenEdgeSegmentCount = hiddenEdgeCoreVerts.size();
@@ -2467,18 +2505,31 @@ void ViewportWidget::paintOpenGLPreview()
         m_glLineProgram->setAttributeBuffer(edgeColorLoc, GL_FLOAT, offsetof(OpenGLLineVertex, color), 4, sizeof(OpenGLLineVertex));
         glEnable(GL_BLEND);
 
+        // X-ray (hidden) pass: GL_GREATER, no depth pull needed — these
+        // lines are intentionally behind the surface.
+        m_glLineProgram->setUniformValue("u_depth_pull", 0.0f);
         glDepthFunc(GL_GREATER);
         if (m_vboSelectionHiddenEdgeCount > 0) {
-            // Hidden geometry is context only: a soft haze, not a competing outline.
+            // Hidden (x-ray) geometry: cool ghost only — no shimmer competition
+            // with the warm-gold visible contour. Kept narrow so it reads as
+            // "behind the surface" rather than "on top of it".
             m_glLineProgram->setUniformValue("u_shimmer_base_alpha", 1.0f);
-            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.45f);
+            m_glLineProgram->setUniformValue("u_shimmer_amount", 0.18f);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glLineWidth(7.0f * glowBoost);
+            glLineWidth(4.5f);
             glDrawArrays(GL_LINES, 0, m_vboSelectionHiddenEdgeCount);
             glLineWidth(1.0f);
             glDrawArrays(GL_LINES, m_vboSelectionHiddenEdgeCount, m_vboSelectionHiddenEdgeCount);
         }
 
+        // Visible structural-edge passes: GL_LEQUAL + small depth pull.
+        // The pull (0.0003 NDC) shifts line vertices slightly toward the camera so
+        // co-planar edges reliably win GL_LEQUAL against the mesh fragments below.
+        // Back-face structural edges that happen to have one visible adjacent face
+        // (e.g. back+top crease) were already excluded from this VBO in the build
+        // loop (only edges where ALL adjacent normals are away-from-camera land in
+        // the x-ray VBO; edges with at least one front-facing normal land here).
+        m_glLineProgram->setUniformValue("u_depth_pull", 0.0003f);
         glDepthFunc(GL_LEQUAL);
         int visibleOffset = m_vboSelectionHiddenEdgeCount * 2;
         if (m_vboSelectionEdgeCount > 0) {
@@ -2496,7 +2547,7 @@ void ViewportWidget::paintOpenGLPreview()
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glLineWidth(4.5f * glowBoost);
             glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionEdgeCount);
-            glLineWidth(2.1f);
+            glLineWidth(2.5f);
             glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionEdgeCount, m_vboSelectionEdgeCount);
             visibleOffset += m_vboSelectionEdgeCount * 2;
         }
@@ -2516,11 +2567,12 @@ void ViewportWidget::paintOpenGLPreview()
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glLineWidth(6.0f * glowBoost);
             glDrawArrays(GL_LINES, visibleOffset, m_vboSelectionSilhouetteCount);
-            glLineWidth(2.7f);
+            glLineWidth(3.2f);
             glDrawArrays(GL_LINES, visibleOffset + m_vboSelectionSilhouetteCount, m_vboSelectionSilhouetteCount);
         }
         glLineWidth(1.0f);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  // restore default
+        m_glLineProgram->setUniformValue("u_depth_pull", 0.0f);  // restore
         m_vboSelectionEdges.release();
         m_glLineProgram->disableAttributeArray(edgePosLoc);
         m_glLineProgram->disableAttributeArray(edgeColorLoc);
