@@ -237,6 +237,11 @@ void MainWindow::buildUi()
         if (shape && m_sceneTreeGraphics)
             m_sceneTreeGraphics->focusSelectedNodeAnimated();
     });
+    connect(m_viewport, &ViewportWidget::treeNodeClicked, this, [this](int nodeId) {
+        m_controller->handleNodeSelected(nodeId);
+        if (m_sceneTreeGraphics)
+            m_sceneTreeGraphics->focusSelectedNodeAnimated();
+    });
     connect(m_viewport, &ViewportWidget::emptyClicked,
             this, &MainWindow::clearSelection);
     connect(m_viewport, &ViewportWidget::shapeDragStarted, m_controller,

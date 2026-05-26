@@ -2,6 +2,7 @@
 
 #include "scenedocument.h"
 #include "scenemesh.h"
+#include "scenetreegraphicshelpers.h"
 
 #include <QCheckBox>
 #include <QtConcurrent>
@@ -277,6 +278,37 @@ static bool collectParentGroupStackForGroup(const SceneDocument::TreeNode &node,
     return false;
 }
 
+static bool collectTreeNodePath(const SceneDocument::TreeNode &node,
+                                int nodeId,
+                                QVector<const SceneDocument::TreeNode *> *path)
+{
+    path->append(&node);
+    if (node.id == nodeId)
+        return true;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        if (collectTreeNodePath(child, nodeId, path))
+            return true;
+    }
+
+    path->removeLast();
+    return false;
+}
+
+static int primitiveTreeNodeIdForShape(const SceneDocument::TreeNode &node, int shapeId)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive && node.shapeId == shapeId)
+        return node.id;
+
+    for (const SceneDocument::TreeNode &child : node.children) {
+        const int found = primitiveTreeNodeIdForShape(child, shapeId);
+        if (found > 0)
+            return found;
+    }
+
+    return 0;
+}
+
 static ProjectedPoint projectWorldPoint(const QVector3D &world,
                                         const QSize &viewportSize,
                                         float yawDegrees,
@@ -466,6 +498,23 @@ static void drawValueLabel(QPainter *painter, const QPointF &anchor, const QStri
     painter->drawRoundedRect(rect, 5.0, 5.0);
     painter->setPen(QColor(255, 248, 210));
     painter->drawText(rect, Qt::AlignCenter, text);
+}
+
+static void drawGlassPanel(QPainter *painter, const QRectF &rect)
+{
+    QPainterPath path;
+    path.addRoundedRect(rect, 8.0, 8.0);
+
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 92));
+    painter->drawRoundedRect(rect.translated(3.0, 4.0), 8.0, 8.0);
+
+    QLinearGradient glass(rect.topLeft(), rect.bottomLeft());
+    glass.setColorAt(0.0, QColor(24, 34, 50, 218));
+    glass.setColorAt(1.0, QColor(8, 13, 22, 196));
+    painter->setPen(QPen(QColor(142, 178, 215, 120), 1.0));
+    painter->setBrush(glass);
+    painter->drawPath(path);
 }
 
 static QString formatPreviewValue(float value, int precision = -1)
@@ -666,11 +715,6 @@ static QColor viewportBackgroundColor(bool darkTheme)
 static QColor viewportMinorGridColor(bool darkTheme)
 {
     return darkTheme ? QColor(70, 74, 82) : QColor(156, 166, 176);
-}
-
-static QColor viewportStatusTextColor(bool darkTheme)
-{
-    return darkTheme ? QColor(220, 220, 220) : QColor(42, 48, 56);
 }
 
 static QColor viewportComputedSolidColor(bool darkTheme, int variant)
@@ -1139,9 +1183,11 @@ ViewportWidget::ViewportWidget(QWidget *parent)
 
     m_openGLViewportCheckBox = new QCheckBox(QStringLiteral("OpenGL"), this);
     m_darkViewportCheckBox = new QCheckBox(QStringLiteral("Dark"), this);
+    m_navigationOverlayCheckBox = new QCheckBox(QStringLiteral("Nav UI"), this);
     m_colorVariantComboBox = new QComboBox(this);
     m_lightingPresetComboBox = new QComboBox(this);
     m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
+    m_navigationOverlayCheckBox->setChecked(m_navigationOverlayEnabled);
     m_colorVariantComboBox->addItems({
         QStringLiteral("Neutral"),
         QStringLiteral("Mint"),
@@ -1169,10 +1215,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         "QCheckBox:disabled, QComboBox:disabled { color: rgba(238, 242, 246, 95); }");
     m_openGLViewportCheckBox->setStyleSheet(controlStyle);
     m_darkViewportCheckBox->setStyleSheet(controlStyle);
+    m_navigationOverlayCheckBox->setStyleSheet(controlStyle);
     m_colorVariantComboBox->setStyleSheet(controlStyle);
     m_lightingPresetComboBox->setStyleSheet(controlStyle);
     m_openGLViewportCheckBox->setToolTip(QStringLiteral("Use OpenGL rendering for viewport meshes and grid."));
     m_darkViewportCheckBox->setToolTip(QStringLiteral("Switch viewport between dark and light theme."));
+    m_navigationOverlayCheckBox->setToolTip(QStringLiteral("Show the viewport glass hint and selectable tree-path breadcrumb."));
     m_colorVariantComboBox->setToolTip(QStringLiteral("Choose viewport material color variant."));
     m_lightingPresetComboBox->setToolTip(QStringLiteral("Choose viewport lighting preset."));
 
@@ -1181,6 +1229,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     });
     connect(m_darkViewportCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         m_darkViewportTheme = checked;
+        update();
+    });
+    connect(m_navigationOverlayCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        m_navigationOverlayEnabled = checked;
+        if (!checked)
+            m_breadcrumbHits.clear();
         update();
     });
     connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -2042,9 +2096,12 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
     }
 
-    painter.setPen(viewportStatusTextColor(m_darkViewportTheme));
-    painter.drawText(12, 24, "3D viewport: drag to orbit, wheel to zoom, drag selected axes to move or rings to rotate");
-    painter.drawText(12, 42, QString("%1 | renderer: %2").arg(csgStatus, renderBackendName()));
+    if (m_navigationOverlayEnabled) {
+        drawViewportHintOverlay(painter, csgStatus);
+        drawSelectionBreadcrumb(painter);
+    } else {
+        m_breadcrumbHits.clear();
+    }
     drawTreeTransformControlPreview(painter);
     drawTreeShapeParameterPreview(painter);
     drawAxisGizmo(painter);
@@ -2665,6 +2722,131 @@ void ViewportWidget::drawAxisGizmo(QPainter &painter) const
     painter.restore();
 }
 
+void ViewportWidget::drawViewportHintOverlay(QPainter &painter, const QString &csgStatus) const
+{
+    const QString help = QStringLiteral("3D viewport: drag to orbit, wheel to zoom; select a transform breadcrumb to manipulate it.");
+    const QString status = QStringLiteral("%1 | renderer: %2").arg(csgStatus, renderBackendName());
+
+    QFont font = painter.font();
+    font.setPointSizeF(qMax<qreal>(8.0, font.pointSizeF() - 0.2));
+    const QFontMetricsF metrics(font);
+    const qreal preferredWidth = qMax(metrics.horizontalAdvance(help), metrics.horizontalAdvance(status)) + 24.0;
+    const qreal panelWidth = qBound<qreal>(260.0, preferredWidth, qMax<qreal>(260.0, width() - 128.0));
+    const QRectF panelRect(10.0, 10.0, panelWidth, metrics.height() * 2.0 + 20.0);
+    const int textWidth = qFloor(panelRect.width() - 24.0);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawGlassPanel(&painter, panelRect);
+    painter.setFont(font);
+    painter.setPen(QColor(232, 242, 255));
+    painter.drawText(QPointF(panelRect.left() + 12.0, panelRect.top() + 10.0 + metrics.ascent()),
+                     metrics.elidedText(help, Qt::ElideRight, textWidth));
+    painter.setPen(QColor(184, 205, 228));
+    painter.drawText(QPointF(panelRect.left() + 12.0, panelRect.top() + 10.0 + metrics.height() + metrics.ascent()),
+                     metrics.elidedText(status, Qt::ElideRight, textWidth));
+    painter.restore();
+}
+
+void ViewportWidget::drawSelectionBreadcrumb(QPainter &painter)
+{
+    m_breadcrumbHits.clear();
+    if (!m_scene)
+        return;
+
+    int selectedNodeId = m_selectedGroupId;
+    if (selectedNodeId <= 0 && m_shapes && m_selectedIndex >= 0 && m_selectedIndex < m_shapes->size())
+        selectedNodeId = primitiveTreeNodeIdForShape(m_scene->treeRoot(), m_shapes->at(m_selectedIndex).id);
+    if (selectedNodeId <= 0)
+        return;
+
+    QVector<const SceneDocument::TreeNode *> fullPath;
+    if (!collectTreeNodePath(m_scene->treeRoot(), selectedNodeId, &fullPath))
+        return;
+
+    QVector<const SceneDocument::TreeNode *> path;
+    for (const SceneDocument::TreeNode *node : fullPath) {
+        if (!node)
+            continue;
+        if (node->type == SceneDocument::TreeNode::Group
+            && node->operation == SceneDocument::TreeNode::Scene) {
+            continue;
+        }
+        if (node->id != m_scene->treeRoot().id)
+            path.append(node);
+    }
+    if (path.isEmpty())
+        return;
+
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPointSizeF(qMax<qreal>(8.0, font.pointSizeF() - 0.2));
+    const QFontMetricsF metrics(font);
+    const qreal panelTop = 106.0;
+    const qreal panelHeight = metrics.height() + 22.0;
+    const qreal panelWidth = qMax<qreal>(140.0, width() - 112.0);
+    const QRectF panelRect(10.0, panelTop, panelWidth, panelHeight);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    drawGlassPanel(&painter, panelRect);
+    painter.setFont(font);
+
+    qreal x = panelRect.left() + 10.0;
+    const qreal chipTop = panelRect.top() + 7.0;
+    const qreal chipHeight = metrics.height() + 8.0;
+    const qreal rightLimit = panelRect.right() - 10.0;
+    for (int i = 0; i < path.size(); ++i) {
+        const SceneDocument::TreeNode *node = path.at(i);
+        QString label;
+        if (node->type == SceneDocument::TreeNode::Primitive) {
+            const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+            label = shape ? SceneTreeGraphics::toolNameForPrimitiveType(shape->type)
+                          : QStringLiteral("primitive");
+        } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
+            label = node->moduleName.isEmpty() ? QStringLiteral("call") : node->moduleName;
+        } else if (node->type == SceneDocument::TreeNode::Variable) {
+            label = node->variableName;
+        } else {
+            label = SceneTreeGraphics::labelForOperation(node->operation);
+        }
+
+        const qreal chipWidth = metrics.horizontalAdvance(label) + 18.0;
+        const qreal separatorWidth = i > 0 ? metrics.horizontalAdvance(QStringLiteral(">")) + 12.0 : 0.0;
+        if (x + separatorWidth + chipWidth > rightLimit) {
+            painter.setPen(QColor(184, 205, 228));
+            painter.drawText(QRectF(x, chipTop, rightLimit - x, chipHeight), Qt::AlignVCenter, QStringLiteral("..."));
+            break;
+        }
+
+        if (i > 0) {
+            painter.setPen(QColor(140, 167, 192));
+            painter.drawText(QRectF(x, chipTop, separatorWidth, chipHeight), Qt::AlignCenter, QStringLiteral(">"));
+            x += separatorWidth;
+        }
+
+        const QRectF chipRect(x, chipTop, chipWidth, chipHeight);
+        const bool selected = node->id == selectedNodeId;
+        const bool manipulable = node->type == SceneDocument::TreeNode::Group
+                                 && (node->operation == SceneDocument::TreeNode::Translate
+                                     || node->operation == SceneDocument::TreeNode::Rotate);
+        painter.setPen(QPen(selected ? QColor(255, 203, 87)
+                                     : manipulable ? QColor(112, 205, 238)
+                                                   : QColor(115, 145, 174),
+                              selected ? 1.4 : 1.0));
+        painter.setBrush(selected ? QColor(255, 193, 72, 42)
+                                  : manipulable ? QColor(54, 124, 162, 46)
+                                                : QColor(25, 35, 49, 90));
+        painter.drawRoundedRect(chipRect, 5.0, 5.0);
+        painter.setPen(selected ? QColor(255, 231, 166) : QColor(220, 233, 246));
+        painter.drawText(chipRect, Qt::AlignCenter, label);
+        m_breadcrumbHits.append({node->id, chipRect});
+        x = chipRect.right() + 5.0;
+    }
+
+    painter.restore();
+}
+
 void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
 {
     if (!m_scene || m_treeTransformPreviewGroupId <= 0 || m_treeTransformPreviewAxis < 0)
@@ -2908,8 +3090,10 @@ void ViewportWidget::updateSelectionShimmerTimer()
 
 void ViewportWidget::updateViewportControls()
 {
-    if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_colorVariantComboBox || !m_lightingPresetComboBox)
+    if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_navigationOverlayCheckBox
+        || !m_colorVariantComboBox || !m_lightingPresetComboBox) {
         return;
+    }
 
     const bool openGLAvailable = canUseOpenGLRenderBackend();
     m_openGLViewportCheckBox->setEnabled(openGLAvailable);
@@ -2921,6 +3105,10 @@ void ViewportWidget::updateViewportControls()
     m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
     m_darkViewportCheckBox->blockSignals(false);
 
+    m_navigationOverlayCheckBox->blockSignals(true);
+    m_navigationOverlayCheckBox->setChecked(m_navigationOverlayEnabled);
+    m_navigationOverlayCheckBox->blockSignals(false);
+
     m_colorVariantComboBox->blockSignals(true);
     m_colorVariantComboBox->setCurrentIndex(qBound(0, m_viewportColorVariant, m_colorVariantComboBox->count() - 1));
     m_colorVariantComboBox->blockSignals(false);
@@ -2930,22 +3118,26 @@ void ViewportWidget::updateViewportControls()
 
     const QSize openGLSize = m_openGLViewportCheckBox->sizeHint();
     const QSize darkSize = m_darkViewportCheckBox->sizeHint();
+    const QSize navigationSize = m_navigationOverlayCheckBox->sizeHint();
     const QSize colorSize = m_colorVariantComboBox->sizeHint();
     const QSize lightingSize = m_lightingPresetComboBox->sizeHint();
     const int margin = 10;
     const int gap = 6;
-    const int y = 54;
+    const int y = 70;
     int x = margin;
     m_openGLViewportCheckBox->setGeometry(x, y, openGLSize.width() + 10, openGLSize.height() + 2);
     x += m_openGLViewportCheckBox->width() + gap;
     m_darkViewportCheckBox->setGeometry(x, y, darkSize.width() + 10, darkSize.height() + 2);
     x += m_darkViewportCheckBox->width() + gap;
+    m_navigationOverlayCheckBox->setGeometry(x, y, navigationSize.width() + 10, darkSize.height() + 2);
+    x += m_navigationOverlayCheckBox->width() + gap;
     m_colorVariantComboBox->setGeometry(x, y, qMax(92, colorSize.width() + 12), darkSize.height() + 2);
     x += m_colorVariantComboBox->width() + gap;
     m_lightingPresetComboBox->setGeometry(x, y, qMax(94, lightingSize.width() + 12), darkSize.height() + 2);
 
     m_openGLViewportCheckBox->raise();
     m_darkViewportCheckBox->raise();
+    m_navigationOverlayCheckBox->raise();
     m_colorVariantComboBox->raise();
     m_lightingPresetComboBox->raise();
 }
@@ -3083,6 +3275,17 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
     return true;
 }
 
+bool ViewportWidget::pickBreadcrumbNode(const QPoint &position, int *nodeId) const
+{
+    for (const BreadcrumbHit &hit : m_breadcrumbHits) {
+        if (hit.rect.contains(position)) {
+            *nodeId = hit.nodeId;
+            return true;
+        }
+    }
+    return false;
+}
+
 QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) const
 {
     const QPoint pixelDelta = position - m_dragStartMousePosition;
@@ -3155,6 +3358,13 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton) {
+        int breadcrumbNodeId = 0;
+        if (m_navigationOverlayEnabled && pickBreadcrumbNode(event->pos(), &breadcrumbNodeId)) {
+            emit treeNodeClicked(breadcrumbNodeId);
+            event->accept();
+            return;
+        }
+
         DragMode pickedAxis = NoDrag;
         if (pickSelectedTransformAxis(event->pos(), &pickedAxis)) {
             m_dragMode = pickedAxis;

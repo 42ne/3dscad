@@ -569,6 +569,7 @@ void SceneTreeGraphicsWidget::refresh()
 {
     resetGraphicsScene();
     drawTreeOrPlaceholder();
+    updateHoverHighlightOverlay();
     updateSceneRect();
     updateToolbarOverlay();
     syncThumbnailCache();
@@ -661,6 +662,7 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     m_treeItems.clear();
     m_renameZones.clear();
     m_toolbarItems.clear();
+    m_hoverHighlightItems.clear();
     m_canvasMoveHandles.clear();
     m_treeItemsVisible = true;
 }
@@ -779,7 +781,26 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
             m_treeItems.append(item);
     }
 
-    // Hover overlays — drawn on top of all tree items.
+}
+
+void SceneTreeGraphicsWidget::clearHoverHighlightOverlay()
+{
+    for (QGraphicsItem *item : m_hoverHighlightItems) {
+        if (!item)
+            continue;
+        m_graphicsScene->removeItem(item);
+        delete item;
+    }
+    m_hoverHighlightItems.clear();
+}
+
+void SceneTreeGraphicsWidget::updateHoverHighlightOverlay()
+{
+    if (!m_graphicsScene)
+        return;
+
+    clearHoverHighlightOverlay();
+
     const bool hasActiveScrollControl = m_activeTransformControlNodeId > 0
                                         || m_activeColorNodeId > 0
                                         || m_activeShapeParameterNodeId > 0
@@ -797,13 +818,15 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
         QPainterPath path;
         path.addRoundedRect(rect.adjusted(-inflate, -inflate, inflate, inflate), radius, radius);
         auto *item = m_graphicsScene->addPath(path, QPen(border, 1.5), QBrush(fill));
+        item->setAcceptedMouseButtons(Qt::NoButton);
         item->setZValue(180.0);
-        m_treeItems.append(item);
+        m_hoverHighlightItems.append(item);
     };
 
-    if (!hasActiveScrollControl)
+    if (!hasActiveScrollControl) {
         addHoverOverlay(m_hoveredScrollRect,
                         QColor(100, 215, 240, 45), QColor(65, 180, 210, 155), 2.5, 5.0);
+    }
     addHoverOverlay(m_hoveredRenameRect,
                     QColor(190, 160, 245, 40), QColor(145, 108, 215, 150), 2.0, 4.0);
 }
@@ -918,7 +941,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         m_hoveredScrollRect = QRectF();
         m_hoveredRenameRect = QRectF();
         if (changed)
-            refresh();
+            updateHoverHighlightOverlay();
         event->accept();
         return;
     }
@@ -1234,7 +1257,7 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
     if (!m_panning)
         setCursor(Qt::OpenHandCursor);
     if (changed && !m_dragActive)
-        refresh();
+        updateHoverHighlightOverlay();
 }
 
 void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
@@ -1246,9 +1269,8 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     m_hoveredScrollRect = QRectF();
     m_hoveredRenameRect = QRectF();
     if (changed && !m_dragActive)
-        refresh(); // refresh() already calls updateToolbarOverlay()
-    else
-        updateToolbarOverlay();
+        updateHoverHighlightOverlay();
+    updateToolbarOverlay();
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
@@ -2997,7 +3019,7 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
 
     m_hoveredScrollRect = newScrollRect;
     m_hoveredRenameRect = newRenameRect;
-    refresh();
+    updateHoverHighlightOverlay();
     emit hoverScrollZoneChanged(m_hoveredScrollRect);
 }
 

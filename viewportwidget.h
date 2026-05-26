@@ -10,6 +10,7 @@
 #include <QOpenGLFunctions>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QRectF>
 #include <QString>
 #include <QTimer>
 #include <QVector>
@@ -63,6 +64,7 @@ public:
 
 signals:
     void shapeClicked(int index);
+    void treeNodeClicked(int nodeId);
     void emptyClicked();
     void csgPreviewReady();
     void shapeDragStarted(int index);
@@ -106,6 +108,8 @@ private:
     void paintOpenGLContactShadows();
     void paintOpenGLPreview();
     void drawAxisGizmo(QPainter &painter) const;
+    void drawViewportHintOverlay(QPainter &painter, const QString &csgStatus) const;
+    void drawSelectionBreadcrumb(QPainter &painter);
     void drawTreeTransformControlPreview(QPainter &painter) const;
     void drawTreeShapeParameterPreview(QPainter &painter) const;
     void updateViewportControls();
@@ -121,6 +125,7 @@ private:
     QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
     QVector3D selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const;
     bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
+    bool pickBreadcrumbNode(const QPoint &position, int *nodeId) const;
     QVector3D dragDeltaForMousePosition(const QPoint &position) const;
     QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
     bool isRotationDragMode(DragMode dragMode) const;
@@ -129,6 +134,7 @@ private:
     const QVector<ShapeNode> *m_shapes = nullptr;
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     bool m_darkViewportTheme = true;
+    bool m_navigationOverlayEnabled = true;
     int m_viewportColorVariant = 0;
     int m_lightingPreset = 0;
     int m_selectedIndex = -1;
@@ -138,6 +144,11 @@ private:
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;
     int m_treeShapePreviewShapeId = -1;
     int m_treeShapePreviewParameter = -1;
+    struct BreadcrumbHit {
+        int nodeId = 0;
+        QRectF rect;
+    };
+    QVector<BreadcrumbHit> m_breadcrumbHits;
     float m_cameraYaw = -35.0f;
     float m_cameraPitch = -28.0f;
     float m_cameraDistance = 220.0f;
@@ -169,6 +180,7 @@ private:
     QSize m_pickBufferSize;
     QCheckBox *m_openGLViewportCheckBox = nullptr;
     QCheckBox *m_darkViewportCheckBox = nullptr;
+    QCheckBox *m_navigationOverlayCheckBox = nullptr;
     QComboBox *m_colorVariantComboBox = nullptr;
     QComboBox *m_lightingPresetComboBox = nullptr;
     QOpenGLShaderProgram *m_glMeshProgram = nullptr;

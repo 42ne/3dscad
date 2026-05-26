@@ -184,6 +184,7 @@ Dragging:
 - Selecting a `Translate` group exposes axis handles; dragging one updates that existing group's translation.
 - Selecting a `Rotate` group exposes rotation rings; dragging one updates that existing group's rotation.
 - Selecting a primitive highlights it for identification, but does not expose an implicit move/rotate gesture.
+- The viewport breadcrumb exposes the selected node's existing container path; selecting a transform chip delegates to the same tree-node selection flow and never creates hierarchy.
 - Scene-tree row dragging moves explicit `TreeNode` entries into target groups through `MoveTreeNodeCommand`.
 - Scene-tree drops use copy-action event handling and defer model updates until after the Qt drop event, so Qt's internal item move cleanup cannot remove freshly rebuilt rows.
 - Graphics-tree palette dragging creates primitives or operation groups through undoable commands.
@@ -201,7 +202,7 @@ Dragging:
 - After tree moves, `SceneDocument` verifies that every existing shape still has a primitive tree node.
 - During transform-group drag, selection glow is suppressed because cached CSG geometry may temporarily represent the preceding transform state.
 - CSG preview is computed asynchronously: `invalidateCsgPreview()` snapshots the scene and dispatches a `QtConcurrent::run` task. Paint paths read the last accepted `m_cachedCsgPreview` without blocking. A `m_csgComputing` guard ensures at most one task runs at a time; when the scene changes while it is running, that completed frame is discarded and evaluation continues with the latest state instead of displaying out-of-order drag positions.
-- The viewport exposes `OpenGL`, dark/light theme, and material color controls as small overlay widgets. When OpenGL is enabled, solid scene meshes, grid/axes, contact shadows, and selection edges use shader paths and cached VBOs. Gizmo/helper overlays and text remain painter overlays; an off-screen software raster pass refreshes CPU picking each frame.
+- The viewport exposes `OpenGL`, dark/light theme, material color controls, and a `Nav UI` toggle for its glass-style help/status panel and selectable tree-path breadcrumb. When OpenGL is enabled, solid scene meshes, grid/axes, contact shadows, and selection edges use shader paths and cached VBOs. Gizmo/helper overlays and text remain painter overlays; an off-screen software raster pass refreshes CPU picking each frame.
 - Graphics-tree transform and primitive parameter controls can be adjusted with `Ctrl + mouse wheel`. Hovering editable controls provides viewport hints for the affected axis, rotation, scale, or primitive dimension.
 
 ## Tools

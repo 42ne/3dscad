@@ -102,6 +102,8 @@ private:
     void handleThemeSwitcherClick(int themeIndex);
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
+    void clearHoverHighlightOverlay();
+    void updateHoverHighlightOverlay();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
     QRectF drawNode(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
@@ -173,6 +175,7 @@ private:
     QSet<int> m_collapsedGroupIds;
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_toolbarItems;
+    QVector<QGraphicsItem *> m_hoverHighlightItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
     QVariantAnimation *m_focusAnimation = nullptr;

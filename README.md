@@ -43,6 +43,8 @@ Implemented:
 - The old Properties dock has been removed; supported primitive, transform, variable, for-loop, and module-call edits happen directly in the graphics tree or viewport.
 - Selecting a group enables position/rotation editing for that group through undoable property changes.
 - Viewport manipulators edit only an explicitly selected `translate()` or `rotate()` container. Selecting a primitive never creates or reorders transform containers; compose transforms in the graphics tree first, then adjust that selected container in the viewport.
+- Selecting visible geometry displays a viewport breadcrumb of its containing tree path; clicking an existing `translate()` or `rotate()` breadcrumb selects it for manipulation without navigating to the graphics tree.
+- The viewport `Nav UI` checkbox can disable the glass status panel and breadcrumb for interaction/performance comparison.
 - Graphics-tree transform containers support `translate`, `rotate`, and `scale`; their compact controls can be adjusted with `Ctrl + mouse wheel`.
 - Primitive size/radius/height controls are also exposed in the graphics tree and show viewport hints while editing.
 - Module declarations have a non-code `call handle`. Dragging it creates a real `ModuleCall` node in `scene`, transform/boolean/for groups, or another module body; the handle itself remains in the declaration.
