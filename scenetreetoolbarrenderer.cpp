@@ -1,5 +1,6 @@
 #include "scenetreetoolbarrenderer.h"
 #include "scenetreegraphicshelpers.h"
+#include "scenetreepalette.h"
 
 #include <QBrush>
 #include <QGraphicsItem>
@@ -69,10 +70,12 @@ int columnCountForWidth(qreal viewportWidth, int toolCount, qreal toolbarScale)
 
 SceneTreeToolbarRenderer::SceneTreeToolbarRenderer(QGraphicsScene *scene,
                                                    QVector<QGraphicsItem *> *toolbarItems,
-                                                   int theme)
+                                                   int theme,
+                                                   bool darkGlass)
     : m_scene(scene)
     , m_toolbarItems(toolbarItems)
     , m_theme(theme)
+    , m_darkGlass(darkGlass)
 {
 }
 
@@ -103,22 +106,29 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     const QPointF panelTopLeft = scenePointFromViewportPixels(OverlayMargin, OverlayTopGap);
     const QRectF rect(panelTopLeft, QSizeF(panelWidth / safeViewportScale, panelHeight / safeViewportScale));
     const QRectF panelLocalRect(0.0, 0.0, panelWidth, panelHeight);
+    const bool darkGlass = m_darkGlass;
+    const bool customGlass = SceneTreePalette::hasCustomTheme();
+    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(3.0, 4.0),
                                              Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, 96)));
+                                             QBrush(QColor(0, 0, 0, darkGlass ? 96 : 38)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     shadow->setAcceptedMouseButtons(Qt::NoButton);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(OverlayZ - 2.0);
-    shadow->setOpacity(0.70);
+    shadow->setOpacity(darkGlass ? 0.70 : 0.42);
     trackToolbarItem(shadow);
 
     QPainterPath panelPath;
     panelPath.addRoundedRect(panelLocalRect, CornerRadius, CornerRadius);
     QGraphicsItem *panel = m_scene->addPath(panelPath,
-                                            QPen(QColor(148, 163, 184, 82), 1.0),
-                                            QBrush(QColor(10, 16, 24, 178)));
+                                            QPen(customGlass ? customTheme.glassBorder
+                                                             : darkGlass ? QColor(148, 163, 184, 82)
+                                                                         : QColor(118, 136, 156, 58), 1.0),
+                                            QBrush(customGlass ? customTheme.glassBottom
+                                                               : darkGlass ? QColor(10, 16, 24, 178)
+                                                                           : QColor(250, 253, 255, 88)));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);

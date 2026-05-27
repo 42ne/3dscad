@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "animatedtitlebar.h"
+#include "appearancethemes.h"
 #include "codeeditorpanel.h"
 #include "csgevaluator.h"
 #include "examplebrowsermenu.h"
@@ -7,12 +8,14 @@
 #include "scenetreegraphicshelpers.h"
 #include "scenetreegraphicswidget.h"
 #include "theme.h"
+#include "themeeditordialog.h"
 #include "viewportwidget.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -20,6 +23,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPixmap>
+#include <QSettings>
 #include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
@@ -34,6 +39,24 @@
 // MainWindow
 // ────────────────────────────────────────────────────────────────────────────
 
+namespace {
+
+ThemeSpec applicationThemeForId(const QString &id)
+{
+    for (const ThemeSpec &theme : availableThemes()) {
+        if (theme.id == id)
+            return theme;
+    }
+    return defaultTheme();
+}
+
+QString settingsFilePath()
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("3DScad.ini"));
+}
+
+} // namespace
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent, Qt::FramelessWindowHint | Qt::Window)
 {
@@ -42,6 +65,17 @@ MainWindow::MainWindow(QWidget *parent)
     // native HWND is configured correctly from the start and never needs to be
     // destroyed/recreated.
     setAttribute(Qt::WA_TranslucentBackground, false);
+
+    AppearanceThemes::ensureDefaultFiles();
+    m_settings = new QSettings(settingsFilePath(), QSettings::IniFormat, this);
+    ThemeSpec initialTheme = applicationThemeForId(
+        m_settings->value(QStringLiteral("appearance/window/theme"),
+                          defaultTheme().id).toString());
+    m_customWindowThemeName = m_settings->value(QStringLiteral("appearance/window/customTheme")).toString();
+    if (!m_customWindowThemeName.isEmpty())
+        AppearanceThemes::loadWindowTheme(m_customWindowThemeName, &initialTheme);
+    m_applicationThemeId = initialTheme.id;
+    m_activeWindowTheme = initialTheme;
 
     m_controller = new SceneController(this);
 
@@ -54,7 +88,7 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::highlightOpenScadSelection);
     // liveViewportUpdate is connected after m_viewport is created in buildUi().
 
-    applyTheme(defaultTheme());
+    applyTheme(initialTheme);
     buildUi();
     refreshOpenScadCode();
     refreshCsgStatus();
@@ -94,10 +128,10 @@ void MainWindow::buildUi()
 {
     setWindowTitle("OpenSCAD Visual Editor Prototype");
 
-    ThemeSpec activeTheme = defaultTheme();
-    auto *titleBar = new AnimatedTitleBar(this);
-    titleBar->setTitle(windowTitle());
-    titleBar->setTheme(activeTheme);
+    const ThemeSpec activeTheme = m_activeWindowTheme;
+    m_titleBar = new AnimatedTitleBar(this);
+    m_titleBar->setTitle(windowTitle());
+    m_titleBar->setTheme(activeTheme);
 
     QMenuBar *appMenuBar = menuBar();
     auto *fileMenu     = appMenuBar->addMenu("File");
@@ -120,22 +154,53 @@ void MainWindow::buildUi()
         action->setData(theme.id);
         themeGroup->addAction(action);
         if (theme.id == activeTheme.id) action->setChecked(true);
-        connect(action, &QAction::triggered, this, [theme, titleBar]() {
+        connect(action, &QAction::triggered, this, [this, theme]() {
+            m_applicationThemeId = theme.id;
+            m_activeWindowTheme = theme;
+            m_customWindowThemeName.clear();
             applyTheme(theme);
-            titleBar->setTheme(theme);
+            m_titleBar->setTheme(theme);
+            saveAppearanceSettings();
         });
     }
+    themeMenu->addSeparator();
+    themeMenu->addAction(QStringLiteral("Edit Theme..."), this, &MainWindow::openThemeEditor);
+    m_savedWindowThemeMenu = themeMenu->addMenu(QStringLiteral("Saved Window Themes"));
+    m_savedTreeThemeMenu = themeMenu->addMenu(QStringLiteral("Saved Tree Themes"));
+    m_savedViewportThemeMenu = themeMenu->addMenu(QStringLiteral("Saved Viewport Themes"));
 
     auto *chrome = new QWidget(this);
     auto *chromeLayout = new QVBoxLayout(chrome);
     chromeLayout->setContentsMargins(0, 0, 0, 0);
     chromeLayout->setSpacing(0);
-    chromeLayout->addWidget(titleBar);
+    chromeLayout->addWidget(m_titleBar);
     chromeLayout->addWidget(appMenuBar);
     setMenuWidget(chrome);
 
     m_viewport = new ViewportWidget;
+    m_viewport->setDarkViewportTheme(
+        m_settings->value(QStringLiteral("appearance/viewport/darkTheme"),
+                          m_viewport->darkViewportTheme()).toBool());
+    m_viewport->setViewportColorVariant(
+        m_settings->value(QStringLiteral("appearance/viewport/materialColorVariant"),
+                          m_viewport->viewportColorVariant()).toInt());
+    m_customViewportThemeName = m_settings->value(QStringLiteral("appearance/viewport/customTheme")).toString();
+    if (!m_customViewportThemeName.isEmpty()) {
+        ViewportAppearanceTheme theme;
+        if (AppearanceThemes::loadViewportTheme(m_customViewportThemeName, &theme))
+            m_viewport->setCustomAppearanceTheme(theme);
+        else
+            m_customViewportThemeName.clear();
+    }
     m_viewport->setScene(&m_controller->scene());
+    connect(m_viewport, &ViewportWidget::darkViewportThemeChanged,
+            this, [this](bool) { saveAppearanceSettings(); });
+    connect(m_viewport, &ViewportWidget::viewportColorVariantChanged,
+            this, [this](int) { saveAppearanceSettings(); });
+    connect(m_viewport, &ViewportWidget::builtInAppearanceSelected, this, [this]() {
+        m_customViewportThemeName.clear();
+        saveAppearanceSettings();
+    });
 
     // Now that m_viewport exists, wire live-update signal.
     connect(m_controller, &SceneController::liveViewportUpdate, this, [this]() {
@@ -157,12 +222,34 @@ void MainWindow::buildUi()
     addDockWidget(Qt::RightDockWidgetArea, codeDock);
 
     // Left dock
-    auto *leftDock   = new QDockWidget("Shapes", this);
+    auto *leftDock   = new QDockWidget("Scene Tree Canvas", this);
     auto *leftPanel  = new QWidget;
     auto *leftLayout = new QVBoxLayout(leftPanel);
 
     m_sceneTreeGraphics = new SceneTreeGraphicsWidget;
+    m_sceneTreeGraphics->setTreeTheme(
+        m_settings->value(QStringLiteral("appearance/sceneTree/theme"),
+                          m_sceneTreeGraphics->treeTheme()).toInt());
+    m_sceneTreeGraphics->setCanvasBackgroundTheme(
+        m_settings->value(QStringLiteral("appearance/sceneTree/canvasBackgroundTheme"),
+                          m_sceneTreeGraphics->canvasBackgroundThemeIndex()).toInt());
+    m_customTreeThemeName = m_settings->value(QStringLiteral("appearance/sceneTree/customTheme")).toString();
+    if (!m_customTreeThemeName.isEmpty()) {
+        TreeAppearanceTheme theme;
+        if (AppearanceThemes::loadTreeTheme(m_customTreeThemeName, &theme))
+            m_sceneTreeGraphics->setCustomAppearanceTheme(theme);
+        else
+            m_customTreeThemeName.clear();
+    }
     m_sceneTreeGraphics->setSceneDocument(&m_controller->scene());
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::treeThemeChanged,
+            this, [this](int) { saveAppearanceSettings(); });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::canvasBackgroundThemeChanged,
+            this, [this](int) { saveAppearanceSettings(); });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::builtInAppearanceSelected, this, [this]() {
+        m_customTreeThemeName.clear();
+        saveAppearanceSettings();
+    });
 
     // Wire all graphics-tree signals through the controller.
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::toolDropped,
@@ -270,6 +357,9 @@ void MainWindow::buildUi()
             &SceneController::handleGroupRotationDragFinished);
     connect(m_viewport, &ViewportWidget::csgPreviewReady,
             this, &MainWindow::refreshCsgStatus);
+
+    rebuildSavedThemeMenus();
+    saveAppearanceSettings();
 }
 
 // ── Toolbar shape/group actions ────────────────────────────────────────────────
@@ -361,6 +451,133 @@ void MainWindow::refreshSceneViews()
 void MainWindow::refreshProperties()
 {
     // Reserved for future property panel.
+}
+
+void MainWindow::saveAppearanceSettings()
+{
+    if (!m_settings)
+        return;
+
+    m_settings->setValue(QStringLiteral("appearance/window/theme"), m_applicationThemeId);
+    m_settings->setValue(QStringLiteral("appearance/window/customTheme"), m_customWindowThemeName);
+    if (m_sceneTreeGraphics) {
+        m_settings->setValue(QStringLiteral("appearance/sceneTree/theme"),
+                             m_sceneTreeGraphics->treeTheme());
+        m_settings->setValue(QStringLiteral("appearance/sceneTree/canvasBackgroundTheme"),
+                             m_sceneTreeGraphics->canvasBackgroundThemeIndex());
+        m_settings->setValue(QStringLiteral("appearance/sceneTree/customTheme"), m_customTreeThemeName);
+    }
+    if (m_viewport) {
+        m_settings->setValue(QStringLiteral("appearance/viewport/darkTheme"),
+                             m_viewport->darkViewportTheme());
+        m_settings->setValue(QStringLiteral("appearance/viewport/materialColorVariant"),
+                             m_viewport->viewportColorVariant());
+        m_settings->setValue(QStringLiteral("appearance/viewport/customTheme"), m_customViewportThemeName);
+    }
+    m_settings->sync();
+}
+
+void MainWindow::rebuildSavedThemeMenus()
+{
+    if (!m_savedWindowThemeMenu || !m_savedTreeThemeMenu || !m_savedViewportThemeMenu)
+        return;
+
+    m_savedWindowThemeMenu->clear();
+    for (const QString &name : AppearanceThemes::customWindowThemeNames()) {
+        QAction *action = m_savedWindowThemeMenu->addAction(name);
+        action->setCheckable(true);
+        action->setChecked(name == m_customWindowThemeName);
+        connect(action, &QAction::triggered, this, [this, name]() { applySavedWindowTheme(name); });
+    }
+    if (m_savedWindowThemeMenu->isEmpty())
+        m_savedWindowThemeMenu->addAction(QStringLiteral("(none)"))->setEnabled(false);
+
+    m_savedTreeThemeMenu->clear();
+    for (const QString &name : AppearanceThemes::customTreeThemeNames()) {
+        QAction *action = m_savedTreeThemeMenu->addAction(name);
+        action->setCheckable(true);
+        action->setChecked(name == m_customTreeThemeName);
+        connect(action, &QAction::triggered, this, [this, name]() { applySavedTreeTheme(name); });
+    }
+    if (m_savedTreeThemeMenu->isEmpty())
+        m_savedTreeThemeMenu->addAction(QStringLiteral("(none)"))->setEnabled(false);
+
+    m_savedViewportThemeMenu->clear();
+    for (const QString &name : AppearanceThemes::customViewportThemeNames()) {
+        QAction *action = m_savedViewportThemeMenu->addAction(name);
+        action->setCheckable(true);
+        action->setChecked(name == m_customViewportThemeName);
+        connect(action, &QAction::triggered, this, [this, name]() { applySavedViewportTheme(name); });
+    }
+    if (m_savedViewportThemeMenu->isEmpty())
+        m_savedViewportThemeMenu->addAction(QStringLiteral("(none)"))->setEnabled(false);
+}
+
+void MainWindow::applySavedWindowTheme(const QString &name)
+{
+    ThemeSpec theme;
+    if (!AppearanceThemes::loadWindowTheme(name, &theme))
+        return;
+    m_customWindowThemeName = name;
+    m_applicationThemeId = theme.id;
+    m_activeWindowTheme = theme;
+    applyTheme(theme);
+    if (m_titleBar)
+        m_titleBar->setTheme(theme);
+    rebuildSavedThemeMenus();
+    saveAppearanceSettings();
+}
+
+void MainWindow::applySavedTreeTheme(const QString &name)
+{
+    TreeAppearanceTheme theme;
+    if (!m_sceneTreeGraphics || !AppearanceThemes::loadTreeTheme(name, &theme))
+        return;
+    m_customTreeThemeName = name;
+    m_sceneTreeGraphics->setCustomAppearanceTheme(theme);
+    rebuildSavedThemeMenus();
+    saveAppearanceSettings();
+}
+
+void MainWindow::applySavedViewportTheme(const QString &name)
+{
+    ViewportAppearanceTheme theme;
+    if (!m_viewport || !AppearanceThemes::loadViewportTheme(name, &theme))
+        return;
+    m_customViewportThemeName = name;
+    m_viewport->setCustomAppearanceTheme(theme);
+    rebuildSavedThemeMenus();
+    saveAppearanceSettings();
+}
+
+void MainWindow::openThemeEditor()
+{
+    TreeAppearanceTheme treeTheme = AppearanceThemes::defaultTreeTheme();
+    ViewportAppearanceTheme viewportTheme = AppearanceThemes::defaultViewportTheme();
+    if (!m_customTreeThemeName.isEmpty())
+        AppearanceThemes::loadTreeTheme(m_customTreeThemeName, &treeTheme);
+    if (!m_customViewportThemeName.isEmpty())
+        AppearanceThemes::loadViewportTheme(m_customViewportThemeName, &viewportTheme);
+
+    // freeze current window as preview background
+    const QPixmap snapshot = grab();
+
+    ThemeEditorDialog editor(snapshot, m_activeWindowTheme, treeTheme, viewportTheme, this);
+    if (editor.exec() != QDialog::Accepted)
+        return;
+
+    const QString name = editor.themeName();
+    if (editor.target() == ThemeEditorDialog::WindowTarget) {
+        AppearanceThemes::saveWindowTheme(name, editor.windowTheme());
+        applySavedWindowTheme(name);
+    } else if (editor.target() == ThemeEditorDialog::TreeTarget) {
+        AppearanceThemes::saveTreeTheme(name, editor.treeTheme());
+        applySavedTreeTheme(name);
+    } else {
+        AppearanceThemes::saveViewportTheme(name, editor.viewportTheme());
+        applySavedViewportTheme(name);
+    }
+    rebuildSavedThemeMenus();
 }
 
 void MainWindow::refreshOpenScadCode()

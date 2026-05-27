@@ -40,7 +40,15 @@ public:
     void setSelectedTreeNodeId(int nodeId);
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
+    void setCanvasBackgroundTheme(int theme);
+    int  canvasBackgroundThemeIndex() const { return m_canvasBackgroundTheme; }
+    void setCustomAppearanceTheme(const TreeAppearanceTheme &theme);
+    void clearCustomAppearanceTheme();
     void refresh();
+
+    // Enable / disable the in-app color-edit paint mode.
+    void setColorEditMode(bool enabled);
+    bool colorEditMode() const { return m_colorEditMode; }
     void compactRootBlocksAndFit();
     void focusSelectedNodeAnimated();
 
@@ -73,6 +81,10 @@ signals:
     void moduleRenameRequested(int groupId, const QString &newName);
     void variableRenameRequested(int variableId, const QString &newName);
     void canvasDrag(const QString &logLine);
+    void treeThemeChanged(int theme);
+    void canvasBackgroundThemeChanged(int theme);
+    void builtInAppearanceSelected();
+    void colorEditModeChanged(bool enabled);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -94,12 +106,31 @@ private:
     using DropTarget = SceneTreeLayout::DropTarget;
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
+    // ── Color-edit mode ───────────────────────────────────────────────────────
+    // A transient "paint" mode: hovering a card zone highlights it and shows
+    // what color role it maps to; clicking opens a color picker and applies the
+    // change via SceneTreePalette::setCustomTheme().
+    struct ColorZoneHit {
+        QString fieldName;   // "canvas" | "card" | "header" | "input"
+        QString label;       // human-readable zone name for the hover hint
+        QRectF  rect;        // zone rect in scene coords (invalid for canvas)
+        bool    valid = false;        // false → canvas / no-card-hit
+        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
+        bool    hasOperation = false; // true when inside a group card
+    };
+    ColorZoneHit colorZoneAt(const QPointF &scenePos) const;
+    void handleColorEditClick(const QPointF &scenePos);
+    void updateColorEditHighlight(const QPointF &scenePos);
+    void clearColorEditHighlight();
+
     QRectF drawToolbar();
     void drawThemeSwitcher();
+    void drawCanvasBackgroundSwitcher();
     void drawHoverHintOverlay();
     void clearToolbar();
     void updateToolbarOverlay();
     void handleThemeSwitcherClick(int themeIndex);
+    void handleCanvasBackgroundSwitcherClick(int backgroundIndex);
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
     void clearHoverHighlightOverlay();
@@ -248,7 +279,13 @@ private:
     QRectF                    m_inlineInputSceneRect;
 
     int m_treeTheme = 1;    // SceneTreePalette::Theme cast to int; 1 = second tree theme
+    int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
+
+    // ── Color-edit paint mode ─────────────────────────────────────────────────
+    bool            m_colorEditMode      = false;
+    QGraphicsItem  *m_colorEditHighlight = nullptr; // zone rect overlay (not in m_toolbarItems)
+    QString         m_colorEditZoneField;           // last detected zone field name
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;
     int m_activeTransformControlNumberStart = -1;

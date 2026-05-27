@@ -2,6 +2,7 @@
 #define VIEWPORTWIDGET_H
 
 #include "csgevaluator.h"
+#include "appearancethemes.h"
 #include "shapenode.h"
 
 #include <QFutureWatcher>
@@ -51,6 +52,12 @@ public:
     void setTreeShapeParameterPreview(int shapeId, int parameter);
     void setRenderBackend(RenderBackend backend);
     RenderBackend renderBackend() const;
+    void setDarkViewportTheme(bool darkTheme);
+    bool darkViewportTheme() const { return m_darkViewportTheme; }
+    void setViewportColorVariant(int variant);
+    int viewportColorVariant() const { return m_viewportColorVariant; }
+    void setCustomAppearanceTheme(const ViewportAppearanceTheme &theme);
+    void clearCustomAppearanceTheme();
     QString renderBackendName() const;
     bool isOpenGLRenderBackendAvailable() const;
     void invalidateCsgPreview();
@@ -79,6 +86,9 @@ signals:
     void groupRotationDragStarted(int groupId);
     void groupRotated(int groupId, const QVector3D &deltaDegrees);
     void groupRotationDragFinished(int groupId);
+    void darkViewportThemeChanged(bool darkTheme);
+    void viewportColorVariantChanged(int variant);
+    void builtInAppearanceSelected();
 
 protected:
     void initializeGL() override;
@@ -137,6 +147,8 @@ private:
     bool m_navigationOverlayEnabled = true;
     int m_viewportColorVariant = 0;
     int m_lightingPreset = 0;
+    bool m_hasCustomAppearanceTheme = false;
+    ViewportAppearanceTheme m_customAppearanceTheme;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
     int m_treeTransformPreviewGroupId = 0;

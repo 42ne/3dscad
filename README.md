@@ -88,6 +88,8 @@ There are currently four preview modes:
 
 CSG preview is computed **asynchronously** on a background thread via `QFutureWatcher`. While a new result is being computed (e.g. right after loading a complex file), the viewport renders the last valid cached frame and the status line shows `CSG preview: computing…`. When the background result is ready the viewport refreshes automatically. This prevents the UI from freezing when loading scenes with many shapes or deep module hierarchies.
 
+During a viewport transform drag, the renderer shows a lightweight primitive interaction preview with the current tree transforms. Full CSG evaluation resumes once on release, so the object remains aligned with its gizmo while it is moving.
+
 Manifold mode:
 
 - Is used first when the matching local Manifold library exists at qmake time:
@@ -110,7 +112,7 @@ Mesh approximate mode:
 - Filters triangles by centroid against subtract/intersect helper volumes.
 - Adds approximate subtract cut faces for some helper shapes, but is not a robust boolean solver.
 
-During viewport editing of a selected transform container, the tree node changes live and commits as one undoable operation on release. Asynchronous CSG results superseded by a newer drag position are discarded instead of being flashed onscreen; selection glow is suppressed during the gesture until geometry catches up.
+During viewport editing of a selected transform container, the tree node changes live and commits as one undoable operation on release. Dragging an expression-backed transform axis replaces only the changed axis with a numeric value; untouched axis expressions remain parameterized. Asynchronous CSG results superseded by a newer drag position are discarded instead of being flashed onscreen; selection glow is suppressed during the gesture until geometry catches up.
 
 ## Build
 
@@ -146,7 +148,7 @@ same Manifold build script without typing the PowerShell command. See
 
 With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
 
-The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, contact shadows, and selection edges are drawn through OpenGL shader paths with depth testing and cached VBOs. Gizmos, helper overlays, and text remain `QPainter` overlays; picking is kept accurate through an off-screen CPU raster pass, so camera motion and scene edits remain selectable in either backend.
+The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, contact shadows, and selection edges are drawn through OpenGL shader paths with depth testing and cached VBOs. Gizmos, helper overlays, and text remain `QPainter` overlays; accurate GPU-side or on-demand picking is still future work.
 
 ## Sample Scenes
 

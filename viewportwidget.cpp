@@ -196,6 +196,15 @@ static QVector3D inverseRotatePoint(const QVector3D &point, const QVector3D &deg
     return p;
 }
 
+static QVector3D reflectAcrossPlane(const QVector3D &vector, const QVector3D &normal)
+{
+    const float lengthSquared = normal.lengthSquared();
+    if (qFuzzyIsNull(lengthSquared))
+        return vector;
+
+    return vector - 2.0f * QVector3D::dotProduct(vector, normal) / lengthSquared * normal;
+}
+
 static QVector3D transformPointForGroup(const QVector3D &point, const SceneDocument::TreeNode &group)
 {
     if (group.operation == SceneDocument::TreeNode::Translate)
@@ -204,6 +213,8 @@ static QVector3D transformPointForGroup(const QVector3D &point, const SceneDocum
         return rotatePoint(point, group.rotation);
     if (group.operation == SceneDocument::TreeNode::Scale)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
+    if (group.operation == SceneDocument::TreeNode::Mirror)
+        return reflectAcrossPlane(point, group.position);
     return point;
 }
 
@@ -222,9 +233,29 @@ static QVector3D transformVectorByGroupStack(QVector3D vector, const QVector<Sce
             vector = rotatePoint(vector, it->rotation);
         else if (it->operation == SceneDocument::TreeNode::Scale)
             vector = QVector3D(vector.x() * it->scale.x(), vector.y() * it->scale.y(), vector.z() * it->scale.z());
+        else if (it->operation == SceneDocument::TreeNode::Mirror)
+            vector = reflectAcrossPlane(vector, it->position);
     }
 
     return vector;
+}
+
+static QVector3D transformNormalByGroupStack(QVector3D normal,
+                                             const QVector<SceneDocument::TreeNode> &groupStack)
+{
+    for (auto it = groupStack.crbegin(); it != groupStack.crend(); ++it) {
+        if (it->operation == SceneDocument::TreeNode::Rotate) {
+            normal = rotatePoint(normal, it->rotation);
+        } else if (it->operation == SceneDocument::TreeNode::Scale) {
+            normal = QVector3D(qFuzzyIsNull(it->scale.x()) ? normal.x() : normal.x() / it->scale.x(),
+                               qFuzzyIsNull(it->scale.y()) ? normal.y() : normal.y() / it->scale.y(),
+                               qFuzzyIsNull(it->scale.z()) ? normal.z() : normal.z() / it->scale.z());
+        } else if (it->operation == SceneDocument::TreeNode::Mirror) {
+            normal = -reflectAcrossPlane(normal, it->position);
+        }
+    }
+
+    return normal.normalized();
 }
 
 static QVector3D inverseTransformVectorByGroupStack(QVector3D vector, const QVector<SceneDocument::TreeNode> &groupStack)
@@ -256,6 +287,29 @@ static bool collectParentGroupStackForShape(const SceneDocument::TreeNode &node,
 
     groupStack->removeLast();
     return false;
+}
+
+static SceneMesh interactionMeshForShape(const SceneDocument *scene, const ShapeNode &shape)
+{
+    SceneMesh mesh = buildShapeMesh(shape);
+    if (!scene)
+        return mesh;
+
+    QVector<SceneDocument::TreeNode> groupStack;
+    if (!collectParentGroupStackForShape(scene->treeRoot(), shape.id, &groupStack))
+        return mesh;
+
+    for (MeshTriangle &triangle : mesh.triangles) {
+        triangle.a = transformPointByGroupStack(triangle.a, groupStack);
+        triangle.b = transformPointByGroupStack(triangle.b, groupStack);
+        triangle.c = transformPointByGroupStack(triangle.c, groupStack);
+        triangle.normal = transformNormalByGroupStack(triangle.normal, groupStack);
+    }
+
+    for (QVector3D &shadowPoint : mesh.shadowPoints)
+        shadowPoint = transformPointByGroupStack(shadowPoint, groupStack);
+
+    return mesh;
 }
 
 static bool collectParentGroupStackForGroup(const SceneDocument::TreeNode &node,
@@ -500,19 +554,26 @@ static void drawValueLabel(QPainter *painter, const QPointF &anchor, const QStri
     painter->drawText(rect, Qt::AlignCenter, text);
 }
 
-static void drawGlassPanel(QPainter *painter, const QRectF &rect)
+static void drawGlassPanel(QPainter *painter,
+                           const QRectF &rect,
+                           bool darkTheme = true,
+                           const ViewportAppearanceTheme *theme = nullptr)
 {
     QPainterPath path;
     path.addRoundedRect(rect, 8.0, 8.0);
 
     painter->setPen(Qt::NoPen);
-    painter->setBrush(QColor(0, 0, 0, 92));
+    painter->setBrush(darkTheme ? QColor(0, 0, 0, 92) : QColor(30, 42, 58, 30));
     painter->drawRoundedRect(rect.translated(3.0, 4.0), 8.0, 8.0);
 
     QLinearGradient glass(rect.topLeft(), rect.bottomLeft());
-    glass.setColorAt(0.0, QColor(24, 34, 50, 218));
-    glass.setColorAt(1.0, QColor(8, 13, 22, 196));
-    painter->setPen(QPen(QColor(142, 178, 215, 120), 1.0));
+    glass.setColorAt(0.0, theme ? theme->glassTop
+                                : darkTheme ? QColor(24, 34, 50, 218) : QColor(255, 255, 255, 118));
+    glass.setColorAt(1.0, theme ? theme->glassBottom
+                                : darkTheme ? QColor(8, 13, 22, 196) : QColor(240, 246, 250, 76));
+    painter->setPen(QPen(theme ? theme->glassBorder
+                              : darkTheme ? QColor(142, 178, 215, 120)
+                                          : QColor(120, 145, 170, 72), 1.0));
     painter->setBrush(glass);
     painter->drawPath(path);
 }
@@ -707,18 +768,24 @@ static QVector4D colorToVector4(const QColor &color)
     return QVector4D(color.redF(), color.greenF(), color.blueF(), color.alphaF());
 }
 
-static QColor viewportBackgroundColor(bool darkTheme)
+static QColor viewportBackgroundColor(bool darkTheme, const ViewportAppearanceTheme *theme = nullptr)
 {
+    if (theme)
+        return theme->background;
     return darkTheme ? QColor(30, 32, 36) : QColor(232, 236, 238);
 }
 
-static QColor viewportMinorGridColor(bool darkTheme)
+static QColor viewportMinorGridColor(bool darkTheme, const ViewportAppearanceTheme *theme = nullptr)
 {
+    if (theme)
+        return theme->grid;
     return darkTheme ? QColor(70, 74, 82) : QColor(156, 166, 176);
 }
 
-static QColor viewportComputedSolidColor(bool darkTheme, int variant)
+static QColor viewportComputedSolidColor(bool darkTheme, int variant, const ViewportAppearanceTheme *theme = nullptr)
 {
+    if (theme)
+        return theme->computedSolid;
     switch (variant) {
     case 1:
         return darkTheme ? QColor(118, 214, 168) : QColor(42, 150, 116);
@@ -733,8 +800,10 @@ static QColor viewportComputedSolidColor(bool darkTheme, int variant)
     }
 }
 
-static QColor viewportPlainSolidColor(bool darkTheme, int variant)
+static QColor viewportPlainSolidColor(bool darkTheme, int variant, const ViewportAppearanceTheme *theme = nullptr)
 {
+    if (theme)
+        return theme->solid;
     switch (variant) {
     case 1:
         return darkTheme ? QColor(91, 190, 151) : QColor(38, 128, 105);
@@ -889,8 +958,7 @@ static void drawTrianglesWithDepth(QPainter *painter,
                                    const QSize &viewportSize,
                                    QVector<int> *pickBuffer,
                                    QVector<float> *depthBuffer,
-                                   QImage *image,
-                                   bool drawImage = true)
+                                   QImage *image)
 {
     if (image->size() != viewportSize || image->format() != QImage::Format_ARGB32_Premultiplied)
         *image = QImage(viewportSize, QImage::Format_ARGB32_Premultiplied);
@@ -918,8 +986,7 @@ static void drawTrianglesWithDepth(QPainter *painter,
                           triangle.shapeIndex);
     }
 
-    if (drawImage)
-        painter->drawImage(0, 0, *image);
+    painter->drawImage(0, 0, *image);
 }
 
 static void drawTransparentTriangles(QPainter *painter, QVector<Triangle2D> triangles)
@@ -1228,8 +1295,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         setRenderBackend(checked ? OpenGLRenderBackend : SoftwareRenderBackend);
     });
     connect(m_darkViewportCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
-        m_darkViewportTheme = checked;
-        update();
+        if (m_hasCustomAppearanceTheme) {
+            clearCustomAppearanceTheme();
+            emit builtInAppearanceSelected();
+        }
+        setDarkViewportTheme(checked);
+        emit darkViewportThemeChanged(m_darkViewportTheme);
     });
     connect(m_navigationOverlayCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         m_navigationOverlayEnabled = checked;
@@ -1238,8 +1309,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         update();
     });
     connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        m_viewportColorVariant = qMax(0, index);
-        update();
+        if (m_hasCustomAppearanceTheme) {
+            clearCustomAppearanceTheme();
+            emit builtInAppearanceSelected();
+        }
+        setViewportColorVariant(index);
+        emit viewportColorVariantChanged(m_viewportColorVariant);
     });
     connect(m_lightingPresetComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         m_lightingPreset = qMax(0, index);
@@ -1347,6 +1422,49 @@ void ViewportWidget::setRenderBackend(RenderBackend backend)
     update();
 }
 
+void ViewportWidget::setDarkViewportTheme(bool darkTheme)
+{
+    if (m_darkViewportTheme == darkTheme) {
+        updateViewportControls();
+        return;
+    }
+
+    m_darkViewportTheme = darkTheme;
+    updateViewportControls();
+    update();
+}
+
+void ViewportWidget::setViewportColorVariant(int variant)
+{
+    constexpr int ColorVariantCount = 5;
+    const int clamped = qBound(0, variant, ColorVariantCount - 1);
+    if (m_viewportColorVariant == clamped) {
+        updateViewportControls();
+        return;
+    }
+
+    m_viewportColorVariant = clamped;
+    updateViewportControls();
+    update();
+}
+
+void ViewportWidget::setCustomAppearanceTheme(const ViewportAppearanceTheme &theme)
+{
+    m_customAppearanceTheme = theme;
+    m_hasCustomAppearanceTheme = true;
+    m_vboMeshKey.clear();
+    update();
+}
+
+void ViewportWidget::clearCustomAppearanceTheme()
+{
+    if (!m_hasCustomAppearanceTheme)
+        return;
+    m_hasCustomAppearanceTheme = false;
+    m_vboMeshKey.clear();
+    update();
+}
+
 ViewportWidget::RenderBackend ViewportWidget::renderBackend() const
 {
     return m_renderBackend;
@@ -1408,7 +1526,7 @@ void ViewportWidget::onCsgPreviewReady()
 
     // Do not flash a superseded transform during an interactive edit.
     if (m_csgPreviewDirty) {
-        if (!m_draggingShape)
+        if (!m_draggingShape && !m_draggingGroup)
             startAsyncCsgCompute();
         update();
         return;
@@ -1424,7 +1542,7 @@ void ViewportWidget::onCsgPreviewReady()
 void ViewportWidget::invalidateCsgPreview()
 {
     m_csgPreviewDirty = true;
-    if (m_draggingShape)
+    if (m_draggingShape || m_draggingGroup)
         return;
 
     startAsyncCsgCompute();
@@ -1482,7 +1600,8 @@ static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH)
 void ViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();
-    const QColor background = viewportBackgroundColor(m_darkViewportTheme);
+    const QColor background = viewportBackgroundColor(m_darkViewportTheme,
+        m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
     glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
 
     m_glMeshProgram = new QOpenGLShaderProgram(this);
@@ -1655,7 +1774,8 @@ void ViewportWidget::resizeEvent(QResizeEvent *event)
 
 void ViewportWidget::paintGL()
 {
-    const QColor background = viewportBackgroundColor(m_darkViewportTheme);
+    const QColor background = viewportBackgroundColor(m_darkViewportTheme,
+        m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
     glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
@@ -1806,7 +1926,8 @@ QImage ViewportWidget::renderThumbnail(const SceneDocument &scene, QSize thumbna
 void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 {
     if (drawSceneMeshes)
-        painter.fillRect(rect(), viewportBackgroundColor(m_darkViewportTheme));
+        painter.fillRect(rect(), viewportBackgroundColor(m_darkViewportTheme,
+                         m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr));
 
     const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
 
@@ -1815,7 +1936,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     };
 
     auto drawGrid = [&]() {
-        painter.setPen(viewportMinorGridColor(m_darkViewportTheme));
+        painter.setPen(viewportMinorGridColor(m_darkViewportTheme,
+                       m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr));
 
         for (int i = -120; i <= 120; i += 20) {
             const ProjectedPoint xStart = project(QVector3D(-120, i, 0));
@@ -1933,7 +2055,6 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
-        const bool buildPickBuffer = drawSceneMeshes || m_renderBackend == OpenGLRenderBackend;
         const QSet<int> selectedShapeIds = selectedViewportShapeIds(m_scene,
                                                                     m_shapes,
                                                                     m_selectedIndex,
@@ -1951,25 +2072,27 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         QVector<Line2D> selectedFeatureLines;
         QVector<QPair<QPolygonF, QColor>> cutHelperOutlines;
 
-        if (m_draggingShape) {
-            csgStatus = "CSG preview: paused while dragging";
+        if (m_draggingShape || m_draggingGroup) {
+            csgStatus = "CSG preview: interaction preview";
 
-            for (int i = 0; i < m_shapes->size(); ++i) {
-                const ShapeNode &shape = m_shapes->at(i);
-                QColor color = QColor(80, 160, 255);
-                if (shape.booleanMode == ShapeNode::Subtract)
-                    color = QColor(225, 95, 95);
-                else if (shape.booleanMode == ShapeNode::Intersect)
-                    color = QColor(150, 115, 240);
+            if (drawSceneMeshes) {
+                for (int i = 0; i < m_shapes->size(); ++i) {
+                    const ShapeNode &shape = m_shapes->at(i);
+                    QColor color = QColor(80, 160, 255);
+                    if (shape.booleanMode == ShapeNode::Subtract)
+                        color = QColor(225, 95, 95);
+                    else if (shape.booleanMode == ShapeNode::Intersect)
+                        color = QColor(150, 115, 240);
 
-                const bool selected = selectedShapeIds.contains(shape.id);
-                if (hasViewportSelection)
-                    color = selectionHighlightColor(color, selected);
+                    const bool selected = selectedShapeIds.contains(shape.id);
+                    if (hasViewportSelection)
+                        color = selectionHighlightColor(color, selected);
 
-                const SceneMesh mesh = buildShapeMesh(shape);
-                appendMesh(triangles, mesh, color, i);
-                if (selected && drawSceneMeshes)
-                    appendCutFeatureEdges(selectedFeatureLines, mesh, selectionFeatureColor, true);
+                    const SceneMesh mesh = interactionMeshForShape(m_scene, shape);
+                    appendMesh(triangles, mesh, color, i);
+                    if (selected)
+                        appendCutFeatureEdges(selectedFeatureLines, mesh, selectionFeatureColor, true);
+                }
             }
         } else {
             const CsgPreview &preview = m_cachedCsgPreview;
@@ -1978,8 +2101,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                 const bool selected = !m_draggingGroup
                                       && itemBelongsToSelection(item, m_shapes, selectedShapeIds, selectedTreeNodeId);
                 QColor color = item.computed
-                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant))
-                    : (item.color.isValid() ? item.color : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant));
+                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant, m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr))
+                    : (item.color.isValid() ? item.color : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant, m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr));
                 if (!item.computed && item.booleanMode == ShapeNode::Subtract)
                     color = QColor(225, 95, 95);
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
@@ -2006,7 +2129,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     } else if (selected) {
                         appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
                     }
-                } else if (buildPickBuffer) {
+                } else if (drawSceneMeshes) {
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
                 }
                 if (!item.helper && selected && drawSceneMeshes) {
@@ -2020,10 +2143,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             painter.drawLine(line.a, line.b);
         }
 
-        if (buildPickBuffer) {
+        if (drawSceneMeshes) {
             m_pickBufferSize = size();
-            drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage,
-                                   drawSceneMeshes);
+            drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
         }
 
         drawTransparentTriangles(&painter, translucentHelperTriangles);
@@ -2150,6 +2272,8 @@ void ViewportWidget::paintOpenGLContactShadows()
 {
     if (!m_shapes || !m_glFlatProgram || !m_glFlatProgram->isLinked() || !m_vboShadow.isCreated())
         return;
+    if (m_draggingShape || m_draggingGroup)
+        return;
 
     const CsgPreview &preview = m_cachedCsgPreview;
 
@@ -2221,9 +2345,9 @@ void ViewportWidget::paintOpenGLPreview()
         || !m_vboMesh.isCreated())
         return;
 
-    // During shape drag, shapes change every frame — rebuild VBO each time but don't
+    // During interaction drag, transforms change every frame; rebuild VBO each time but don't
     // cache the key so the post-drag frame re-derives from CSG preview.
-    const bool dragging = m_draggingShape;
+    const bool dragging = m_draggingShape || m_draggingGroup;
 
     // m_cachedCsgFingerprint is updated asynchronously by onCsgPreviewReady();
     // no synchronous cache-warming needed here.
@@ -2243,9 +2367,10 @@ void ViewportWidget::paintOpenGLPreview()
            + "|" + QString::number(m_selectedGroupId)
            + "|" + (m_darkViewportTheme ? QChar('d') : QChar('l'))
            + "|" + QString::number(m_viewportColorVariant)
+           + "|" + (m_hasCustomAppearanceTheme ? m_customAppearanceTheme.name : QStringLiteral("builtin"))
            + (m_draggingGroup ? QStringLiteral("|drag") : QStringLiteral("|idle")));
 
-    if (meshKey != m_vboMeshKey) {
+    if (dragging || meshKey != m_vboMeshKey) {
         QVector<OpenGLMeshVertex> verts;
         QVector<OpenGLFlatVertex> frontVerts;
         QVector<OpenGLFlatVertex> xrayVerts;
@@ -2269,7 +2394,7 @@ void ViewportWidget::paintOpenGLPreview()
                 const bool selected = selectedShapeIds.contains(shape.id);
                 if (hasViewportSelection)
                     color = selectionHighlightColor(color, selected);
-                appendMesh(buildShapeMesh(shape), color);
+                appendMesh(interactionMeshForShape(m_scene, shape), color);
             }
         } else {
             const CsgPreview &preview = m_cachedCsgPreview;
@@ -2302,8 +2427,8 @@ void ViewportWidget::paintOpenGLPreview()
                 }
 
                 QColor color = item.computed
-                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant))
-                    : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant);
+                    ? (item.color.isValid() ? item.color : viewportComputedSolidColor(m_darkViewportTheme, m_viewportColorVariant, m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr))
+                    : viewportPlainSolidColor(m_darkViewportTheme, m_viewportColorVariant, m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
                 if (!item.computed && item.color.isValid())
                     color = item.color;
                 if (!item.computed && item.booleanMode == ShapeNode::Subtract)
@@ -2344,10 +2469,12 @@ void ViewportWidget::paintOpenGLPreview()
            + "|" + QString::number(m_selectedIndex)
            + "|" + QString::number(m_selectedGroupId));
     auto forEachSelectedMesh = [&](const auto &visitor) {
+        if (m_draggingGroup)
+            return;
         if (dragging) {
             for (const ShapeNode &shape : *m_shapes) {
                 if (selectedShapeIds.contains(shape.id))
-                    visitor(buildShapeMesh(shape));
+                    visitor(interactionMeshForShape(m_scene, shape));
             }
             return;
         }
@@ -2737,12 +2864,15 @@ void ViewportWidget::drawViewportHintOverlay(QPainter &painter, const QString &c
 
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
-    drawGlassPanel(&painter, panelRect);
+    drawGlassPanel(&painter, panelRect, m_darkViewportTheme,
+                   m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
     painter.setFont(font);
-    painter.setPen(QColor(232, 242, 255));
+    painter.setPen(m_hasCustomAppearanceTheme ? m_customAppearanceTheme.text
+                                              : m_darkViewportTheme ? QColor(232, 242, 255) : QColor(35, 47, 62));
     painter.drawText(QPointF(panelRect.left() + 12.0, panelRect.top() + 10.0 + metrics.ascent()),
                      metrics.elidedText(help, Qt::ElideRight, textWidth));
-    painter.setPen(QColor(184, 205, 228));
+    painter.setPen(m_hasCustomAppearanceTheme ? m_customAppearanceTheme.mutedText
+                                              : m_darkViewportTheme ? QColor(184, 205, 228) : QColor(74, 94, 115));
     painter.drawText(QPointF(panelRect.left() + 12.0, panelRect.top() + 10.0 + metrics.height() + metrics.ascent()),
                      metrics.elidedText(status, Qt::ElideRight, textWidth));
     painter.restore();
@@ -2789,7 +2919,8 @@ void ViewportWidget::drawSelectionBreadcrumb(QPainter &painter)
 
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
-    drawGlassPanel(&painter, panelRect);
+    drawGlassPanel(&painter, panelRect, m_darkViewportTheme,
+                   m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
     painter.setFont(font);
 
     qreal x = panelRect.left() + 10.0;
@@ -3547,6 +3678,8 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
                 emit groupRotationDragFinished(groupId);
             else
                 emit groupDragFinished(groupId);
+            if (m_csgPreviewDirty && !m_csgComputing)
+                startAsyncCsgCompute();
         } else {
             if (wasRotating)
                 emit shapeRotationDragFinished(shapeIndex);

@@ -2,6 +2,7 @@
 #define SCENETREEPALETTE_H
 
 #include "scenedocument.h"
+#include "appearancethemes.h"
 #include <QColor>
 #include <QString>
 
@@ -45,12 +46,49 @@ QColor textMuted(Theme theme);
 QColor pillBorder(const QColor &groupFill, Theme theme);
 QColor pillFill(Theme theme);
 
-// Number-pill colours — active (Ctrl + hover) state.  Same for all themes.
+// Number-pill colours — active (Ctrl + hover) state.
 QColor pillBorderActive();
 QColor pillFillActive();
 
+// Number-pill text colours.
+QColor numText(Theme theme);
+QColor numLabelText(Theme theme);
+
 // Colour shown as the circular swatch in the theme switcher overlay.
 QColor swatchColor(Theme theme);
+
+void setCustomTheme(const TreeAppearanceTheme &theme);
+void clearCustomTheme();
+bool hasCustomTheme();
+TreeAppearanceTheme customTheme();
+QColor headerFill(const QColor &cardFill, Theme theme);
+
+// ── Per-operation overrides ──────────────────────────────────────────────────
+// These fall back to the global/built-in palette when no override is set for
+// the given operation. They're layered on top of the existing groupFill /
+// headerFill / textPrimary functions so existing call sites that do NOT need
+// per-op colours are unaffected.
+
+// Header fill for a specific operation type. Falls back to headerFill().
+QColor groupHeaderColor(SceneDocument::TreeNode::Operation op,
+                        const QColor &cardFill, Theme theme);
+
+// Primary text for a specific operation's card. Falls back to textPrimary().
+QColor cardTextPrimary(SceneDocument::TreeNode::Operation op, Theme theme);
+
+// Card border for a specific operation. Falls back to derived-from-fill border.
+QColor cardBorder(SceneDocument::TreeNode::Operation op,
+                  const QColor &fill, Theme theme);
+
+// Active-pill highlight colours per operation. Fall back to the global yellow.
+QColor cardPillBorderActive(SceneDocument::TreeNode::Operation op);
+QColor cardPillFillActive(SceneDocument::TreeNode::Operation op);
+
+// Access / mutate the per-operation palette stored inside the custom theme.
+void setOperationCardPalette(SceneDocument::TreeNode::Operation op,
+                             const OperationCardPalette &pal);
+OperationCardPalette operationCardPalette(SceneDocument::TreeNode::Operation op);
+void clearOperationCardPalettes();
 
 } // namespace SceneTreePalette
 

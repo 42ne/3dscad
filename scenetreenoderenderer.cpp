@@ -148,6 +148,7 @@ public:
                       int activeNumberStart,
                       qreal opacity,
                       qreal zValue,
+                      int theme = 0,
                       const QImage &thumbnail = QImage())
         : m_rect(rect)
         , m_shape(shape ? *shape : ShapeNode())
@@ -156,6 +157,7 @@ public:
         , m_activeParamIndex(activeParamIndex)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_theme(theme)
         , m_thumbnail(thumbnail)
     {
         setZValue(zValue);
@@ -194,11 +196,13 @@ public:
             const ShapeParameterControl &control = controls[i];
             const QRectF rowRect = shapeParameterControlRect(m_rect, i, controls.size());
 
+            const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
+
             // Label "X =" in muted color.
-            painter->setPen(QColor(58, 89, 125));
+            painter->setPen(SceneTreePalette::numLabelText(pt));
             painter->drawText(QRectF(rowRect.left(), rowRect.top(), 10.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter, control.label);
-            painter->setPen(QColor(104, 122, 148));
+            painter->setPen(SceneTreePalette::numLabelText(pt));
             painter->drawText(QRectF(rowRect.left() + 13.0, rowRect.top(), 10.0, rowRect.height()),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("="));
 
@@ -216,16 +220,16 @@ public:
                 paintRoundedPanel(painter,
                                   span.rect,
                                   3.0,
-                                  QPen(active ? QColor(220, 156, 26) : QColor(86, 117, 150), active ? 2 : 1),
-                                  QBrush(active ? QColor(255, 220, 108, 205) : QColor(244, 248, 252, 190)));
+                                  QPen(active ? SceneTreePalette::pillBorderActive() : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt), active ? 2 : 1),
+                                  QBrush(active ? SceneTreePalette::pillFillActive() : SceneTreePalette::pillFill(pt)));
             }
 
-            painter->setPen(QColor(24, 34, 44));
+            painter->setPen(SceneTreePalette::numText(pt));
             for (const ExpressionTextSpan &span : spans)
                 painter->drawText(span.rect, Qt::AlignCenter, span.text);
 
             // Non-number text (variable names, operators).
-            painter->setPen(QColor(58, 89, 125));
+            painter->setPen(SceneTreePalette::numLabelText(pt));
             for (const ExpressionTextSpan &span : spans) {
                 if (!span.number)
                     painter->drawText(span.rect, Qt::AlignCenter, span.text);
@@ -241,6 +245,7 @@ private:
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    int m_theme = 0;
     QImage m_thumbnail;
 };
 
@@ -286,14 +291,6 @@ public:
         const QColor nameColor = dark
             ? (m_isParameter ? QColor(200, 215, 245) : QColor(235, 210, 160))
             : (m_isParameter ? QColor( 24,  36,  72) : QColor( 43,  37,  28));
-        const QColor eqColor = dark
-            ? (m_isParameter ? QColor(160, 185, 230) : QColor(200, 170, 100))
-            : (m_isParameter ? QColor( 58,  80, 140) : QColor(104,  83,  48));
-        const QColor numBorder = dark
-            ? (m_isParameter ? QColor(120, 160, 230) : QColor(200, 160,  70))
-            : (m_isParameter ? QColor( 60, 100, 190) : QColor(158, 126,  51));
-        const QColor numBorderA = SceneTreePalette::pillBorderActive();
-        const QColor numFillA   = SceneTreePalette::pillFillActive();
         const QString badgeLabel = m_isParameter ? QStringLiteral("PAR") : QStringLiteral("VAR");
 
         // Row background — rounded card so it looks polished inside groups
@@ -338,12 +335,11 @@ public:
         painter->setPen(nameColor);
         painter->drawText(textLineRect, Qt::AlignLeft | Qt::AlignVCenter, m_name);
 
-        painter->setPen(eqColor);
+        painter->setPen(SceneTreePalette::numLabelText(pt));
         painter->drawText(QRectF(textLineRect.right() + 4.0, textLineRect.top(), 12.0, textLineRect.height()),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
 
-        const QColor numFillInactive = dark ? QColor(255, 255, 255, 32) : QColor(255, 255, 255, 110);
         const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics, nameW);
         for (const ExpressionTextSpan &span : spans) {
             if (!span.number)
@@ -352,13 +348,14 @@ public:
             paintRoundedPanel(painter,
                               span.rect,
                               4.0,
-                              QPen(active ? numBorderA : numBorder, active ? 2 : 1),
-                              QBrush(active ? numFillA : numFillInactive));
+                              QPen(active ? SceneTreePalette::pillBorderActive() : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt), active ? 2 : 1),
+                              QBrush(active ? SceneTreePalette::pillFillActive() : SceneTreePalette::pillFill(pt)));
         }
 
-        painter->setPen(eqColor);
-        for (const ExpressionTextSpan &span : spans)
+        for (const ExpressionTextSpan &span : spans) {
+            painter->setPen(span.number ? SceneTreePalette::numText(pt) : SceneTreePalette::numLabelText(pt));
             painter->drawText(span.rect, Qt::AlignCenter, span.text);
+        }
     }
 
 private:
@@ -441,12 +438,12 @@ public:
             fill.setAlpha(dark ? 185 : 215);
         }
 
-        // Body border: selected = golden; otherwise lighter above fill on dark themes.
+        // Body border: selected = golden; otherwise use per-op override or derive from fill.
         const QPen bodyBorderPen = m_selected
             ? QPen(QColor(255, 203, 87), 3)
-            : QPen(dark ? fill.lighter(165) : fill.darker(145), 1.5);
+            : QPen(SceneTreePalette::cardBorder(m_operation, fill, pt), 1.5);
 
-        const QColor cTextPrimary = SceneTreePalette::textPrimary(pt);
+        const QColor cTextPrimary = SceneTreePalette::cardTextPrimary(m_operation, pt);
         const QColor cTextMuted   = SceneTreePalette::textMuted(pt);
         const QColor cPillBorder  = SceneTreePalette::pillBorder(fill, pt);
         const QColor cPillFill    = SceneTreePalette::pillFill(pt);
@@ -515,7 +512,7 @@ private:
                                 m_rect.width(), GroupHeaderHeight);
         // Header fill clipped to the card outline: naturally follows the rounded top corners
         // and presents a flat bottom edge (no bubble-inside-card effect).
-        const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
+        const QColor rawHeaderFill = SceneTreePalette::groupHeaderColor(m_operation, fill, static_cast<SceneTreePalette::Theme>(m_theme));
         const QColor headerFill = m_insertedPreview
             ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
             : rawHeaderFill;
@@ -583,8 +580,8 @@ private:
                 if (span.number) {
                     const bool active = span.start == m_activeForLoopNumberStart;
                     paintRoundedPanel(painter, span.rect, 3.0,
-                                      QPen(active ? SceneTreePalette::pillBorderActive() : cPillBorder, active ? 2 : 1),
-                                      QBrush(active ? SceneTreePalette::pillFillActive() : cPillFill));
+                                      QPen(active ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder, active ? 2 : 1),
+                                      QBrush(active ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
                 painter->setPen(span.number ? cTextPrimary : cTextMuted);
                 // Numbers use HCenter: span.rect has 4 px padding on each side so the digit
@@ -641,7 +638,7 @@ private:
         // on the left side and has a flat right edge (no bubble-inside-card effect).
         const QRectF iconBorderRect(m_rect.left(), m_rect.top(),
                                     TransformIconWidth, m_rect.height());
-        const QColor rawHeaderFill = dark ? fill.lighter(180) : fill.lighter(112);
+        const QColor rawHeaderFill = SceneTreePalette::groupHeaderColor(m_operation, fill, static_cast<SceneTreePalette::Theme>(m_theme));
         const QColor headerFill = m_insertedPreview
             ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
             : rawHeaderFill;
@@ -740,9 +737,9 @@ private:
                     const bool numActive = rowActive && span.number && (span.start == m_activeTransformNumberStart);
                     if (span.number) {
                         paintRoundedPanel(painter, span.rect, 3.0,
-                                          QPen(numActive ? SceneTreePalette::pillBorderActive() : cPillBorder,
+                                          QPen(numActive ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder,
                                                numActive ? 2 : 1),
-                                          QBrush(numActive ? SceneTreePalette::pillFillActive() : cPillFill));
+                                          QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                     }
                     painter->setPen(span.number ? cTextPrimary
                                                 : (dark ? QColor(140, 175, 220) : QColor(80, 110, 160)));
@@ -787,9 +784,9 @@ private:
                 const bool numActive = rowActive && span.number && (span.start == m_activeTransformNumberStart);
                 if (span.number) {
                     paintRoundedPanel(painter, span.rect, 3.0,
-                                      QPen(numActive ? SceneTreePalette::pillBorderActive() : cPillBorder,
+                                      QPen(numActive ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder,
                                            numActive ? 2 : 1),
-                                      QBrush(numActive ? SceneTreePalette::pillFillActive() : cPillFill));
+                                      QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
                 // Numbers: span.rect is 4 px wider on each side → centre digit inside pill.
                 painter->setPen(span.number ? cTextPrimary
@@ -838,6 +835,7 @@ public:
                        int activeNumberStart,
                        qreal opacity,
                        qreal zValue,
+                       int theme = 0,
                        const QImage &thumbnail = QImage())
         : m_rect(rect)
         , m_moduleName(moduleName)
@@ -846,6 +844,7 @@ public:
         , m_activeParamVarNodeId(activeParamVarNodeId)
         , m_activeNumberStart(activeNumberStart)
         , m_opacity(opacity)
+        , m_theme(theme)
         , m_thumbnail(thumbnail)
     {
         setZValue(zValue);
@@ -859,6 +858,7 @@ public:
         painter->setOpacity(m_opacity);
         painter->setFont(sceneTreeGraphicsFont());
 
+        const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
         const QColor accent(38, 108, 148);
         if (m_selected) {
             paintRoundedPanel(painter,
@@ -935,11 +935,11 @@ public:
                         const bool active = m_params[i].varNodeId == m_activeParamVarNodeId
                                             && span.start == m_activeNumberStart;
                         paintRoundedPanel(painter, span.rect, 4.0,
-                                          QPen(active ? QColor(220, 156, 26) : accent.darker(125), active ? 2 : 1),
-                                          QBrush(active ? QColor(255, 220, 108, 205) : QColor(255, 255, 255, 110)));
+                                          QPen(active ? SceneTreePalette::pillBorderActive() : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt), active ? 2 : 1),
+                                          QBrush(active ? SceneTreePalette::pillFillActive() : SceneTreePalette::pillFill(pt)));
                     }
                 }
-                painter->setPen(QColor(24, 60, 95));
+                painter->setPen(SceneTreePalette::numText(pt));
                 for (const ExpressionTextSpan &span : spans)
                     painter->drawText(span.rect, Qt::AlignCenter, span.text);
 
@@ -967,6 +967,7 @@ private:
     int m_activeParamVarNodeId = 0;
     int m_activeNumberStart = -1;
     qreal m_opacity = 1.0;
+    int m_theme = 0;
     QImage m_thumbnail;
 };
 
@@ -1015,7 +1016,7 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
 {
     const int activeParamIndex = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
     const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
-    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, thumbnail));
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, m_theme, thumbnail));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
@@ -1035,7 +1036,7 @@ void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node
 {
     const int activeVarNodeId = node.id == m_activeModuleCallNodeId ? m_activeModuleCallVarNodeId : 0;
     const int activeNumStart = node.id == m_activeModuleCallNodeId ? m_activeModuleCallNumberStart : -1;
-    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0, thumbnail));
+    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0, m_theme, thumbnail));
     m_scene->addItem(createTreeNodeSelectionItem(node.id, rect, 5.0, m_onSelected));
 }
 
@@ -1091,7 +1092,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     } else if (isVariableToolName(tool)) {
         item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0, false, 0, theme);
     } else if (tool == QStringLiteral("call")) {
-        item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0);
+        item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0, theme);
     } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
@@ -1101,7 +1102,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
-        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, -1, 0.78, 58.0);
+        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, -1, 0.78, 58.0, theme);
     }
 
     scene->addItem(item);
@@ -1121,7 +1122,8 @@ void SceneTreeNodeRenderer::renderPreviewPrimitive(QGraphicsScene *scene,
                                       -1,
                                       -1,
                                       0.78,
-                                      58.0);
+                                      58.0,
+                                      0);
     scene->addItem(item);
     appendPreviewItem(items, item);
 }

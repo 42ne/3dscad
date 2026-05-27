@@ -21,7 +21,8 @@ public:
 
     explicit SceneTreeToolbarRenderer(QGraphicsScene *scene,
                                       QVector<QGraphicsItem *> *toolbarItems = nullptr,
-                                      int theme = 0);
+                                      int theme = 0,
+                                      bool darkGlass = true);
 
     QRectF render(PreviewMovedCallback onPreviewMoved,
                   PreviewFinishedCallback onPreviewFinished,
@@ -38,6 +39,7 @@ private:
     QGraphicsScene *m_scene = nullptr;
     QVector<QGraphicsItem *> *m_toolbarItems = nullptr;
     int m_theme = 0;
+    bool m_darkGlass = true;
 };
 
 #endif

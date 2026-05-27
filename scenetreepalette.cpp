@@ -5,6 +5,8 @@ namespace SceneTreePalette {
 namespace {
 
 using Op = SceneDocument::TreeNode::Operation;
+bool CustomThemeActive = false;
+TreeAppearanceTheme CustomTheme;
 
 // ---------------------------------------------------------------------------
 // Per-operation base fill colours, one column per theme.
@@ -98,6 +100,13 @@ Theme nextTheme(Theme current)
 
 QColor groupFill(SceneDocument::TreeNode::Operation operation, int depth, Theme theme)
 {
+    if (CustomThemeActive) {
+        // Check per-operation card override first.
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(operation));
+        if (it != CustomTheme.operationCards.end() && it.value().card.isValid())
+            return applyDepthHueShift(it.value().card, depth);
+        return applyDepthHueShift(CustomTheme.card, depth);
+    }
     const QColor *base = baseColorFor(operation, theme);
     if (!base)
         return QColor(200, 215, 225, 183);
@@ -106,6 +115,8 @@ QColor groupFill(SceneDocument::TreeNode::Operation operation, int depth, Theme 
 
 QColor variableFill(bool isParameter, Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.input;
     switch (theme) {
     case Theme::Aurora:
         return isParameter ? QColor(195, 218, 252, 183) : QColor(252, 225, 215, 183);
@@ -125,6 +136,8 @@ QColor variableFill(bool isParameter, Theme theme)
 
 bool isDarkTheme(Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.canvas.lightness() < 128;
     return theme == Theme::Glass
         || theme == Theme::Nordic
         || theme == Theme::Ocean;
@@ -132,32 +145,58 @@ bool isDarkTheme(Theme theme)
 
 QColor textPrimary(Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.text;
     return isDarkTheme(theme) ? QColor(218, 228, 245) : QColor(24, 34, 44);
 }
 
 QColor textMuted(Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.mutedText;
     return isDarkTheme(theme) ? QColor(148, 165, 192) : QColor(80, 92, 108);
 }
 
 QColor pillBorder(const QColor &fill, Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.numBorder;
     return isDarkTheme(theme) ? fill.lighter(155) : fill.darker(130);
 }
 
 QColor pillFill(Theme theme)
 {
+    if (CustomThemeActive)
+        return CustomTheme.numFill;
     return isDarkTheme(theme) ? QColor(255, 255, 255, 32) : QColor(255, 255, 255, 125);
 }
 
 QColor pillBorderActive()
 {
+    if (CustomThemeActive)
+        return CustomTheme.numBorderActive;
     return QColor(220, 156, 26);
 }
 
 QColor pillFillActive()
 {
+    if (CustomThemeActive)
+        return CustomTheme.numFillActive;
     return QColor(255, 220, 108, 205);
+}
+
+QColor numText(Theme theme)
+{
+    if (CustomThemeActive)
+        return CustomTheme.numText;
+    return textPrimary(theme);
+}
+
+QColor numLabelText(Theme theme)
+{
+    if (CustomThemeActive)
+        return CustomTheme.numLabelText;
+    return isDarkTheme(theme) ? QColor(140, 175, 220) : QColor(80, 110, 160);
 }
 
 QColor swatchColor(Theme theme)
@@ -171,6 +210,115 @@ QColor swatchColor(Theme theme)
     case Theme::Meadow:  return QColor(122, 192, 122); // meadow green
     }
     return QColor(200, 215, 225);
+}
+
+void setCustomTheme(const TreeAppearanceTheme &theme)
+{
+    CustomTheme = theme;
+    CustomThemeActive = true;
+}
+
+void clearCustomTheme()
+{
+    CustomThemeActive = false;
+}
+
+bool hasCustomTheme()
+{
+    return CustomThemeActive;
+}
+
+TreeAppearanceTheme customTheme()
+{
+    return CustomThemeActive ? CustomTheme : AppearanceThemes::defaultTreeTheme();
+}
+
+QColor headerFill(const QColor &cardFill, Theme theme)
+{
+    if (CustomThemeActive)
+        return CustomTheme.header;
+    return isDarkTheme(theme) ? cardFill.lighter(180) : cardFill.lighter(112);
+}
+
+// ---------------------------------------------------------------------------
+// Per-operation overrides — fall through to global defaults when not set.
+// ---------------------------------------------------------------------------
+
+QColor groupHeaderColor(SceneDocument::TreeNode::Operation op,
+                        const QColor &cardFill, Theme theme)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end() && it.value().header.isValid())
+            return it.value().header;
+    }
+    return headerFill(cardFill, theme);
+}
+
+QColor cardTextPrimary(SceneDocument::TreeNode::Operation op, Theme theme)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end() && it.value().text.isValid())
+            return it.value().text;
+    }
+    return textPrimary(theme);
+}
+
+QColor cardBorder(SceneDocument::TreeNode::Operation op,
+                  const QColor &fill, Theme theme)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end() && it.value().border.isValid())
+            return it.value().border;
+    }
+    return isDarkTheme(theme) ? fill.lighter(165) : fill.darker(145);
+}
+
+QColor cardPillBorderActive(SceneDocument::TreeNode::Operation op)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end() && it.value().numBorderActive.isValid())
+            return it.value().numBorderActive;
+    }
+    return pillBorderActive();
+}
+
+QColor cardPillFillActive(SceneDocument::TreeNode::Operation op)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end() && it.value().numFillActive.isValid())
+            return it.value().numFillActive;
+    }
+    return pillFillActive();
+}
+
+void setOperationCardPalette(SceneDocument::TreeNode::Operation op,
+                             const OperationCardPalette &pal)
+{
+    // Ensure a custom theme is active (snapshot the built-in defaults if needed).
+    if (!CustomThemeActive)
+        CustomTheme = AppearanceThemes::defaultTreeTheme();
+    CustomThemeActive = true;
+    CustomTheme.operationCards[static_cast<int>(op)] = pal;
+}
+
+OperationCardPalette operationCardPalette(SceneDocument::TreeNode::Operation op)
+{
+    if (CustomThemeActive) {
+        const auto it = CustomTheme.operationCards.find(static_cast<int>(op));
+        if (it != CustomTheme.operationCards.end())
+            return it.value();
+    }
+    return OperationCardPalette{};
+}
+
+void clearOperationCardPalettes()
+{
+    CustomTheme.operationCards.clear();
 }
 
 } // namespace SceneTreePalette

@@ -203,6 +203,9 @@ block creation are performed through undo/redo commands.
 
 During live geometry dragging or rotation, the viewport updates immediately;
 the final change is committed to the undo stack when the drag finishes.
+For a transform value defined by an expression, a viewport gizmo gesture
+converts only axes actually changed by that gesture to numeric values; the
+expressions for unaffected axes are preserved.
 
 Root card canvas positions are visual state of the graphics widget and are not
 part of OpenSCAD code.

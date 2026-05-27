@@ -2,12 +2,15 @@
 #define MAINWINDOW_H
 
 #include "scenecontroller.h"
+#include "theme.h"
 
 #include <QMainWindow>
 
 class QByteArray;
 class QLabel;
 class QMenu;
+class QSettings;
+class AnimatedTitleBar;
 class CodeEditorPanel;
 class ExampleBrowserMenu;
 class SceneTreeGraphicsWidget;
@@ -43,9 +46,25 @@ private:
     void onSelectionChanged(int nodeId);
     void highlightOpenScadSelection();
     void clearSelection();
+    void saveAppearanceSettings();
+    void rebuildSavedThemeMenus();
+    void openThemeEditor();
+    void applySavedWindowTheme(const QString &name);
+    void applySavedTreeTheme(const QString &name);
+    void applySavedViewportTheme(const QString &name);
 
 private:
     SceneController *m_controller = nullptr;
+    QSettings       *m_settings = nullptr;
+    QString          m_applicationThemeId;
+    QString          m_customWindowThemeName;
+    QString          m_customTreeThemeName;
+    QString          m_customViewportThemeName;
+    ThemeSpec        m_activeWindowTheme;
+    AnimatedTitleBar *m_titleBar = nullptr;
+    QMenu            *m_savedWindowThemeMenu = nullptr;
+    QMenu            *m_savedTreeThemeMenu = nullptr;
+    QMenu            *m_savedViewportThemeMenu = nullptr;
 
     ExampleBrowserMenu      *m_exampleBrowser    = nullptr;
     ViewportWidget          *m_viewport          = nullptr;

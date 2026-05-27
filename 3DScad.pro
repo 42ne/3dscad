@@ -16,10 +16,12 @@ contains(CONFIG, opengl_renderer) {
 
 SOURCES += \
     animatedtitlebar.cpp \
+    appearancethemes.cpp \
     codeeditorpanel.cpp \
     csgevaluator.cpp \
     examplebrowsermenu.cpp \
     theme.cpp \
+    themeeditordialog.cpp \
     examplepreviewpopup.cpp \
     groupthumbnailcache.cpp \
     main.cpp \
@@ -46,10 +48,12 @@ SOURCES += \
 
 HEADERS += \
     animatedtitlebar.h \
+    appearancethemes.h \
     codeeditorpanel.h \
     csgevaluator.h \
     examplebrowsermenu.h \
     theme.h \
+    themeeditordialog.h \
     examplepreviewpopup.h \
     groupthumbnailcache.h \
     scenecontroller.h \

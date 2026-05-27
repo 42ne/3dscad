@@ -11,6 +11,8 @@
 #include "scenestringutils.h"
 
 #include <QApplication>
+#include <QColorDialog>
+#include <QMenu>
 #include <QEasingCurve>
 #include <QFontMetricsF>
 #include <QGraphicsEllipseItem>
@@ -79,6 +81,40 @@ private:
 constexpr qreal LiveDropPreviewDurationMs = 210.0;
 constexpr qreal ReleaseDropPreviewDurationMs = 95.0;
 constexpr qreal DropPreviewRectTolerance = 0.5;
+constexpr int CanvasBackgroundThemeCount = 6;
+
+struct CanvasBackgroundTheme {
+    QColor background;
+    QColor minorGrid;
+    QColor majorGrid;
+};
+
+CanvasBackgroundTheme canvasBackgroundTheme(int index)
+{
+    static const CanvasBackgroundTheme themes[CanvasBackgroundThemeCount] = {
+        { QColor(31, 41, 55),   QColor(96, 106, 121),  QColor(139, 150, 166) },
+        { QColor(16, 22, 32),   QColor(57, 69, 84),    QColor(92, 108, 128) },
+        { QColor(50, 51, 56),   QColor(82, 84, 91),    QColor(119, 122, 131) },
+        { QColor(231, 235, 241), QColor(197, 204, 214), QColor(160, 171, 185) },
+        { QColor(246, 239, 226), QColor(217, 207, 190), QColor(183, 171, 151) },
+        { QColor(220, 235, 241), QColor(185, 207, 216), QColor(145, 177, 190) },
+    };
+    return themes[qBound(0, index, CanvasBackgroundThemeCount - 1)];
+}
+
+CanvasBackgroundTheme activeCanvasBackgroundTheme(int index)
+{
+    if (SceneTreePalette::hasCustomTheme()) {
+        const TreeAppearanceTheme theme = SceneTreePalette::customTheme();
+        return {theme.canvas, theme.minorGrid, theme.majorGrid};
+    }
+    return canvasBackgroundTheme(index);
+}
+
+bool usesDarkOverlayGlass(int backgroundTheme)
+{
+    return activeCanvasBackgroundTheme(backgroundTheme).background.lightness() < 128;
+}
 
 bool isRootOnlyTreeTool(const QString &tool)
 {
@@ -357,7 +393,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     setDragMode(QGraphicsView::NoDrag);
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setResizeAnchor(QGraphicsView::AnchorViewCenter);
-    setBackgroundBrush(CanvasBackground);
+    setBackgroundBrush(activeCanvasBackgroundTheme(m_canvasBackgroundTheme).background);
     setCacheMode(QGraphicsView::CacheNone);
     setFocusPolicy(Qt::StrongFocus);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -565,6 +601,34 @@ void SceneTreeGraphicsWidget::setTreeTheme(int theme)
     refresh();
 }
 
+void SceneTreeGraphicsWidget::setCanvasBackgroundTheme(int theme)
+{
+    const int clamped = qBound(0, theme, CanvasBackgroundThemeCount - 1);
+    if (m_canvasBackgroundTheme == clamped)
+        return;
+
+    m_canvasBackgroundTheme = clamped;
+    setBackgroundBrush(canvasBackgroundTheme(clamped).background);
+    viewport()->update();
+    updateToolbarOverlay();
+}
+
+void SceneTreeGraphicsWidget::setCustomAppearanceTheme(const TreeAppearanceTheme &theme)
+{
+    SceneTreePalette::setCustomTheme(theme);
+    setBackgroundBrush(theme.canvas);
+    refresh();
+}
+
+void SceneTreeGraphicsWidget::clearCustomAppearanceTheme()
+{
+    if (!SceneTreePalette::hasCustomTheme())
+        return;
+    SceneTreePalette::clearCustomTheme();
+    setBackgroundBrush(canvasBackgroundTheme(m_canvasBackgroundTheme).background);
+    refresh();
+}
+
 void SceneTreeGraphicsWidget::refresh()
 {
     resetGraphicsScene();
@@ -654,6 +718,8 @@ void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
 void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
     clearDropPreview();
+    // scene->clear() will delete m_colorEditHighlight — null it out first.
+    m_colorEditHighlight = nullptr;
     m_graphicsScene->clear();
     m_canvasDragGhost = nullptr;  // scene->clear() already deleted it
     m_canvasDragItems.clear();    // scene->clear() deleted these too
@@ -833,9 +899,10 @@ void SceneTreeGraphicsWidget::updateHoverHighlightOverlay()
 
 void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    painter->fillRect(rect, CanvasBackground);
-    drawCanvasGrid(painter, rect, 24.0, MinorGridColor, 1);
-    drawCanvasGrid(painter, rect, 96.0, MajorGridColor, 1);
+    const CanvasBackgroundTheme background = activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
+    painter->fillRect(rect, background.background);
+    drawCanvasGrid(painter, rect, 24.0, background.minorGrid, 1);
+    drawCanvasGrid(painter, rect, 96.0, background.majorGrid, 1);
 }
 
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
@@ -885,6 +952,25 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         m_panInertiaTimer->stop();
         m_panVelocity = QPointF();
         snapZoom();
+    }
+
+    // ── Color-edit mode: intercept left-clicks on card zones ─────────────────
+    if (m_colorEditMode && event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        // Only toolbar items (theme swatches, the "✏ Colors" toggle button) are
+        // allowed to handle their own clicks normally.  Everything else — tree
+        // selection items, drag handles, node overlays — is suppressed so that
+        // the color-edit click always fires, even when the user clicks on top of
+        // an interactive card overlay.
+        const QGraphicsItem *hitItem = itemAt(event->pos());
+        const bool isToolbarItem = hitItem
+            && m_toolbarItems.contains(const_cast<QGraphicsItem *>(hitItem));
+        if (!isToolbarItem) {
+            handleColorEditClick(scenePos);
+            event->accept();
+            return;
+        }
+        // Fall through for toolbar-only items (toggle button, swatches, etc.).
     }
 
     // ── Canvas-move drag: check grip strip before anything else ──────────────
@@ -1117,6 +1203,13 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    // ── Color-edit mode hover ─────────────────────────────────────────────────
+    if (m_colorEditMode) {
+        updateColorEditHighlight(scenePosition);
+        event->accept();
+        return;
+    }
+
     // ── Normal flow ──────────────────────────────────────────────────────────
     updateControlTooltip(event->globalPos(), scenePosition, controlDown);
     updateActiveTransformControl(scenePosition, controlDown);
@@ -1135,13 +1228,6 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-
-    // Update grip cursor when hovering over a strip.
-    bool onGrip = false;
-    for (const CanvasMoveHandle &h : m_canvasMoveHandles) {
-        if (h.gripRect.contains(scenePosition)) { onGrip = true; break; }
-    }
-    setCursor(onGrip ? Qt::SizeAllCursor : Qt::OpenHandCursor);
 
     updateHoverHighlights(scenePosition);
     QGraphicsView::mouseMoveEvent(event);
@@ -1249,6 +1335,7 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
 void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
 {
     QGraphicsView::leaveEvent(event);
+    clearColorEditHighlight();
     const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid();
     m_hoveredScrollRect = QRectF();
     m_hoveredRenameRect = QRectF();
@@ -1358,7 +1445,10 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
     const qreal viewportWidth = viewport() ? viewport()->width() : 640.0;
     const qreal viewportScale = transform().m11();
 
-    return SceneTreeToolbarRenderer(m_graphicsScene, &m_toolbarItems, m_treeTheme)
+    return SceneTreeToolbarRenderer(m_graphicsScene,
+                                    &m_toolbarItems,
+                                    m_treeTheme,
+                                    usesDarkOverlayGlass(m_canvasBackgroundTheme))
         .render(
             [this](const QPointF &position, const QSizeF &previewSize, const QString &previewTool) {
                 showDropPreview(position, previewSize, previewTool);
@@ -1400,6 +1490,7 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
 
     clearToolbar();
     drawToolbar();
+    drawCanvasBackgroundSwitcher();
     drawThemeSwitcher();
     drawHoverHintOverlay();
 }
@@ -1407,12 +1498,368 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
 void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
 {
     const int clamped = qBound(0, themeIndex, SceneTreePalette::ThemeCount - 1);
-    if (m_treeTheme == clamped)
+    const bool customWasActive = SceneTreePalette::hasCustomTheme();
+    if (customWasActive) {
+        clearCustomAppearanceTheme();
+        emit builtInAppearanceSelected();
+    }
+    if (m_treeTheme == clamped && !customWasActive)
         return;
-    m_treeTheme = clamped;
-    // refresh() rebuilds the whole scene including the toolbar overlay.
-    refresh();
+    setTreeTheme(clamped);
+    emit treeThemeChanged(m_treeTheme);
 }
+
+void SceneTreeGraphicsWidget::handleCanvasBackgroundSwitcherClick(int backgroundIndex)
+{
+    const int clamped = qBound(0, backgroundIndex, CanvasBackgroundThemeCount - 1);
+    const bool customWasActive = SceneTreePalette::hasCustomTheme();
+    if (customWasActive) {
+        clearCustomAppearanceTheme();
+        emit builtInAppearanceSelected();
+    }
+    if (m_canvasBackgroundTheme == clamped && !customWasActive)
+        return;
+    setCanvasBackgroundTheme(clamped);
+    emit canvasBackgroundThemeChanged(m_canvasBackgroundTheme);
+}
+
+void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
+{
+    if (!m_graphicsScene || !viewport())
+        return;
+
+    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
+    const qreal viewportHeight = viewport()->height();
+    const qreal safeScale = qMax<qreal>(0.001, std::abs(transform().m11()));
+    const auto scenePoint = [&](qreal x, qreal y) {
+        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
+    };
+
+    constexpr qreal SwatchR = 7.0;
+    constexpr qreal SwatchGap = 5.0;
+    constexpr qreal PadH = 7.0;
+    constexpr qreal PadV = 6.0;
+    constexpr qreal BottomGap = 12.0;
+    constexpr qreal RowGap = 8.0;
+    constexpr qreal LocalOverlayZ = 10000.0;
+    const qreal panelW = CanvasBackgroundThemeCount * (SwatchR * 2.0)
+                         + (CanvasBackgroundThemeCount - 1) * SwatchGap + PadH * 2.0;
+    const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
+    const QRectF panelLocal(0.0, 0.0, panelW, panelH);
+    const QPointF panelTopLeft = scenePoint(12.0,
+                                            viewportHeight - BottomGap - panelH * 2.0 - RowGap);
+    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
+    const bool customGlass = SceneTreePalette::hasCustomTheme();
+    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
+
+    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
+                                             Qt::NoPen,
+                                             QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
+    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    shadow->setAcceptedMouseButtons(Qt::NoButton);
+    shadow->setPos(panelTopLeft);
+    shadow->setZValue(LocalOverlayZ - 2.0);
+    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
+    m_toolbarItems.append(shadow);
+
+    QPainterPath panelPath;
+    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
+    auto *panel = m_graphicsScene->addPath(panelPath,
+                                           QPen(customGlass ? customTheme.glassBorder
+                                                            : darkGlass ? QColor(148, 163, 184, 82)
+                                                                        : QColor(118, 136, 156, 58), 1.0),
+                                           QBrush(customGlass ? customTheme.glassBottom
+                                                              : darkGlass ? QColor(10, 16, 24, 178)
+                                                                          : QColor(250, 253, 255, 88)));
+    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+    panel->setAcceptedMouseButtons(Qt::NoButton);
+    panel->setPos(panelTopLeft);
+    panel->setZValue(LocalOverlayZ - 1.0);
+    m_toolbarItems.append(panel);
+
+    for (int i = 0; i < CanvasBackgroundThemeCount; ++i) {
+        const bool active = i == m_canvasBackgroundTheme;
+        const QColor swatch = canvasBackgroundTheme(i).background;
+        const QPointF center(PadH + i * (SwatchR * 2.0 + SwatchGap) + SwatchR,
+                             PadV + SwatchR);
+        if (active) {
+            auto *ring = new ThemeSwitcherSwatchItem(
+                center, SwatchR + 2.8,
+                QPen(QColor(255, 255, 255, 210), 1.6), Qt::NoBrush,
+                i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
+            ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+            ring->setPos(panelTopLeft);
+            ring->setZValue(LocalOverlayZ);
+            m_graphicsScene->addItem(ring);
+            m_toolbarItems.append(ring);
+        }
+        auto *circle = new ThemeSwitcherSwatchItem(
+            center, SwatchR,
+            active ? QPen(Qt::NoPen) : QPen(swatch.darker(150), 1.0),
+            QBrush(swatch),
+            i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
+        circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        circle->setPos(panelTopLeft);
+        circle->setZValue(LocalOverlayZ + 0.5);
+        m_graphicsScene->addItem(circle);
+        m_toolbarItems.append(circle);
+    }
+}
+
+// ── Color-edit paint mode ──────────────────────────────────────────────────────
+
+void SceneTreeGraphicsWidget::setColorEditMode(bool enabled)
+{
+    if (m_colorEditMode == enabled)
+        return;
+    m_colorEditMode = enabled;
+    clearColorEditHighlight();
+    if (enabled) {
+        setCursor(Qt::PointingHandCursor);
+        updateHoverHint(QStringLiteral("colorEdit:mode"),
+                        QStringLiteral("✏ Edit colors\n"
+                                       "Hover a card area then click to change its color.\n"
+                                       "Click the button again to exit edit mode."));
+    } else {
+        m_colorEditZoneField.clear();
+        setCursor(Qt::OpenHandCursor);
+        updateHoverHint(QString(), QString());
+    }
+    updateToolbarOverlay();
+    emit colorEditModeChanged(enabled);
+}
+
+SceneTreeGraphicsWidget::ColorZoneHit
+SceneTreeGraphicsWidget::colorZoneAt(const QPointF &scenePos) const
+{
+    // Find the innermost (smallest-area) group hit area containing the position.
+    const GroupHitArea *best = nullptr;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (!area.rect.contains(scenePos))
+            continue;
+        const qreal area2 = area.rect.width() * area.rect.height();
+        if (!best || area2 < best->rect.width() * best->rect.height())
+            best = &area;
+    }
+
+    if (best) {
+        const SceneDocument::TreeNode::Operation op = best->operation;
+        // Children first — variable/param rows and primitive cards.
+        for (const ChildLayout &child : best->children) {
+            if (!child.rect.contains(scenePos))
+                continue;
+            if (m_scene) {
+                const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
+                if (node && node->type == SceneDocument::TreeNode::Variable) {
+                    const QString label = node->isParameter
+                        ? QStringLiteral("Parameter row")
+                        : QStringLiteral("Variable row");
+                    return {QStringLiteral("input"), label, child.rect, true, op, true};
+                }
+            }
+            return {QStringLiteral("card"), QStringLiteral("Card body"), child.rect, true, op, true};
+        }
+
+        // Header zone (top GroupHeaderHeight px of the group card).
+        const QRectF hdr(best->rect.left(), best->rect.top(),
+                         best->rect.width(), GroupHeaderHeight);
+        if (hdr.contains(scenePos))
+            return {QStringLiteral("header"), QStringLiteral("Card header"), hdr, true, op, true};
+
+        // Rest of the group body.
+        return {QStringLiteral("card"), QStringLiteral("Card body"), best->rect, true, op, true};
+    }
+
+    return {QStringLiteral("canvas"), QStringLiteral("Canvas background"), QRectF(), false,
+            SceneDocument::TreeNode::Union, false};
+}
+
+void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
+{
+    clearColorEditHighlight();
+    if (!m_colorEditMode || !m_graphicsScene)
+        return;
+
+    const ColorZoneHit hit = colorZoneAt(scenePos);
+    m_colorEditZoneField = hit.fieldName;
+
+    // Gold outline + subtle fill over the detected zone.
+    if (hit.valid && !hit.rect.isNull()) {
+        const qreal lineW = qMax(1.0, 2.0 / qMax(0.001, qAbs(transform().m11())));
+        auto *overlay = m_graphicsScene->addRect(
+            hit.rect.adjusted(lineW * 0.5, lineW * 0.5, -lineW * 0.5, -lineW * 0.5),
+            QPen(QColor(255, 195, 40, 220), lineW),
+            QBrush(QColor(255, 210, 70, 38)));
+        overlay->setZValue(8800.0);
+        m_colorEditHighlight = overlay;
+    }
+
+    const QString prefix = QStringLiteral("✏ Edit colors • ");
+    if (hit.valid) {
+        // Include the operation name so the user knows which card type will be affected.
+        QString hintText = prefix + hit.label;
+        if (hit.hasOperation) {
+            // Map operation to a display name.
+            static const QHash<int, QString> opNames = {
+                {(int)SceneDocument::TreeNode::Union,        QStringLiteral("Union")},
+                {(int)SceneDocument::TreeNode::Difference,   QStringLiteral("Difference")},
+                {(int)SceneDocument::TreeNode::Intersection, QStringLiteral("Intersection")},
+                {(int)SceneDocument::TreeNode::Module,       QStringLiteral("Module")},
+                {(int)SceneDocument::TreeNode::Translate,    QStringLiteral("Translate")},
+                {(int)SceneDocument::TreeNode::Rotate,       QStringLiteral("Rotate")},
+                {(int)SceneDocument::TreeNode::Scale,        QStringLiteral("Scale")},
+                {(int)SceneDocument::TreeNode::Mirror,       QStringLiteral("Mirror")},
+                {(int)SceneDocument::TreeNode::Hull,         QStringLiteral("Hull")},
+                {(int)SceneDocument::TreeNode::For,          QStringLiteral("For")},
+                {(int)SceneDocument::TreeNode::Scene,        QStringLiteral("Scene")},
+            };
+            const QString opName = opNames.value(static_cast<int>(hit.operation), QStringLiteral("Group"));
+            hintText += QStringLiteral(" [") + opName + QStringLiteral("]");
+        }
+        hintText += QStringLiteral(" — click to edit colors");
+        updateHoverHint(QStringLiteral("colorEdit:%1").arg(hit.fieldName), hintText);
+    } else {
+        updateHoverHint(QStringLiteral("colorEdit:canvas"),
+                        prefix + QStringLiteral("Canvas — click to change background color"));
+    }
+}
+
+void SceneTreeGraphicsWidget::clearColorEditHighlight()
+{
+    if (m_colorEditHighlight && m_graphicsScene) {
+        m_graphicsScene->removeItem(m_colorEditHighlight);
+        delete m_colorEditHighlight;
+        m_colorEditHighlight = nullptr;
+    }
+}
+
+void SceneTreeGraphicsWidget::handleColorEditClick(const QPointF &scenePos)
+{
+    const ColorZoneHit hit = colorZoneAt(scenePos);
+
+    // ── Canvas background click ───────────────────────────────────────────────
+    if (!hit.hasOperation) {
+        TreeAppearanceTheme theme = SceneTreePalette::customTheme();
+        const QColor chosen = QColorDialog::getColor(theme.canvas, this,
+                                                      QStringLiteral("Canvas background"),
+                                                      QColorDialog::ShowAlphaChannel);
+        if (chosen.isValid()) {
+            theme.canvas = chosen;
+            SceneTreePalette::setCustomTheme(theme);
+            refresh();
+            updateToolbarOverlay();
+            updateColorEditHighlight(scenePos);
+        }
+        return;
+    }
+
+    // ── Group card click — per-operation color menu ──────────────────────────
+    const SceneDocument::TreeNode::Operation op = hit.operation;
+
+    // Build the operation display name.
+    static const QHash<int, QString> opDisplayNames = {
+        {(int)SceneDocument::TreeNode::Union,        QStringLiteral("Union")},
+        {(int)SceneDocument::TreeNode::Difference,   QStringLiteral("Difference")},
+        {(int)SceneDocument::TreeNode::Intersection, QStringLiteral("Intersection")},
+        {(int)SceneDocument::TreeNode::Module,       QStringLiteral("Module")},
+        {(int)SceneDocument::TreeNode::Translate,    QStringLiteral("Translate")},
+        {(int)SceneDocument::TreeNode::Rotate,       QStringLiteral("Rotate")},
+        {(int)SceneDocument::TreeNode::Scale,        QStringLiteral("Scale")},
+        {(int)SceneDocument::TreeNode::Mirror,       QStringLiteral("Mirror")},
+        {(int)SceneDocument::TreeNode::Hull,         QStringLiteral("Hull")},
+        {(int)SceneDocument::TreeNode::For,          QStringLiteral("For")},
+        {(int)SceneDocument::TreeNode::Scene,        QStringLiteral("Scene")},
+    };
+    const QString opName = opDisplayNames.value(static_cast<int>(op), QStringLiteral("Group"));
+
+    // Resolve current colors (override or derived default).
+    const auto pt = static_cast<SceneTreePalette::Theme>(m_treeTheme);
+    const OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
+    const QColor currentCard   = pal.card.isValid()   ? pal.card   : SceneTreePalette::groupFill(op, 0, pt);
+    const QColor currentHeader = pal.header.isValid() ? pal.header : SceneTreePalette::headerFill(currentCard, pt);
+    const QColor currentText   = pal.text.isValid()   ? pal.text   : SceneTreePalette::textPrimary(pt);
+    const QColor currentBorder = pal.border.isValid() ? pal.border : SceneTreePalette::cardBorder(op, currentCard, pt);
+    const QColor currentActive = pal.numBorderActive.isValid() ? pal.numBorderActive : SceneTreePalette::pillBorderActive();
+    const QColor currentActiveFill = pal.numFillActive.isValid() ? pal.numFillActive : SceneTreePalette::pillFillActive();
+
+    // Helper: add a color-picking action with a swatch icon.
+    QMenu menu(this);
+
+    // Title (non-interactive).
+    auto *titleAction = menu.addAction(QStringLiteral("✏ ") + opName + QStringLiteral(" colors"));
+    titleAction->setEnabled(false);
+    menu.addSeparator();
+
+    const auto addColorEntry = [&](const QString &label, const QColor &current,
+                                   std::function<void(const QColor &)> apply)
+    {
+        QPixmap swatch(14, 14);
+        swatch.fill(current.isValid() ? QColor(current.red(), current.green(), current.blue()) : Qt::gray);
+        auto *act = menu.addAction(QIcon(swatch), label);
+        QObject::connect(act, &QAction::triggered, this, [this, current, opName, label, apply]() {
+            const QColor chosen = QColorDialog::getColor(current, this,
+                                                          opName + QStringLiteral(" — ") + label,
+                                                          QColorDialog::ShowAlphaChannel);
+            if (chosen.isValid())
+                apply(chosen);
+        });
+    };
+
+    addColorEntry(QStringLiteral("Card body"), currentCard, [this, op, &scenePos](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.card = c;
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    addColorEntry(QStringLiteral("Header"), currentHeader, [this, op, &scenePos](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.header = c;
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    addColorEntry(QStringLiteral("Text"), currentText, [this, op, &scenePos](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.text = c;
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    addColorEntry(QStringLiteral("Border"), currentBorder, [this, op, &scenePos](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.border = c;
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    menu.addSeparator();
+    addColorEntry(QStringLiteral("Active highlight"), currentActive, [this, op, &scenePos, currentActiveFill](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.numBorderActive = c;
+        // Also update fill as a 50%-alpha version of the same hue if not already customised.
+        if (!p.numFillActive.isValid())
+            p.numFillActive = QColor(c.red(), c.green(), c.blue(), 128);
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    addColorEntry(QStringLiteral("Highlight fill"), currentActiveFill, [this, op, &scenePos](const QColor &c) {
+        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
+        p.numFillActive = c;
+        SceneTreePalette::setOperationCardPalette(op, p);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+    menu.addSeparator();
+
+    // Reset this operation to defaults.
+    auto *resetAct = menu.addAction(QStringLiteral("Reset ") + opName + QStringLiteral(" to default"));
+    QObject::connect(resetAct, &QAction::triggered, this, [this, op, &scenePos]() {
+        TreeAppearanceTheme theme = SceneTreePalette::customTheme();
+        theme.operationCards.remove(static_cast<int>(op));
+        SceneTreePalette::setCustomTheme(theme);
+        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
+    });
+
+    menu.exec(QCursor::pos());
+}
+
+// ── End of color-edit section ─────────────────────────────────────────────────
 
 void SceneTreeGraphicsWidget::drawThemeSwitcher()
 {
@@ -1446,24 +1893,31 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     const QRectF panelLocal(0.0, 0.0, panelW, panelH);
     const QPointF panelTopLeft = scenePoint(12.0,                           // OverlayMargin
                                              viewportHeight - BottomGap - panelH);
+    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
+    const bool customGlass = SceneTreePalette::hasCustomTheme();
+    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     // Drop shadow.
     auto *shadow = m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
                                              Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, 90)));
+                                             QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     shadow->setAcceptedMouseButtons(Qt::NoButton);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(0.65);
+    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
     m_toolbarItems.append(shadow);
 
     // Glass panel background — same style as toolbar.
     QPainterPath panelPath;
     panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
     auto *panel = m_graphicsScene->addPath(panelPath,
-                                            QPen(QColor(148, 163, 184, 82), 1.0),
-                                            QBrush(QColor(10, 16, 24, 178)));
+                                            QPen(customGlass ? customTheme.glassBorder
+                                                             : darkGlass ? QColor(148, 163, 184, 82)
+                                                                         : QColor(118, 136, 156, 58), 1.0),
+                                            QBrush(customGlass ? customTheme.glassBottom
+                                                               : darkGlass ? QColor(10, 16, 24, 178)
+                                                                           : QColor(250, 253, 255, 88)));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
@@ -1508,6 +1962,98 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         m_graphicsScene->addItem(circle);
         m_toolbarItems.append(circle);
     }
+
+    // ── Color-edit mode toggle button ─────────────────────────────────────────
+    // A small "✏ Colors" button to the right of the swatch panel, with the
+    // same glass style.  When active it gets a warm gold outline.
+    {
+        constexpr qreal BtnGap  = 6.0;   // gap between swatch panel right edge and button
+        constexpr qreal BtnPadH = 8.0;
+
+        // Measure the button label.
+        const QString btnLabel = m_colorEditMode
+            ? QStringLiteral("✏ Colors ✓")   // ✏ Colors ✓
+            : QStringLiteral("✏ Colors");           // ✏ Colors
+
+        QFont btnFont = sceneTreeGraphicsFont();
+        btnFont.setPointSizeF(qMax(7.5, btnFont.pointSizeF() - 0.5));
+        const QFontMetricsF fm(btnFont);
+        const qreal textW = fm.horizontalAdvance(btnLabel);
+        const qreal btnW  = textW + BtnPadH * 2.0;
+        const qreal btnH  = panelH;   // same height as swatch panel
+
+        // Position: immediately to the right of the swatch panel.
+        const QPointF btnTopLeft = scenePoint(12.0 + panelW + BtnGap,
+                                               viewportHeight - BottomGap - btnH);
+        const QRectF  btnLocal(0.0, 0.0, btnW, btnH);
+
+        // Shadow.
+        auto *btnShadow = m_graphicsScene->addRect(btnLocal.translated(2.0, 3.0),
+                                                    Qt::NoPen,
+                                                    QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
+        btnShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        btnShadow->setAcceptedMouseButtons(Qt::NoButton);
+        btnShadow->setPos(btnTopLeft);
+        btnShadow->setZValue(LocalOverlayZ - 2.0);
+        btnShadow->setOpacity(darkGlass ? 0.65 : 0.40);
+        m_toolbarItems.append(btnShadow);
+
+        // Panel background — highlighted when active.
+        QPainterPath btnPath;
+        btnPath.addRoundedRect(btnLocal, CornerRadius, CornerRadius);
+        const QColor btnBorder = m_colorEditMode
+            ? QColor(255, 195, 40, 230)
+            : (customGlass ? customTheme.glassBorder
+                           : darkGlass ? QColor(148, 163, 184, 82)
+                                       : QColor(118, 136, 156, 58));
+        const QColor btnBg = m_colorEditMode
+            ? QColor(255, 200, 50, 55)
+            : (customGlass ? customTheme.glassBottom
+                           : darkGlass ? QColor(10, 16, 24, 178)
+                                       : QColor(250, 253, 255, 88));
+        auto *btnPanel = m_graphicsScene->addPath(btnPath,
+                                                   QPen(btnBorder, m_colorEditMode ? 1.5 : 1.0),
+                                                   QBrush(btnBg));
+        btnPanel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        btnPanel->setAcceptedMouseButtons(Qt::NoButton);
+        btnPanel->setPos(btnTopLeft);
+        btnPanel->setZValue(LocalOverlayZ - 1.0);
+        m_toolbarItems.append(btnPanel);
+
+        // Button label text.
+        auto *btnText = m_graphicsScene->addText(btnLabel, btnFont);
+        btnText->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        btnText->setAcceptedMouseButtons(Qt::NoButton);
+        btnText->setDefaultTextColor(m_colorEditMode
+            ? QColor(255, 195, 40, 240)
+            : (darkGlass ? QColor(210, 225, 248, 210) : QColor(34, 45, 58, 200)));
+        // Center text inside the button rect.
+        btnText->setPos(btnTopLeft + QPointF(BtnPadH,
+                                              (btnH - fm.height()) * 0.5 - fm.descent() * 0.5 + 0.5));
+        btnText->setZValue(LocalOverlayZ + 0.5);
+        m_toolbarItems.append(btnText);
+
+        // Invisible click-catcher rect on top (so the whole button area is clickable).
+        class ColorEditBtnItem : public QGraphicsRectItem {
+        public:
+            ColorEditBtnItem(const QRectF &r, std::function<void()> fn)
+                : QGraphicsRectItem(r), m_fn(std::move(fn))
+            { setPen(Qt::NoPen); setBrush(Qt::NoBrush);
+              setAcceptedMouseButtons(Qt::LeftButton); }
+        protected:
+            void mousePressEvent(QGraphicsSceneMouseEvent *e) override
+            { if (e->button() == Qt::LeftButton) { m_fn(); e->accept(); } else e->ignore(); }
+        private:
+            std::function<void()> m_fn;
+        };
+        auto *clickArea = new ColorEditBtnItem(btnLocal,
+                                               [this]{ setColorEditMode(!m_colorEditMode); });
+        clickArea->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        clickArea->setPos(btnTopLeft);
+        clickArea->setZValue(LocalOverlayZ + 1.0);
+        m_graphicsScene->addItem(clickArea);
+        m_toolbarItems.append(clickArea);
+    }
 }
 
 void SceneTreeGraphicsWidget::drawHoverHintOverlay()
@@ -1532,6 +2078,8 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
     constexpr qreal OverlayMargin = 12.0;
     constexpr qreal ThemePanelWidth = 123.0;
     constexpr qreal ThemePanelHeight = 26.0;
+    constexpr qreal BackgroundPanelHeight = 26.0;
+    constexpr qreal SwitcherRowGap = 8.0;
     constexpr qreal Gap = 14.0;
     constexpr qreal PadH = 12.0;
     constexpr qreal PadV = 9.0;
@@ -1560,28 +2108,35 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
                                        maxPanelH);
     qreal panelY = viewportHeight - BottomGap - panelH;
     if (panelX <= OverlayMargin + 0.5)
-        panelY -= ThemePanelHeight + Gap;
+        panelY -= ThemePanelHeight + BackgroundPanelHeight + SwitcherRowGap + Gap;
 
     const QRectF panelLocal(0.0, 0.0, availableW, panelH);
     const QPointF panelTopLeft = scenePoint(panelX, qMax<qreal>(OverlayMargin, panelY));
+    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
+    const bool customGlass = SceneTreePalette::hasCustomTheme();
+    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     auto *shadow = m_graphicsScene->addRect(panelLocal.translated(3.0, 4.0),
                                             Qt::NoPen,
-                                            QBrush(QColor(0, 0, 0, 115)));
+                                            QBrush(QColor(0, 0, 0, darkGlass ? 115 : 38)));
     shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     shadow->setAcceptedMouseButtons(Qt::NoButton);
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(0.72);
+    shadow->setOpacity(darkGlass ? 0.72 : 0.42);
     m_toolbarItems.append(shadow);
 
     QPainterPath path;
     path.addRoundedRect(panelLocal, 8.0, 8.0);
     QLinearGradient glass(QPointF(0.0, 0.0), QPointF(0.0, panelH));
-    glass.setColorAt(0.0, QColor(24, 34, 50, 218));
-    glass.setColorAt(1.0, QColor(8, 13, 22, 196));
+    glass.setColorAt(0.0, customGlass ? customTheme.glassTop
+                                      : darkGlass ? QColor(24, 34, 50, 218) : QColor(255, 255, 255, 116));
+    glass.setColorAt(1.0, customGlass ? customTheme.glassBottom
+                                      : darkGlass ? QColor(8, 13, 22, 196) : QColor(237, 244, 249, 74));
     auto *panel = m_graphicsScene->addPath(path,
-                                           QPen(QColor(142, 178, 215, 120), 1.0),
+                                           QPen(customGlass ? customTheme.glassBorder
+                                                            : darkGlass ? QColor(142, 178, 215, 120)
+                                                                        : QColor(116, 141, 166, 70), 1.0),
                                            QBrush(glass));
     panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
     panel->setAcceptedMouseButtons(Qt::NoButton);
@@ -1594,7 +2149,8 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
     text->setAcceptedMouseButtons(Qt::NoButton);
     text->document()->setDocumentMargin(0.0);
     text->setTextWidth(textW);
-    text->setDefaultTextColor(QColor(232, 242, 255));
+    text->setDefaultTextColor(customGlass ? customTheme.text
+                                          : darkGlass ? QColor(232, 242, 255) : QColor(39, 51, 66));
     text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
     text->setZValue(LocalOverlayZ);
     m_toolbarItems.append(text);
@@ -3006,11 +3562,25 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
     hoverRenameZoneAt(scenePosition, &renameNodeId, &renameRect);
     const QRectF newRenameRect = renameNodeId > 0 ? renameRect : QRectF();
 
+    int collapseGroupId = 0;
+    const bool onCollapseControl = groupCollapseControlAt(scenePosition, &collapseGroupId);
+    bool onCanvasGrip = false;
+    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
+        if (handle.gripRect.contains(scenePosition)) {
+            onCanvasGrip = true;
+            break;
+        }
+    }
+
     // Update cursor.
     if (newRenameRect.isValid())
         setCursor(Qt::IBeamCursor);
     else if (newScrollRect.isValid())
         setCursor(Qt::SizeVerCursor);
+    else if (onCollapseControl)
+        setCursor(Qt::PointingHandCursor);
+    else if (onCanvasGrip)
+        setCursor(Qt::SizeAllCursor);
     else
         setCursor(Qt::OpenHandCursor);
 

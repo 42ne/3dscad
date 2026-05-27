@@ -74,6 +74,7 @@ public:
     void handleShapeRotationDragFinished(int index);
 
     // Group drag: calls updateGroupTransform live; commits on finish.
+    // Expression-backed axes remain expressions unless that component is changed.
     void handleGroupDragStarted(int groupId);
     void handleGroupDragged(int groupId, const QVector3D &delta);
     void handleGroupDragFinished(int groupId);
@@ -131,6 +132,7 @@ private:
     QVector3D m_groupDragStartPos;
     QVector3D m_groupDragStartRot;
     QVector3D m_groupDragStartScale;
+    QStringList m_groupDragStartExpressions;
 };
 
 #endif // SCENECONTROLLER_H

@@ -32,6 +32,18 @@ static QVector3D normalizedRotation(const QVector3D &r)
                      normalizedRotationDegrees(r.z()));
 }
 
+static QStringList dragExpressionsWithChangedComponentsCleared(const QStringList &startExpressions,
+                                                                const QVector3D &delta)
+{
+    QStringList expressions = startExpressions;
+    const float components[] = { delta.x(), delta.y(), delta.z() };
+    for (int axis = 0; axis < 3 && axis < expressions.size(); ++axis) {
+        if (!qFuzzyIsNull(components[axis]))
+            expressions[axis].clear();
+    }
+    return expressions;
+}
+
 static bool isStandaloneNumericToken(const QString &expression, int start, int length)
 {
     if (start < 0 || length <= 0 || start + length > expression.size())
@@ -371,6 +383,7 @@ void SceneController::handleGroupDragStarted(int groupId)
     m_groupDragStartPos   = group->position;
     m_groupDragStartRot   = group->rotation;
     m_groupDragStartScale = group->scale;
+    m_groupDragStartExpressions = group->transformExpressions;
     m_groupDragActive     = true;
 }
 
@@ -380,7 +393,8 @@ void SceneController::handleGroupDragged(int groupId, const QVector3D &delta)
     m_scene.updateGroupTransform(groupId,
                                  m_groupDragStartPos + delta,
                                  m_groupDragStartRot,
-                                 m_groupDragStartScale);
+                                 m_groupDragStartScale,
+                                 dragExpressionsWithChangedComponentsCleared(m_groupDragStartExpressions, delta));
     emit liveViewportUpdate();
 }
 
@@ -404,7 +418,8 @@ void SceneController::handleGroupDragFinished(int groupId)
     m_scene.updateGroupTransform(groupId,
                                  m_groupDragStartPos,
                                  m_groupDragStartRot,
-                                 m_groupDragStartScale);
+                                 m_groupDragStartScale,
+                                 m_groupDragStartExpressions);
     const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
     m_scene.restoreSnapshot(newSnapshot);
 
@@ -425,7 +440,8 @@ void SceneController::handleGroupRotated(int groupId, const QVector3D &deltaDegr
     m_scene.updateGroupTransform(groupId,
                                  m_groupDragStartPos,
                                  normalizedRotation(m_groupDragStartRot + deltaDegrees),
-                                 m_groupDragStartScale);
+                                 m_groupDragStartScale,
+                                 dragExpressionsWithChangedComponentsCleared(m_groupDragStartExpressions, deltaDegrees));
     emit liveViewportUpdate();
 }
 
