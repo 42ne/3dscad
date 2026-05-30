@@ -17,7 +17,7 @@ SceneTreeInlineTextInput::SceneTreeInlineTextInput(QWidget *parent)
 
 void SceneTreeInlineTextInput::startEditing(const QRect &viewRect,
                                             const QString &initialText,
-                                            std::function<void(const QString &)> onCommit,
+                                            std::function<bool(const QString &)> onCommit,
                                             std::function<void()> onCancel)
 {
     m_onCommit = onCommit;
@@ -52,13 +52,22 @@ void SceneTreeInlineTextInput::stopEditing(bool commit)
     if (!m_editing)
         return;
 
+    if (commit && m_onCommit) {
+        const bool accepted = m_onCommit(m_text.trimmed());
+        if (!accepted) {
+            m_committing = false;
+            show();
+            raise();
+            setFocus(Qt::OtherFocusReason);
+            update();
+            return;
+        }
+    }
+
     m_editing = false;
     hide();
 
-    if (commit) {
-        if (m_onCommit)
-            m_onCommit(m_text.trimmed());
-    } else {
+    if (!commit) {
         if (m_onCancel)
             m_onCancel();
     }

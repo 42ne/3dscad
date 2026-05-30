@@ -26,7 +26,7 @@ public:
      */
     void startEditing(const QRect &viewRect,
                       const QString &initialText,
-                      std::function<void(const QString &)> onCommit,
+                      std::function<bool(const QString &)> onCommit,
                       std::function<void()> onCancel);
 
     void reposition(const QRect &viewRect);
@@ -51,7 +51,7 @@ private:
     void updateTextViewport();
     QRect textRect() const;
 
-    std::function<void(const QString &)> m_onCommit;
+    std::function<bool(const QString &)> m_onCommit;
     std::function<void()>               m_onCancel;
     QFont m_baseFont;
     QString m_text;

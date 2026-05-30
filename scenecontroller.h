@@ -90,15 +90,19 @@ public:
     void handleTransformValueAdjusted(int groupId, int axis,
                                        int numberStart, int numberLength,
                                        qreal delta);
+    void handleTransformExpressionEdited(int groupId, int axis, const QString &expression);
     void handleColorChannelAdjusted(int groupId, int channel, qreal delta);
     void handleModuleRenameRequested(int groupId, const QString &newName);
     void handleVariableRenameRequested(int variableId, const QString &newName);
     void handleShapeParameterAdjusted(int nodeId, int paramIndex,
                                        int numberStart, int numberLength,
                                        qreal delta);
+    void handleShapeParameterExpressionEdited(int nodeId, int paramIndex, const QString &expression);
     void handleVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
+    void handleVariableExpressionEdited(int nodeId, const QString &expression);
     void handleModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId,
                                            int start, int length, qreal delta);
+    void handleModuleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void handleForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
     void handleCtrlReleased();
 

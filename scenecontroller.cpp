@@ -32,6 +32,18 @@ static QVector3D normalizedRotation(const QVector3D &r)
                      normalizedRotationDegrees(r.z()));
 }
 
+static void collectVariableValues(const SceneDocument::TreeNode &node, QHash<QString, qreal> *values)
+{
+    if (!values)
+        return;
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        (*values)[node.variableName] = node.variableValue;
+        return;
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectVariableValues(child, values);
+}
+
 static QStringList dragExpressionsWithChangedComponentsCleared(const QStringList &startExpressions,
                                                                 const QVector3D &delta)
 {
@@ -645,9 +657,7 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
         }
 
         QHash<QString, qreal> varValues;
-        for (const SceneDocument::TreeNode &child : m_scene.treeRoot().children)
-            if (child.type == SceneDocument::TreeNode::Variable)
-                varValues[child.variableName] = child.variableValue;
+        collectVariableValues(m_scene.treeRoot(), &varValues);
 
         qreal newNumeric = replacement.toDouble();
         ExpressionSyntax::evaluate(newExpr, varValues, &newNumeric);
@@ -700,6 +710,61 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
 }
 
 // ── Graphics-tree: module rename ──────────────────────────────────────────────
+
+void SceneController::handleTransformExpressionEdited(int groupId, int axis, const QString &expression)
+{
+    if (axis < 0 || axis > 2)
+        return;
+
+    const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group)
+        return;
+
+    const QString trimmed = expression.trimmed();
+    QHash<QString, qreal> varValues;
+    collectVariableValues(m_scene.treeRoot(), &varValues);
+
+    qreal numericValue = 0.0;
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &numericValue))
+        return;
+
+    QStringList newExpressions = group->transformExpressions;
+    while (newExpressions.size() < 3)
+        newExpressions.append(QString());
+    if (newExpressions[axis] == trimmed)
+        return;
+    newExpressions[axis] = trimmed;
+
+    QVector3D position = group->position;
+    QVector3D rotation = group->rotation;
+    QVector3D scale = group->scale;
+    if (group->operation == SceneDocument::TreeNode::Scale)
+        numericValue = qMax<qreal>(0.01, numericValue);
+
+    const bool usePosition = group->operation == SceneDocument::TreeNode::Translate
+                             || group->operation == SceneDocument::TreeNode::Mirror;
+    QVector3D *target = usePosition ? &position
+                       : group->operation == SceneDocument::TreeNode::Rotate ? &rotation
+                                                                             : &scale;
+    if (axis == 0)
+        target->setX(float(numericValue));
+    else if (axis == 1)
+        target->setY(float(numericValue));
+    else
+        target->setZ(float(numericValue));
+
+    const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+    if (!m_scene.updateGroupTransform(groupId, position, rotation, scale, newExpressions))
+        return;
+    const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+    m_scene.restoreSnapshot(oldSnapshot);
+
+    auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                    [this]() { emit sceneChanged(); });
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
 
 void SceneController::handleColorChannelAdjusted(int groupId, int channel, qreal delta)
 {
@@ -803,9 +868,7 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
     }
 
     QHash<QString, qreal> varValues;
-    for (const SceneDocument::TreeNode &child : m_scene.treeRoot().children)
-        if (child.type == SceneDocument::TreeNode::Variable)
-            varValues[child.variableName] = child.variableValue;
+    collectVariableValues(m_scene.treeRoot(), &varValues);
 
     qreal newNumericValue = replacement.toDouble();
     ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
@@ -867,6 +930,60 @@ void SceneController::handleVariableNumberAdjusted(int nodeId, int start, int le
 }
 
 // ── Graphics-tree: module call argument adjusted ──────────────────────────────
+
+void SceneController::handleShapeParameterExpressionEdited(int nodeId,
+                                                           int paramIndex,
+                                                           const QString &expression)
+{
+    if (nodeId <= 0 || paramIndex < 0)
+        return;
+
+    const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Primitive)
+        return;
+
+    const ShapeNode *shape = m_scene.shapeById(node->shapeId);
+    if (!shape)
+        return;
+
+    const QVector<SceneTreeGraphics::ShapeParameterControl> controls =
+        SceneTreeGraphics::shapeParameterControls(*shape);
+    if (paramIndex >= controls.size())
+        return;
+
+    const QString trimmed = expression.trimmed();
+    QHash<QString, qreal> varValues;
+    collectVariableValues(m_scene.treeRoot(), &varValues);
+
+    qreal numericValue = 0.0;
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &numericValue))
+        return;
+
+    ShapeNode updatedShape = *shape;
+    while (updatedShape.parameterExpressions.size() < controls.size())
+        updatedShape.parameterExpressions.append(QString());
+    if (updatedShape.parameterExpressions[paramIndex] == trimmed)
+        return;
+    updatedShape.parameterExpressions[paramIndex] = trimmed;
+    updatedShape.applyParameterValue(paramIndex, numericValue);
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
+
+void SceneController::handleVariableExpressionEdited(int nodeId, const QString &expression)
+{
+    auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression,
+                                                        [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
 
 void SceneController::handleModuleCallArgumentAdjusted(int moduleCallId,
                                                         int parameterVariableId,
@@ -930,6 +1047,27 @@ void SceneController::handleModuleCallArgumentAdjusted(int moduleCallId,
 }
 
 // ── Graphics-tree: for loop range adjusted ────────────────────────────────────
+
+void SceneController::handleModuleCallArgumentExpressionEdited(int moduleCallId,
+                                                               int parameterVariableId,
+                                                               const QString &expression)
+{
+    const SceneDocument::TreeNode *parameterNode = m_scene.treeNodeById(parameterVariableId);
+    if (!parameterNode || parameterNode->type != SceneDocument::TreeNode::Variable
+        || !parameterNode->isParameter) {
+        return;
+    }
+
+    auto *command = new UpdateModuleCallArgumentCommand(&m_scene,
+                                                        moduleCallId,
+                                                        parameterNode->variableName,
+                                                        expression,
+                                                        [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
 
 void SceneController::handleForLoopRangeAdjusted(int nodeId, int start, int length,
                                                    qreal delta)

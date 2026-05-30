@@ -63,9 +63,11 @@ signals:
     void treeNodeSelected(int nodeId);
     void treeNodeDeleteRequested(int nodeId);
     void transformValueAdjusted(int groupId, int axis, int numberStart, int numberLength, qreal delta);
+    void transformExpressionEdited(int groupId, int axis, const QString &expression);
     void colorChannelAdjusted(int groupId, int channel, qreal delta);
     void transformControlHovered(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void shapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
+    void shapeParameterExpressionEdited(int nodeId, int paramIndex, const QString &expression);
     void shapeParameterHovered(int shapeId, int parameter);
     void variableNumberHovered(int nodeId, int start);
     void forLoopRangeHovered(int nodeId, int start);
@@ -74,8 +76,10 @@ signals:
     void dropPreviewChanged(const QString &previewTool, int movingNodeId,
                             const SceneTreeLayout::DropTarget &target, const QPointF &scenePosition);
     void variableNumberAdjusted(int nodeId, int start, int length, qreal delta);
+    void variableExpressionEdited(int nodeId, const QString &expression);
     void moduleCallArgumentAdjusted(int moduleCallId, int parameterVariableId,
                                     int start, int length, qreal delta);
+    void moduleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void forLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
     void ctrlReleased();
     void moduleRenameRequested(int groupId, const QString &newName);
@@ -176,6 +180,10 @@ private:
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
+    struct ExpressionEditTarget;
+    bool expressionEditTargetAt(const QPointF &scenePosition, ExpressionEditTarget *target) const;
+    void startInlineExpressionEdit(const ExpressionEditTarget &target);
+    bool validateInlineExpression(const ExpressionEditTarget &target, const QString &expression, QString *errorMessage) const;
     void updateInlineInputGeometry();
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
@@ -287,6 +295,23 @@ private:
     };
     QVector<RenameZone> m_renameZones;
 
+    struct ExpressionEditTarget {
+        enum Kind {
+            None,
+            Transform,
+            ShapeParameter,
+            Variable,
+            ModuleCallArgument
+        };
+        Kind kind = None;
+        QRectF hoverRect;
+        QRectF editRect;
+        QString label;
+        QString expression;
+        int nodeId = 0;
+        int secondaryId = 0;
+    };
+
     SceneTreeInlineTextInput *m_inlineInput     = nullptr;
     bool                      m_inlineInputActive = false;
     QRectF                    m_inlineInputSceneRect;
@@ -328,6 +353,7 @@ private:
     QRectF m_lastToolbarRect;
     QRectF m_hoveredScrollRect;
     QRectF m_hoveredRenameRect;
+    QRectF m_hoveredExpressionRect;
     DropTarget m_dropPreviewStartTarget;
     DropTarget m_dropPreviewTarget;
     DropTarget m_dropPreviewCurrentTarget;

@@ -270,6 +270,8 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handleNodeDeleteRequested);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformValueAdjusted,
             m_controller, &SceneController::handleTransformValueAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformExpressionEdited,
+            m_controller, &SceneController::handleTransformExpressionEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::colorChannelAdjusted,
             m_controller, &SceneController::handleColorChannelAdjusted);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::transformControlHovered,
@@ -278,14 +280,20 @@ void MainWindow::buildUi()
             });
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeParameterAdjusted,
             m_controller, &SceneController::handleShapeParameterAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeParameterExpressionEdited,
+            m_controller, &SceneController::handleShapeParameterExpressionEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeParameterHovered,
             this, [this](int shapeId, int parameter) {
                 if (m_viewport) m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
             });
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableNumberAdjusted,
             m_controller, &SceneController::handleVariableNumberAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableExpressionEdited,
+            m_controller, &SceneController::handleVariableExpressionEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleCallArgumentAdjusted,
             m_controller, &SceneController::handleModuleCallArgumentAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleCallArgumentExpressionEdited,
+            m_controller, &SceneController::handleModuleCallArgumentExpressionEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::forLoopRangeAdjusted,
             m_controller, &SceneController::handleForLoopRangeAdjusted);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::ctrlReleased,
