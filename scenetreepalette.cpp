@@ -101,11 +101,12 @@ Theme nextTheme(Theme current)
 QColor groupFill(SceneDocument::TreeNode::Operation operation, int depth, Theme theme)
 {
     if (CustomThemeActive) {
-        // Check per-operation card override first.
+        // User-chosen colors are returned as-is — no depth hue shift.
+        // The shift is a built-in theming effect; it must not alter explicit user picks.
         const auto it = CustomTheme.operationCards.find(static_cast<int>(operation));
         if (it != CustomTheme.operationCards.end() && it.value().card.isValid())
-            return applyDepthHueShift(it.value().card, depth);
-        return applyDepthHueShift(CustomTheme.card, depth);
+            return it.value().card;
+        return CustomTheme.card;
     }
     const QColor *base = baseColorFor(operation, theme);
     if (!base)

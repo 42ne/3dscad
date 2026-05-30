@@ -85,6 +85,7 @@ signals:
     void canvasBackgroundThemeChanged(int theme);
     void builtInAppearanceSelected();
     void colorEditModeChanged(bool enabled);
+    void inlineThemeEdited();
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -107,19 +108,28 @@ private:
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
     // ── Color-edit mode ───────────────────────────────────────────────────────
-    // A transient "paint" mode: hovering a card zone highlights it and shows
-    // what color role it maps to; clicking opens a color picker and applies the
-    // change via SceneTreePalette::setCustomTheme().
     struct ColorZoneHit {
         QString fieldName;   // "canvas" | "card" | "header" | "input"
         QString label;       // human-readable zone name for the hover hint
         QRectF  rect;        // zone rect in scene coords (invalid for canvas)
-        bool    valid = false;        // false → canvas / no-card-hit
+        bool    valid = false;
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        bool    hasOperation = false; // true when inside a group card
+        bool    hasOperation = false;
+        int     nodeId = 0;  // scene node id; 0 = none
+        QString spanText;    // for direct numText/mutedText hits: the span's text content
+    };
+    struct ColorPropDef {
+        QString id;       // field name in TreeAppearanceTheme / OperationCardPalette
+        QString label;    // shown in hint + dialog title
+        bool isText   = false; // true → blink the highlight
+        bool isGlobal = false; // true = global theme; false = per-op palette
     };
     ColorZoneHit colorZoneAt(const QPointF &scenePos) const;
+    QVector<ColorPropDef> propsForHit(const ColorZoneHit &hit) const;
+    QColor  getColorForProp(const ColorPropDef &prop, const ColorZoneHit &hit) const;
+    void    setColorForProp(const ColorPropDef &prop, const ColorZoneHit &hit, const QColor &color);
     void handleColorEditClick(const QPointF &scenePos);
+    void handleColorEditWheel(const QPointF &scenePos, int angleDelta);
     void updateColorEditHighlight(const QPointF &scenePos);
     void clearColorEditHighlight();
 
@@ -283,9 +293,15 @@ private:
     int m_selectedTreeNodeId = 0;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
-    bool            m_colorEditMode      = false;
-    QGraphicsItem  *m_colorEditHighlight = nullptr; // zone rect overlay (not in m_toolbarItems)
-    QString         m_colorEditZoneField;           // last detected zone field name
+    bool            m_colorEditMode        = false;
+    QGraphicsItem  *m_colorEditHighlight   = nullptr; // owned inverted-fill overlay (fill props)
+    QVector<QGraphicsItem*> m_colorEditBlinkTargets;  // borrowed tree text items (text props)
+    QString         m_colorEditZoneField;
+    int             m_colorEditPropIndex   = 0;
+    ColorZoneHit    m_colorEditCurrentZone;
+    QTimer         *m_colorEditBlinkTimer  = nullptr;
+    bool            m_colorEditBlinkOn     = true;
+    QGraphicsItem  *m_colorEditToggleItem  = nullptr; // pointer to the toggle for priority check
     int m_activeTransformControlNodeId = 0;
     int m_activeTransformControlAxis = -1;
     int m_activeTransformControlNumberStart = -1;

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"f:\\\\QtProjects\\\\3DScad\\\\3DScad\"; $env:PATH = \"E:\\\\Qt\\\\Tools\\\\mingw810_32\\\\bin;E:\\\\Qt\\\\5.15.2\\\\mingw81_32\\\\bin;\" + $env:PATH; \\(Get-Item \"scenetreegraphicswidget.cpp\"\\).LastWriteTime = Get-Date; mingw32-make -f Makefile.Debug 2>&1 | Select-Object -Last 50)"
+    ]
+  }
+}

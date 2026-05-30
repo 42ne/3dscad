@@ -38,7 +38,10 @@ QStringList savedNames(const QString &scope)
         QSettings settings(info.filePath(), QSettings::IniFormat);
         if (settings.value(QStringLiteral("meta/builtIn"), false).toBool())
             continue;
-        names.append(settings.value(QStringLiteral("meta/name"), info.completeBaseName()).toString());
+        const QString name = settings.value(QStringLiteral("meta/name"), info.completeBaseName()).toString();
+        if (name.startsWith(QLatin1String("__")))
+            continue;  // internal slots (e.g. __autosave__) are not user-visible
+        names.append(name);
     }
     return names;
 }
@@ -244,6 +247,34 @@ bool loadTreeTheme(const QString &name, TreeAppearanceTheme *theme)
     t.numFillActive = readColor(in, QStringLiteral("numFillActive"), t.numFillActive);
     t.numText = readColor(in, QStringLiteral("numText"), t.numText);
     t.numLabelText = readColor(in, QStringLiteral("numLabelText"), t.numLabelText);
+
+    // Per-operation card overrides — groups named "op_<int>"
+    for (const QString &grp : in.childGroups()) {
+        if (!grp.startsWith(QStringLiteral("op_")))
+            continue;
+        bool ok = false;
+        const int opKey = grp.mid(3).toInt(&ok);
+        if (!ok)
+            continue;
+        in.beginGroup(grp);
+        const auto readOp = [&](const QString &key) -> QColor {
+            const QString v = in.value(key).toString();
+            if (v.isEmpty()) return QColor();
+            const QColor c(v);
+            return c.isValid() ? c : QColor();
+        };
+        OperationCardPalette pal;
+        pal.card            = readOp(QStringLiteral("card"));
+        pal.header          = readOp(QStringLiteral("header"));
+        pal.text            = readOp(QStringLiteral("text"));
+        pal.input           = readOp(QStringLiteral("input"));
+        pal.border          = readOp(QStringLiteral("border"));
+        pal.numBorderActive = readOp(QStringLiteral("numBorderActive"));
+        pal.numFillActive   = readOp(QStringLiteral("numFillActive"));
+        in.endGroup();
+        t.operationCards[opKey] = pal;
+    }
+
     *theme = t;
     return true;
 }
@@ -272,6 +303,25 @@ bool saveTreeTheme(const QString &name, const TreeAppearanceTheme &theme)
     writeColor(out, QStringLiteral("numFillActive"), theme.numFillActive);
     writeColor(out, QStringLiteral("numText"), theme.numText);
     writeColor(out, QStringLiteral("numLabelText"), theme.numLabelText);
+
+    // Per-operation card overrides — written as groups "op_<int>"
+    for (auto it = theme.operationCards.cbegin(); it != theme.operationCards.cend(); ++it) {
+        const OperationCardPalette &pal = it.value();
+        out.beginGroup(QStringLiteral("op_%1").arg(it.key()));
+        const auto writeOp = [&](const QString &key, const QColor &c) {
+            if (c.isValid())
+                out.setValue(key, c.name(QColor::HexArgb));
+        };
+        writeOp(QStringLiteral("card"),            pal.card);
+        writeOp(QStringLiteral("header"),          pal.header);
+        writeOp(QStringLiteral("text"),            pal.text);
+        writeOp(QStringLiteral("input"),           pal.input);
+        writeOp(QStringLiteral("border"),          pal.border);
+        writeOp(QStringLiteral("numBorderActive"), pal.numBorderActive);
+        writeOp(QStringLiteral("numFillActive"),   pal.numFillActive);
+        out.endGroup();
+    }
+
     out.sync();
     return true;
 }

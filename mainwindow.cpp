@@ -250,6 +250,12 @@ void MainWindow::buildUi()
         m_customTreeThemeName.clear();
         saveAppearanceSettings();
     });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::inlineThemeEdited, this, [this]() {
+        if (m_customTreeThemeName.isEmpty())
+            m_customTreeThemeName = QStringLiteral("__autosave__");
+        AppearanceThemes::saveTreeTheme(m_customTreeThemeName, SceneTreePalette::customTheme());
+        saveAppearanceSettings();
+    });
 
     // Wire all graphics-tree signals through the controller.
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::toolDropped,

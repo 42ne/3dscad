@@ -18,6 +18,7 @@
 #include <QGraphicsEllipseItem>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsSimpleTextItem>
 #include <QGraphicsTextItem>
 #include <QHash>
 #include <QKeyEvent>
@@ -35,6 +36,93 @@
 using namespace SceneTreeGraphics;
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// GridBlinkItem — paints a grid overlay at a fixed spacing with a given color.
+// Used to blink the minor/major grid when that property is selected in color-edit mode.
+// ---------------------------------------------------------------------------
+class GridBlinkItem : public QGraphicsItem
+{
+public:
+    GridBlinkItem(const QRectF &sceneRect, qreal gridSize, const QColor &color)
+        : m_sceneRect(sceneRect), m_gridSize(gridSize), m_color(color) {}
+    QRectF boundingRect() const override { return m_sceneRect; }
+    void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        drawCanvasGrid(p, m_sceneRect, m_gridSize, m_color, 3);
+    }
+private:
+    QRectF  m_sceneRect;
+    qreal   m_gridSize;
+    QColor  m_color;
+};
+
+// ---------------------------------------------------------------------------
+// ColorEditToggleItem — standalone vertical toggle switch for color-edit mode.
+// Thumb slides to top (ON) or bottom (OFF); track darkens when active.
+// ---------------------------------------------------------------------------
+class ColorEditToggleItem : public QGraphicsItem
+{
+public:
+    static constexpr qreal kW      = 16.0;
+    static constexpr qreal kH      = 28.0;
+    static constexpr qreal kThumbD = 12.0;
+    static constexpr qreal kThumbM = (kW - kThumbD) * 0.5;  // side margin = 2 px
+
+    ColorEditToggleItem(bool on,
+                        std::function<void()> onClick,
+                        std::function<void(bool)> onHover = {})
+        : m_on(on), m_onClick(std::move(onClick)), m_onHover(std::move(onHover))
+    {
+        setAcceptedMouseButtons(Qt::LeftButton);
+        setAcceptHoverEvents(true);
+    }
+
+    QRectF boundingRect() const override
+    { return QRectF(-2.0, -2.0, kW + 4.0, kH + 4.0); }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
+    {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+
+        // Track — dark when ON, muted when OFF
+        const QColor track = m_on ? QColor(22, 22, 22, 225) : QColor(110, 115, 125, 135);
+        QPainterPath trackPath;
+        trackPath.addRoundedRect(QRectF(0, 0, kW, kH), kW * 0.5, kW * 0.5);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(track);
+        painter->drawPath(trackPath);
+
+        // Thumb: top = ON, bottom = OFF
+        const qreal thumbY = m_on ? kThumbM : kH - kThumbM - kThumbD;
+        const QRectF thumbRect(kThumbM, thumbY, kThumbD, kThumbD);
+
+        // Thumb drop shadow
+        painter->setBrush(QColor(0, 0, 0, 45));
+        painter->drawEllipse(thumbRect.translated(0.5, 1.2));
+
+        // Thumb fill
+        painter->setPen(QPen(QColor(140, 140, 140, 55), 0.5));
+        painter->setBrush(Qt::white);
+        painter->drawEllipse(thumbRect);
+    }
+
+protected:
+    void mousePressEvent(QGraphicsSceneMouseEvent *e) override
+    {
+        if (e->button() == Qt::LeftButton) { m_onClick(); e->accept(); }
+        else e->ignore();
+    }
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *) override
+    { if (m_onHover) m_onHover(true); }
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *) override
+    { if (m_onHover) m_onHover(false); }
+
+private:
+    bool m_on;
+    std::function<void()> m_onClick;
+    std::function<void(bool)> m_onHover;
+};
 
 // ---------------------------------------------------------------------------
 // ThemeSwitcherSwatchItem — a single clickable swatch circle in the theme
@@ -718,8 +806,8 @@ void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
 void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
     clearDropPreview();
-    // scene->clear() will delete m_colorEditHighlight — null it out first.
-    m_colorEditHighlight = nullptr;
+    // Remove color-edit overlays before clear() deletes them under us.
+    clearColorEditHighlight();
     m_graphicsScene->clear();
     m_canvasDragGhost = nullptr;  // scene->clear() already deleted it
     m_canvasDragItems.clear();    // scene->clear() deleted these too
@@ -1203,9 +1291,24 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    // ── Toggle overlay — highest priority ────────────────────────────────────
+    // Compute the toggle's viewport rect directly (ItemIgnoresTransformations means
+    // the item's bounding rect is in viewport pixels, not scene units).
+    if (m_colorEditToggleItem) {
+        const QPointF togVp = mapFromScene(m_colorEditToggleItem->pos());
+        if (m_colorEditToggleItem->boundingRect().translated(togVp)
+                .contains(QPointF(event->pos()))) {
+            clearColorEditHighlight();                  // remove any stale blink overlay
+            QGraphicsView::mouseMoveEvent(event);       // deliver hover enter/move to toggle
+            event->accept();
+            return;
+        }
+    }
+
     // ── Color-edit mode hover ─────────────────────────────────────────────────
     if (m_colorEditMode) {
         updateColorEditHighlight(scenePosition);
+        QGraphicsView::mouseMoveEvent(event);           // deliver hover LEAVE when leaving toggle
         event->accept();
         return;
     }
@@ -1391,6 +1494,13 @@ void SceneTreeGraphicsWidget::showEvent(QShowEvent *event)
 
 void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 {
+    if (m_colorEditMode && event->angleDelta().y() != 0) {
+        const QPointF scenePos = mapToScene(event->position().toPoint());
+        handleColorEditWheel(scenePos, event->angleDelta().y());
+        event->accept();
+        return;
+    }
+
     if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
         const int wheelSteps = event->angleDelta().y() / 120;
         const QPointF scenePosition = mapToScene(event->position().toPoint());
@@ -1474,6 +1584,7 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
 
 void SceneTreeGraphicsWidget::clearToolbar()
 {
+    m_colorEditToggleItem = nullptr;
     for (QGraphicsItem *item : m_toolbarItems) {
         if (!item)
             continue;
@@ -1608,19 +1719,43 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
 
 // ── Color-edit paint mode ──────────────────────────────────────────────────────
 
+static QString colorEditOpName(SceneDocument::TreeNode::Operation op);
+
 void SceneTreeGraphicsWidget::setColorEditMode(bool enabled)
 {
     if (m_colorEditMode == enabled)
         return;
     m_colorEditMode = enabled;
     clearColorEditHighlight();
+    m_colorEditPropIndex = 0;
+    m_colorEditCurrentZone = {};
+    m_colorEditBlinkOn = true;
+
     if (enabled) {
+        // Create blink timer once; it runs for the whole duration of color-edit mode.
+        if (!m_colorEditBlinkTimer) {
+            m_colorEditBlinkTimer = new QTimer(this);
+            m_colorEditBlinkTimer->setInterval(250);
+            connect(m_colorEditBlinkTimer, &QTimer::timeout, this, [this]() {
+                m_colorEditBlinkOn = !m_colorEditBlinkOn;
+                // Fill overlay (owned)
+                if (m_colorEditHighlight)
+                    m_colorEditHighlight->setVisible(m_colorEditBlinkOn);
+                // Text items (borrowed — just toggle visibility)
+                for (QGraphicsItem *it : m_colorEditBlinkTargets)
+                    if (it && it->scene())
+                        it->setVisible(m_colorEditBlinkOn);
+            });
+        }
+        m_colorEditBlinkTimer->start();
         setCursor(Qt::PointingHandCursor);
         updateHoverHint(QStringLiteral("colorEdit:mode"),
-                        QStringLiteral("✏ Edit colors\n"
-                                       "Hover a card area then click to change its color.\n"
-                                       "Click the button again to exit edit mode."));
+                        QStringLiteral("✏ Color edit\n"
+                                       "Hover a card, then scroll ↕ to cycle properties.\n"
+                                       "Click to pick a color.  Esc to exit."));
     } else {
+        if (m_colorEditBlinkTimer)
+            m_colorEditBlinkTimer->stop();
         m_colorEditZoneField.clear();
         setCursor(Qt::OpenHandCursor);
         updateHoverHint(QString(), QString());
@@ -1651,23 +1786,209 @@ SceneTreeGraphicsWidget::colorZoneAt(const QPointF &scenePos) const
             if (m_scene) {
                 const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
                 if (node && node->type == SceneDocument::TreeNode::Variable) {
+                    // Detect precise text zone within the variable/parameter row.
+                    const QFont font = sceneTreeGraphicsFont();
+                    const QFontMetricsF metrics(font);
+                    const qreal nameW = metrics.horizontalAdvance(node->variableName);
+                    const QVector<ExpressionTextSpan> spans =
+                        expressionTextSpans(child.rect, node->variableExpression, metrics, nameW);
+                    for (const ExpressionTextSpan &span : spans) {
+                        if (span.rect.contains(scenePos)) {
+                            const QString fn = span.number
+                                ? QStringLiteral("numText") : QStringLiteral("mutedText");
+                            ColorZoneHit h{fn, span.number
+                                ? QStringLiteral("Number constant") : QStringLiteral("Formula"),
+                                span.rect, true, op, true};
+                            h.nodeId = child.nodeId;
+                            h.spanText = span.text;
+                            return h;
+                        }
+                    }
+                    // "=" label area → numLabelText
+                    const qreal eqLeft = child.rect.left() + 38.0 + nameW + 4.0;
+                    const QRectF eqRect(eqLeft, child.rect.top() + (VariableHeight - 16.0) * 0.5, 12.0, 16.0);
+                    if (eqRect.contains(scenePos)) {
+                        ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Label color"),
+                                        eqRect, true, op, true};
+                        h.nodeId = child.nodeId;
+                        return h;
+                    }
                     const QString label = node->isParameter
                         ? QStringLiteral("Parameter row")
                         : QStringLiteral("Variable row");
                     return {QStringLiteral("input"), label, child.rect, true, op, true};
                 }
+                if (node && node->type == SceneDocument::TreeNode::Primitive) {
+                    const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+                    if (shape) {
+                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                        const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
+                        const int count = controls.size();
+                        for (int i = 0; i < count; ++i) {
+                            const QRectF rowRect = shapeParameterControlRect(child.rect, i, count);
+                            if (!rowRect.contains(scenePos)) continue;
+                            const QRectF labelRect(rowRect.left(), rowRect.top(),
+                                                   PrimitiveParamLabelArea - 2.0, rowRect.height());
+                            if (labelRect.contains(scenePos)) {
+                                ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Param label"),
+                                               child.rect, true, op, true};
+                                h.nodeId = child.nodeId;
+                                return h;
+                            }
+                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea, rowRect.top(),
+                                                   rowRect.width() - PrimitiveParamLabelArea, rowRect.height());
+                            for (const ExpressionTextSpan &span :
+                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics)) {
+                                if (!span.rect.contains(scenePos)) continue;
+                                const QString fn = span.number
+                                    ? QStringLiteral("numText") : QStringLiteral("mutedText");
+                                ColorZoneHit h{fn, span.number ? QStringLiteral("Number constant")
+                                                               : QStringLiteral("Formula"),
+                                               span.rect, true, op, true};
+                                h.nodeId = child.nodeId;
+                                h.spanText = span.text;
+                                return h;
+                            }
+                        }
+                    }
+                }
+                if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
+                    const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
+                    if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
+                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                        QVector<ModuleCallParam> params;
+                        const QHash<QString, QString> overrides =
+                            resolveModuleArguments(node->moduleCallArguments, *modGroup);
+                        for (const SceneDocument::TreeNode &pChild : modGroup->children) {
+                            if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
+                                const QString expr = overrides.value(
+                                    pChild.variableName,
+                                    pChild.variableExpression.trimmed().isEmpty()
+                                        ? QString::number(pChild.variableValue)
+                                        : pChild.variableExpression.trimmed());
+                                params.append({pChild.id, pChild.variableName, expr});
+                            }
+                        }
+                        qreal x = child.rect.left() + 46.0
+                                  + metrics.horizontalAdvance(node->moduleName + QStringLiteral("("));
+                        for (int i = 0; i < params.size(); ++i) {
+                            x += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
+                            const QRectF exprRect(x, child.rect.top(),
+                                                   child.rect.right() - x, VariableHeight);
+                            for (const ExpressionTextSpan &span :
+                                     expressionSpansInTextRect(exprRect, params[i].expression, metrics)) {
+                                if (!span.rect.contains(scenePos)) continue;
+                                const QString fn = span.number
+                                    ? QStringLiteral("numText") : QStringLiteral("mutedText");
+                                ColorZoneHit h{fn, span.number ? QStringLiteral("Number constant")
+                                                               : QStringLiteral("Formula"),
+                                               span.rect, true, op, true};
+                                h.nodeId = child.nodeId;
+                                h.spanText = span.text;
+                                return h;
+                            }
+                            x += metrics.horizontalAdvance(params[i].expression);
+                            if (i < params.size() - 1)
+                                x += metrics.horizontalAdvance(QStringLiteral(", "));
+                        }
+                    }
+                }
             }
             return {QStringLiteral("card"), QStringLiteral("Card body"), child.rect, true, op, true};
         }
 
-        // Header zone (top GroupHeaderHeight px of the group card).
-        const QRectF hdr(best->rect.left(), best->rect.top(),
-                         best->rect.width(), GroupHeaderHeight);
-        if (hdr.contains(scenePos))
-            return {QStringLiteral("header"), QStringLiteral("Card header"), hdr, true, op, true};
+        // Header zone: left icon strip for vertical-header ops, top row for horizontal.
+        const QRectF hdr = isVerticalHeaderOperation(op)
+            ? QRectF(best->rect.left(), best->rect.top(),
+                     TransformIconWidth, best->rect.height())
+            : QRectF(best->rect.left(), best->rect.top(),
+                     best->rect.width(), GroupHeaderHeight);
+        if (hdr.contains(scenePos)) {
+            // For-loop header: detect precise text spans (numbers / formulas / label).
+            if (op == SceneDocument::TreeNode::For && m_scene) {
+                const SceneDocument::TreeNode *node = m_scene->treeNodeById(best->groupId);
+                const QString varName     = node ? forLoopVariableName(*node)     : QStringLiteral("i");
+                const QString rangeExpr   = node ? forLoopRangeExpression(*node)  : QStringLiteral("[0 : 1 : 3]");
+                const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                const QVector<ExpressionTextSpan> spans =
+                    forLoopRangeTextSpans(best->rect, varName, rangeExpr, metrics);
+                for (const ExpressionTextSpan &span : spans) {
+                    if (span.rect.contains(scenePos)) {
+                        const QString fn = span.number
+                            ? QStringLiteral("numText") : QStringLiteral("mutedText");
+                        ColorZoneHit h{fn, span.number
+                            ? QStringLiteral("Number constant") : QStringLiteral("Formula"),
+                            span.rect, true, op, true};
+                        h.nodeId = best->groupId;
+                        h.spanText = span.text;
+                        return h;
+                    }
+                }
+                // Prefix "for (x = " → numLabelText
+                const QString prefix = QStringLiteral("for (%1 = ").arg(varName);
+                const qreal textLeft = best->rect.left() + 30.0 + (PrimitiveIconSize - 4.0) + 10.0;
+                const QRectF prefixRect(textLeft, best->rect.top() + 7.0,
+                                        metrics.horizontalAdvance(prefix), 16.0);
+                if (prefixRect.contains(scenePos)) {
+                    ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Loop label"),
+                                    prefixRect, true, op, true};
+                    h.nodeId = best->groupId;
+                    return h;
+                }
+            }
+            ColorZoneHit h{QStringLiteral("header"), QStringLiteral("Card header"), hdr, true, op, true};
+            h.nodeId = best->groupId;
+            return h;
+        }
 
-        // Rest of the group body.
-        return {QStringLiteral("card"), QStringLiteral("Card body"), best->rect, true, op, true};
+        // Transform card body: detect axis label / value zones for direct text editing.
+        // Use full-font metrics (same as renderer + transformControlAt) so pill rects match exactly.
+        if (isVerticalHeaderOperation(op) && m_scene) {
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(best->groupId);
+            for (int axis = 0; axis < 3; ++axis) {
+                const QRectF rowRect = transformParameterControlRect(best->rect, axis, TransformHeaderWidth);
+                if (!rowRect.contains(scenePos))
+                    continue;
+                const QRectF labelRect(rowRect.left(), rowRect.top(),
+                                       TransformParamLabelArea - 2.0, rowRect.height());
+                if (labelRect.contains(scenePos)) {
+                    ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Axis label"),
+                                    best->rect, true, op, true};
+                    h.nodeId = best->groupId;
+                    return h;
+                }
+                if (!node) continue;
+                const QString expr = transformAxisExpression(*node, axis);
+                // Exact number pill hit via same function used by transformControlAt.
+                for (const ExpressionNumberControl &nc :
+                         transformParameterNumberControls(best->rect, axis, expr, metrics)) {
+                    if (nc.rect.contains(scenePos)) {
+                        ColorZoneHit h{QStringLiteral("numText"), QStringLiteral("Number constant"),
+                                        best->rect, true, op, true};
+                        h.nodeId = best->groupId;
+                        return h;
+                    }
+                }
+                // Formula / non-number text spans.
+                const QRectF textRect(rowRect.left() + TransformParamLabelArea, rowRect.top(),
+                                      rowRect.width() - TransformParamLabelArea, rowRect.height());
+                for (const ExpressionTextSpan &span : expressionSpansInTextRect(textRect, expr, metrics)) {
+                    if (!span.number && span.rect.contains(scenePos)) {
+                        ColorZoneHit h{QStringLiteral("mutedText"), QStringLiteral("Formula"),
+                                        best->rect, true, op, true};
+                        h.nodeId = best->groupId;
+                        return h;
+                    }
+                }
+            }
+        }
+
+        // Rest of the group body — also carry the group ID for blink lookups.
+        ColorZoneHit cardHit{QStringLiteral("card"), QStringLiteral("Card body"),
+                              best->rect, true, op, true};
+        cardHit.nodeId = best->groupId;
+        return cardHit;
     }
 
     return {QStringLiteral("canvas"), QStringLiteral("Canvas background"), QRectF(), false,
@@ -1683,49 +2004,254 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
     const ColorZoneHit hit = colorZoneAt(scenePos);
     m_colorEditZoneField = hit.fieldName;
 
-    // Gold outline + subtle fill over the detected zone.
-    if (hit.valid && !hit.rect.isNull()) {
-        const qreal lineW = qMax(1.0, 2.0 / qMax(0.001, qAbs(transform().m11())));
-        auto *overlay = m_graphicsScene->addRect(
-            hit.rect.adjusted(lineW * 0.5, lineW * 0.5, -lineW * 0.5, -lineW * 0.5),
-            QPen(QColor(255, 195, 40, 220), lineW),
-            QBrush(QColor(255, 210, 70, 38)));
-        overlay->setZValue(8800.0);
-        m_colorEditHighlight = overlay;
+    // Reset prop index when hovering a different zone.
+    const bool sameZone = (hit.fieldName   == m_colorEditCurrentZone.fieldName   &&
+                            hit.hasOperation == m_colorEditCurrentZone.hasOperation &&
+                            hit.operation    == m_colorEditCurrentZone.operation);
+    if (!sameZone) {
+        m_colorEditPropIndex   = 0;
+        m_colorEditCurrentZone = hit;
     }
 
-    const QString prefix = QStringLiteral("✏ Edit colors • ");
-    if (hit.valid) {
-        // Include the operation name so the user knows which card type will be affected.
-        QString hintText = prefix + hit.label;
-        if (hit.hasOperation) {
-            // Map operation to a display name.
-            static const QHash<int, QString> opNames = {
-                {(int)SceneDocument::TreeNode::Union,        QStringLiteral("Union")},
-                {(int)SceneDocument::TreeNode::Difference,   QStringLiteral("Difference")},
-                {(int)SceneDocument::TreeNode::Intersection, QStringLiteral("Intersection")},
-                {(int)SceneDocument::TreeNode::Module,       QStringLiteral("Module")},
-                {(int)SceneDocument::TreeNode::Translate,    QStringLiteral("Translate")},
-                {(int)SceneDocument::TreeNode::Rotate,       QStringLiteral("Rotate")},
-                {(int)SceneDocument::TreeNode::Scale,        QStringLiteral("Scale")},
-                {(int)SceneDocument::TreeNode::Mirror,       QStringLiteral("Mirror")},
-                {(int)SceneDocument::TreeNode::Hull,         QStringLiteral("Hull")},
-                {(int)SceneDocument::TreeNode::For,          QStringLiteral("For")},
-                {(int)SceneDocument::TreeNode::Scene,        QStringLiteral("Scene")},
-            };
-            const QString opName = opNames.value(static_cast<int>(hit.operation), QStringLiteral("Group"));
-            hintText += QStringLiteral(" [") + opName + QStringLiteral("]");
+    const QVector<ColorPropDef> props = propsForHit(hit);
+    const int idx   = props.isEmpty() ? 0 : qBound(0, m_colorEditPropIndex, props.size() - 1);
+    const bool hasProp = !props.isEmpty();
+    const ColorPropDef prop = hasProp ? props.at(idx) : ColorPropDef{};
+
+    if (hasProp && hit.valid && !hit.rect.isNull()) {
+        const QColor cur = getColorForProp(prop, hit);
+        const QColor flash(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(),
+                           prop.isText ? cur.alpha() : 218);
+
+        if (prop.isText
+            && hit.fieldName == QLatin1String("header")
+            && !isVerticalHeaderOperation(hit.operation))
+        {
+            // Horizontal header text: stamp an inverted-color text item on top of the label.
+            const QFont font = sceneTreeGraphicsFont();
+            const QFontMetricsF metrics(font);
+            const qreal iconSize = (hit.operation == SceneDocument::TreeNode::Module)
+                ? PrimitiveIconSize - 6.0 : PrimitiveIconSize - 4.0;
+            const qreal labelLeft = hit.rect.left() + 30.0 + iconSize + 10.0;
+            // Vertical centering mirrors QPainter::drawText(rect, AlignVCenter):
+            // topOfText = rectTop + (rectH - fm.height()) / 2
+            const qreal textTop = hit.rect.top() + 7.0 + (16.0 - metrics.height()) * 0.5;
+
+            QString headerLabel = labelForOperation(hit.operation);
+            if (hit.operation == SceneDocument::TreeNode::Module && m_scene && hit.nodeId) {
+                const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
+                if (node && !node->moduleName.trimmed().isEmpty())
+                    headerLabel += QStringLiteral(" ") + node->moduleName.trimmed();
+            }
+            auto *overlay = new QGraphicsSimpleTextItem(headerLabel);
+            overlay->setFont(font);
+            overlay->setPos(QPointF(labelLeft, textTop));
+            overlay->setBrush(QBrush(flash));
+            overlay->setZValue(8801.0);
+            m_graphicsScene->addItem(overlay);
+            overlay->setVisible(m_colorEditBlinkOn);
+            m_colorEditBlinkTargets.append(overlay);
+        } else if ((prop.id == QLatin1String("numLabelText")
+                    || prop.id == QLatin1String("numText")
+                    || prop.id == QLatin1String("mutedText")
+                    || prop.id == QLatin1String("numFill")
+                    || prop.id == QLatin1String("numBorder"))
+                   && hit.hasOperation && isVerticalHeaderOperation(hit.operation)
+                   && hit.rect.height() > 3.0 * VariableHeight)
+        {
+            // Per-axis row blink. Pill rects use the full-size scene font — same as the renderer
+            // and transformControlAt — so overlays are pixel-identical to the rendered pills.
+            const QFont font = sceneTreeGraphicsFont();
+            QFont valueFont = font;
+            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
+            const QFontMetricsF metrics(font);  // full font for pill/span rect computation
+            const QFontMetricsF vfm(valueFont); // value-font metrics for text-item vertical centering
+            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
+            static const QString xyzLabels[3] = {
+                QStringLiteral("X ="), QStringLiteral("Y ="), QStringLiteral("Z =")};
+            static const QString rgbLabels[3] = {
+                QStringLiteral("R ="), QStringLiteral("G ="), QStringLiteral("B =")};
+            const QString *rowLabels = (hit.operation == SceneDocument::TreeNode::Color)
+                                       ? rgbLabels : xyzLabels;
+            const SceneDocument::TreeNode *groupNode = (hit.nodeId && m_scene)
+                ? m_scene->treeNodeById(hit.nodeId) : nullptr;
+            for (int axis = 0; axis < 3; ++axis) {
+                const QRectF rowRect = transformParameterControlRect(hit.rect, axis, TransformHeaderWidth);
+                const QRectF labelRect(rowRect.left(), rowRect.top(),
+                                       TransformParamLabelArea - 2.0, rowRect.height());
+                if (prop.id == QLatin1String("numLabelText")) {
+                    auto *lbl = new QGraphicsSimpleTextItem(rowLabels[axis]);
+                    lbl->setFont(valueFont);
+                    const qreal ty = labelRect.top() + (labelRect.height() - vfm.height()) * 0.5;
+                    lbl->setPos(labelRect.left(), ty);
+                    lbl->setBrush(QBrush(flash));
+                    lbl->setZValue(8801.0);
+                    m_graphicsScene->addItem(lbl);
+                    lbl->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(lbl);
+                } else {
+                    const QString expr = groupNode ? transformAxisExpression(*groupNode, axis) : QString();
+                    const QRectF textRect(rowRect.left() + TransformParamLabelArea, rowRect.top(),
+                                          rowRect.width() - TransformParamLabelArea, rowRect.height());
+                    // numFill/numBorder/numText target number spans; mutedText targets formula spans.
+                    const bool wantNumber = (prop.id != QLatin1String("mutedText"));
+                    for (const ExpressionTextSpan &span :
+                             expressionSpansInTextRect(textRect, expr, metrics)) {
+                        if (span.number != wantNumber) continue;
+                        if (prop.id == QLatin1String("numFill")) {
+                            QPainterPath path;
+                            path.addRoundedRect(span.rect, r, r);
+                            auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
+                            it->setZValue(8800.0);
+                            it->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(it);
+                        } else if (prop.id == QLatin1String("numBorder")) {
+                            QPainterPath path;
+                            path.addRoundedRect(span.rect, r, r);
+                            QPen borderPen(flash, 2.0);
+                            borderPen.setCosmetic(true);
+                            auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
+                            it->setZValue(8800.0);
+                            it->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(it);
+                        } else {
+                            // numText / mutedText — blink the text itself in the inverted colour.
+                            auto *lbl = new QGraphicsSimpleTextItem(span.text);
+                            lbl->setFont(valueFont);
+                            const qreal tx = span.number
+                                ? span.rect.left() + (span.rect.width() - vfm.horizontalAdvance(span.text)) * 0.5
+                                : span.rect.left();
+                            const qreal ty = span.rect.top() + (span.rect.height() - vfm.height()) * 0.5;
+                            lbl->setPos(tx, ty);
+                            lbl->setBrush(QBrush(flash));
+                            lbl->setZValue(8801.0);
+                            m_graphicsScene->addItem(lbl);
+                            lbl->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(lbl);
+                        }
+                    }
+                }
+            }
+        } else if ((prop.id == QLatin1String("mutedText") || prop.id == QLatin1String("numText"))
+                   && !hit.spanText.isEmpty())
+        {
+            // Direct span-text hit: blink the actual text in the inverted colour so the
+            // text itself flashes rather than a background box.
+            const QFont font = sceneTreeGraphicsFont();
+            QFont valueFont = font;
+            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
+            const QFontMetricsF vfm(valueFont);
+            auto *lbl = new QGraphicsSimpleTextItem(hit.spanText);
+            lbl->setFont(valueFont);
+            // Mirror the renderer: numbers AlignHCenter, formula AlignLeft — both AlignVCenter.
+            const qreal tx = (prop.id == QLatin1String("numText"))
+                ? hit.rect.left() + (hit.rect.width() - vfm.horizontalAdvance(hit.spanText)) * 0.5
+                : hit.rect.left();
+            const qreal ty = hit.rect.top() + (hit.rect.height() - vfm.height()) * 0.5;
+            lbl->setPos(tx, ty);
+            lbl->setBrush(QBrush(flash));
+            lbl->setZValue(8801.0);
+            m_graphicsScene->addItem(lbl);
+            lbl->setVisible(m_colorEditBlinkOn);
+            m_colorEditBlinkTargets.append(lbl);
+        } else {
+            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
+            QPainterPath flashPath;
+            QGraphicsPathItem *overlay = nullptr;
+
+            if (prop.id == QLatin1String("border") || prop.id == QLatin1String("numBorder")) {
+                // Outline only — card border / pill border strokes the perimeter.
+                flashPath.addRoundedRect(hit.rect, r, r);
+                QPen borderPen(flash, 3.0);
+                borderPen.setCosmetic(true);
+                overlay = m_graphicsScene->addPath(flashPath, borderPen, Qt::NoBrush);
+            } else {
+                // Card fill and everything else — filled rect over the zone.
+                flashPath.addRoundedRect(hit.rect, r, r);
+                overlay = m_graphicsScene->addPath(flashPath, Qt::NoPen, QBrush(flash));
+            }
+
+            overlay->setZValue(8800.0);
+            overlay->setVisible(m_colorEditBlinkOn);
+            m_colorEditHighlight = overlay;
         }
-        hintText += QStringLiteral(" — click to edit colors");
-        updateHoverHint(QStringLiteral("colorEdit:%1").arg(hit.fieldName), hintText);
+    }
+
+    // Canvas-zone visuals: grid blink or viewport-edge frame.
+    if (hasProp && hit.fieldName == QLatin1String("canvas")) {
+        const QColor cur = getColorForProp(prop, hit);
+        if (cur.isValid()) {
+            const QColor inv(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(), 200);
+            if (prop.id == QLatin1String("minorGrid") || prop.id == QLatin1String("majorGrid")) {
+                const qreal gridSize = (prop.id == QLatin1String("minorGrid")) ? 24.0 : 96.0;
+                const QRectF vis = mapToScene(viewport()->rect()).boundingRect();
+                auto *gi = new GridBlinkItem(vis, gridSize, inv);
+                gi->setZValue(8800.0);
+                m_graphicsScene->addItem(gi);
+                gi->setVisible(m_colorEditBlinkOn);
+                m_colorEditBlinkTargets.append(gi);
+            } else {
+                // Canvas background: thick colored border framing the viewport.
+                const qreal w = viewport() ? viewport()->width()  : 640.0;
+                const qreal h = viewport() ? viewport()->height() : 480.0;
+                constexpr qreal kInset = 4.0;
+                auto *frame = m_graphicsScene->addRect(
+                    QRectF(kInset, kInset, w - kInset * 2, h - kInset * 2),
+                    QPen(inv, 6),
+                    Qt::NoBrush);
+                frame->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+                frame->setPos(mapToScene(QPoint(0, 0)));
+                frame->setZValue(8800.0);
+                frame->setVisible(m_colorEditBlinkOn);
+                m_colorEditBlinkTargets.append(frame);
+            }
+        }
+    }
+
+    // Hint text.
+    if (hasProp) {
+        const QColor cur = getColorForProp(prop, hit);
+        const QString hexStr = cur.isValid()
+            ? (cur.alpha() < 255
+                ? QStringLiteral("#") + QString::number(cur.rgba(), 16).rightJustified(8, QLatin1Char('0')).toUpper()
+                : cur.name().toUpper())
+            : QStringLiteral("—");
+
+        QString zoneLine;
+        if (hit.hasOperation)
+            zoneLine = colorEditOpName(hit.operation) + QStringLiteral("  ") + hit.label;
+        else if (hit.fieldName == QLatin1String("input"))
+            zoneLine = hit.label;
+        else
+            zoneLine = QStringLiteral("Canvas");
+
+        const QString navLine = props.size() > 1
+            ? QStringLiteral("↕ ") + QString::number(idx + 1) + QStringLiteral("/")
+              + QString::number(props.size()) + QStringLiteral("  ·  click to pick  ·  Esc exit")
+            : QStringLiteral("click to pick  ·  Esc exit");
+
+        updateHoverHint(QStringLiteral("colorEdit:%1").arg(hit.fieldName),
+                        QStringLiteral("✏ ") + zoneLine
+                        + QStringLiteral("\n") + prop.label + QStringLiteral("   ") + hexStr
+                        + QStringLiteral("\n") + navLine);
     } else {
-        updateHoverHint(QStringLiteral("colorEdit:canvas"),
-                        prefix + QStringLiteral("Canvas — click to change background color"));
+        updateHoverHint(QStringLiteral("colorEdit:none"),
+                        QStringLiteral("✏ Color edit\nHover a card to inspect its colors."));
     }
 }
 
 void SceneTreeGraphicsWidget::clearColorEditHighlight()
 {
+    // Delete owned text overlay items.
+    for (QGraphicsItem *it : m_colorEditBlinkTargets) {
+        if (it && m_graphicsScene) {
+            m_graphicsScene->removeItem(it);
+            delete it;
+        }
+    }
+    m_colorEditBlinkTargets.clear();
+
+    // Delete the owned inverted-fill overlay.
     if (m_colorEditHighlight && m_graphicsScene) {
         m_graphicsScene->removeItem(m_colorEditHighlight);
         delete m_colorEditHighlight;
@@ -1736,127 +2262,211 @@ void SceneTreeGraphicsWidget::clearColorEditHighlight()
 void SceneTreeGraphicsWidget::handleColorEditClick(const QPointF &scenePos)
 {
     const ColorZoneHit hit = colorZoneAt(scenePos);
-
-    // ── Canvas background click ───────────────────────────────────────────────
-    if (!hit.hasOperation) {
-        TreeAppearanceTheme theme = SceneTreePalette::customTheme();
-        const QColor chosen = QColorDialog::getColor(theme.canvas, this,
-                                                      QStringLiteral("Canvas background"),
-                                                      QColorDialog::ShowAlphaChannel);
-        if (chosen.isValid()) {
-            theme.canvas = chosen;
-            SceneTreePalette::setCustomTheme(theme);
-            refresh();
-            updateToolbarOverlay();
-            updateColorEditHighlight(scenePos);
-        }
+    const QVector<ColorPropDef> props = propsForHit(hit);
+    if (props.isEmpty())
         return;
+
+    const int idx = qBound(0, m_colorEditPropIndex, props.size() - 1);
+    const ColorPropDef &prop = props.at(idx);
+    const QColor current = getColorForProp(prop, hit);
+
+    const QString title = hit.hasOperation
+        ? colorEditOpName(hit.operation) + QStringLiteral(" — ") + prop.label
+        : prop.label;
+
+    const QColor chosen = QColorDialog::getColor(
+        current.isValid() ? current : Qt::white,
+        this, title, QColorDialog::ShowAlphaChannel);
+    if (!chosen.isValid())
+        return;
+
+    setColorForProp(prop, hit, chosen);
+    refresh();
+    updateToolbarOverlay();
+    updateColorEditHighlight(scenePos);
+    emit inlineThemeEdited();
+}
+
+void SceneTreeGraphicsWidget::handleColorEditWheel(const QPointF &scenePos, int angleDelta)
+{
+    const ColorZoneHit hit = colorZoneAt(scenePos);
+    const QVector<ColorPropDef> props = propsForHit(hit);
+    if (props.isEmpty())
+        return;
+
+    // Reset index when the zone changes.
+    const bool sameZone = (hit.fieldName   == m_colorEditCurrentZone.fieldName   &&
+                            hit.hasOperation == m_colorEditCurrentZone.hasOperation &&
+                            hit.operation    == m_colorEditCurrentZone.operation);
+    if (!sameZone) {
+        m_colorEditPropIndex   = 0;
+        m_colorEditCurrentZone = hit;
     }
 
-    // ── Group card click — per-operation color menu ──────────────────────────
-    const SceneDocument::TreeNode::Operation op = hit.operation;
+    // Scroll up (positive delta) → previous property; scroll down → next.
+    const int dir = angleDelta > 0 ? -1 : 1;
+    m_colorEditPropIndex = (m_colorEditPropIndex + dir + props.size()) % props.size();
+    m_colorEditCurrentZone = hit;
 
-    // Build the operation display name.
-    static const QHash<int, QString> opDisplayNames = {
-        {(int)SceneDocument::TreeNode::Union,        QStringLiteral("Union")},
-        {(int)SceneDocument::TreeNode::Difference,   QStringLiteral("Difference")},
-        {(int)SceneDocument::TreeNode::Intersection, QStringLiteral("Intersection")},
-        {(int)SceneDocument::TreeNode::Module,       QStringLiteral("Module")},
-        {(int)SceneDocument::TreeNode::Translate,    QStringLiteral("Translate")},
-        {(int)SceneDocument::TreeNode::Rotate,       QStringLiteral("Rotate")},
-        {(int)SceneDocument::TreeNode::Scale,        QStringLiteral("Scale")},
-        {(int)SceneDocument::TreeNode::Mirror,       QStringLiteral("Mirror")},
-        {(int)SceneDocument::TreeNode::Hull,         QStringLiteral("Hull")},
-        {(int)SceneDocument::TreeNode::For,          QStringLiteral("For")},
-        {(int)SceneDocument::TreeNode::Scene,        QStringLiteral("Scene")},
+    updateColorEditHighlight(scenePos);
+    updateToolbarOverlay();
+}
+
+// ── Color-edit helpers ────────────────────────────────────────────────────────
+
+static QString colorEditOpName(SceneDocument::TreeNode::Operation op)
+{
+    switch (op) {
+    case SceneDocument::TreeNode::Union:        return QStringLiteral("Union");
+    case SceneDocument::TreeNode::Difference:   return QStringLiteral("Difference");
+    case SceneDocument::TreeNode::Intersection: return QStringLiteral("Intersection");
+    case SceneDocument::TreeNode::Module:       return QStringLiteral("Module");
+    case SceneDocument::TreeNode::Translate:    return QStringLiteral("Translate");
+    case SceneDocument::TreeNode::Rotate:       return QStringLiteral("Rotate");
+    case SceneDocument::TreeNode::Scale:        return QStringLiteral("Scale");
+    case SceneDocument::TreeNode::Mirror:       return QStringLiteral("Mirror");
+    case SceneDocument::TreeNode::Hull:         return QStringLiteral("Hull");
+    case SceneDocument::TreeNode::For:          return QStringLiteral("For");
+    case SceneDocument::TreeNode::Scene:        return QStringLiteral("Scene");
+    case SceneDocument::TreeNode::Minkowski:    return QStringLiteral("Minkowski");
+    case SceneDocument::TreeNode::Color:        return QStringLiteral("Color");
+    }
+    return QStringLiteral("Group");
+}
+
+QVector<SceneTreeGraphicsWidget::ColorPropDef>
+SceneTreeGraphicsWidget::propsForHit(const ColorZoneHit &hit) const
+{
+    // Direct text zone hits (from precise hover over label/constant/formula).
+    if (hit.fieldName == QLatin1String("numLabelText"))
+        return {{QStringLiteral("numLabelText"), QStringLiteral("Label text color (X=, Y=, Z=)"), true, true}};
+    if (hit.fieldName == QLatin1String("numText"))
+        return {
+            {QStringLiteral("numText"),   QStringLiteral("Number text color"),  true,  true},
+            {QStringLiteral("numFill"),   QStringLiteral("Number pill fill"),   false, true},
+            {QStringLiteral("numBorder"), QStringLiteral("Number pill border"), false, true},
+        };
+    if (hit.fieldName == QLatin1String("mutedText"))
+        return {{QStringLiteral("mutedText"), QStringLiteral("Expression color"), true, true}};
+
+    if (hit.fieldName == QLatin1String("header")) {
+        if (hit.hasOperation && isVerticalHeaderOperation(hit.operation))
+            return {{QStringLiteral("header"), QStringLiteral("Header fill"), false, false}};
+        return {
+            {QStringLiteral("header"), QStringLiteral("Header fill"),     false, false},
+            {QStringLiteral("text"),   QStringLiteral("Card text color"), true,  false},
+        };
+    }
+    if (hit.fieldName == QLatin1String("card")) {
+        QVector<ColorPropDef> props = {
+            {QStringLiteral("card"),   QStringLiteral("Card fill"),   false, false},
+            {QStringLiteral("border"), QStringLiteral("Card border"), false, false},
+        };
+        // Number pills only exist on transform / for-loop cards.
+        using Op = SceneDocument::TreeNode;
+        if (hit.hasOperation && (isVerticalHeaderOperation(hit.operation)
+                              || hit.operation == Op::For)) {
+            props << ColorPropDef{QStringLiteral("numLabelText"), QStringLiteral("Label text (X=, Y=)"), true,  true};
+            props << ColorPropDef{QStringLiteral("numText"),     QStringLiteral("Constant values"),      true,  true};
+            props << ColorPropDef{QStringLiteral("mutedText"),   QStringLiteral("Expression color"),     true,  true};
+        }
+        return props;
+    }
+    if (hit.fieldName == QLatin1String("input"))
+        return {
+            {QStringLiteral("input"), QStringLiteral("Variable row fill"), false, true},
+        };
+    // Canvas / default — only the three properties visible on an empty canvas
+    return {
+        {QStringLiteral("canvas"),    QStringLiteral("Canvas background"), false, true},
+        {QStringLiteral("minorGrid"), QStringLiteral("Minor grid"),        false, true},
+        {QStringLiteral("majorGrid"), QStringLiteral("Major grid"),        false, true},
     };
-    const QString opName = opDisplayNames.value(static_cast<int>(op), QStringLiteral("Group"));
+}
 
-    // Resolve current colors (override or derived default).
+QColor SceneTreeGraphicsWidget::getColorForProp(const ColorPropDef &prop,
+                                                 const ColorZoneHit &hit) const
+{
     const auto pt = static_cast<SceneTreePalette::Theme>(m_treeTheme);
-    const OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
-    const QColor currentCard   = pal.card.isValid()   ? pal.card   : SceneTreePalette::groupFill(op, 0, pt);
-    const QColor currentHeader = pal.header.isValid() ? pal.header : SceneTreePalette::headerFill(currentCard, pt);
-    const QColor currentText   = pal.text.isValid()   ? pal.text   : SceneTreePalette::textPrimary(pt);
-    const QColor currentBorder = pal.border.isValid() ? pal.border : SceneTreePalette::cardBorder(op, currentCard, pt);
-    const QColor currentActive = pal.numBorderActive.isValid() ? pal.numBorderActive : SceneTreePalette::pillBorderActive();
-    const QColor currentActiveFill = pal.numFillActive.isValid() ? pal.numFillActive : SceneTreePalette::pillFillActive();
+    if (!prop.isGlobal && hit.hasOperation) {
+        const auto op = hit.operation;
+        const OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
+        const QColor cardFill = pal.card.isValid()
+            ? pal.card : SceneTreePalette::groupFill(op, 0, pt);
+        if (prop.id == QLatin1String("header"))
+            return pal.header.isValid() ? pal.header : SceneTreePalette::groupHeaderColor(op, cardFill, pt);
+        if (prop.id == QLatin1String("text"))
+            return pal.text.isValid() ? pal.text : SceneTreePalette::cardTextPrimary(op, pt);
+        if (prop.id == QLatin1String("card"))
+            return cardFill;
+        if (prop.id == QLatin1String("border"))
+            return pal.border.isValid() ? pal.border : SceneTreePalette::cardBorder(op, cardFill, pt);
+        if (prop.id == QLatin1String("numBorderActive"))
+            return pal.numBorderActive.isValid() ? pal.numBorderActive : SceneTreePalette::cardPillBorderActive(op);
+        if (prop.id == QLatin1String("numFillActive"))
+            return pal.numFillActive.isValid() ? pal.numFillActive : SceneTreePalette::cardPillFillActive(op);
+    }
+    const TreeAppearanceTheme t = SceneTreePalette::customTheme();
+    if (prop.id == QLatin1String("canvas"))          return t.canvas;
+    if (prop.id == QLatin1String("minorGrid"))        return t.minorGrid;
+    if (prop.id == QLatin1String("majorGrid"))        return t.majorGrid;
+    if (prop.id == QLatin1String("text"))             return t.text;
+    if (prop.id == QLatin1String("mutedText"))        return t.mutedText;
+    if (prop.id == QLatin1String("accent"))           return t.accent;
+    if (prop.id == QLatin1String("glassTop"))         return t.glassTop;
+    if (prop.id == QLatin1String("glassBottom"))      return t.glassBottom;
+    if (prop.id == QLatin1String("glassBorder"))      return t.glassBorder;
+    if (prop.id == QLatin1String("card"))             return t.card;
+    if (prop.id == QLatin1String("header"))           return t.header;
+    if (prop.id == QLatin1String("input"))            return t.input;
+    if (prop.id == QLatin1String("numFill"))          return t.numFill;
+    if (prop.id == QLatin1String("numBorder"))        return t.numBorder;
+    if (prop.id == QLatin1String("numText"))          return t.numText;
+    if (prop.id == QLatin1String("numLabelText"))     return t.numLabelText;
+    if (prop.id == QLatin1String("numBorderActive"))  return t.numBorderActive;
+    if (prop.id == QLatin1String("numFillActive"))    return t.numFillActive;
+    return QColor();
+}
 
-    // Helper: add a color-picking action with a swatch icon.
-    QMenu menu(this);
-
-    // Title (non-interactive).
-    auto *titleAction = menu.addAction(QStringLiteral("✏ ") + opName + QStringLiteral(" colors"));
-    titleAction->setEnabled(false);
-    menu.addSeparator();
-
-    const auto addColorEntry = [&](const QString &label, const QColor &current,
-                                   std::function<void(const QColor &)> apply)
-    {
-        QPixmap swatch(14, 14);
-        swatch.fill(current.isValid() ? QColor(current.red(), current.green(), current.blue()) : Qt::gray);
-        auto *act = menu.addAction(QIcon(swatch), label);
-        QObject::connect(act, &QAction::triggered, this, [this, current, opName, label, apply]() {
-            const QColor chosen = QColorDialog::getColor(current, this,
-                                                          opName + QStringLiteral(" — ") + label,
-                                                          QColorDialog::ShowAlphaChannel);
-            if (chosen.isValid())
-                apply(chosen);
-        });
-    };
-
-    addColorEntry(QStringLiteral("Card body"), currentCard, [this, op, &scenePos](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.card = c;
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    addColorEntry(QStringLiteral("Header"), currentHeader, [this, op, &scenePos](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.header = c;
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    addColorEntry(QStringLiteral("Text"), currentText, [this, op, &scenePos](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.text = c;
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    addColorEntry(QStringLiteral("Border"), currentBorder, [this, op, &scenePos](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.border = c;
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    menu.addSeparator();
-    addColorEntry(QStringLiteral("Active highlight"), currentActive, [this, op, &scenePos, currentActiveFill](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.numBorderActive = c;
-        // Also update fill as a 50%-alpha version of the same hue if not already customised.
-        if (!p.numFillActive.isValid())
-            p.numFillActive = QColor(c.red(), c.green(), c.blue(), 128);
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    addColorEntry(QStringLiteral("Highlight fill"), currentActiveFill, [this, op, &scenePos](const QColor &c) {
-        OperationCardPalette p = SceneTreePalette::operationCardPalette(op);
-        p.numFillActive = c;
-        SceneTreePalette::setOperationCardPalette(op, p);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-    menu.addSeparator();
-
-    // Reset this operation to defaults.
-    auto *resetAct = menu.addAction(QStringLiteral("Reset ") + opName + QStringLiteral(" to default"));
-    QObject::connect(resetAct, &QAction::triggered, this, [this, op, &scenePos]() {
-        TreeAppearanceTheme theme = SceneTreePalette::customTheme();
-        theme.operationCards.remove(static_cast<int>(op));
-        SceneTreePalette::setCustomTheme(theme);
-        refresh(); updateToolbarOverlay(); updateColorEditHighlight(scenePos);
-    });
-
-    menu.exec(QCursor::pos());
+void SceneTreeGraphicsWidget::setColorForProp(const ColorPropDef &prop,
+                                               const ColorZoneHit &hit,
+                                               const QColor &color)
+{
+    if (!prop.isGlobal && hit.hasOperation) {
+        const auto op = hit.operation;
+        OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
+        bool applied = false;
+        if (prop.id == QLatin1String("header"))          { pal.header          = color; applied = true; }
+        else if (prop.id == QLatin1String("text"))       { pal.text            = color; applied = true; }
+        else if (prop.id == QLatin1String("card"))       { pal.card            = color; applied = true; }
+        else if (prop.id == QLatin1String("border"))     { pal.border          = color; applied = true; }
+        else if (prop.id == QLatin1String("numBorderActive")) { pal.numBorderActive = color; applied = true; }
+        else if (prop.id == QLatin1String("numFillActive"))   { pal.numFillActive   = color; applied = true; }
+        if (applied) {
+            SceneTreePalette::setOperationCardPalette(op, pal);
+            return;
+        }
+    }
+    TreeAppearanceTheme t = SceneTreePalette::customTheme();
+    if (prop.id == QLatin1String("canvas"))          t.canvas          = color;
+    else if (prop.id == QLatin1String("minorGrid"))  t.minorGrid       = color;
+    else if (prop.id == QLatin1String("majorGrid"))  t.majorGrid       = color;
+    else if (prop.id == QLatin1String("text"))       t.text            = color;
+    else if (prop.id == QLatin1String("mutedText"))  t.mutedText       = color;
+    else if (prop.id == QLatin1String("accent"))     t.accent          = color;
+    else if (prop.id == QLatin1String("glassTop"))   t.glassTop        = color;
+    else if (prop.id == QLatin1String("glassBottom"))t.glassBottom     = color;
+    else if (prop.id == QLatin1String("glassBorder"))t.glassBorder     = color;
+    else if (prop.id == QLatin1String("card"))       t.card            = color;
+    else if (prop.id == QLatin1String("header"))     t.header          = color;
+    else if (prop.id == QLatin1String("input"))      t.input           = color;
+    else if (prop.id == QLatin1String("numFill"))    t.numFill         = color;
+    else if (prop.id == QLatin1String("numBorder"))  t.numBorder       = color;
+    else if (prop.id == QLatin1String("numText"))    t.numText         = color;
+    else if (prop.id == QLatin1String("numLabelText"))t.numLabelText   = color;
+    else if (prop.id == QLatin1String("numBorderActive"))t.numBorderActive = color;
+    else if (prop.id == QLatin1String("numFillActive"))  t.numFillActive   = color;
+    SceneTreePalette::setCustomTheme(t);
 }
 
 // ── End of color-edit section ─────────────────────────────────────────────────
@@ -1887,7 +2497,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     constexpr qreal LocalOverlayZ = 10000.0;
 
     const int n = SceneTreePalette::ThemeCount;
-    const qreal panelW = n * (SwatchR * 2.0) + (n - 1) * SwatchGap + PadH * 2.0;
+    const qreal panelW = n * (SwatchR * 2.0) + (n - 1) * SwatchGap + PadH * 2.0; // = 123
     const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
 
     const QRectF panelLocal(0.0, 0.0, panelW, panelH);
@@ -1963,96 +2573,57 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         m_toolbarItems.append(circle);
     }
 
-    // ── Color-edit mode toggle button ─────────────────────────────────────────
-    // A small "✏ Colors" button to the right of the swatch panel, with the
-    // same glass style.  When active it gets a warm gold outline.
+    // ── Standalone vertical toggle for color-edit mode ───────────────────────
     {
-        constexpr qreal BtnGap  = 6.0;   // gap between swatch panel right edge and button
-        constexpr qreal BtnPadH = 8.0;
+        constexpr qreal ToggleGap = 7.0;   // gap from swatch panel right edge
+        constexpr qreal TW = ColorEditToggleItem::kW;
+        constexpr qreal TH = ColorEditToggleItem::kH;
 
-        // Measure the button label.
-        const QString btnLabel = m_colorEditMode
-            ? QStringLiteral("✏ Colors ✓")   // ✏ Colors ✓
-            : QStringLiteral("✏ Colors");           // ✏ Colors
+        // Centre the toggle vertically with the swatch panel.
+        const qreal toggleVpX = 12.0 + panelW + ToggleGap;
+        const qreal toggleVpY = viewportHeight - BottomGap - panelH * 0.5 - TH * 0.5;
+        const QPointF toggleTopLeft = scenePoint(toggleVpX, toggleVpY);
 
-        QFont btnFont = sceneTreeGraphicsFont();
-        btnFont.setPointSizeF(qMax(7.5, btnFont.pointSizeF() - 0.5));
-        const QFontMetricsF fm(btnFont);
-        const qreal textW = fm.horizontalAdvance(btnLabel);
-        const qreal btnW  = textW + BtnPadH * 2.0;
-        const qreal btnH  = panelH;   // same height as swatch panel
+        // Drop shadow (rounded pill, offset slightly).
+        QPainterPath shadowPath;
+        shadowPath.addRoundedRect(QRectF(1.5, 2.5, TW, TH), TW * 0.5, TW * 0.5);
+        auto *toggleShadow = m_graphicsScene->addPath(shadowPath,
+            Qt::NoPen, QBrush(QColor(0, 0, 0, darkGlass ? 85 : 28)));
+        toggleShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        toggleShadow->setAcceptedMouseButtons(Qt::NoButton);
+        toggleShadow->setPos(toggleTopLeft);
+        toggleShadow->setZValue(LocalOverlayZ - 2.0);
+        toggleShadow->setOpacity(darkGlass ? 0.62 : 0.38);
+        m_toolbarItems.append(toggleShadow);
 
-        // Position: immediately to the right of the swatch panel.
-        const QPointF btnTopLeft = scenePoint(12.0 + panelW + BtnGap,
-                                               viewportHeight - BottomGap - btnH);
-        const QRectF  btnLocal(0.0, 0.0, btnW, btnH);
-
-        // Shadow.
-        auto *btnShadow = m_graphicsScene->addRect(btnLocal.translated(2.0, 3.0),
-                                                    Qt::NoPen,
-                                                    QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
-        btnShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        btnShadow->setAcceptedMouseButtons(Qt::NoButton);
-        btnShadow->setPos(btnTopLeft);
-        btnShadow->setZValue(LocalOverlayZ - 2.0);
-        btnShadow->setOpacity(darkGlass ? 0.65 : 0.40);
-        m_toolbarItems.append(btnShadow);
-
-        // Panel background — highlighted when active.
-        QPainterPath btnPath;
-        btnPath.addRoundedRect(btnLocal, CornerRadius, CornerRadius);
-        const QColor btnBorder = m_colorEditMode
-            ? QColor(255, 195, 40, 230)
-            : (customGlass ? customTheme.glassBorder
-                           : darkGlass ? QColor(148, 163, 184, 82)
-                                       : QColor(118, 136, 156, 58));
-        const QColor btnBg = m_colorEditMode
-            ? QColor(255, 200, 50, 55)
-            : (customGlass ? customTheme.glassBottom
-                           : darkGlass ? QColor(10, 16, 24, 178)
-                                       : QColor(250, 253, 255, 88));
-        auto *btnPanel = m_graphicsScene->addPath(btnPath,
-                                                   QPen(btnBorder, m_colorEditMode ? 1.5 : 1.0),
-                                                   QBrush(btnBg));
-        btnPanel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        btnPanel->setAcceptedMouseButtons(Qt::NoButton);
-        btnPanel->setPos(btnTopLeft);
-        btnPanel->setZValue(LocalOverlayZ - 1.0);
-        m_toolbarItems.append(btnPanel);
-
-        // Button label text.
-        auto *btnText = m_graphicsScene->addText(btnLabel, btnFont);
-        btnText->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        btnText->setAcceptedMouseButtons(Qt::NoButton);
-        btnText->setDefaultTextColor(m_colorEditMode
-            ? QColor(255, 195, 40, 240)
-            : (darkGlass ? QColor(210, 225, 248, 210) : QColor(34, 45, 58, 200)));
-        // Center text inside the button rect.
-        btnText->setPos(btnTopLeft + QPointF(BtnPadH,
-                                              (btnH - fm.height()) * 0.5 - fm.descent() * 0.5 + 0.5));
-        btnText->setZValue(LocalOverlayZ + 0.5);
-        m_toolbarItems.append(btnText);
-
-        // Invisible click-catcher rect on top (so the whole button area is clickable).
-        class ColorEditBtnItem : public QGraphicsRectItem {
-        public:
-            ColorEditBtnItem(const QRectF &r, std::function<void()> fn)
-                : QGraphicsRectItem(r), m_fn(std::move(fn))
-            { setPen(Qt::NoPen); setBrush(Qt::NoBrush);
-              setAcceptedMouseButtons(Qt::LeftButton); }
-        protected:
-            void mousePressEvent(QGraphicsSceneMouseEvent *e) override
-            { if (e->button() == Qt::LeftButton) { m_fn(); e->accept(); } else e->ignore(); }
-        private:
-            std::function<void()> m_fn;
-        };
-        auto *clickArea = new ColorEditBtnItem(btnLocal,
-                                               [this]{ setColorEditMode(!m_colorEditMode); });
-        clickArea->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        clickArea->setPos(btnTopLeft);
-        clickArea->setZValue(LocalOverlayZ + 1.0);
-        m_graphicsScene->addItem(clickArea);
-        m_toolbarItems.append(clickArea);
+        // The toggle itself.
+        auto *tog = new ColorEditToggleItem(
+            m_colorEditMode,
+            [this] { setColorEditMode(!m_colorEditMode); },
+            [this](bool enter) {
+                if (enter) {
+                    const QString stateStr = m_colorEditMode
+                        ? QStringLiteral("ON  — click to exit")
+                        : QStringLiteral("OFF — click to enter");
+                    updateHoverHint(QStringLiteral("colorEdit:toggle"),
+                                    QStringLiteral("✏ Color edit  ") + stateStr
+                                    + QStringLiteral("\nHover blocks to inspect and edit theme colors."));
+                } else {
+                    if (m_colorEditMode)
+                        updateHoverHint(QStringLiteral("colorEdit:mode"),
+                                        QStringLiteral("✏ Color edit\n"
+                                                       "Hover a card, then scroll ↕ to cycle properties.\n"
+                                                       "Click to pick a color.  Esc to exit."));
+                    else
+                        updateHoverHint(QString(), QString());
+                }
+            });
+        tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        tog->setPos(toggleTopLeft);
+        tog->setZValue(LocalOverlayZ + 0.5);
+        m_graphicsScene->addItem(tog);
+        m_toolbarItems.append(tog);
+        m_colorEditToggleItem = tog;
     }
 }
 
@@ -2076,7 +2647,7 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
     };
 
     constexpr qreal OverlayMargin = 12.0;
-    constexpr qreal ThemePanelWidth = 123.0;
+    constexpr qreal ThemePanelWidth = 146.0;
     constexpr qreal ThemePanelHeight = 26.0;
     constexpr qreal BackgroundPanelHeight = 26.0;
     constexpr qreal SwitcherRowGap = 8.0;

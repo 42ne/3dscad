@@ -1074,7 +1074,17 @@ const OperationVisual &operationVisual(SceneDocument::TreeNode::Operation operat
 
 qreal minimumWidthForOperation(SceneDocument::TreeNode::Operation operation)
 {
-    return operationVisual(operation).minWidth;
+    const qreal hardMin = operationVisual(operation).minWidth;
+    if (isVerticalHeaderOperation(operation))
+        return hardMin;
+
+    // For horizontal-header cards ensure the label fits.
+    // Header geometry: grip+gap(30) + icon(24) + gap(10) = 64 from left to label;
+    // chevron+gap(28) reserved on the right.
+    const QFontMetricsF fm(sceneTreeGraphicsFont());
+    const qreal labelW = fm.horizontalAdvance(
+        QString::fromLatin1(operationVisual(operation).toolName));
+    return qMax(hardMin, 64.0 + labelW + 28.0 + 6.0);
 }
 
 QString labelForOperation(SceneDocument::TreeNode::Operation operation)
