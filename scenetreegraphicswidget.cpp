@@ -990,7 +990,7 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
     const CanvasBackgroundTheme background = activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
     painter->fillRect(rect, background.background);
     drawCanvasGrid(painter, rect, 24.0, background.minorGrid, 1);
-    drawCanvasGrid(painter, rect, 96.0, background.majorGrid, 1);
+    drawCanvasGrid(painter, rect, 120.0, background.majorGrid, 1);
 }
 
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
@@ -2615,7 +2615,7 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
         if (cur.isValid()) {
             const QColor inv(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(), 200);
             if (prop.id == QLatin1String("minorGrid") || prop.id == QLatin1String("majorGrid")) {
-                const qreal gridSize = (prop.id == QLatin1String("minorGrid")) ? 24.0 : 96.0;
+                const qreal gridSize = (prop.id == QLatin1String("minorGrid")) ? 24.0 : 120.0;
                 const QRectF vis = mapToScene(viewport()->rect()).boundingRect();
                 auto *gi = new GridBlinkItem(vis, gridSize, inv);
                 gi->setZValue(8800.0);
