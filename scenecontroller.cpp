@@ -95,7 +95,10 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         .arg(toolName.left(1).toUpper() + toolName.mid(1))
         .arg(shapeNumber);
 
-    if (toolName == QStringLiteral("sphere")) {
+    if (toolName == QStringLiteral("circle")) {
+        shape.type   = ShapeNode::Circle;
+        shape.radius = 10.0f;
+    } else if (toolName == QStringLiteral("sphere")) {
         shape.type   = ShapeNode::Sphere;
         shape.radius = 10.0f;
     } else if (toolName == QStringLiteral("cylinder")) {

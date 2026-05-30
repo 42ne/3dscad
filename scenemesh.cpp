@@ -218,8 +218,36 @@ static SceneMesh buildConeMesh(const ShapeNode &shape)
     return mesh;
 }
 
+static SceneMesh buildCircleMesh(const ShapeNode &shape)
+{
+    SceneMesh mesh;
+    QVector<QVector3D> top;
+    QVector<QVector3D> bottom;
+    const int sectors = 48;
+    constexpr float thickness = 0.1f;
+
+    for (int i = 0; i < sectors; ++i) {
+        const float angle = 2.0f * M_PI * i / sectors;
+        const QVector3D ringPoint(shape.radius * qCos(angle), shape.radius * qSin(angle), 0.0f);
+        top.append(rotatePoint(ringPoint + QVector3D(0, 0, thickness * 0.5f), shape.rotation) + shape.position);
+        bottom.append(rotatePoint(ringPoint - QVector3D(0, 0, thickness * 0.5f), shape.rotation) + shape.position);
+    }
+
+    mesh.shadowPoints = bottom + top;
+    for (int i = 0; i < sectors; ++i) {
+        const int next = (i + 1) % sectors;
+        appendPolygon(&mesh.triangles, {bottom[i], bottom[next], top[next], top[i]}, 96);
+    }
+    appendPolygon(&mesh.triangles, bottom, 82);
+    appendPolygon(&mesh.triangles, top, 120);
+    return mesh;
+}
+
 SceneMesh buildShapeMesh(const ShapeNode &shape)
 {
+    if (shape.type == ShapeNode::Circle)
+        return buildCircleMesh(shape);
+
     if (shape.type == ShapeNode::Sphere)
         return buildSphereMesh(shape);
 

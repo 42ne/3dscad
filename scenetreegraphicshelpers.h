@@ -131,6 +131,10 @@ QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName
 qreal forLoopHeaderMinWidth(const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
+QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node);
+QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF &metrics);
+qreal linearExtrudeHeaderMinWidth(const QString &heightExpression, const QFontMetricsF &metrics);
+QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect, const QString &heightExpression, const QFontMetricsF &metrics);
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);

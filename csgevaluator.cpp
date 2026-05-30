@@ -89,6 +89,12 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
     if (shape.type == ShapeNode::Sphere)
         return local.lengthSquared() <= shape.radius * shape.radius;
 
+    if (shape.type == ShapeNode::Circle) {
+        const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
+        return radialDistanceSquared <= shape.radius * shape.radius
+               && qAbs(local.z()) <= 0.05f;
+    }
+
     if (shape.type == ShapeNode::Cylinder) {
         const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
         return radialDistanceSquared <= shape.radius * shape.radius
@@ -574,6 +580,11 @@ static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDo
         return rotatePoint(point, group.rotation);
     if (group.operation == SceneDocument::TreeNode::Scale)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
+    if (group.operation == SceneDocument::TreeNode::LinearExtrude) {
+        constexpr float baseThickness = 0.1f;
+        const float height = qMax(0.1f, group.scale.x());
+        return QVector3D(point.x(), point.y(), point.z() * (height / baseThickness));
+    }
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return reflectAcrossPlane(point, group.position);
     return point;
@@ -589,6 +600,11 @@ static QVector3D transformNormalForGroup(const QVector3D &normal, const SceneDoc
         return QVector3D(qFuzzyIsNull(group.scale.x()) ? normal.x() : normal.x() / group.scale.x(),
                          qFuzzyIsNull(group.scale.y()) ? normal.y() : normal.y() / group.scale.y(),
                          qFuzzyIsNull(group.scale.z()) ? normal.z() : normal.z() / group.scale.z());
+    }
+    if (group.operation == SceneDocument::TreeNode::LinearExtrude) {
+        constexpr float baseThickness = 0.1f;
+        const float height = qMax(0.1f, group.scale.x());
+        return QVector3D(normal.x(), normal.y(), normal.z() / (height / baseThickness));
     }
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return -reflectAcrossPlane(normal, group.position); // negate to compensate winding reversal
@@ -1078,6 +1094,9 @@ static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCap
             break;
         case SceneDocument::TreeNode::Color:
             caps.hasColor = true;
+            break;
+        case SceneDocument::TreeNode::LinearExtrude:
+            caps.hasTransform = true;
             break;
         default:
             break;

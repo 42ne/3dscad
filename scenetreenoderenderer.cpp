@@ -604,6 +604,42 @@ private:
             painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
             painter->restore();
+        } else if (m_operation == SceneDocument::TreeNode::LinearExtrude) {
+            painter->save();
+            painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
+            const QString heightExpression = !m_transformExpressions.isEmpty()
+                && !m_transformExpressions.first().trimmed().isEmpty()
+                    ? m_transformExpressions.first().trimmed()
+                    : QString::number(m_transformValues.x() > 0.0f ? m_transformValues.x() : 20.0f, 'g');
+            const QString prefix = QStringLiteral("linear_extrude(height = ");
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
+            const qreal textLeft = iconRect.right() + 10.0;
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0,
+                                     metrics.horizontalAdvance(prefix), 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, prefix);
+
+            const QVector<ExpressionTextSpan> spans = linearExtrudeHeightTextSpans(m_rect, heightExpression, metrics);
+            for (const ExpressionTextSpan &span : spans) {
+                if (span.number) {
+                    const bool active = m_activeTransformAxis == 0 && span.start == m_activeTransformNumberStart;
+                    paintRoundedPanel(painter, span.rect, 3.0,
+                                      QPen(active ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder, active ? 2 : 1),
+                                      QBrush(active ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
+                }
+                painter->setPen(span.number ? SceneTreePalette::numText(pt2) : SceneTreePalette::textMuted(pt2));
+                const Qt::Alignment align = span.number
+                    ? (Qt::AlignHCenter | Qt::AlignVCenter)
+                    : (Qt::AlignLeft | Qt::AlignVCenter);
+                painter->drawText(span.rect, align, span.text);
+            }
+            const qreal suffixLeft = linearExtrudeHeightTextRect(m_rect, metrics).left()
+                                     + metrics.horizontalAdvance(heightExpression);
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+            painter->restore();
         } else {
             // Reserve space for the chevron (18 px from the right edge + 10 px gap)
             // so the label text never overlaps the collapse indicator.
@@ -1078,6 +1114,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                     : node.operation == SceneDocument::TreeNode::Rotate    ? node.rotation
                                     : node.operation == SceneDocument::TreeNode::Mirror    ? node.position
                                     : node.operation == SceneDocument::TreeNode::Scale     ? node.scale
+                                    : node.operation == SceneDocument::TreeNode::LinearExtrude ? node.scale
                                                                                            : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;

@@ -51,6 +51,8 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         result = Manifold::Sphere(shape.radius, 32);
     } else if (shape.type == ShapeNode::Cone) {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, 32, true);
+    } else if (shape.type == ShapeNode::Circle) {
+        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, 64, true);
     } else {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, 32, true);
     }
@@ -68,7 +70,8 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Rotate
            || operation == SceneDocument::TreeNode::Scale
            || operation == SceneDocument::TreeNode::Mirror
-           || operation == SceneDocument::TreeNode::Color;
+           || operation == SceneDocument::TreeNode::Color
+           || operation == SceneDocument::TreeNode::LinearExtrude;
 }
 
 static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::TreeNode &node)
@@ -79,6 +82,11 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
         return source.Rotate(node.rotation.x(), node.rotation.y(), node.rotation.z());
     if (node.operation == SceneDocument::TreeNode::Scale)
         return source.Scale(vec3(node.scale.x(), node.scale.y(), node.scale.z()));
+    if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
+        constexpr float baseThickness = 0.1f;
+        const float height = qMax(0.1f, node.scale.x());
+        return source.Scale(vec3(1.0f, 1.0f, height / baseThickness));
+    }
     if (node.operation == SceneDocument::TreeNode::Mirror) {
         const QVector3D &n = node.position;
         if (qFuzzyIsNull(n.x()) && qFuzzyIsNull(n.y()) && qFuzzyIsNull(n.z()))

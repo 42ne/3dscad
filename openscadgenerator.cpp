@@ -293,6 +293,23 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
+        const QString heightExpr = !node.transformExpressions.isEmpty()
+                                       && !node.transformExpressions.first().trimmed().isEmpty()
+                                   ? node.transformExpressions.first().trimmed()
+                                   : QString::number(node.scale.x(), 'g');
+        *code += QString("%1linear_extrude(height=%2, center=true) {\n")
+                     .arg(indent, heightExpr);
+
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     appendTreeGroup(code, SceneTreeGraphics::labelForOperation(node.operation), node, scene, indent, ranges);
     if (ranges)
         ranges->append({node.id, start, code->size() - start});
@@ -329,6 +346,10 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
     }
     if (shape.type == ShapeNode::Sphere) {
         return QString("sphere(r=%1);\n")
+            .arg(paramExpr(0, shape.radius));
+    }
+    if (shape.type == ShapeNode::Circle) {
+        return QString("circle(r=%1);\n")
             .arg(paramExpr(0, shape.radius));
     }
     if (shape.type == ShapeNode::Cylinder) {

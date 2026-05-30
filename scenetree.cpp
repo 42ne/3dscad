@@ -711,6 +711,10 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
     // Mirror axis defaults to [1,0,0] (reflect across the Y-Z plane).
     if (operation == TreeNode::Mirror)
         node.position = QVector3D(1, 0, 0);
+    if (operation == TreeNode::LinearExtrude) {
+        node.scale = QVector3D(20, 1, 1);
+        node.transformExpressions = QStringList({QStringLiteral("20")});
+    }
     return node;
 }
 

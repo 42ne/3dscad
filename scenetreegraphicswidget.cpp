@@ -366,8 +366,11 @@ QRectF groupRectForPreviewContent(QRectF groupRect,
 
 qreal horizontalHeaderMinWidth(const SceneDocument::TreeNode &node)
 {
-    if (isVerticalHeaderOperation(node.operation) || node.operation == SceneDocument::TreeNode::For)
+    if (isVerticalHeaderOperation(node.operation)
+        || node.operation == SceneDocument::TreeNode::For
+        || node.operation == SceneDocument::TreeNode::LinearExtrude) {
         return minimumWidthForOperation(node.operation);
+    }
 
     QString label = labelForOperation(node.operation);
     if (node.operation == SceneDocument::TreeNode::Module && !node.moduleName.trimmed().isEmpty())
@@ -2799,6 +2802,7 @@ static QString colorEditOpName(SceneDocument::TreeNode::Operation op)
     case SceneDocument::TreeNode::Scene:        return QStringLiteral("Scene");
     case SceneDocument::TreeNode::Minkowski:    return QStringLiteral("Minkowski");
     case SceneDocument::TreeNode::Color:        return QStringLiteral("Color");
+    case SceneDocument::TreeNode::LinearExtrude:return QStringLiteral("Linear extrude");
     }
     return QStringLiteral("Group");
 }
@@ -3502,21 +3506,25 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         || node.operation == SceneDocument::TreeNode::Intersection)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
 
-    // For a for-loop the header text can be much wider than the children.
-    // Measure it so the card is never narrower than the rendered range expression.
-    qreal forLoopHeaderMinWidth = 0.0;
+    // Parameter headers can be wider than the children. Measure them so the
+    // card is never narrower than the rendered expression.
+    qreal parameterHeaderMinWidth = 0.0;
     if (node.operation == SceneDocument::TreeNode::For) {
-        forLoopHeaderMinWidth = SceneTreeGraphics::forLoopHeaderMinWidth(
+        parameterHeaderMinWidth = SceneTreeGraphics::forLoopHeaderMinWidth(
             forLoopVariableName(node),
             forLoopRangeExpression(node),
+            QFontMetricsF(sceneTreeGraphicsFont()));
+    } else if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
+        parameterHeaderMinWidth = SceneTreeGraphics::linearExtrudeHeaderMinWidth(
+            linearExtrudeHeightExpression(node),
             QFontMetricsF(sceneTreeGraphicsFont()));
     }
 
     const QSizeF size = collapsedGroup
-        ? QSizeF(qMax(horizontalHeaderMinWidth(node), forLoopHeaderMinWidth), GroupHeaderHeight)
+        ? QSizeF(qMax(horizontalHeaderMinWidth(node), parameterHeaderMinWidth), GroupHeaderHeight)
         : QSizeF(qMax(qMax(horizontalHeaderMinWidth(node),
                            headerWidth + maxChildWidth + GroupPadding * 2.0),
-                      forLoopHeaderMinWidth),
+                      parameterHeaderMinWidth),
                  headerHeight + GroupPadding * 2.0 + childrenHeight);
     const QRectF rect(topLeft, size);
     qreal cutSeparatorY = 0.0;
@@ -4927,6 +4935,43 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
                     target->expression = transformAxisExpression(*node, axis);
                     target->nodeId = bestTransform->groupId;
                     target->secondaryId = axis;
+                }
+                return true;
+            }
+        }
+    }
+
+    const GroupHitArea *bestLinearExtrude = nullptr;
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        if (area.operation != SceneDocument::TreeNode::LinearExtrude
+            || !area.rect.contains(scenePosition)) {
+            continue;
+        }
+        if (!bestLinearExtrude || area.depth > bestLinearExtrude->depth)
+            bestLinearExtrude = &area;
+    }
+    if (bestLinearExtrude) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestLinearExtrude->groupId);
+        if (node) {
+            const QString expression = linearExtrudeHeightExpression(*node);
+            const QRectF textRect = linearExtrudeHeightTextRect(bestLinearExtrude->rect, metrics);
+            const qreal prefixLeft = bestLinearExtrude->rect.left() + 68.0;
+            const qreal expressionRight = textRect.left()
+                                          + qMax<qreal>(40.0, metrics.horizontalAdvance(expression) + 8.0);
+            const QRectF hoverRect(prefixLeft,
+                                   textRect.top() - 1.0,
+                                   qMin(bestLinearExtrude->rect.right() - prefixLeft - 28.0,
+                                        expressionRight - prefixLeft),
+                                   textRect.height() + 2.0);
+            if (hoverRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition)) {
+                if (target) {
+                    target->kind = ExpressionEditTarget::Transform;
+                    target->hoverRect = hoverRect;
+                    target->editRect = textRect;
+                    target->label = QStringLiteral("Linear extrude height");
+                    target->expression = expression;
+                    target->nodeId = bestLinearExtrude->groupId;
+                    target->secondaryId = 0;
                 }
                 return true;
             }

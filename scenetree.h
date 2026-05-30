@@ -40,6 +40,7 @@ public:
             Minkowski,  // Minkowski sum of children; no parameters
             For,
             Color,
+            LinearExtrude,
             Scene // top-level container; flattened in code generation, never emitted as a block
         };
 

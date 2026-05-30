@@ -277,7 +277,9 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
     static const QStringList reservedCalls = {
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
-        QStringLiteral("cylinder")
+        QStringLiteral("cylinder"),
+        QStringLiteral("circle"),
+        QStringLiteral("linear_extrude")
     };
     if (reservedCalls.contains(match.captured(1)))
         return false;
@@ -288,6 +290,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         *args = match.captured(2).trimmed();
     return true;
 }
+
+static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression);
 
 static bool parseOperationLine(const QString &line,
                                SceneDocument::TreeNode::Operation *operation,
@@ -309,6 +313,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression mirrorRegex("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression forRegex("^for\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(\\[[^\\]]+\\])\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression colorRegex("^color\\s*\\((.*)\\)\\s*\\{\\s*$");
+    static const QRegularExpression linearExtrudeRegex("^linear_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     if (unionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Union;
@@ -346,6 +351,22 @@ static bool parseOperationLine(const QString &line,
         *operation = SceneDocument::TreeNode::For;
         if (loopVariable)     *loopVariable = forMatch.captured(1);
         if (loopRangeExpression) *loopRangeExpression = forMatch.captured(2).trimmed();
+        return true;
+    }
+
+    QRegularExpressionMatch extrudeMatch = linearExtrudeRegex.match(line);
+    if (extrudeMatch.hasMatch()) {
+        const auto args = parseNamedArgs(extrudeMatch.captured(1), {"height"});
+        const QString heightExpr = args.value(QStringLiteral("height"), QStringLiteral("20"));
+        qreal height = 20.0;
+        QString he;
+        if (!parseParamExpression(heightExpr, varValues, &height, &he))
+            return false;
+        *operation = SceneDocument::TreeNode::LinearExtrude;
+        if (vector)
+            *vector = QVector3D(height, 1.0f, 1.0f);
+        if (expressions)
+            *expressions = QStringList({he});
         return true;
     }
 
@@ -501,6 +522,31 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         return true;
     }
 
+    if (extractCallArgs(line, "circle", &argsStr) && line.endsWith(';')) {
+        const auto args = parseNamedArgs(argsStr, {"r"});
+        QString radiusStr = args.value("r");
+        if (radiusStr.isEmpty() && args.contains("d"))
+            radiusStr = args["d"] + "/2";
+        if (radiusStr.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("circle on line %1: missing radius");
+            return false;
+        }
+        qreal r = 0.0;
+        QString re;
+        if (!parseParamExpression(radiusStr, state->variableValues, &r, &re)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("circle on line %1: could not parse radius");
+            return false;
+        }
+        shape->id = state->nextShapeId++;
+        shape->type = ShapeNode::Circle;
+        shape->name = QStringLiteral("Circle %1").arg(shape->id);
+        shape->radius = r;
+        shape->parameterExpressions = QStringList({re});
+        return true;
+    }
+
     // ── Cylinder / Cone ─────────────────────────────────────────────────────
     if (extractCallArgs(line, "cylinder", &argsStr) && line.endsWith(';')) {
         const auto args = parseNamedArgs(argsStr, {"h", "r", "r1", "r2", "center"});
@@ -610,8 +656,8 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "minkowski", "for", "color",
-        "cube", "sphere", "cylinder"
+        "union", "difference", "intersection", "hull", "minkowski", "for", "color", "linear_extrude",
+        "cube", "sphere", "cylinder", "circle"
     };
     for (const QString &kw : known)
         if (line.startsWith(kw))
@@ -735,11 +781,14 @@ static bool parseBlock(ParserState *state,
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
             } else if (operation == SceneDocument::TreeNode::Color) {
                 group.color = operationColor;
+            } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
+                group.scale = transformVector;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale
-                || operation == SceneDocument::TreeNode::Mirror)
+                || operation == SceneDocument::TreeNode::Mirror
+                || operation == SceneDocument::TreeNode::LinearExtrude)
                 group.transformExpressions = transformExpressions;
 
             parent->children.append(group);
@@ -1136,11 +1185,14 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.loopRangeExpression = loopRangeExpression.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : loopRangeExpression;
             } else if (operation == SceneDocument::TreeNode::Color) {
                 group.color = operationColor;
+            } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
+                group.scale = transformVector;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale
-                || operation == SceneDocument::TreeNode::Mirror)
+                || operation == SceneDocument::TreeNode::Mirror
+                || operation == SceneDocument::TreeNode::LinearExtrude)
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
             SceneDocument::TreeNode &child = sceneNode.children.last();

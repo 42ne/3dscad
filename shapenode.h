@@ -12,7 +12,8 @@ struct ShapeNode
         Cube,
         Sphere,
         Cylinder,
-        Cone // frustum: r1 (bottom) = radius, r2 (top) = radius2; r2=0 → true cone
+        Cone,
+        Circle
     };
 
     enum BooleanMode {
@@ -39,8 +40,8 @@ struct ShapeNode
     QStringList parameterExpressions;
 
     // Apply a parameter value by index, clamping to the type-appropriate minimum.
-    // Pass the raw (pre-clamp) evaluated value — this method owns all clamping logic.
-    // Cone R2 (index 1) may be 0.0 for a true pointed apex; every other param ≥ 0.1.
+    // Pass the raw (pre-clamp) evaluated value; this method owns all clamping logic.
+    // Cone R2 (index 1) may be 0.0 for a true pointed apex; every other param >= 0.1.
     void applyParameterValue(int paramIndex, qreal rawValue)
     {
         switch (type) {
@@ -50,6 +51,7 @@ struct ShapeNode
             else if (paramIndex == 2) size.setZ(static_cast<float>(qMax<qreal>(0.1, rawValue)));
             break;
         case Sphere:
+        case Circle:
             if (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
             break;
         case Cylinder:
@@ -64,13 +66,14 @@ struct ShapeNode
         }
     }
 
-    // Returns true if toolName names a primitive shape (cube / sphere / cylinder / cone).
+    // Returns true if toolName names a primitive shape.
     static bool isPrimitiveTool(const QString &toolName)
     {
         return toolName == QLatin1String("cube")
             || toolName == QLatin1String("sphere")
             || toolName == QLatin1String("cylinder")
-            || toolName == QLatin1String("cone");
+            || toolName == QLatin1String("cone")
+            || toolName == QLatin1String("circle");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -79,6 +82,7 @@ struct ShapeNode
         if (toolName == QLatin1String("sphere"))   return Sphere;
         if (toolName == QLatin1String("cylinder")) return Cylinder;
         if (toolName == QLatin1String("cone"))     return Cone;
+        if (toolName == QLatin1String("circle"))   return Circle;
         return Cube;
     }
 };

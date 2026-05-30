@@ -19,6 +19,7 @@ QStringList paletteTools()
 {
     return {
         // ── Primitives ────────────────────────────────────────────────────────
+        QStringLiteral("circle"),
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
@@ -36,6 +37,7 @@ QStringList paletteTools()
         // ── Geometry algorithms ───────────────────────────────────────────────
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),
+        QStringLiteral("linear_extrude"),
         // ── Structure / control flow ──────────────────────────────────────────
         QStringLiteral("module"),
         QStringLiteral("var"),

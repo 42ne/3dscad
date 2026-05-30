@@ -173,6 +173,15 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         return;
     }
 
+    if (type == ShapeNode::Circle) {
+        painter->setBrush(QColor(178, 207, 238, 170));
+        painter->drawEllipse(rect.adjusted(2.0, 2.0, -2.0, -2.0));
+        painter->setPen(QPen(QColor(93, 127, 166), 1.2));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(rect.adjusted(5.0, 5.0, -5.0, -5.0));
+        return;
+    }
+
     if (type == ShapeNode::Cylinder) {
         const QRectF top(rect.left() + 3.0, rect.top() + 3.0, rect.width() - 6.0, rect.height() * 0.34);
         const QRectF bottom(top.left(), rect.bottom() - top.height() - 3.0, top.width(), top.height());
@@ -365,6 +374,16 @@ void paintOperationIcon(QPainter *painter,
         painter->setPen(QPen(accent.darker(170), 1.2));
         painter->drawLine(QPointF(gx, center.y() - 2.5), QPointF(gx, center.y() + 2.5));
         painter->drawLine(QPointF(gx - 2.5, center.y()), QPointF(gx + 2.5, center.y()));
+    } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
+        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setBrush(QColor(255, 255, 255, 55));
+        const QRectF base(symbolRect.left() + 2.0, symbolRect.bottom() - symbolRect.height() * 0.34,
+                          symbolRect.width() - 4.0, symbolRect.height() * 0.24);
+        const QRectF top = base.translated(0.0, -symbolRect.height() * 0.42);
+        painter->drawEllipse(base);
+        painter->drawEllipse(top);
+        painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
+        painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
@@ -412,7 +431,7 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
         return QString::number(numericValue, 'g');
     };
 
-    if (shape.type == ShapeNode::Sphere)
+    if (shape.type == ShapeNode::Sphere || shape.type == ShapeNode::Circle)
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)}};
 
     if (shape.type == ShapeNode::Cylinder)
@@ -735,6 +754,55 @@ QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupR
     return controls;
 }
 
+QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node)
+{
+    if (!node.transformExpressions.isEmpty()) {
+        const QString expression = node.transformExpressions.first().trimmed();
+        if (!expression.isEmpty())
+            return expression;
+    }
+    const qreal height = node.scale.x() > 0.0f ? node.scale.x() : 20.0f;
+    return QString::number(height, 'g');
+}
+
+QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF &metrics)
+{
+    const QString prefix = QStringLiteral("linear_extrude(height = ");
+    const qreal left = groupRect.left() + 68.0 + metrics.horizontalAdvance(prefix);
+    return QRectF(left,
+                  groupRect.top() + 7.0,
+                  qMax<qreal>(0.0, groupRect.right() - left - 8.0),
+                  16.0);
+}
+
+qreal linearExtrudeHeaderMinWidth(const QString &heightExpression, const QFontMetricsF &metrics)
+{
+    const QString expression = heightExpression.trimmed().isEmpty()
+        ? QStringLiteral("20")
+        : heightExpression.trimmed();
+    const QString prefix = QStringLiteral("linear_extrude(height = ");
+    const QRectF measureRect(0.0, 0.0, 2048.0, GroupHeaderHeight);
+
+    qreal right = 64.0 + metrics.horizontalAdvance(prefix);
+    const QVector<ExpressionTextSpan> spans = linearExtrudeHeightTextSpans(measureRect, expression, metrics);
+    for (const ExpressionTextSpan &span : spans)
+        right = qMax(right, span.rect.right());
+
+    return right + metrics.horizontalAdvance(QStringLiteral(")")) + 36.0;
+}
+
+QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect,
+                                                         const QString &heightExpression,
+                                                         const QFontMetricsF &metrics)
+{
+    const QString expression = heightExpression.trimmed().isEmpty()
+        ? QStringLiteral("20")
+        : heightExpression.trimmed();
+    return expressionSpansInTextRect(linearExtrudeHeightTextRect(groupRect, metrics),
+                                     expression,
+                                     metrics);
+}
+
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count)
 {
     if (index < 0 || count <= 0 || index >= count)
@@ -955,6 +1023,11 @@ QSizeF previewSizeForTool(const QString &tool)
                                                  QStringLiteral("[0 : 1 : 3]"),
                                                  QFontMetricsF(sceneTreeGraphicsFont()))),
                       GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "linear_extrude")
+        return QSizeF(qMax(GroupWideMinWidth,
+                           linearExtrudeHeaderMinWidth(QStringLiteral("20"),
+                                                       QFontMetricsF(sceneTreeGraphicsFont()))),
+                      GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "color")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
@@ -975,6 +1048,8 @@ bool isVariableToolName(const QString &tool)
 ShapeNode::Type primitiveTypeForTool(const QString &tool)
 {
     const QString normalized = tool.toLower();
+    if (normalized.contains("circle"))
+        return ShapeNode::Circle;
     if (normalized.contains("sphere"))
         return ShapeNode::Sphere;
     if (normalized.contains("cone"))
@@ -986,6 +1061,8 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
 
 QString toolNameForPrimitiveType(ShapeNode::Type type)
 {
+    if (type == ShapeNode::Circle)
+        return QStringLiteral("circle");
     if (type == ShapeNode::Sphere)
         return QStringLiteral("sphere");
     if (type == ShapeNode::Cylinder)
@@ -1041,6 +1118,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Minkowski;
         return true;
     }
+    if (normalized == QStringLiteral("linear_extrude") || normalized == QStringLiteral("extrude")) {
+        *operation = SceneDocument::TreeNode::LinearExtrude;
+        return true;
+    }
     if (normalized == QStringLiteral("for")) {
         *operation = SceneDocument::TreeNode::For;
         return true;
@@ -1065,6 +1146,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Mirror, "mirror", QColor(242, 218, 235), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
+    {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},

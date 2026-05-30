@@ -131,6 +131,8 @@ inline SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
                 evaluated.position.setY(static_cast<float>(value));
             else
                 evaluated.position.setZ(static_cast<float>(value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::LinearExtrude) {
+            evaluated.scale.setX(static_cast<float>(qMax<qreal>(0.1, value)));
         }
     }
 
