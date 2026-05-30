@@ -110,6 +110,21 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         shape.radius  = 10.0f;
         shape.radius2 = 0.0f;
         shape.height  = 30.0f;
+    } else if (toolName == QStringLiteral("polyhedron")) {
+        shape.type = ShapeNode::Polyhedron;
+        // Default tetrahedron
+        shape.polyhedronPoints.append(QVector3D( 10,  0, -7));
+        shape.polyhedronPoints.append(QVector3D(-10,  0, -7));
+        shape.polyhedronPoints.append(QVector3D(  0, 10,  7));
+        shape.polyhedronPoints.append(QVector3D(  0,-10,  7));
+        QVector<int> f0; f0 << 0 << 1 << 2;
+        QVector<int> f1; f1 << 0 << 3 << 1;
+        QVector<int> f2; f2 << 0 << 2 << 3;
+        QVector<int> f3; f3 << 1 << 3 << 2;
+        shape.polyhedronFaces.append(f0);
+        shape.polyhedronFaces.append(f1);
+        shape.polyhedronFaces.append(f2);
+        shape.polyhedronFaces.append(f3);
     } else {
         shape.type = ShapeNode::Cube;
         shape.size = QVector3D(20, 20, 20);

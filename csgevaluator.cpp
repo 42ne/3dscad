@@ -109,6 +109,21 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
                && qAbs(local.z()) <= shape.height * 0.5f;
     }
 
+    if (shape.type == ShapeNode::Polyhedron) {
+        if (shape.polyhedronPoints.isEmpty())
+            return false;
+        // Approximate: axis-aligned bounding box of the polyhedron points in local space
+        QVector3D mn = shape.polyhedronPoints.first();
+        QVector3D mx = mn;
+        for (const QVector3D &pt : shape.polyhedronPoints) {
+            mn.setX(qMin(mn.x(), pt.x())); mn.setY(qMin(mn.y(), pt.y())); mn.setZ(qMin(mn.z(), pt.z()));
+            mx.setX(qMax(mx.x(), pt.x())); mx.setY(qMax(mx.y(), pt.y())); mx.setZ(qMax(mx.z(), pt.z()));
+        }
+        return local.x() >= mn.x() && local.x() <= mx.x()
+            && local.y() >= mn.y() && local.y() <= mx.y()
+            && local.z() >= mn.z() && local.z() <= mx.z();
+    }
+
     const QVector3D half = shape.size * 0.5f;
     return qAbs(local.x()) <= half.x()
            && qAbs(local.y()) <= half.y()

@@ -24,6 +24,7 @@ QStringList paletteTools()
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
         QStringLiteral("cone"),
+        QStringLiteral("polyhedron"),
         // ── Boolean operations ────────────────────────────────────────────────
         QStringLiteral("union"),
         QStringLiteral("difference"),

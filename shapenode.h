@@ -13,7 +13,8 @@ struct ShapeNode
         Sphere,
         Cylinder,
         Cone,
-        Circle
+        Circle,
+        Polyhedron
     };
 
     enum BooleanMode {
@@ -35,6 +36,10 @@ struct ShapeNode
     float radius2 = 0.0f;  // top radius for Cone (r2); unused for other types
     float height  = 20.0f;
 
+    // Polyhedron geometry — empty for all other types.
+    QVector<QVector3D>    polyhedronPoints;
+    QVector<QVector<int>> polyhedronFaces;
+
     // One expression string per parameter, in shapeParameterControls() order.
     // Empty list = plain numeric mode (use size/radius/height directly).
     QStringList parameterExpressions;
@@ -53,6 +58,8 @@ struct ShapeNode
         case Sphere:
         case Circle:
             if (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            break;
+        case Polyhedron:
             break;
         case Cylinder:
             if      (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
@@ -73,7 +80,8 @@ struct ShapeNode
             || toolName == QLatin1String("sphere")
             || toolName == QLatin1String("cylinder")
             || toolName == QLatin1String("cone")
-            || toolName == QLatin1String("circle");
+            || toolName == QLatin1String("circle")
+            || toolName == QLatin1String("polyhedron");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -82,7 +90,8 @@ struct ShapeNode
         if (toolName == QLatin1String("sphere"))   return Sphere;
         if (toolName == QLatin1String("cylinder")) return Cylinder;
         if (toolName == QLatin1String("cone"))     return Cone;
-        if (toolName == QLatin1String("circle"))   return Circle;
+        if (toolName == QLatin1String("circle"))     return Circle;
+        if (toolName == QLatin1String("polyhedron")) return Polyhedron;
         return Cube;
     }
 };
@@ -99,7 +108,9 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.radius == right.radius
            && left.radius2 == right.radius2
            && left.height == right.height
-           && left.parameterExpressions == right.parameterExpressions;
+           && left.parameterExpressions == right.parameterExpressions
+           && left.polyhedronPoints == right.polyhedronPoints
+           && left.polyhedronFaces == right.polyhedronFaces;
 }
 
 inline bool operator!=(const ShapeNode &left, const ShapeNode &right)

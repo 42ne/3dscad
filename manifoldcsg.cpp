@@ -45,6 +45,9 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
 {
     Manifold result;
 
+    if (shape.type == ShapeNode::Polyhedron)
+        return {}; // polyhedron skipped in Manifold CSG; handled via preview only
+
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
     } else if (shape.type == ShapeNode::Sphere) {

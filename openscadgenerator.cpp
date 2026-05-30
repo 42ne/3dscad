@@ -365,5 +365,27 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(paramExpr(0, shape.radius))
             .arg(paramExpr(1, shape.radius2));
     }
+    if (shape.type == ShapeNode::Polyhedron) {
+        // Derive variable names from the shape name to avoid storing them in the struct
+        const QString safeName = QString(shape.name).replace(QLatin1Char(' '), QLatin1Char('_'));
+        const QString ptsVar  = safeName + QLatin1String("_pts");
+        const QString facesVar = safeName + QLatin1String("_faces");
+
+        QStringList ptsList;
+        for (const QVector3D &pt : shape.polyhedronPoints)
+            ptsList.append(QString("[%1,%2,%3]").arg(pt.x(), 0, 'g').arg(pt.y(), 0, 'g').arg(pt.z(), 0, 'g'));
+
+        QStringList facesList;
+        for (const QVector<int> &face : shape.polyhedronFaces) {
+            QStringList idxList;
+            for (int idx : face)
+                idxList.append(QString::number(idx));
+            facesList.append(QString("[%1]").arg(idxList.join(QLatin1Char(','))));
+        }
+
+        return QString("%1 = [%2];\n%3 = [%4];\npolyhedron(points=%1, faces=%3);\n")
+            .arg(ptsVar, ptsList.join(QLatin1Char(',')),
+                 facesVar, facesList.join(QLatin1Char(',')));
+    }
     return QString();
 }

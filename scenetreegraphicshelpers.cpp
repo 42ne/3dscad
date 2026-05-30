@@ -219,6 +219,25 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         return;
     }
 
+    if (type == ShapeNode::Polyhedron) {
+        // Draw a simple irregular polygon (pentagon) to suggest a polyhedron face
+        const QPointF c = rect.center();
+        const qreal rx = rect.width() * 0.38, ry = rect.height() * 0.38;
+        QPolygonF poly;
+        poly << QPointF(c.x(),           c.y() - ry)
+             << QPointF(c.x() + rx,      c.y() - ry * 0.2)
+             << QPointF(c.x() + rx * 0.6, c.y() + ry)
+             << QPointF(c.x() - rx * 0.6, c.y() + ry)
+             << QPointF(c.x() - rx,      c.y() - ry * 0.2);
+        painter->setBrush(face);
+        painter->drawPolygon(poly);
+        // inner line to suggest facets
+        painter->setPen(QPen(outline, 0.8));
+        painter->drawLine(poly[0], poly[2]);
+        painter->drawLine(poly[0], poly[3]);
+        return;
+    }
+
     QPolygonF topFace;
     topFace << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.34)
             << QPointF(rect.left() + rect.width() * 0.48, rect.top() + rect.height() * 0.12)
@@ -442,6 +461,9 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
         return {{QStringLiteral("R1"), shape.radius,  expr(0, shape.radius)},
                 {QStringLiteral("R2"), shape.radius2, expr(1, shape.radius2)},
                 {QStringLiteral("H"),  shape.height,  expr(2, shape.height)}};
+
+    if (shape.type == ShapeNode::Polyhedron)
+        return {};
 
     return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
             {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())},
@@ -1056,6 +1078,8 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
         return ShapeNode::Cone;
     if (normalized.contains("cylinder"))
         return ShapeNode::Cylinder;
+    if (normalized.contains("polyhedron"))
+        return ShapeNode::Polyhedron;
     return ShapeNode::Cube;
 }
 
@@ -1069,6 +1093,8 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
         return QStringLiteral("cylinder");
     if (type == ShapeNode::Cone)
         return QStringLiteral("cone");
+    if (type == ShapeNode::Polyhedron)
+        return QStringLiteral("polyhedron");
     return QStringLiteral("cube");
 }
 

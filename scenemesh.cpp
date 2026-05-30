@@ -243,8 +243,34 @@ static SceneMesh buildCircleMesh(const ShapeNode &shape)
     return mesh;
 }
 
+static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
+{
+    SceneMesh mesh;
+    if (shape.polyhedronPoints.isEmpty() || shape.polyhedronFaces.isEmpty())
+        return mesh;
+
+    for (const QVector<int> &face : shape.polyhedronFaces) {
+        if (face.size() < 3)
+            continue;
+        QVector<QVector3D> faceVertices;
+        bool valid = true;
+        for (int idx : face) {
+            if (idx < 0 || idx >= shape.polyhedronPoints.size()) { valid = false; break; }
+            faceVertices.append(shape.polyhedronPoints[idx]);
+        }
+        if (valid)
+            appendPolygon(&mesh.triangles, faceVertices);
+    }
+
+    mesh.shadowPoints = shape.polyhedronPoints;
+    return mesh;
+}
+
 SceneMesh buildShapeMesh(const ShapeNode &shape)
 {
+    if (shape.type == ShapeNode::Polyhedron)
+        return buildPolyhedronMesh(shape);
+
     if (shape.type == ShapeNode::Circle)
         return buildCircleMesh(shape);
 
