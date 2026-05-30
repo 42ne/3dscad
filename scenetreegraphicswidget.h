@@ -109,14 +109,15 @@ private:
 
     // ── Color-edit mode ───────────────────────────────────────────────────────
     struct ColorZoneHit {
-        QString fieldName;   // "canvas" | "card" | "header" | "input"
-        QString label;       // human-readable zone name for the hover hint
-        QRectF  rect;        // zone rect in scene coords (invalid for canvas)
+        QString fieldName;      // "canvas"|"card"|"header"|"input"|"hint"|"toolbar"|"toolbar_controls"
+        QString label;          // human-readable zone name for the hover hint
+        QRectF  rect;           // zone rect in scene coords (or local item rect for hint/toolbar)
         bool    valid = false;
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         bool    hasOperation = false;
-        int     nodeId = 0;  // scene node id; 0 = none
-        QString spanText;    // for direct numText/mutedText hits: the span's text content
+        int     nodeId = 0;       // scene node id; 0 = none
+        QString spanText     = {}; // for direct numText/mutedText hits: the span's text content
+        QPointF itemScenePos = {}; // for hint/toolbar hits: scene pos of the ItemIgnoresTransformations panel
     };
     struct ColorPropDef {
         QString id;       // field name in TreeAppearanceTheme / OperationCardPalette
@@ -150,6 +151,8 @@ private:
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
     QRectF drawModuleCall(const SceneDocument::TreeNode &node, const QPointF &topLeft);
     QRectF drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
+    void drawModuleSectionLabels(const QRectF &rect, qreal sepY, int depth,
+                                 const QColor &color, QVector<QGraphicsItem *> *outItems = nullptr);
     QString previewToolForNode(const SceneDocument::TreeNode &node) const;
     DropTarget dropTargetForToolAt(const QPointF &scenePosition,
                                    const QSizeF &previewSize,

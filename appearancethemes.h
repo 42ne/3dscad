@@ -44,6 +44,7 @@ struct TreeAppearanceTheme
     QColor numFillActive;
     QColor numText;
     QColor numLabelText;
+    QColor leafCard;    // primitive / module-call card fill; transparent = no background
     // Per-operation overrides; keyed by (int)SceneDocument::TreeNode::Operation.
     QHash<int, OperationCardPalette> operationCards;
 };

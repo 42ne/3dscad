@@ -171,6 +171,17 @@ public:
         painter->setOpacity(m_opacity);
         painter->setFont(sceneTreeGraphicsFont());
 
+        // Optional user-set background — transparent by default, drawn only when alpha > 0.
+        const QColor leafFill = SceneTreePalette::leafCardFill();
+        if (leafFill.alpha() > 0) {
+            const QColor leafBorder = leafFill.alpha() > 10
+                ? (SceneTreePalette::isDarkTheme(static_cast<SceneTreePalette::Theme>(m_theme))
+                       ? leafFill.lighter(150) : leafFill.darker(130))
+                : Qt::transparent;
+            paintRoundedPanel(painter, m_rect, CornerRadius,
+                              QPen(leafBorder, 1.0), QBrush(leafFill));
+        }
+
         const QRectF cardRect(m_rect.left(), m_rect.top(), PrimitiveCardWidth, m_rect.height());
         QRectF iconRect;
 
@@ -477,8 +488,7 @@ public:
         if (m_operation != SceneDocument::TreeNode::Difference || m_cutSeparatorY <= 0.0)
             return;
 
-        const QColor diffSepColor = dark ? QColor(190, 140, 110) : QColor(130, 92, 70);
-        painter->setPen(QPen(diffSepColor, 1, Qt::DashLine));
+        painter->setPen(QPen(cTextMuted, 1, Qt::DashLine));
         painter->drawLine(QPointF(m_rect.left() + GroupPadding, m_cutSeparatorY),
                           QPointF(m_rect.right() - GroupPadding, m_cutSeparatorY));
 
@@ -490,14 +500,12 @@ public:
             const qreal baseBottom  = m_cutSeparatorY - 4.0;
             const qreal cutTop      = m_cutSeparatorY + 4.0;
             const qreal cutBottom   = m_rect.bottom() - GroupPadding;
-            const QColor diffAccent = dark ? QColor(200, 160, 120) : QColor(128, 99, 73);
-            const QColor cutAccent  = dark ? QColor(210, 130, 100) : QColor(153, 85, 56);
             paintVerticalPillLabel(painter, QStringLiteral("base"),
                                    boundedVerticalLabelRect(labelLeft, baseTop, baseBottom, labelWidth, labelHeight),
-                                   diffAccent);
+                                   cTextMuted.lighter(115));
             paintVerticalPillLabel(painter, QStringLiteral("cut"),
                                    boundedVerticalLabelRect(labelLeft, cutTop, cutBottom, labelWidth, labelHeight),
-                                   cutAccent);
+                                   cTextMuted);
         }
     }
 
@@ -856,6 +864,18 @@ public:
 
         const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
         const QColor accent(38, 108, 148);
+
+        // Optional user-set background — transparent by default, drawn only when alpha > 0.
+        const QColor leafFill = SceneTreePalette::leafCardFill();
+        if (leafFill.alpha() > 0) {
+            const QColor leafBorder = leafFill.alpha() > 10
+                ? (SceneTreePalette::isDarkTheme(pt)
+                       ? leafFill.lighter(150) : leafFill.darker(130))
+                : Qt::transparent;
+            paintRoundedPanel(painter, m_rect, 5.0,
+                              QPen(leafBorder, 1.0), QBrush(leafFill));
+        }
+
         if (m_selected) {
             paintRoundedPanel(painter,
                               m_rect.adjusted(-3.0, -3.0, 3.0, 3.0),

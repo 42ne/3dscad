@@ -234,3 +234,68 @@ After changes to the tree, manually verify:
    must not create invalid nesting.
 9. Select a node and press `Delete`, then `Undo`. Structure and code must be
    restored correctly.
+
+## 11. Color Edit Mode
+
+Color edit mode lets the user visually inspect and change any color in the scene
+tree theme without opening a settings panel. All changes are applied instantly
+to an in-memory custom theme and can be saved.
+
+### Entering and exiting
+
+- Click the **✏ Colors** toggle button in the toolbar overlay.
+- Exit by clicking the toggle again, or press **Esc**.
+- While active, drag-and-drop of toolbar items and canvas block moves are
+  disabled; only color selection gestures work.
+
+### Zone detection
+
+Moving the mouse over the canvas highlights the current *color zone* — the
+smallest rectangle that contains the cursor. Each zone maps to a set of
+color properties:
+
+| Zone | Properties |
+| --- | --- |
+| Card header (group, module, for-loop, boolean) | Header fill, text color |
+| Card body of a group operation | Card fill, card border, (transforms/for also expose: axis label color, number color, expression color) |
+| Primitive card body | Optional card fill (transparent by default), param label color, number constant color, expression color, number pill fill, number pill border |
+| Module call card body | Same as primitive |
+| Variable / parameter row | Row fill, label color (`=`), number color, expression color, number pill fill, number pill border |
+| Empty canvas | Canvas background, minor grid, major grid |
+
+Hovering over the toolbar panel, hint overlay, or swatches does **not** expose
+canvas colors — those zones are outside the editable card area.
+
+### Scrolling and picking
+
+- **Scroll wheel** over a zone cycles through its color properties (shown in
+  the hint: `↕ N/M`).
+- The current property and its hex value are displayed in the hint text.
+- **Left-click** opens the system color picker for the highlighted property.
+- After picking a color, the scene updates immediately and the highlight
+  refreshes.
+
+### Scope of changes
+
+Properties marked *global* (most text and pill colors) update the shared custom
+theme and affect all cards of every type.
+
+Properties marked *per-operation* (card fill, header fill, card border) update
+only the palette entry for the specific operation type (e.g. Union, Translate).
+When no custom entry exists, the change is derived from the active built-in
+theme.
+
+Leaf cards (Primitive, Module Call) always write global properties.
+
+### Theme persistence
+
+The custom theme is serialized to a `.theme` file and loaded automatically on
+next launch. Clearing the custom theme restores the current built-in preset.
+
+### Current limitations
+
+- The dashed separator line and the **base** / **cut** vertical pill labels
+  inside `difference` cards use internally derived colors that are not yet
+  exposed as editable properties.
+- The Difference separator and base/cut accent colors change automatically when
+  the card body fill is edited.

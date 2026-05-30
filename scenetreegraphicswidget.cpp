@@ -995,6 +995,11 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
 
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Escape && m_colorEditMode) {
+        setColorEditMode(false);
+        event->accept();
+        return;
+    }
     if (event->key() == Qt::Key_Control) {
         const QPointF scenePosition = mapToScene(m_lastMousePosition);
         updateControlTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
@@ -1053,12 +1058,17 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         const QGraphicsItem *hitItem = itemAt(event->pos());
         const bool isToolbarItem = hitItem
             && m_toolbarItems.contains(const_cast<QGraphicsItem *>(hitItem));
-        if (!isToolbarItem) {
+        // Swatches and the toggle button handle their own clicks; everything else
+        // (card zones, glass panels, empty canvas) routes through handleColorEditClick.
+        const QString hitZone = isToolbarItem ? hitItem->data(0).toString() : QString();
+        const bool isToolbarControl = (hitZone == QLatin1String("swatch")
+                                       || hitZone == QLatin1String("toggle"));
+        if (!isToolbarControl) {
             handleColorEditClick(scenePos);
             event->accept();
             return;
         }
-        // Fall through for toolbar-only items (toggle button, swatches, etc.).
+        // Fall through for swatches and the toggle button.
     }
 
     // ── Canvas-move drag: check grip strip before anything else ──────────────
@@ -1308,7 +1318,8 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     // ── Color-edit mode hover ─────────────────────────────────────────────────
     if (m_colorEditMode) {
         updateColorEditHighlight(scenePosition);
-        QGraphicsView::mouseMoveEvent(event);           // deliver hover LEAVE when leaving toggle
+        if (!(event->buttons() & Qt::LeftButton))
+            QGraphicsView::mouseMoveEvent(event);       // hover events only — block drag propagation
         event->accept();
         return;
     }
@@ -1671,6 +1682,7 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
     shadow->setOpacity(darkGlass ? 0.65 : 0.40);
+    shadow->setData(0, QStringLiteral("shadow"));
     m_toolbarItems.append(shadow);
 
     QPainterPath panelPath;
@@ -1686,6 +1698,7 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
     panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
     panel->setZValue(LocalOverlayZ - 1.0);
+    panel->setData(0, QStringLiteral("glass_toolbar"));
     m_toolbarItems.append(panel);
 
     for (int i = 0; i < CanvasBackgroundThemeCount; ++i) {
@@ -1701,6 +1714,7 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
             ring->setPos(panelTopLeft);
             ring->setZValue(LocalOverlayZ);
+            ring->setData(0, QStringLiteral("swatch"));
             m_graphicsScene->addItem(ring);
             m_toolbarItems.append(ring);
         }
@@ -1712,6 +1726,7 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
         circle->setZValue(LocalOverlayZ + 0.5);
+        circle->setData(0, QStringLiteral("swatch"));
         m_graphicsScene->addItem(circle);
         m_toolbarItems.append(circle);
     }
@@ -1767,6 +1782,47 @@ void SceneTreeGraphicsWidget::setColorEditMode(bool enabled)
 SceneTreeGraphicsWidget::ColorZoneHit
 SceneTreeGraphicsWidget::colorZoneAt(const QPointF &scenePos) const
 {
+    // Toolbar/hint panels use ItemIgnoresTransformations. QGraphicsView::itemAt drives
+    // scene-space containment checks, which break at zoom != 1 for IIT items (their
+    // sceneBoundingRect has local-pixel size, not world units). Instead, compute each
+    // item's viewport-space rect directly and find the topmost hit by Z value.
+    const QPointF vpCursor(mapFromScene(scenePos));
+    QGraphicsItem *topToolbarItem = nullptr;
+    qreal topZ = -1.0;
+    for (QGraphicsItem *it : m_toolbarItems) {
+        if (!it->isVisible())
+            continue;
+        const QRectF vpRect = it->boundingRect().translated(mapFromScene(it->pos()));
+        if (vpRect.contains(vpCursor) && it->zValue() > topZ) {
+            topToolbarItem = it;
+            topZ = it->zValue();
+        }
+    }
+    if (topToolbarItem) {
+        const QString zone = topToolbarItem->data(0).toString();
+        if (zone == QLatin1String("glass_hint")) {
+            ColorZoneHit h;
+            h.fieldName    = QStringLiteral("hint");
+            h.label        = QStringLiteral("Hint panel");
+            h.valid        = true;
+            h.rect         = topToolbarItem->boundingRect();
+            h.itemScenePos = topToolbarItem->pos();
+            return h;
+        }
+        if (zone == QLatin1String("glass_toolbar")) {
+            ColorZoneHit h;
+            h.fieldName    = QStringLiteral("toolbar");
+            h.label        = QStringLiteral("Toolbar panel");
+            h.valid        = true;
+            h.rect         = topToolbarItem->boundingRect();
+            h.itemScenePos = topToolbarItem->pos();
+            return h;
+        }
+        // swatch, toggle, shadow, or untagged main toolbar item — no color properties.
+        return {QStringLiteral("toolbar_controls"), QString(), QRectF(), false,
+                SceneDocument::TreeNode::Union, false};
+    }
+
     // Find the innermost (smallest-area) group hit area containing the position.
     const GroupHitArea *best = nullptr;
     for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
@@ -1894,7 +1950,56 @@ SceneTreeGraphicsWidget::colorZoneAt(const QPointF &scenePos) const
                     }
                 }
             }
-            return {QStringLiteral("card"), QStringLiteral("Card body"), child.rect, true, op, true};
+            // Primitive and ModuleCall are leaf nodes rendered with global theme colours,
+            // not per-operation palette overrides.  Look up the child type here (second
+            // treeNodeById call is cheap and keeps the earlier if (m_scene) scope clean).
+            bool isLeafCard = false;
+            QString leafLabel = QStringLiteral("Card body");
+            if (m_scene) {
+                const SceneDocument::TreeNode *cn = m_scene->treeNodeById(child.nodeId);
+                if (cn) {
+                    if (cn->type == SceneDocument::TreeNode::Primitive) {
+                        isLeafCard = true;
+                        leafLabel  = QStringLiteral("Primitive card");
+                    } else if (cn->type == SceneDocument::TreeNode::ModuleCall) {
+                        isLeafCard = true;
+                        leafLabel  = QStringLiteral("Module call card");
+                    }
+                }
+            }
+            ColorZoneHit h{QStringLiteral("card"), leafLabel, child.rect,
+                           true, op, !isLeafCard};
+            h.nodeId = child.nodeId;
+            return h;
+        }
+
+        // Module template call — rendered between separator and body, not in children list.
+        if (op == SceneDocument::TreeNode::Module
+            && best->moduleParameterSeparatorY > 0.0 && m_scene)
+        {
+            const SceneDocument::TreeNode *modNode = m_scene->treeNodeById(best->groupId);
+            if (modNode) {
+                QVector<ModuleCallParam> tmplParams;
+                for (const SceneDocument::TreeNode &pc : modNode->children) {
+                    if (pc.type == SceneDocument::TreeNode::Variable && pc.isParameter) {
+                        const QString expr = pc.variableExpression.trimmed().isEmpty()
+                            ? QString::number(pc.variableValue)
+                            : pc.variableExpression.trimmed();
+                        tmplParams.append({pc.id, pc.variableName, expr});
+                    }
+                }
+                const QSizeF tmplSz = moduleCallPreviewSize(modNode->moduleName, tmplParams);
+                const QRectF tmplRect(best->rect.left() + GroupPadding,
+                                      best->moduleParameterSeparatorY
+                                          - ChildGap * 0.5 + 16.0 + ChildGap,
+                                      tmplSz.width(), tmplSz.height());
+                if (tmplRect.contains(scenePos)) {
+                    ColorZoneHit h{QStringLiteral("card"), QStringLiteral("Call template"),
+                                   tmplRect, true, op, false};
+                    h.nodeId = -best->groupId; // negative sentinel: template, not real call node
+                    return h;
+                }
+            }
         }
 
         // Header zone: left icon strip for vertical-header ops, top row for horizontal.
@@ -2002,6 +2107,7 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
         return;
 
     const ColorZoneHit hit = colorZoneAt(scenePos);
+
     m_colorEditZoneField = hit.fieldName;
 
     // Reset prop index when hovering a different zone.
@@ -2023,19 +2129,36 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
         const QColor flash(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(),
                            prop.isText ? cur.alpha() : 218);
 
-        if (prop.isText
-            && hit.fieldName == QLatin1String("header")
+        if (hit.fieldName == QLatin1String("hint")
+            || hit.fieldName == QLatin1String("toolbar"))
+        {
+            // Overlay flash anchored in viewport space (same ItemIgnoresTransformations as the panel).
+            QPainterPath flashPath;
+            flashPath.addRoundedRect(hit.rect, 6.0, 6.0);
+            QPen borderPen(flash, 2.5);
+            borderPen.setCosmetic(true);
+            auto *blink = m_graphicsScene->addPath(flashPath, borderPen,
+                                                   QBrush(QColor(flash.red(), flash.green(),
+                                                                  flash.blue(), 55)));
+            blink->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+            blink->setPos(hit.itemScenePos);
+            blink->setZValue(12000.0);
+            blink->setVisible(m_colorEditBlinkOn);
+            m_colorEditBlinkTargets.append(blink);
+        } else if (prop.isText
+            && prop.id == QLatin1String("text")
+            && (hit.fieldName == QLatin1String("header") || hit.fieldName == QLatin1String("card"))
             && !isVerticalHeaderOperation(hit.operation))
         {
             // Horizontal header text: stamp an inverted-color text item on top of the label.
+            // When hit comes from card body (not header), the header is at the card top.
             const QFont font = sceneTreeGraphicsFont();
             const QFontMetricsF metrics(font);
             const qreal iconSize = (hit.operation == SceneDocument::TreeNode::Module)
                 ? PrimitiveIconSize - 6.0 : PrimitiveIconSize - 4.0;
             const qreal labelLeft = hit.rect.left() + 30.0 + iconSize + 10.0;
-            // Vertical centering mirrors QPainter::drawText(rect, AlignVCenter):
-            // topOfText = rectTop + (rectH - fm.height()) / 2
-            const qreal textTop = hit.rect.top() + 7.0 + (16.0 - metrics.height()) * 0.5;
+            const qreal headerTop = hit.rect.top();  // card rect top = header top for horiz-header ops
+            const qreal textTop = headerTop + 7.0 + (16.0 - metrics.height()) * 0.5;
 
             QString headerLabel = labelForOperation(hit.operation);
             if (hit.operation == SceneDocument::TreeNode::Module && m_scene && hit.nodeId) {
@@ -2154,6 +2277,315 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
             m_graphicsScene->addItem(lbl);
             lbl->setVisible(m_colorEditBlinkOn);
             m_colorEditBlinkTargets.append(lbl);
+        } else if (hit.fieldName == QLatin1String("card") && !hit.hasOperation
+                   && hit.nodeId && m_scene
+                   && (prop.id == QLatin1String("numLabelText")
+                       || prop.id == QLatin1String("numText")
+                       || prop.id == QLatin1String("mutedText")
+                       || prop.id == QLatin1String("numFill")
+                       || prop.id == QLatin1String("numBorder")))
+        {
+            // Leaf card body (Primitive / ModuleCall): blink the relevant param spans.
+            const QFont font = sceneTreeGraphicsFont();
+            QFont valueFont = font;
+            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
+            const QFontMetricsF metrics(font);
+            const QFontMetricsF vfm(valueFont);
+            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
+            // numFill / numBorder / numText target number spans; mutedText targets formula spans.
+            const bool wantNumber = (prop.id != QLatin1String("mutedText"));
+
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
+
+            // Helper lambda: add one span overlay (pill fill, pill border, or text item).
+            auto addSpanOverlay = [&](const ExpressionTextSpan &span) {
+                if (span.number != wantNumber) return;
+                if (prop.id == QLatin1String("numFill")) {
+                    QPainterPath path;
+                    path.addRoundedRect(span.rect, r, r);
+                    auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
+                    it->setZValue(8800.0);
+                    it->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(it);
+                } else if (prop.id == QLatin1String("numBorder")) {
+                    QPainterPath path;
+                    path.addRoundedRect(span.rect, r, r);
+                    QPen borderPen(flash, 2.0);
+                    borderPen.setCosmetic(true);
+                    auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
+                    it->setZValue(8800.0);
+                    it->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(it);
+                } else {
+                    auto *lbl = new QGraphicsSimpleTextItem(span.text);
+                    lbl->setFont(valueFont);
+                    const qreal tx = span.number
+                        ? span.rect.left() + (span.rect.width() - vfm.horizontalAdvance(span.text)) * 0.5
+                        : span.rect.left();
+                    lbl->setPos(tx, span.rect.top() + (span.rect.height() - vfm.height()) * 0.5);
+                    lbl->setBrush(QBrush(flash));
+                    lbl->setZValue(8801.0);
+                    m_graphicsScene->addItem(lbl);
+                    lbl->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(lbl);
+                }
+            };
+
+            if (node && node->type == SceneDocument::TreeNode::Primitive) {
+                const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+                if (shape) {
+                    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
+                    const int count = controls.size();
+                    for (int i = 0; i < count; ++i) {
+                        const QRectF rowRect = shapeParameterControlRect(hit.rect, i, count);
+                        if (prop.id == QLatin1String("numLabelText")) {
+                            const QRectF labelRect(rowRect.left(), rowRect.top(),
+                                                   PrimitiveParamLabelArea - 2.0, rowRect.height());
+                            auto *lbl = new QGraphicsSimpleTextItem(
+                                controls[i].label + QStringLiteral(" ="));
+                            lbl->setFont(valueFont);
+                            lbl->setPos(labelRect.left(),
+                                        labelRect.top() + (labelRect.height() - vfm.height()) * 0.5);
+                            lbl->setBrush(QBrush(flash));
+                            lbl->setZValue(8801.0);
+                            m_graphicsScene->addItem(lbl);
+                            lbl->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(lbl);
+                        } else {
+                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea,
+                                                  rowRect.top(),
+                                                  rowRect.width() - PrimitiveParamLabelArea,
+                                                  rowRect.height());
+                            for (const ExpressionTextSpan &span :
+                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics))
+                                addSpanOverlay(span);
+                        }
+                    }
+                }
+            } else if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
+                const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
+                if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
+                    QVector<ModuleCallParam> params;
+                    const QHash<QString, QString> overrides =
+                        resolveModuleArguments(node->moduleCallArguments, *modGroup);
+                    for (const SceneDocument::TreeNode &pChild : modGroup->children) {
+                        if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
+                            const QString expr = overrides.value(
+                                pChild.variableName,
+                                pChild.variableExpression.trimmed().isEmpty()
+                                    ? QString::number(pChild.variableValue)
+                                    : pChild.variableExpression.trimmed());
+                            params.append({pChild.id, pChild.variableName, expr});
+                        }
+                    }
+                    qreal x = hit.rect.left() + 46.0
+                              + metrics.horizontalAdvance(node->moduleName + QStringLiteral("("));
+                    for (int i = 0; i < params.size(); ++i) {
+                        const QString nameLabel = params[i].name + QStringLiteral(" =");
+                        const qreal nameLabelW  = metrics.horizontalAdvance(nameLabel + QStringLiteral(" "));
+                        if (prop.id == QLatin1String("numLabelText")) {
+                            auto *lbl = new QGraphicsSimpleTextItem(nameLabel);
+                            lbl->setFont(valueFont);
+                            lbl->setPos(x, hit.rect.top() + (VariableHeight - vfm.height()) * 0.5);
+                            lbl->setBrush(QBrush(flash));
+                            lbl->setZValue(8801.0);
+                            m_graphicsScene->addItem(lbl);
+                            lbl->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(lbl);
+                        } else {
+                            const QRectF exprRect(x + nameLabelW, hit.rect.top(),
+                                                  hit.rect.right() - (x + nameLabelW), VariableHeight);
+                            for (const ExpressionTextSpan &span :
+                                     expressionSpansInTextRect(exprRect, params[i].expression, metrics))
+                                addSpanOverlay(span);
+                        }
+                        x += nameLabelW;
+                        x += metrics.horizontalAdvance(params[i].expression);
+                        if (i < params.size() - 1)
+                            x += metrics.horizontalAdvance(QStringLiteral(", "));
+                    }
+                }
+            } else if (hit.nodeId < 0) {
+                // Template call: nodeId = -(moduleGroupId) — uses module params directly.
+                const SceneDocument::TreeNode *modNode = m_scene->treeNodeById(-hit.nodeId);
+                if (modNode && modNode->operation == SceneDocument::TreeNode::Module) {
+                    QVector<ModuleCallParam> tmplParams;
+                    for (const SceneDocument::TreeNode &pc : modNode->children) {
+                        if (pc.type == SceneDocument::TreeNode::Variable && pc.isParameter) {
+                            const QString expr = pc.variableExpression.trimmed().isEmpty()
+                                ? QString::number(pc.variableValue)
+                                : pc.variableExpression.trimmed();
+                            tmplParams.append({pc.id, pc.variableName, expr});
+                        }
+                    }
+                    qreal x = hit.rect.left() + 46.0
+                              + metrics.horizontalAdvance(modNode->moduleName + QStringLiteral("("));
+                    for (int i = 0; i < tmplParams.size(); ++i) {
+                        const QString nameLabel = tmplParams[i].name + QStringLiteral(" =");
+                        const qreal nameLabelW  = metrics.horizontalAdvance(nameLabel + QStringLiteral(" "));
+                        if (prop.id == QLatin1String("numLabelText")) {
+                            auto *lbl = new QGraphicsSimpleTextItem(nameLabel);
+                            lbl->setFont(valueFont);
+                            lbl->setPos(x, hit.rect.top() + (VariableHeight - vfm.height()) * 0.5);
+                            lbl->setBrush(QBrush(flash));
+                            lbl->setZValue(8801.0);
+                            m_graphicsScene->addItem(lbl);
+                            lbl->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(lbl);
+                        } else {
+                            const QRectF exprRect(x + nameLabelW, hit.rect.top(),
+                                                  hit.rect.right() - (x + nameLabelW), VariableHeight);
+                            for (const ExpressionTextSpan &span :
+                                     expressionSpansInTextRect(exprRect, tmplParams[i].expression, metrics))
+                                addSpanOverlay(span);
+                        }
+                        x += nameLabelW;
+                        x += metrics.horizontalAdvance(tmplParams[i].expression);
+                        if (i < tmplParams.size() - 1)
+                            x += metrics.horizontalAdvance(QStringLiteral(", "));
+                    }
+                }
+            }
+        } else if (hit.fieldName == QLatin1String("input")
+                   && hit.nodeId && m_scene
+                   && (prop.id == QLatin1String("numLabelText")
+                       || prop.id == QLatin1String("numText")
+                       || prop.id == QLatin1String("mutedText")
+                       || prop.id == QLatin1String("numFill")
+                       || prop.id == QLatin1String("numBorder")))
+        {
+            // Variable / parameter row: blink the relevant spans.
+            // Variable rows render with the full scene font (no −2pt reduction).
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
+            if (node && node->type == SceneDocument::TreeNode::Variable) {
+                const QFont font = sceneTreeGraphicsFont();
+                const QFontMetricsF metrics(font);
+                const qreal r    = 3.0 / qMax(0.001, qAbs(transform().m11()));
+                const qreal nameW = metrics.horizontalAdvance(node->variableName);
+
+                if (prop.id == QLatin1String("numLabelText")) {
+                    const qreal eqLeft = hit.rect.left() + 38.0 + nameW + 4.0;
+                    const QRectF eqRect(eqLeft,
+                                        hit.rect.top() + (VariableHeight - 16.0) * 0.5,
+                                        12.0, 16.0);
+                    auto *lbl = new QGraphicsSimpleTextItem(QStringLiteral("="));
+                    lbl->setFont(font);
+                    lbl->setPos(eqRect.left(),
+                                eqRect.top() + (eqRect.height() - metrics.height()) * 0.5);
+                    lbl->setBrush(QBrush(flash));
+                    lbl->setZValue(8801.0);
+                    m_graphicsScene->addItem(lbl);
+                    lbl->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(lbl);
+                } else {
+                    const bool wantNumber = (prop.id != QLatin1String("mutedText"));
+                    for (const ExpressionTextSpan &span :
+                             expressionTextSpans(hit.rect, node->variableExpression, metrics, nameW)) {
+                        if (span.number != wantNumber) continue;
+                        if (prop.id == QLatin1String("numFill")) {
+                            QPainterPath path;
+                            path.addRoundedRect(span.rect, r, r);
+                            auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
+                            it->setZValue(8800.0);
+                            it->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(it);
+                        } else if (prop.id == QLatin1String("numBorder")) {
+                            QPainterPath path;
+                            path.addRoundedRect(span.rect, r, r);
+                            QPen borderPen(flash, 2.0);
+                            borderPen.setCosmetic(true);
+                            auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
+                            it->setZValue(8800.0);
+                            it->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(it);
+                        } else {
+                            auto *lbl = new QGraphicsSimpleTextItem(span.text);
+                            lbl->setFont(font);
+                            const qreal tx = span.number
+                                ? span.rect.left() + (span.rect.width() - metrics.horizontalAdvance(span.text)) * 0.5
+                                : span.rect.left();
+                            lbl->setPos(tx,
+                                        span.rect.top() + (span.rect.height() - metrics.height()) * 0.5);
+                            lbl->setBrush(QBrush(flash));
+                            lbl->setZValue(8801.0);
+                            m_graphicsScene->addItem(lbl);
+                            lbl->setVisible(m_colorEditBlinkOn);
+                            m_colorEditBlinkTargets.append(lbl);
+                        }
+                    }
+                }
+            }
+        } else if (prop.id == QLatin1String("mutedText")
+                   && hit.fieldName == QLatin1String("card")
+                   && hit.hasOperation
+                   && hit.operation == SceneDocument::TreeNode::Module
+                   && hit.nodeId && m_scene)
+        {
+            // Module card body: use the same helper as drawGroup so positions/scales match exactly.
+            const GroupHitArea *area = nullptr;
+            for (const GroupHitArea &a : m_treeLayout.groupHitAreas())
+                if (a.groupId == hit.nodeId) { area = &a; break; }
+
+            if (area && area->moduleParameterSeparatorY > hit.rect.top()) {
+                QVector<QGraphicsItem *> items;
+                drawModuleSectionLabels(hit.rect, area->moduleParameterSeparatorY,
+                                        area->depth, flash, &items);
+                for (QGraphicsItem *it : items) {
+                    it->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(it);
+                }
+            }
+        } else if (prop.id == QLatin1String("mutedText")
+                   && hit.fieldName == QLatin1String("card")
+                   && hit.hasOperation
+                   && hit.operation == SceneDocument::TreeNode::Difference
+                   && hit.nodeId && m_scene)
+        {
+            // Difference card body: blink dashed separator + "base" and "cut" vertical pill rects.
+            const GroupHitArea *area = nullptr;
+            for (const GroupHitArea &a : m_treeLayout.groupHitAreas())
+                if (a.groupId == hit.nodeId) { area = &a; break; }
+
+            if (area && area->cutSeparatorY > hit.rect.top()) {
+                QPainterPath sepPath;
+                sepPath.moveTo(hit.rect.left() + GroupPadding, area->cutSeparatorY);
+                sepPath.lineTo(hit.rect.right() - GroupPadding, area->cutSeparatorY);
+                QPen dashPen(flash, 2.0, Qt::DashLine);
+                dashPen.setCosmetic(true);
+                auto *sepLine = m_graphicsScene->addPath(sepPath, dashPen, Qt::NoBrush);
+                sepLine->setZValue(8801.0);
+                sepLine->setVisible(m_colorEditBlinkOn);
+                m_colorEditBlinkTargets.append(sepLine);
+
+                // "base" pill rect (mirrors renderer's boundedVerticalLabelRect).
+                const qreal labelLeft  = hit.rect.left() + GroupPadding * 0.5;
+                const qreal baseTop    = hit.rect.top() + GroupHeaderHeight + GroupPadding;
+                const qreal baseBottom = area->cutSeparatorY - 4.0;
+                const qreal baseH      = qMin(42.0, baseBottom - baseTop);
+                if (baseH >= 18.0) {
+                    const qreal baseY = baseTop + (baseBottom - baseTop - baseH) * 0.5;
+                    QPainterPath basePath;
+                    basePath.addRoundedRect(QRectF(labelLeft, baseY, 20.0, baseH), 4.0, 4.0);
+                    auto *baseItem = m_graphicsScene->addPath(basePath, Qt::NoPen, QBrush(flash));
+                    baseItem->setZValue(8801.0);
+                    baseItem->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(baseItem);
+                }
+
+                // "cut" pill rect (below separator).
+                const qreal cutTop    = area->cutSeparatorY + 4.0;
+                const qreal cutBottom = hit.rect.bottom() - GroupPadding;
+                const qreal cutH      = qMin(42.0, cutBottom - cutTop);
+                if (cutH >= 18.0) {
+                    const qreal cutY = cutTop + (cutBottom - cutTop - cutH) * 0.5;
+                    QPainterPath cutPath;
+                    cutPath.addRoundedRect(QRectF(labelLeft, cutY, 20.0, cutH), 4.0, 4.0);
+                    auto *cutItem = m_graphicsScene->addPath(cutPath, Qt::NoPen, QBrush(flash));
+                    cutItem->setZValue(8801.0);
+                    cutItem->setVisible(m_colorEditBlinkOn);
+                    m_colorEditBlinkTargets.append(cutItem);
+                }
+            }
         } else {
             const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
             QPainterPath flashPath;
@@ -2220,7 +2652,10 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
         QString zoneLine;
         if (hit.hasOperation)
             zoneLine = colorEditOpName(hit.operation) + QStringLiteral("  ") + hit.label;
-        else if (hit.fieldName == QLatin1String("input"))
+        else if (hit.fieldName == QLatin1String("input")
+                 || hit.fieldName == QLatin1String("card")
+                 || hit.fieldName == QLatin1String("hint")
+                 || hit.fieldName == QLatin1String("toolbar"))
             zoneLine = hit.label;
         else
             zoneLine = QStringLiteral("Canvas");
@@ -2236,7 +2671,9 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
                         + QStringLiteral("\n") + navLine);
     } else {
         updateHoverHint(QStringLiteral("colorEdit:none"),
-                        QStringLiteral("✏ Color edit\nHover a card to inspect its colors."));
+                        QStringLiteral("✏ Color edit mode\n"
+                                       "Hover a card to inspect its colors.\n"
+                                       "Esc — exit color edit mode"));
     }
 }
 
@@ -2349,6 +2786,19 @@ SceneTreeGraphicsWidget::propsForHit(const ColorZoneHit &hit) const
     if (hit.fieldName == QLatin1String("mutedText"))
         return {{QStringLiteral("mutedText"), QStringLiteral("Expression color"), true, true}};
 
+    if (hit.fieldName == QLatin1String("hint"))
+        return {
+            {QStringLiteral("glassTop"),    QStringLiteral("Hint glass (top)"),    false, true},
+            {QStringLiteral("glassBottom"), QStringLiteral("Hint glass (bottom)"), false, true},
+            {QStringLiteral("glassBorder"), QStringLiteral("Hint border"),         false, true},
+            {QStringLiteral("text"),        QStringLiteral("Hint text color"),     true,  true},
+        };
+    if (hit.fieldName == QLatin1String("toolbar"))
+        return {
+            {QStringLiteral("glassBottom"), QStringLiteral("Toolbar glass fill"),   false, true},
+            {QStringLiteral("glassBorder"), QStringLiteral("Toolbar glass border"), false, true},
+        };
+
     if (hit.fieldName == QLatin1String("header")) {
         if (hit.hasOperation && isVerticalHeaderOperation(hit.operation))
             return {{QStringLiteral("header"), QStringLiteral("Header fill"), false, false}};
@@ -2358,23 +2808,43 @@ SceneTreeGraphicsWidget::propsForHit(const ColorZoneHit &hit) const
         };
     }
     if (hit.fieldName == QLatin1String("card")) {
+        if (!hit.hasOperation) {
+            // Leaf cards (Primitive, ModuleCall): optional background + text + pill colours.
+            return {
+                {QStringLiteral("leafCard"),     QStringLiteral("Card fill"),            false, true},
+                {QStringLiteral("numLabelText"), QStringLiteral("Param label color"),    true,  true},
+                {QStringLiteral("numText"),      QStringLiteral("Number constant color"),true,  true},
+                {QStringLiteral("mutedText"),    QStringLiteral("Expression color"),     true,  true},
+                {QStringLiteral("numFill"),      QStringLiteral("Number pill fill"),     false, true},
+                {QStringLiteral("numBorder"),    QStringLiteral("Number pill border"),   false, true},
+            };
+        }
         QVector<ColorPropDef> props = {
             {QStringLiteral("card"),   QStringLiteral("Card fill"),   false, false},
             {QStringLiteral("border"), QStringLiteral("Card border"), false, false},
         };
-        // Number pills only exist on transform / for-loop cards.
         using Op = SceneDocument::TreeNode;
-        if (hit.hasOperation && (isVerticalHeaderOperation(hit.operation)
-                              || hit.operation == Op::For)) {
+        if (isVerticalHeaderOperation(hit.operation) || hit.operation == Op::For) {
+            // Transform / for-loop cards: expose per-operation text and pill colours.
             props << ColorPropDef{QStringLiteral("numLabelText"), QStringLiteral("Label text (X=, Y=)"), true,  true};
             props << ColorPropDef{QStringLiteral("numText"),     QStringLiteral("Constant values"),      true,  true};
             props << ColorPropDef{QStringLiteral("mutedText"),   QStringLiteral("Expression color"),     true,  true};
+        } else if (hit.operation != Op::Scene) {
+            // Horizontal-header operations (Module, Union, Difference, Intersection):
+            // expose the header label text and muted labels/separator color.
+            props << ColorPropDef{QStringLiteral("text"),      QStringLiteral("Header text color"),  true, false};
+            props << ColorPropDef{QStringLiteral("mutedText"), QStringLiteral("Label / separator color"), true, true};
         }
         return props;
     }
     if (hit.fieldName == QLatin1String("input"))
         return {
-            {QStringLiteral("input"), QStringLiteral("Variable row fill"), false, true},
+            {QStringLiteral("input"),        QStringLiteral("Row fill"),           false, true},
+            {QStringLiteral("numLabelText"), QStringLiteral("Label color (=)"),    true,  true},
+            {QStringLiteral("numText"),      QStringLiteral("Number constant"),    true,  true},
+            {QStringLiteral("mutedText"),    QStringLiteral("Expression color"),   true,  true},
+            {QStringLiteral("numFill"),      QStringLiteral("Number pill fill"),   false, true},
+            {QStringLiteral("numBorder"),    QStringLiteral("Number pill border"), false, true},
         };
     // Canvas / default — only the three properties visible on an empty canvas
     return {
@@ -2425,6 +2895,7 @@ QColor SceneTreeGraphicsWidget::getColorForProp(const ColorPropDef &prop,
     if (prop.id == QLatin1String("numLabelText"))     return t.numLabelText;
     if (prop.id == QLatin1String("numBorderActive"))  return t.numBorderActive;
     if (prop.id == QLatin1String("numFillActive"))    return t.numFillActive;
+    if (prop.id == QLatin1String("leafCard"))         return t.leafCard;
     return QColor();
 }
 
@@ -2466,6 +2937,7 @@ void SceneTreeGraphicsWidget::setColorForProp(const ColorPropDef &prop,
     else if (prop.id == QLatin1String("numLabelText"))t.numLabelText   = color;
     else if (prop.id == QLatin1String("numBorderActive"))t.numBorderActive = color;
     else if (prop.id == QLatin1String("numFillActive"))  t.numFillActive   = color;
+    else if (prop.id == QLatin1String("leafCard"))       t.leafCard        = color;
     SceneTreePalette::setCustomTheme(t);
 }
 
@@ -2516,6 +2988,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
     shadow->setOpacity(darkGlass ? 0.65 : 0.40);
+    shadow->setData(0, QStringLiteral("shadow"));
     m_toolbarItems.append(shadow);
 
     // Glass panel background — same style as toolbar.
@@ -2532,6 +3005,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
     panel->setZValue(LocalOverlayZ - 1.0);
+    panel->setData(0, QStringLiteral("glass_toolbar"));
     m_toolbarItems.append(panel);
 
     // One swatch circle per theme.
@@ -2553,6 +3027,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
             ring->setPos(panelTopLeft);
             ring->setZValue(LocalOverlayZ);
+            ring->setData(0, QStringLiteral("swatch"));
             m_graphicsScene->addItem(ring);
             m_toolbarItems.append(ring);
         }
@@ -2569,6 +3044,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
         circle->setZValue(LocalOverlayZ + 0.5);
+        circle->setData(0, QStringLiteral("swatch"));
         m_graphicsScene->addItem(circle);
         m_toolbarItems.append(circle);
     }
@@ -2594,6 +3070,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         toggleShadow->setPos(toggleTopLeft);
         toggleShadow->setZValue(LocalOverlayZ - 2.0);
         toggleShadow->setOpacity(darkGlass ? 0.62 : 0.38);
+        toggleShadow->setData(0, QStringLiteral("shadow"));
         m_toolbarItems.append(toggleShadow);
 
         // The toggle itself.
@@ -2621,6 +3098,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
         tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         tog->setPos(toggleTopLeft);
         tog->setZValue(LocalOverlayZ + 0.5);
+        tog->setData(0, QStringLiteral("toggle"));
         m_graphicsScene->addItem(tog);
         m_toolbarItems.append(tog);
         m_colorEditToggleItem = tog;
@@ -2695,6 +3173,7 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
     shadow->setPos(panelTopLeft);
     shadow->setZValue(LocalOverlayZ - 2.0);
     shadow->setOpacity(darkGlass ? 0.72 : 0.42);
+    shadow->setData(0, QStringLiteral("shadow"));
     m_toolbarItems.append(shadow);
 
     QPainterPath path;
@@ -2713,6 +3192,7 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
     panel->setAcceptedMouseButtons(Qt::NoButton);
     panel->setPos(panelTopLeft);
     panel->setZValue(LocalOverlayZ - 1.0);
+    panel->setData(0, QStringLiteral("glass_hint"));
     m_toolbarItems.append(panel);
 
     auto *text = m_graphicsScene->addText(hint, font);
@@ -2724,6 +3204,7 @@ void SceneTreeGraphicsWidget::drawHoverHintOverlay()
                                           : darkGlass ? QColor(232, 242, 255) : QColor(39, 51, 66));
     text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
     text->setZValue(LocalOverlayZ);
+    text->setData(0, QStringLiteral("glass_hint"));
     m_toolbarItems.append(text);
 }
 
@@ -2859,6 +3340,59 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
     return rect;
 }
 
+void SceneTreeGraphicsWidget::drawModuleSectionLabels(
+    const QRectF &rect, qreal sepY, int depth,
+    const QColor &color, QVector<QGraphicsItem *> *outItems)
+{
+    const bool blinkMode   = (outItems != nullptr);
+    const qreal labelLeft  = rect.left() + GroupPadding + PrimitiveIconSize + 10.0;
+    const qreal callLeft   = rect.left() + GroupPadding;
+    const qreal labelRight = rect.right() - GroupPadding;
+    // moduleCallTemplateRect.top() derivation: after sep is set, drawGroup does
+    //   childTopLeft.ry() += 16 + ChildGap, so tmplTop = sepY - ChildGap/2 + 16 + ChildGap = sepY + 16 + ChildGap/2
+    const qreal tmplTop    = sepY + 16.0 + ChildGap * 0.5;
+    const qreal tmplBottom = tmplTop + VariableHeight;
+
+    // "parameters" label
+    auto *paramsLabel = m_graphicsScene->addSimpleText(QStringLiteral("parameters"));
+    paramsLabel->setBrush(color);
+    if (paramsLabel->boundingRect().width() > labelRight - labelLeft)
+        paramsLabel->setScale(qMax<qreal>(0.72, (labelRight - labelLeft) / paramsLabel->boundingRect().width()));
+    paramsLabel->setPos(labelLeft, rect.top() + GroupHeaderHeight + 4.0);
+    paramsLabel->setZValue(blinkMode ? 8801.0 : depth * 10.0 + 8.0);
+    if (blinkMode) outItems->append(paramsLabel);
+
+    // "call handle" label — scale first, then compute Y (same as renderer)
+    auto *callLabel = m_graphicsScene->addSimpleText(QStringLiteral("call handle"));
+    callLabel->setBrush(color);
+    if (callLabel->boundingRect().width() > labelRight - callLeft)
+        callLabel->setScale(qMax<qreal>(0.72, (labelRight - callLeft) / callLabel->boundingRect().width()));
+    const qreal callLabelY = qMax(sepY + 4.0,
+                                   tmplTop - callLabel->boundingRect().height() - 3.0);
+    callLabel->setPos(callLeft, callLabelY);
+    callLabel->setZValue(blinkMode ? 8801.0 : depth * 10.0 + 8.0);
+    if (blinkMode) outItems->append(callLabel);
+
+    // "body" label
+    auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
+    const qreal bodyTop = tmplBottom + ChildGap + 4.0;
+    if (bodyTop + bodyLabel->boundingRect().height() <= rect.bottom() - GroupPadding) {
+        bodyLabel->setBrush(color);
+        bodyLabel->setPos(callLeft, bodyTop);
+        bodyLabel->setZValue(blinkMode ? 8801.0 : depth * 10.0 + 8.0);
+        if (blinkMode) outItems->append(bodyLabel);
+    } else {
+        delete bodyLabel;
+    }
+
+    // Separator dashed line — same pen width in both modes so dash pattern aligns.
+    auto *separator = m_graphicsScene->addLine(
+        callLeft, sepY, labelRight, sepY,
+        QPen(color, 1.0, Qt::DashLine));
+    separator->setZValue(blinkMode ? 8801.0 : depth * 10.0 + 7.0);
+    if (blinkMode) outItems->append(separator);
+}
+
 QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth)
 {
     QVector<ChildLayout> children;
@@ -2873,7 +3407,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     qreal maxChildWidth = 0.0;
     int moduleParameterCount = 0;
     qreal moduleParameterSeparatorY = 0.0;
-    qreal moduleCallTemplateLabelY = 0.0;
     QRectF moduleCallTemplateRect;
     QVector<ModuleCallParam> moduleCallTemplateParams;
 
@@ -2907,7 +3440,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                 }
             }
             childTopLeft.ry() += 16.0 + ChildGap;
-            moduleCallTemplateLabelY = moduleParameterSeparatorY + 4.0;
             moduleCallTemplateRect = QRectF(childTopLeft, moduleCallPreviewSize(node.moduleName, moduleCallTemplateParams));
             maxChildWidth = qMax(maxChildWidth, moduleCallTemplateRect.width());
             childTopLeft.ry() += moduleCallTemplateRect.height() + ChildGap;
@@ -2926,9 +3458,16 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     qreal childrenHeight = children.isEmpty()
                                ? PrimitiveHeight
                                : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
-    if (node.operation == SceneDocument::TreeNode::Module && !collapsedGroup)
-        childrenHeight = qMax(childrenHeight + 10.0, VariableHeight * 2.0 + ChildGap * 7.0);
-    if (node.operation == SceneDocument::TreeNode::Difference)
+    if (node.operation == SceneDocument::TreeNode::Module && !collapsedGroup) {
+        // Modules have complex internal layout (labels, separator, call template) that
+        // advance childTopLeft even when children is empty — always derive from actual position.
+        // +PrimitiveHeight ensures a visible body drop zone at the bottom.
+        const qreal actual = childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
+        childrenHeight = qMax(actual + PrimitiveHeight, VariableHeight * 2.0 + ChildGap * 7.0);
+    }
+    if (node.operation == SceneDocument::TreeNode::Difference
+        || node.operation == SceneDocument::TreeNode::Union
+        || node.operation == SceneDocument::TreeNode::Intersection)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
 
     // For a for-loop the header text can be much wider than the children.
@@ -2987,23 +3526,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail, collapsedGroup);
 
     if (node.operation == SceneDocument::TreeNode::Module && !collapsedGroup) {
-        const qreal labelLeft = rect.left() + GroupPadding + PrimitiveIconSize + 10.0;
-        const qreal labelRight = rect.right() - GroupPadding;
-        auto *paramsLabel = m_graphicsScene->addSimpleText(QStringLiteral("parameters"));
-        paramsLabel->setBrush(QColor(84, 95, 116));
-        if (paramsLabel->boundingRect().width() > labelRight - labelLeft)
-            paramsLabel->setScale(qMax<qreal>(0.72, (labelRight - labelLeft) / paramsLabel->boundingRect().width()));
-        paramsLabel->setPos(labelLeft, rect.top() + GroupHeaderHeight + 4.0);
-        paramsLabel->setZValue(depth * 10.0 + 8.0);
-
-        auto *callLabel = m_graphicsScene->addSimpleText(QStringLiteral("call handle"));
-        callLabel->setBrush(QColor(84, 95, 116));
-        if (callLabel->boundingRect().width() > labelRight - (rect.left() + GroupPadding))
-            callLabel->setScale(qMax<qreal>(0.72, (labelRight - rect.left() - GroupPadding) / callLabel->boundingRect().width()));
-        const qreal callLabelY = qMax(moduleCallTemplateLabelY,
-                                      moduleCallTemplateRect.top() - callLabel->boundingRect().height() - 3.0);
-        callLabel->setPos(rect.left() + GroupPadding, callLabelY);
-        callLabel->setZValue(depth * 10.0 + 8.0);
+        const QColor moduleLabelColor = SceneTreePalette::textMuted(static_cast<SceneTreePalette::Theme>(m_treeTheme));
+        drawModuleSectionLabels(rect, moduleParameterSeparatorY, depth, moduleLabelColor);
 
         SceneDocument::TreeNode callTemplate;
         callTemplate.id = 0;
@@ -3042,22 +3566,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                   node.id, true, node.moduleName});
         }
 
-        const qreal bodyTop = moduleCallTemplateRect.bottom() + ChildGap + 4.0;
-        auto *bodyLabel = m_graphicsScene->addSimpleText(QStringLiteral("body"));
-        bodyLabel->setBrush(QColor(84, 95, 116));
-        if (bodyTop + bodyLabel->boundingRect().height() <= rect.bottom() - GroupPadding) {
-            bodyLabel->setPos(rect.left() + GroupPadding, bodyTop);
-            bodyLabel->setZValue(depth * 10.0 + 8.0);
-        } else {
-            delete bodyLabel;
-        }
-
-        auto *separator = m_graphicsScene->addLine(rect.left() + GroupPadding,
-                                                  moduleParameterSeparatorY,
-                                                  rect.right() - GroupPadding,
-                                                  moduleParameterSeparatorY,
-                                                  QPen(QColor(142, 151, 166), 1, Qt::DashLine));
-        separator->setZValue(depth * 10.0 + 7.0);
     }
 
     const QString groupLabel = labelForOperation(node.operation);

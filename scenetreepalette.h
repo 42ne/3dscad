@@ -54,6 +54,10 @@ QColor pillFillActive();
 QColor numText(Theme theme);
 QColor numLabelText(Theme theme);
 
+// Leaf-card (Primitive / ModuleCall) optional background fill.
+// Returns a transparent colour by default — draw only when alpha > 0.
+QColor leafCardFill();
+
 // Colour shown as the circular swatch in the theme switcher overlay.
 QColor swatchColor(Theme theme);
 

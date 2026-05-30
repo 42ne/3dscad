@@ -109,6 +109,7 @@ TreeAppearanceTheme defaultTreeTheme()
     t.numFillActive   = QColor(255, 220, 108, 205);
     t.numText    = QColor(218, 228, 245);
     t.numLabelText    = QColor(140, 175, 220);
+    t.leafCard   = QColor(0, 0, 0, 0);   // transparent = no background by default
     return t;
 }
 
@@ -157,6 +158,7 @@ void ensureDefaultFiles()
         writeColor(out, QStringLiteral("numFillActive"), t.numFillActive);
         writeColor(out, QStringLiteral("numText"), t.numText);
         writeColor(out, QStringLiteral("numLabelText"), t.numLabelText);
+        writeColor(out, QStringLiteral("leafCard"), t.leafCard);
         out.sync();
     }
 
@@ -247,6 +249,7 @@ bool loadTreeTheme(const QString &name, TreeAppearanceTheme *theme)
     t.numFillActive = readColor(in, QStringLiteral("numFillActive"), t.numFillActive);
     t.numText = readColor(in, QStringLiteral("numText"), t.numText);
     t.numLabelText = readColor(in, QStringLiteral("numLabelText"), t.numLabelText);
+    t.leafCard = readColor(in, QStringLiteral("leafCard"), t.leafCard);
 
     // Per-operation card overrides — groups named "op_<int>"
     for (const QString &grp : in.childGroups()) {

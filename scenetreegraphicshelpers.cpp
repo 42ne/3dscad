@@ -938,8 +938,17 @@ QSizeF previewSizeForTool(const QString &tool)
         return differencePreviewSize();
     if (tool == "intersection")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
-    if (tool == "module")
-        return QSizeF(GroupModuleMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight * 2.0 + ChildGap * 2.0);
+    if (tool == "module") {
+        // Height matches the actual empty-module render: header + param placeholder + separator
+        // + call template + body label + one body-slot (+PrimitiveHeight).
+        const qreal bodyContent = 16.0 + VariableHeight + ChildGap    // "Parameters" label + empty param row
+                                + 16.0 + ChildGap                     // separator / template-label gap
+                                + VariableHeight + ChildGap            // call template row
+                                + 16.0 + ChildGap                     // "Body" label gap
+                                + PrimitiveHeight;                     // visible body drop zone
+        return QSizeF(GroupModuleMinWidth,
+                      GroupHeaderHeight + GroupPadding * 2.0 + bodyContent);
+    }
     if (tool == "for")
         return QSizeF(qMax(GroupWideMinWidth,
                            forLoopHeaderMinWidth(QStringLiteral("i"),
