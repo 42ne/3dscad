@@ -5,6 +5,7 @@
 #include "scenetreegraphicshelpers.h"
 #include "shapenode.h"
 
+#include <QGraphicsItem>
 #include <QImage>
 #include <QRectF>
 #include <QVector>
@@ -12,6 +13,55 @@
 
 class QGraphicsScene;
 class QGraphicsItem;
+
+// ── Polyhedron table item ────────────────────────────────────────────────────
+class PolyhedronTableItem final : public QGraphicsItem
+{
+public:
+    struct Cell {
+        QRectF rect;
+        enum Type { None, PtX, PtY, PtZ, FaceN, FaceV, RemovePt, RemoveFace, AddPt, AddFace, PtLabel, FaceLabel };
+        Type type = None;
+        int index = -1;
+        int sub   = -1;
+        int nodeId = 0;
+    };
+
+    using CellCallback = std::function<void(const Cell &cell, int wheelSteps, bool clicked)>;
+
+    PolyhedronTableItem(const QRectF &rect,
+                        int groupNodeId,
+                        const SceneDocument *scene,
+                        CellCallback onCellEdited = nullptr,
+                        int theme = 0);
+
+    QRectF boundingRect() const override { return m_rect; }
+
+    Cell cellAt(const QPointF &pos) const;
+    const QVector<Cell> &cells() const { return m_cells; }
+    int pointCount() const { return m_points.size(); }
+    int faceCount() const { return m_faces.size(); }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override;
+
+private:
+    void gatherData();
+    void computeLayout();
+
+    QRectF m_rect;
+    int m_groupNodeId;
+    const SceneDocument *m_scene;
+    CellCallback m_onCellEdited;
+    int m_theme = 0;
+
+    struct PointData { int nodeId; QVector3D position; };
+    struct FaceData  { int nodeId; QVector<int> indices; };
+    QVector<PointData> m_points;
+    QVector<FaceData>  m_faces;
+    QVector<Cell> m_cells;
+    qreal m_tableWidth  = 0;
+    qreal m_tableHeight = 0;
+};
 
 class SceneTreeNodeRenderer
 {

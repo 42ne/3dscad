@@ -99,6 +99,15 @@ public:
                     std::function<void()> onChanged);
 };
 
+class AddPolyhedronGroupCommand : public SnapshotCommand
+{
+public:
+    AddPolyhedronGroupCommand(SceneDocument *scene,
+                              int parentGroupId,
+                              int insertIndex,
+                              std::function<void()> onChanged);
+};
+
 class RemoveGroupCommand : public SnapshotCommand
 {
 public:

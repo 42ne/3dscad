@@ -302,6 +302,10 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handleModuleRenameRequested);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableRenameRequested,
             m_controller, &SceneController::handleVariableRenameRequested);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronAddPointRequested,
+            m_controller, &SceneController::handlePolyhedronAddPoint);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronAddFaceRequested,
+            m_controller, &SceneController::handlePolyhedronAddFace);
 
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;

@@ -1090,6 +1090,36 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         // Fall through for swatches and the toggle button.
     }
 
+    // ── Polyhedron table buttons ────────────────────────────
+    if (!m_colorEditMode && event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePos, &cell)) {
+            if (cell.type == PolyhedronTableItem::Cell::RemovePt
+                || cell.type == PolyhedronTableItem::Cell::RemoveFace) {
+                emit treeNodeDeleteRequested(cell.nodeId);
+                event->accept();
+                return;
+            }
+            if (cell.type == PolyhedronTableItem::Cell::AddPt) {
+                const int groupId = polyhedronGroupIdForCell(scenePos);
+                if (groupId > 0) {
+                    emit polyhedronAddPointRequested(groupId);
+                    event->accept();
+                    return;
+                }
+            }
+            if (cell.type == PolyhedronTableItem::Cell::AddFace) {
+                const int groupId = polyhedronGroupIdForCell(scenePos);
+                if (groupId > 0) {
+                    emit polyhedronAddFaceRequested(groupId);
+                    event->accept();
+                    return;
+                }
+            }
+        }
+    }
+
     // ── Canvas-move drag: check grip strip before anything else ──────────────
     if (!m_colorEditMode && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
@@ -1571,6 +1601,10 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
             return;
         }
         if (wheelSteps != 0 && handleTransformWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
+        if (wheelSteps != 0 && handlePolyhedronTableWheel(scenePosition, wheelSteps)) {
             event->accept();
             return;
         }
@@ -3447,6 +3481,26 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     QRectF moduleCallTemplateRect;
     QVector<ModuleCallParam> moduleCallTemplateParams;
 
+        // Polyhedron table height estimation
+    const bool isPolyhedron = (node.operation == SceneDocument::TreeNode::Polyhedron);
+    qreal polyhedronTableHeight = 0.0;
+    const qreal polyRowH = 18.0, polyGap = 3.0, polyPad = 4.0, polySecH = 20.0;
+    if (isPolyhedron && !collapsedGroup && m_scene) {
+        int ptCnt = 0, faceCnt = 0;
+        for (const auto &ch : node.children) {
+            if (ch.type != SceneDocument::TreeNode::Primitive) continue;
+            if (const ShapeNode *s = m_scene->shapeById(ch.shapeId)) {
+                if (s->type == ShapeNode::Point3D) ++ptCnt;
+                else if (s->type == ShapeNode::Face3D) ++faceCnt;
+            }
+        }
+        polyhedronTableHeight = polyPad + polySecH + polyGap
+            + ptCnt * (polyRowH + polyGap) + (polyRowH + polyGap)
+            + polyGap * 2 + polySecH + polyGap
+            + faceCnt * (polyRowH + polyGap) + (polyRowH + polyGap)
+            + polyPad;
+    }
+
     auto drawChild = [&](const SceneDocument::TreeNode &child) {
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
         children.append({childRect, previewToolForNode(child), child.id});
@@ -3487,13 +3541,19 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                     drawChild(child);
             }
         }
+    } else if (isPolyhedron && !collapsedGroup) {
+        // Reserve space for the polyhedron table — no individual children
+        childTopLeft.ry() += polyhedronTableHeight;
+        maxChildWidth = qMax(maxChildWidth, 300.0);
     } else if (!collapsedGroup) {
         for (const SceneDocument::TreeNode &child : node.children)
             drawChild(child);
     }
 
     qreal childrenHeight = children.isEmpty()
-                               ? PrimitiveHeight
+                               ? (isPolyhedron && !collapsedGroup
+                                      ? polyhedronTableHeight
+                                      : PrimitiveHeight)
                                : childTopLeft.y() - topLeft.y() - headerHeight - GroupPadding - ChildGap;
     if (node.operation == SceneDocument::TreeNode::Module && !collapsedGroup) {
         // Modules have complex internal layout (labels, separator, call template) that
@@ -3565,6 +3625,19 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           m_activeForLoopNumberStart)
         .setTheme(m_treeTheme)
         .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail, collapsedGroup);
+
+    // ── Polyhedron table ──────────────────────────────────
+    if (isPolyhedron && !collapsedGroup && m_scene) {
+        const QRectF tableRect(
+            rect.left() + GroupPadding,
+            rect.top() + GroupHeaderHeight + GroupPadding,
+            rect.width() - GroupPadding * 2,
+            polyhedronTableHeight
+        );
+        auto *tableItem = new PolyhedronTableItem(tableRect, node.id, m_scene, nullptr, m_treeTheme);
+        m_graphicsScene->addItem(tableItem);
+        m_treeItems.append(tableItem);
+    }
 
     if (node.operation == SceneDocument::TreeNode::Module && !collapsedGroup) {
         const QColor moduleLabelColor = SceneTreePalette::textMuted(static_cast<SceneTreePalette::Theme>(m_treeTheme));
@@ -3972,6 +4045,42 @@ bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosi
     return true;
 }
 
+bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    PolyhedronTableItem::Cell cell;
+    if (!polyhedronTableControlAt(scenePosition, &cell))
+        return false;
+
+    int paramIndex = -1;
+    switch (cell.type) {
+    case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
+    case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
+    case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
+    case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
+    case PolyhedronTableItem::Cell::FaceV: paramIndex = 1 + cell.sub; break;
+    default: return false;
+    }
+
+    // Resolve the shape to get the parameter expression,
+    // so we can emit a valid numberStart/numberLength for the handler.
+    const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(cell.nodeId) : nullptr;
+    if (!node || node->type != SceneDocument::TreeNode::Primitive) return false;
+    const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+    if (!shape) return false;
+
+    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
+    if (paramIndex >= controls.size()) return false;
+
+    const QString &expr = controls[paramIndex].expression;
+    // Point3D coords and Face3D indices are always simple numeric expressions,
+    // so the entire expression string is the number to adjust.
+    const int numberStart = 0;
+    const int numberLength = expr.size();
+
+    emit shapeParameterAdjusted(cell.nodeId, paramIndex, numberStart, numberLength, static_cast<qreal>(wheelSteps));
+    return true;
+}
+
 bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps)
 {
     if (!m_scene)
@@ -4167,6 +4276,40 @@ bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePositi
     }
 
     return false;
+}
+
+bool SceneTreeGraphicsWidget::polyhedronTableControlAt(const QPointF &scenePosition,
+                                                       PolyhedronTableItem::Cell *cell) const
+{
+    if (!cell) return false;
+    // Iterate all tree items looking for a PolyhedronTableItem under the cursor
+    for (QGraphicsItem *item : m_treeItems) {
+        auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
+        if (!tableItem) continue;
+        if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
+            continue;
+        *cell = tableItem->cellAt(tableItem->mapFromScene(scenePosition));
+        return cell->type != PolyhedronTableItem::Cell::None;
+    }
+    return false;
+}
+
+int SceneTreeGraphicsWidget::polyhedronGroupIdForCell(const QPointF &scenePosition) const
+{
+    for (QGraphicsItem *item : m_treeItems) {
+        auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
+        if (!tableItem) continue;
+        if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
+            continue;
+        // The table item's ctor stores m_groupNodeId — we can't access it directly.
+        // Instead, find the group node via the layout.
+        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+            if (area.rect.contains(scenePosition)
+                && area.operation == SceneDocument::TreeNode::Polyhedron)
+                return area.groupId;
+        }
+    }
+    return 0;
 }
 
 bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePosition,
@@ -4874,6 +5017,32 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             }
         }
     }
+    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceN/FaceV) ──
+    {
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePosition, &cell)) {
+            switch (cell.type) {
+            case PolyhedronTableItem::Cell::PtX:
+            case PolyhedronTableItem::Cell::PtY:
+            case PolyhedronTableItem::Cell::PtZ:
+            case PolyhedronTableItem::Cell::FaceN:
+            case PolyhedronTableItem::Cell::FaceV: {
+                // Find the table item to map the cell rect to scene coords
+                for (QGraphicsItem *item : m_treeItems) {
+                    auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
+                    if (!tableItem) continue;
+                    if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
+                        continue;
+                    return QRectF(tableItem->mapToScene(cell.rect.topLeft()),
+                                  tableItem->mapToScene(cell.rect.bottomRight()));
+                }
+                break;
+            }
+            default:
+                break;
+            }
+        }
+    }
     return QRectF();
 }
 
@@ -4999,6 +5168,51 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
                 bestRect = child.rect;
                 bestDepth = area.depth;
             }
+        }
+    }
+
+    // ── Polyhedron table pills (inline edit) ────────────────
+    if (!bestNode) {
+        for (QGraphicsItem *item : m_treeItems) {
+            auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
+            if (!tableItem) continue;
+            const QPointF localPos = tableItem->mapFromScene(scenePosition);
+            if (!tableItem->boundingRect().contains(localPos))
+                continue;
+            const PolyhedronTableItem::Cell cell = tableItem->cellAt(localPos);
+            if (cell.type == PolyhedronTableItem::Cell::None)
+                continue;
+
+            int paramIndex = -1;
+            switch (cell.type) {
+            case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
+            case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
+            case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
+            case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
+            case PolyhedronTableItem::Cell::FaceV: paramIndex = 1 + cell.sub; break;
+            default: continue;
+            }
+
+            const SceneDocument::TreeNode *node = m_scene->treeNodeById(cell.nodeId);
+            if (!node || node->type != SceneDocument::TreeNode::Primitive) continue;
+            const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+            if (!shape) continue;
+
+            const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
+            if (paramIndex >= controls.size()) continue;
+
+            const QRectF sceneRect(tableItem->mapToScene(cell.rect.topLeft()),
+                                   tableItem->mapToScene(cell.rect.bottomRight()));
+            if (target) {
+                target->kind = ExpressionEditTarget::ShapeParameter;
+                target->hoverRect = sceneRect;
+                target->editRect = sceneRect;
+                target->label = controls[paramIndex].label;
+                target->expression = controls[paramIndex].expression;
+                target->nodeId = cell.nodeId;
+                target->secondaryId = paramIndex;
+            }
+            return true;
         }
     }
 

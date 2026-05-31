@@ -107,6 +107,8 @@ public:
     void handleModuleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void handleForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
     void handleCtrlReleased();
+    void handlePolyhedronAddPoint(int groupNodeId);
+    void handlePolyhedronAddFace(int groupNodeId);
 
 signals:
     // Scene content changed (undo command committed).

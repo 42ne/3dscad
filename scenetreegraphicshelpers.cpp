@@ -456,6 +456,32 @@ void paintOperationIcon(QPainter *painter,
         painter->drawEllipse(top);
         painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
         painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
+    } else if (operation == SceneDocument::TreeNode::Polyhedron) {
+        painter->setPen(QPen(accent.darker(155), 1.25));
+        const QPointF top(symbolRect.center().x(), symbolRect.top() + 1.0);
+        const QPointF left(symbolRect.left() + 1.0, symbolRect.center().y() - 0.5);
+        const QPointF right(symbolRect.right() - 1.0, symbolRect.center().y() - 0.5);
+        const QPointF bottom(symbolRect.center().x(), symbolRect.bottom() - 1.0);
+        const QPointF mid(symbolRect.center().x(), symbolRect.center().y() + 1.0);
+
+        painter->setBrush(QColor(255, 255, 255, 78));
+        painter->drawPolygon(QPolygonF() << top << left << mid);
+        painter->setBrush(QColor(255, 255, 255, 48));
+        painter->drawPolygon(QPolygonF() << top << mid << right);
+        painter->setBrush(QColor(255, 255, 255, 34));
+        painter->drawPolygon(QPolygonF() << left << bottom << mid);
+        painter->setBrush(QColor(255, 255, 255, 60));
+        painter->drawPolygon(QPolygonF() << mid << bottom << right);
+
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPolygon(QPolygonF() << top << left << bottom << right);
+        painter->drawLine(top, bottom);
+        painter->drawLine(left, right);
+
+        painter->setBrush(accent.darker(150));
+        painter->setPen(Qt::NoPen);
+        for (const QPointF &p : {top, left, right, bottom})
+            painter->drawEllipse(p, 1.25, 1.25);
     } else if (operation == SceneDocument::TreeNode::For) {
         painter->setPen(QPen(accent.darker(160), 1.6));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
@@ -1254,7 +1280,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Mirror, "mirror", QColor(242, 218, 235), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
-    {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), GroupMinWidth},
+    {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), 300.0},
     {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},

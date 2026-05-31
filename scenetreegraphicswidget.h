@@ -3,6 +3,7 @@
 
 #include "scenedocument.h"
 #include "scenetreelayout.h"
+#include "scenetreenoderenderer.h"
 #include "scenetreepalette.h"
 
 #include <QGraphicsPathItem>
@@ -90,6 +91,8 @@ signals:
     void builtInAppearanceSelected();
     void colorEditModeChanged(bool enabled);
     void inlineThemeEdited();
+    void polyhedronAddPointRequested(int groupNodeId);
+    void polyhedronAddFaceRequested(int groupNodeId);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -173,6 +176,7 @@ private:
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
+    bool handlePolyhedronTableWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
@@ -190,6 +194,8 @@ private:
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
     bool colorChannelControlAt(const QPointF &scenePosition, int *groupId, int *channel) const;
     bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter, int *numberStart, int *numberLength) const;
+    bool polyhedronTableControlAt(const QPointF &scenePosition, PolyhedronTableItem::Cell *cell) const;
+    int polyhedronGroupIdForCell(const QPointF &scenePosition) const;
     bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool moduleCallParamControlAt(const QPointF &scenePosition, int *moduleCallNodeId, int *paramVarNodeId, int *start, int *length) const;

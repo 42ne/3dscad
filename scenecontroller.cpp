@@ -533,6 +533,16 @@ void SceneController::handleToolDrop(const QString &toolName, int parentGroupId,
         return;
     }
 
+    if (toolName == QLatin1String("polyhedron")) {
+        if (parentGroupId <= 0 || parentGroupId == m_scene.treeRoot().id)
+            parentGroupId = m_scene.sceneNodeId();
+        auto *cmd = new AddPolyhedronGroupCommand(&m_scene, parentGroupId, insertIndex,
+                                                   [this]() { emit sceneChanged(); });
+        if (!cmd->isValid()) { delete cmd; return; }
+        m_undoStack->push(cmd);
+        return;
+    }
+
     SceneDocument::TreeNode::Operation operation;
     if (SceneTreeGraphics::operationForToolName(toolName, &operation)) {
         if (operation == SceneDocument::TreeNode::Module) {
@@ -1167,4 +1177,20 @@ void SceneController::handleCtrlReleased()
 {
     m_ctrlHighlight.active = false;
     emit ctrlHighlightChanged();
+}
+
+void SceneController::handlePolyhedronAddPoint(int groupNodeId)
+{
+    if (groupNodeId <= 0) return;
+    ShapeNode shape = makeShapeForTool(QStringLiteral("point_3d"), m_scene.shapeCount() + 1);
+    m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
+                                          [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::handlePolyhedronAddFace(int groupNodeId)
+{
+    if (groupNodeId <= 0) return;
+    ShapeNode shape = makeShapeForTool(QStringLiteral("face_3d"), m_scene.shapeCount() + 1);
+    m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
+                                          [this]() { emit sceneChanged(); }));
 }

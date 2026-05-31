@@ -137,6 +137,227 @@ void paintGlossBadge(QPainter *painter,
     painter->restore();
 }
 
+// ── Polyhedron table item implementations ─────────────────────────────────────
+
+} // namespace
+
+PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
+                                         int groupNodeId,
+                                         const SceneDocument *scene,
+                                         CellCallback onCellEdited,
+                                         int theme)
+    : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
+    , m_groupNodeId(groupNodeId)
+    , m_scene(scene)
+    , m_onCellEdited(std::move(onCellEdited))
+    , m_theme(theme)
+{
+    setPos(rect.topLeft());
+    setZValue(999.0);
+    gatherData();
+    computeLayout();
+}
+
+PolyhedronTableItem::Cell PolyhedronTableItem::cellAt(const QPointF &pos) const
+{
+    for (const Cell &c : m_cells)
+        if (c.rect.contains(pos))
+            return c;
+    return Cell{};
+}
+
+void PolyhedronTableItem::gatherData()
+{
+    m_points.clear();
+    m_faces.clear();
+    if (!m_scene) return;
+    const auto *grp = m_scene->treeNodeById(m_groupNodeId);
+    if (!grp) return;
+
+    for (const auto &child : grp->children) {
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *shape = m_scene->shapeById(child.shapeId);
+        if (!shape) continue;
+        if (shape->type == ShapeNode::Point3D)
+            m_points.append({child.id, shape->position});
+        else if (shape->type == ShapeNode::Face3D)
+            m_faces.append({child.id, shape->polyhedronFaces.isEmpty()
+                                    ? QVector<int>()
+                                    : shape->polyhedronFaces.first()});
+    }
+}
+
+void PolyhedronTableItem::computeLayout()
+{
+    m_cells.clear();
+    m_tableWidth = 0;
+    m_tableHeight = 0;
+
+    if (m_points.isEmpty() && m_faces.isEmpty())
+        return;
+
+    const qreal labelW  = 36.0;
+    const qreal pillW   = 44.0;
+    const qreal btnW    = 16.0;
+    const qreal rowH    = 18.0;
+    const qreal gap     = 3.0;
+    const qreal pad     = 4.0;
+    const qreal innerH  = rowH;
+    qreal x = pad;
+    qreal y = pad;
+
+    // Section header
+    {
+        const qreal sh = 20.0;
+        m_cells.append({QRectF(x, y, m_rect.width() - pad * 2, sh), Cell::PtLabel, -1, -1, 0});
+        y += sh + gap;
+    }
+
+    // Point rows
+    for (int i = 0; i < m_points.size(); ++i) {
+        x = pad;
+        const int ptNodeId = m_points[i].nodeId;
+
+        m_cells.append({QRectF(x, y, btnW, innerH), Cell::RemovePt, i, -1, ptNodeId});
+        x += btnW + gap;
+
+        m_cells.append({QRectF(x, y, labelW, innerH), Cell::PtLabel, i, -1, ptNodeId});
+        x += labelW + gap;
+
+        for (int coord = 0; coord < 3; ++coord) {
+            Cell::Type t = (coord == 0) ? Cell::PtX : (coord == 1) ? Cell::PtY : Cell::PtZ;
+            m_cells.append({QRectF(x, y, pillW, innerH), t, i, -1, ptNodeId});
+            x += pillW + gap;
+        }
+        y += rowH + gap;
+    }
+
+    // Add Point button
+    {
+        x = pad;
+        m_cells.append({QRectF(x, y, btnW + labelW + pillW * 0.5, innerH), Cell::AddPt, -1, -1, 0});
+        y += rowH + gap;
+    }
+
+    y += gap * 2;
+
+    // Face section header
+    {
+        const qreal sh = 20.0;
+        m_cells.append({QRectF(pad, y, m_rect.width() - pad * 2, sh), Cell::FaceLabel, -1, -1, 0});
+        y += sh + gap;
+    }
+
+    // Face rows
+    for (int i = 0; i < m_faces.size(); ++i) {
+        x = pad;
+        const int faceNodeId = m_faces[i].nodeId;
+
+        m_cells.append({QRectF(x, y, btnW, innerH), Cell::RemoveFace, i, -1, faceNodeId});
+        x += btnW + gap;
+
+        m_cells.append({QRectF(x, y, labelW, innerH), Cell::FaceLabel, i, -1, faceNodeId});
+        x += labelW + gap;
+
+        m_cells.append({QRectF(x, y, pillW * 0.5, innerH), Cell::FaceN, i, -1, faceNodeId});
+        x += pillW * 0.5 + gap;
+
+        const int n = m_faces[i].indices.size();
+        for (int vi = 0; vi < n; ++vi) {
+            m_cells.append({QRectF(x, y, pillW * 0.45, innerH), Cell::FaceV, i, vi, faceNodeId});
+            x += pillW * 0.45 + gap * 0.5;
+        }
+        y += rowH + gap;
+    }
+
+    // Add Face button
+    {
+        x = pad;
+        m_cells.append({QRectF(x, y, btnW + labelW + pillW * 0.5, innerH), Cell::AddFace, -1, -1, 0});
+        y += rowH + gap;
+    }
+
+    y += pad;
+    m_tableWidth  = m_rect.width();
+    m_tableHeight = y;
+}
+
+void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
+{
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setFont(sceneTreeGraphicsFont());
+    const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
+
+    struct Pill { QRectF r; QString text; bool active; };
+    QVector<Pill> pills;
+
+    for (const Cell &c : m_cells) {
+        if (c.type == Cell::None || c.rect.isNull())
+            continue;
+
+        const bool isButton = (c.type == Cell::RemovePt || c.type == Cell::RemoveFace
+                               || c.type == Cell::AddPt || c.type == Cell::AddFace);
+        const bool isPill = (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ
+                             || c.type == Cell::FaceN || c.type == Cell::FaceV);
+
+        if (isButton) {
+            const bool isAdd = (c.type == Cell::AddPt || c.type == Cell::AddFace);
+            const QColor btnFill = isAdd ? QColor(70, 180, 70) : QColor(210, 70, 70);
+            paintRoundedPanel(painter, c.rect, 4.0,
+                              QPen(btnFill.darker(130), 1.0), QBrush(btnFill));
+            painter->setPen(Qt::white);
+            painter->drawText(c.rect, Qt::AlignCenter, isAdd ? QStringLiteral("+") : QStringLiteral("−"));
+            continue;
+        }
+
+        if (isPill) {
+            QString text;
+            if (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ) {
+                if (c.index >= 0 && c.index < m_points.size()) {
+                    float v = (c.type == Cell::PtX) ? m_points[c.index].position.x()
+                            : (c.type == Cell::PtY) ? m_points[c.index].position.y()
+                            : m_points[c.index].position.z();
+                    text = QString::number(static_cast<double>(v), 'f', 1);
+                }
+            } else if (c.type == Cell::FaceN) {
+                if (c.index >= 0 && c.index < m_faces.size())
+                    text = QString::number(m_faces[c.index].indices.size());
+            } else if (c.type == Cell::FaceV) {
+                if (c.index >= 0 && c.index < m_faces.size()
+                    && c.sub >= 0 && c.sub < m_faces[c.index].indices.size())
+                    text = QString::number(m_faces[c.index].indices[c.sub]);
+            }
+            pills.append({c.rect, text, false});
+            continue;
+        }
+
+        if (c.type == Cell::PtLabel || c.type == Cell::FaceLabel) {
+            painter->setPen(SceneTreePalette::textMuted(pt));
+            QString label;
+            if (c.type == Cell::PtLabel)
+                label = QStringLiteral("Pt %1").arg(c.index);
+            else
+                label = QStringLiteral("Face %1").arg(c.index);
+            painter->drawText(c.rect, Qt::AlignRight | Qt::AlignVCenter, label);
+            continue;
+        }
+    }
+
+    for (const Pill &p : pills) {
+        if (p.text.isEmpty()) continue;
+        paintRoundedPanel(painter, p.r, 4.0,
+                          QPen(p.active ? SceneTreePalette::pillBorderActive()
+                                        : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt),
+                               p.active ? 2 : 1),
+                          QBrush(p.active ? SceneTreePalette::pillFillActive()
+                                          : SceneTreePalette::pillFill(pt)));
+        painter->setPen(SceneTreePalette::numText(pt));
+        painter->drawText(p.r, Qt::AlignCenter, p.text);
+    }
+}
+
+namespace {
+
 class PrimitiveCardItem final : public QGraphicsItem
 {
 public:
