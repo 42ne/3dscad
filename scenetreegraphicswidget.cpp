@@ -1132,6 +1132,20 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
 
     if (!m_colorEditMode && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
+        Polygon2DTableItem::Cell polygonCell;
+        if (polygon2DTableControlAt(scenePos, &polygonCell)) {
+            if (polygonCell.type == Polygon2DTableItem::Cell::RemovePt && polygonCell.index >= 0) {
+                emit polygon2DPointRemoveRequested(polygonCell.nodeId, polygonCell.index);
+                event->accept();
+                return;
+            }
+            if (polygonCell.type == Polygon2DTableItem::Cell::AddPt) {
+                emit polygon2DPointAddRequested(polygonCell.nodeId);
+                event->accept();
+                return;
+            }
+        }
+
         PolyhedronTableItem::Cell cell;
         if (polyhedronTableControlAt(scenePos, &cell)) {
             if (cell.type == PolyhedronTableItem::Cell::RemovePt
@@ -1579,6 +1593,7 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
     m_hoveredScrollRect = QRectF();
     m_hoveredRenameRect = QRectF();
     m_hoveredExpressionRect = QRectF();
+    updatePolyhedronElementHover(QPointF(), false);
     updateHoverHint(QStringLiteral("canvas"),
                     QStringLiteral("Scene tree canvas\nWheel: zoom tree view\nDrag empty space: pan; drag toolbar icons to create blocks"));
     if (!m_panning)
@@ -1656,6 +1671,10 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
             return;
         }
         if (wheelSteps != 0 && handleShapeParameterWheel(scenePosition, wheelSteps)) {
+            event->accept();
+            return;
+        }
+        if (wheelSteps != 0 && handlePolygon2DTableWheel(scenePosition, wheelSteps)) {
             event->accept();
             return;
         }
@@ -3429,6 +3448,18 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
                           -1)
         .renderPrimitive(node, rect, label, shape, thumbnail);
 
+    if (shape && shape->type == ShapeNode::Polygon2D) {
+        const QRectF tableRect(rect.left(), rect.top() + PrimitiveHeight + 8.0,
+                               rect.width(), qMax<qreal>(0.0, rect.height() - PrimitiveHeight - 8.0));
+        auto *tableItem = new Polygon2DTableItem(tableRect, node.id, shape, m_treeTheme,
+                                                 m_activeShapeParameterNodeId,
+                                                 m_activeShapeParameter);
+        tableItem->setPos(tableRect.topLeft());
+        tableItem->setZValue(6.0);
+        m_graphicsScene->addItem(tableItem);
+        m_treeItems.append(tableItem);
+    }
+
     addNodeDragHandle(node.id, label, rect, rect, size);
     return rect;
 }
@@ -3688,7 +3719,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                                        m_activeShapeParameterNodeId,
                                                        m_activeShapeParameter,
                                                        m_activeShapeParameterNumberStart,
-                                                       m_selectedPolyhedronElementNodeIds);
+                                                       m_selectedPolyhedronElementNodeIds,
+                                                       m_hoveredPolyhedronElementNodeId);
         m_graphicsScene->addItem(tableItem);
         m_treeItems.append(tableItem);
     }
@@ -4214,6 +4246,25 @@ bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePositi
     return true;
 }
 
+bool SceneTreeGraphicsWidget::handlePolygon2DTableWheel(const QPointF &scenePosition, int wheelSteps)
+{
+    Polygon2DTableItem::Cell cell;
+    if (!polygon2DTableControlAt(scenePosition, &cell))
+        return false;
+
+    int coord = -1;
+    if (cell.type == Polygon2DTableItem::Cell::PtX)
+        coord = 0;
+    else if (cell.type == Polygon2DTableItem::Cell::PtY)
+        coord = 1;
+    if (coord < 0 || cell.index < 0)
+        return false;
+
+    emit polygon2DPointAdjusted(cell.nodeId, cell.index, coord, wheelSteps);
+    updateActiveShapeParameterControl(scenePosition, true);
+    return true;
+}
+
 bool SceneTreeGraphicsWidget::colorChannelControlAt(const QPointF &scenePosition,
                                                     int *groupId,
                                                     int *channel) const
@@ -4405,6 +4456,22 @@ int SceneTreeGraphicsWidget::polyhedronGroupIdForCell(const QPointF &scenePositi
         return tableItem->groupNodeId();
     }
     return 0;
+}
+
+bool SceneTreeGraphicsWidget::polygon2DTableControlAt(const QPointF &scenePosition,
+                                                      Polygon2DTableItem::Cell *cell) const
+{
+    if (!cell) return false;
+    for (QGraphicsItem *item : m_treeItems) {
+        auto *tableItem = dynamic_cast<Polygon2DTableItem *>(item);
+        if (!tableItem) continue;
+        const QPointF local = tableItem->mapFromScene(scenePosition);
+        if (!tableItem->boundingRect().contains(local))
+            continue;
+        *cell = tableItem->cellAt(local);
+        return cell->type != Polygon2DTableItem::Cell::None;
+    }
+    return false;
 }
 
 bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePosition,
@@ -4649,6 +4716,20 @@ QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePo
         return QStringLiteral("Editable number\nHold Ctrl + mouse wheel: change value\nThe highlighted field shows the active target");
     }
 
+    {
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePosition, &cell)) {
+            if (cell.type == PolyhedronTableItem::Cell::PtLabel) {
+                setKey(QStringLiteral("poly-pt-label:%1").arg(cell.nodeId));
+                return QStringLiteral("Polyhedron point label\nRight-click: highlight this point in viewport\nShift + right-click: add/remove from selection");
+            }
+            if (cell.type == PolyhedronTableItem::Cell::FaceLabel) {
+                setKey(QStringLiteral("poly-face-label:%1").arg(cell.nodeId));
+                return QStringLiteral("Polyhedron face label\nRight-click: highlight this face in viewport\nShift + right-click: add/remove from selection");
+            }
+        }
+    }
+
     for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
         if (handle.gripRect.contains(scenePosition)) {
             setKey(QStringLiteral("grip:%1").arg(handle.nodeId));
@@ -4753,6 +4834,20 @@ void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &s
             if (paramIndex >= 0) {
                 nodeId = cell.nodeId;
                 numberStart = 0;
+            }
+        }
+        if (paramIndex < 0) {
+            Polygon2DTableItem::Cell polygonCell;
+            if (polygon2DTableControlAt(scenePosition, &polygonCell)) {
+                if (polygonCell.type == Polygon2DTableItem::Cell::PtX)
+                    paramIndex = polygonCell.index * 2;
+                else if (polygonCell.type == Polygon2DTableItem::Cell::PtY)
+                    paramIndex = polygonCell.index * 2 + 1;
+                if (paramIndex >= 0) {
+                    shapeId = polygonCell.nodeId;
+                    nodeId = polygonCell.nodeId;
+                    numberStart = 0;
+                }
             }
         }
     }
@@ -4958,13 +5053,19 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
             break;
         }
     }
+    PolyhedronTableItem::Cell polyCell;
+    const bool onPolyhedronElementLabel = polyhedronTableControlAt(scenePosition, &polyCell)
+        && (polyCell.type == PolyhedronTableItem::Cell::PtLabel
+            || polyCell.type == PolyhedronTableItem::Cell::FaceLabel)
+        && polyCell.nodeId > 0;
+    updatePolyhedronElementHover(scenePosition, onPolyhedronElementLabel);
 
     // Update cursor.
     if (newExpressionRect.isValid() || newRenameRect.isValid())
         setCursor(Qt::IBeamCursor);
     else if (newScrollRect.isValid())
         setCursor(Qt::SizeVerCursor);
-    else if (onCollapseControl)
+    else if (onCollapseControl || onPolyhedronElementLabel)
         setCursor(Qt::PointingHandCursor);
     else if (onCanvasGrip)
         setCursor(Qt::SizeAllCursor);
@@ -4981,6 +5082,27 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
     m_hoveredExpressionRect = newExpressionRect;
     updateHoverHighlightOverlay();
     emit hoverScrollZoneChanged(m_hoveredScrollRect);
+}
+
+void SceneTreeGraphicsWidget::updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled)
+{
+    int nodeId = 0;
+    if (enabled) {
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePosition, &cell)
+            && (cell.type == PolyhedronTableItem::Cell::PtLabel
+                || cell.type == PolyhedronTableItem::Cell::FaceLabel)) {
+            nodeId = cell.nodeId;
+        }
+    }
+
+    if (m_hoveredPolyhedronElementNodeId == nodeId)
+        return;
+
+    m_hoveredPolyhedronElementNodeId = nodeId;
+    if (!m_dragActive)
+        refresh();
+    emit polyhedronElementHoverChanged(nodeId);
 }
 
 QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition) const
@@ -5283,6 +5405,37 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
     // ── Polyhedron table pills (inline edit) ────────────────
     if (!bestNode) {
         for (QGraphicsItem *item : m_treeItems) {
+            if (auto *polygonTable = dynamic_cast<Polygon2DTableItem *>(item)) {
+                const QPointF localPos = polygonTable->mapFromScene(scenePosition);
+                if (!polygonTable->boundingRect().contains(localPos))
+                    continue;
+                const Polygon2DTableItem::Cell cell = polygonTable->cellAt(localPos);
+                if (cell.type != Polygon2DTableItem::Cell::PtX
+                    && cell.type != Polygon2DTableItem::Cell::PtY)
+                    continue;
+
+                const SceneDocument::TreeNode *node = m_scene->treeNodeById(cell.nodeId);
+                const ShapeNode *shape = (node && node->type == SceneDocument::TreeNode::Primitive)
+                    ? m_scene->shapeById(node->shapeId) : nullptr;
+                if (!shape || cell.index < 0 || cell.index >= shape->polyhedronPoints.size())
+                    continue;
+
+                const bool isX = cell.type == Polygon2DTableItem::Cell::PtX;
+                const QRectF sceneRect(polygonTable->mapToScene(cell.rect.topLeft()),
+                                       polygonTable->mapToScene(cell.rect.bottomRight()));
+                if (target) {
+                    target->kind = ExpressionEditTarget::Polygon2DPoint;
+                    target->hoverRect = sceneRect;
+                    target->editRect = sceneRect;
+                    target->label = QStringLiteral("Pt %1 %2").arg(cell.index).arg(isX ? QStringLiteral("X") : QStringLiteral("Y"));
+                    target->expression = QString::number(isX ? shape->polyhedronPoints[cell.index].x()
+                                                             : shape->polyhedronPoints[cell.index].y(), 'g');
+                    target->nodeId = cell.nodeId;
+                    target->secondaryId = cell.index * 2 + (isX ? 0 : 1);
+                }
+                return true;
+            }
+
             auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
             if (!tableItem) continue;
             const QPointF localPos = tableItem->mapFromScene(scenePosition);
@@ -5510,6 +5663,12 @@ void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarg
             case ExpressionEditTarget::ShapeParameter:
                 emit shapeParameterExpressionEdited(target.nodeId, target.secondaryId, newExpression);
                 break;
+            case ExpressionEditTarget::Polygon2DPoint: {
+                const int pointIndex = target.secondaryId / 2;
+                const int coord = target.secondaryId % 2;
+                emit polygon2DPointExpressionEdited(target.nodeId, pointIndex, coord, newExpression);
+                break;
+            }
             case ExpressionEditTarget::Variable:
                 emit variableExpressionEdited(target.nodeId, newExpression);
                 break;

@@ -319,6 +319,19 @@ void MainWindow::buildUi()
                 if (m_viewport)
                     m_viewport->setPolyhedronElementSelection(nodeIds);
             });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronElementHoverChanged,
+            this, [this](int nodeId) {
+                if (m_viewport)
+                    m_viewport->setPolyhedronElementHover(nodeId);
+            });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polygon2DPointAddRequested,
+            m_controller, &SceneController::handlePolygon2DAddPoint);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polygon2DPointRemoveRequested,
+            m_controller, &SceneController::handlePolygon2DRemovePoint);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polygon2DPointAdjusted,
+            m_controller, &SceneController::handlePolygon2DPointAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polygon2DPointExpressionEdited,
+            m_controller, &SceneController::handlePolygon2DPointExpressionEdited);
 
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;
@@ -386,6 +399,12 @@ void MainWindow::buildUi()
             &SceneController::handleGroupRotated);
     connect(m_viewport, &ViewportWidget::groupRotationDragFinished, m_controller,
             &SceneController::handleGroupRotationDragFinished);
+    connect(m_viewport, &ViewportWidget::polyhedronElementsDragStarted, m_controller,
+            &SceneController::handlePolyhedronElementsDragStarted);
+    connect(m_viewport, &ViewportWidget::polyhedronElementsDragged, m_controller,
+            &SceneController::handlePolyhedronElementsDragged);
+    connect(m_viewport, &ViewportWidget::polyhedronElementsDragFinished, m_controller,
+            &SceneController::handlePolyhedronElementsDragFinished);
     connect(m_viewport, &ViewportWidget::csgPreviewReady,
             this, &MainWindow::refreshCsgStatus);
 

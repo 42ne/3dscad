@@ -149,7 +149,8 @@ PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
                                          int activeShapeNodeId,
                                          int activeParamIndex,
                                          int activeNumberStart,
-                                         const QSet<int> &selectedElementNodeIds)
+                                         const QSet<int> &selectedElementNodeIds,
+                                         int hoveredElementNodeId)
     : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
     , m_groupNodeId(groupNodeId)
     , m_scene(scene)
@@ -159,6 +160,7 @@ PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
     , m_activeParamIndex(activeParamIndex)
     , m_activeNumberStart(activeNumberStart)
     , m_selectedElementNodeIds(selectedElementNodeIds)
+    , m_hoveredElementNodeId(hoveredElementNodeId)
 {
     setPos(rect.topLeft());
     setZValue(999.0);
@@ -452,14 +454,19 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
 
         if (c.type == Cell::PtLabel || c.type == Cell::FaceLabel) {
             const bool selected = m_selectedElementNodeIds.contains(c.nodeId);
-            if (selected) {
+            const bool hovered = c.nodeId > 0 && c.nodeId == m_hoveredElementNodeId;
+            if (selected || hovered) {
                 const QRectF halo = c.rect.adjusted(-2.0, -1.5, 2.0, 1.5);
                 paintRoundedPanel(painter, halo, 4.0,
-                                  QPen(QColor(255, 210, 90, 210), 1.4),
-                                  QBrush(QColor(255, 199, 64, 46)));
+                                  QPen(selected ? QColor(255, 210, 90, 210)
+                                                : QColor(255, 220, 120, 130),
+                                       selected ? 1.4 : 1.0),
+                                  QBrush(selected ? QColor(255, 199, 64, 46)
+                                                  : QColor(255, 210, 90, 24)));
             }
             painter->setPen(selected ? QColor(255, 232, 150)
-                                     : SceneTreePalette::textMuted(pt));
+                            : hovered ? QColor(255, 226, 145)
+                                      : SceneTreePalette::textMuted(pt));
             QString label;
             Qt::Alignment alignment = Qt::AlignRight | Qt::AlignVCenter;
             if (c.type == Cell::PtLabel) {
@@ -489,6 +496,119 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
                                           : SceneTreePalette::pillFill(pt)));
         painter->setPen(SceneTreePalette::numText(pt));
         painter->drawText(p.r, Qt::AlignCenter, p.text);
+    }
+}
+
+Polygon2DTableItem::Polygon2DTableItem(const QRectF &rect,
+                                       int nodeId,
+                                       const ShapeNode *shape,
+                                       int theme,
+                                       int activeNodeId,
+                                       int activeParamIndex)
+    : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
+    , m_nodeId(nodeId)
+    , m_shape(shape ? *shape : ShapeNode())
+    , m_theme(theme)
+    , m_activeNodeId(activeNodeId)
+    , m_activeParamIndex(activeParamIndex)
+{
+    computeLayout();
+}
+
+Polygon2DTableItem::Cell Polygon2DTableItem::cellAt(const QPointF &pos) const
+{
+    for (const Cell &cell : m_cells) {
+        if (cell.rect.contains(pos))
+            return cell;
+    }
+    return Cell{};
+}
+
+void Polygon2DTableItem::computeLayout()
+{
+    m_cells.clear();
+    const qreal pad = 4.0;
+    const qreal gap = 3.0;
+    const qreal rowH = 18.0;
+    const qreal btnW = 16.0;
+    const qreal labelW = 38.0;
+    const qreal pillW = 48.0;
+
+    qreal y = pad;
+    qreal x = pad + btnW + gap + labelW + gap;
+    m_cells.append({QRectF(x, y, pillW, rowH), Cell::HeaderLabel, -1, 0, m_nodeId});
+    x += pillW + gap;
+    m_cells.append({QRectF(x, y, pillW, rowH), Cell::HeaderLabel, -1, 1, m_nodeId});
+    y += rowH + gap;
+
+    const int pointCount = m_shape.polyhedronPoints.size();
+    for (int i = 0; i < pointCount; ++i) {
+        x = pad;
+        m_cells.append({QRectF(x, y, btnW, rowH), Cell::RemovePt, i, -1, m_nodeId});
+        x += btnW + gap;
+        m_cells.append({QRectF(x, y, labelW, rowH), Cell::PtLabel, i, -1, m_nodeId});
+        x += labelW + gap;
+        m_cells.append({QRectF(x, y, pillW, rowH), Cell::PtX, i, -1, m_nodeId});
+        x += pillW + gap;
+        m_cells.append({QRectF(x, y, pillW, rowH), Cell::PtY, i, -1, m_nodeId});
+        y += rowH + gap;
+    }
+
+    m_tableWidth = pad * 2.0 + btnW + gap + labelW + gap + pillW * 2.0 + gap;
+    m_cells.append({QRectF(pad, y, m_tableWidth - pad * 2.0, rowH), Cell::AddPt, -1, -1, m_nodeId});
+    y += rowH + gap + pad;
+    m_tableHeight = y;
+}
+
+void Polygon2DTableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
+{
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setFont(sceneTreeGraphicsFont());
+    const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
+
+    for (const Cell &cell : m_cells) {
+        if (cell.type == Cell::None)
+            continue;
+
+        if (cell.type == Cell::RemovePt || cell.type == Cell::AddPt) {
+            const bool add = cell.type == Cell::AddPt;
+            const QColor fill = add ? QColor(70, 180, 70) : QColor(210, 70, 70);
+            paintRoundedPanel(painter, cell.rect, 4.0,
+                              QPen(fill.darker(130), 1.0), QBrush(fill));
+            painter->setPen(Qt::white);
+            painter->drawText(cell.rect, Qt::AlignCenter, add ? QStringLiteral("+") : QStringLiteral("\u2212"));
+            continue;
+        }
+
+        if (cell.type == Cell::HeaderLabel) {
+            painter->setPen(SceneTreePalette::textMuted(pt));
+            painter->drawText(cell.rect, Qt::AlignCenter, cell.sub == 0 ? QStringLiteral("X") : QStringLiteral("Y"));
+            continue;
+        }
+
+        if (cell.type == Cell::PtLabel) {
+            painter->setPen(SceneTreePalette::textMuted(pt));
+            painter->drawText(cell.rect, Qt::AlignRight | Qt::AlignVCenter,
+                              QStringLiteral("Pt %1").arg(cell.index));
+            continue;
+        }
+
+        if (cell.index < 0 || cell.index >= m_shape.polyhedronPoints.size())
+            continue;
+
+        const bool isX = cell.type == Cell::PtX;
+        const int paramIndex = cell.index * 2 + (isX ? 0 : 1);
+        const qreal value = isX ? m_shape.polyhedronPoints[cell.index].x()
+                                : m_shape.polyhedronPoints[cell.index].y();
+        const bool active = m_nodeId == m_activeNodeId && paramIndex == m_activeParamIndex;
+        paintRoundedPanel(painter, cell.rect, 4.0,
+                          QPen(active ? SceneTreePalette::pillBorderActive()
+                                      : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt),
+                               active ? 2 : 1),
+                          QBrush(active ? SceneTreePalette::pillFillActive()
+                                        : SceneTreePalette::pillFill(pt)));
+        painter->setPen(SceneTreePalette::numText(pt));
+        painter->drawText(cell.rect, Qt::AlignCenter, QString::number(value, 'f', 1));
     }
 }
 
@@ -1436,6 +1556,11 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
 {
     const int activeParamIndex = node.id == m_activeShapeNodeId ? m_activeShapeParameter : -1;
     const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
+    if (shape && shape->type == ShapeNode::Polygon2D) {
+        const QRectF cardRect(rect.topLeft(), QSizeF(qMin(rect.width(), PrimitiveWidth), PrimitiveHeight));
+        m_scene->addItem(new PrimitiveCardItem(cardRect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, m_theme, thumbnail));
+        return;
+    }
     m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, m_theme, thumbnail));
 }
 

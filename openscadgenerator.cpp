@@ -388,6 +388,18 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
         return QString("circle(r=%1);\n")
             .arg(paramExpr(0, shape.radius));
     }
+    if (shape.type == ShapeNode::Square) {
+        return QString("square([%1, %2], center=true);\n")
+            .arg(paramExpr(0, shape.size.x()))
+            .arg(paramExpr(1, shape.size.y()));
+    }
+    if (shape.type == ShapeNode::Polygon2D) {
+        QStringList ptsList;
+        for (const QVector3D &pt : shape.polyhedronPoints)
+            ptsList.append(QString("[%1,%2]").arg(pt.x(), 0, 'g').arg(pt.y(), 0, 'g'));
+        return QString("polygon(points=[%1]);\n")
+            .arg(ptsList.join(QLatin1Char(',')));
+    }
     if (shape.type == ShapeNode::Cylinder) {
         // parameterExpressions: index 0 = R (radius), index 1 = H (height)
         return QString("cylinder(h=%1, r=%2, center=true);\n")

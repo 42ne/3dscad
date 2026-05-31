@@ -38,7 +38,8 @@ public:
                         int activeShapeNodeId = 0,
                         int activeParamIndex = -1,
                         int activeNumberStart = -1,
-                        const QSet<int> &selectedElementNodeIds = {});
+                        const QSet<int> &selectedElementNodeIds = {},
+                        int hoveredElementNodeId = 0);
 
     QRectF boundingRect() const override { return m_rect; }
 
@@ -69,6 +70,7 @@ private:
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
     QSet<int> m_selectedElementNodeIds;
+    int m_hoveredElementNodeId = 0;
 
     struct PointData { int nodeId; QVector3D position; };
     struct FaceData  { int nodeId; QVector<int> indices; };
@@ -76,6 +78,48 @@ private:
     QVector<FaceData>  m_faces;
     QVector<Cell> m_cells;
     qreal m_tableWidth  = 0;
+    qreal m_tableHeight = 0;
+};
+
+// ── 2D polygon point table item ───────────────────────────────────────────────
+class Polygon2DTableItem final : public QGraphicsItem
+{
+public:
+    struct Cell {
+        QRectF rect;
+        enum Type { None, PtX, PtY, RemovePt, AddPt, PtLabel, HeaderLabel };
+        Type type = None;
+        int index = -1;
+        int sub = -1;
+        int nodeId = 0;
+    };
+
+    Polygon2DTableItem(const QRectF &rect,
+                       int nodeId,
+                       const ShapeNode *shape,
+                       int theme = 0,
+                       int activeNodeId = 0,
+                       int activeParamIndex = -1);
+
+    QRectF boundingRect() const override { return m_rect; }
+    Cell cellAt(const QPointF &pos) const;
+    int nodeId() const { return m_nodeId; }
+    qreal tableWidth() const { return m_tableWidth; }
+    qreal tableHeight() const { return m_tableHeight; }
+
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override;
+
+private:
+    void computeLayout();
+
+    QRectF m_rect;
+    int m_nodeId = 0;
+    ShapeNode m_shape;
+    int m_theme = 0;
+    int m_activeNodeId = 0;
+    int m_activeParamIndex = -1;
+    QVector<Cell> m_cells;
+    qreal m_tableWidth = 0;
     qreal m_tableHeight = 0;
 };
 

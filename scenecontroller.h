@@ -81,6 +81,9 @@ public:
     void handleGroupRotationDragStarted(int groupId);
     void handleGroupRotated(int groupId, const QVector3D &deltaDegrees);
     void handleGroupRotationDragFinished(int groupId);
+    void handlePolyhedronElementsDragStarted(const QVector<int> &elementNodeIds);
+    void handlePolyhedronElementsDragged(const QVector3D &delta);
+    void handlePolyhedronElementsDragFinished();
 
     // ── Graphics-tree event handlers ──────────────────────────────────────────
     void handleToolDrop(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone = false);
@@ -111,6 +114,10 @@ public:
     void handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
     void handlePolyhedronApplyTemplate(int groupNodeId, int templateType);
     void handlePolyhedronClearAll(int groupNodeId);
+    void handlePolygon2DAddPoint(int nodeId);
+    void handlePolygon2DRemovePoint(int nodeId, int pointIndex);
+    void handlePolygon2DPointAdjusted(int nodeId, int pointIndex, int coord, qreal delta);
+    void handlePolygon2DPointExpressionEdited(int nodeId, int pointIndex, int coord, const QString &expression);
 
 signals:
     // Scene content changed (undo command committed).
@@ -143,6 +150,9 @@ private:
     QVector3D m_groupDragStartRot;
     QVector3D m_groupDragStartScale;
     QStringList m_groupDragStartExpressions;
+    bool m_polyhedronElementsDragActive = false;
+    SceneDocument::Snapshot m_polyhedronElementsDragStartSnapshot;
+    QVector<ShapeNode> m_polyhedronElementsDragStartPoints;
 };
 
 #endif // SCENECONTROLLER_H

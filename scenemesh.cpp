@@ -331,6 +331,53 @@ static SceneMesh buildCircleMesh(const ShapeNode &shape)
     return mesh;
 }
 
+static SceneMesh buildFlatPolygonMesh(const QVector<QVector3D> &localPoints,
+                                      const ShapeNode &shape)
+{
+    SceneMesh mesh;
+    if (localPoints.size() < 3)
+        return mesh;
+
+    QVector<QVector3D> top;
+    QVector<QVector3D> bottom;
+    top.reserve(localPoints.size());
+    bottom.reserve(localPoints.size());
+    constexpr float thickness = 0.1f;
+
+    for (const QVector3D &point : localPoints) {
+        const QVector3D xy(point.x(), point.y(), 0.0f);
+        top.append(rotatePoint(xy + QVector3D(0, 0, thickness * 0.5f), shape.rotation) + shape.position);
+        bottom.append(rotatePoint(xy - QVector3D(0, 0, thickness * 0.5f), shape.rotation) + shape.position);
+    }
+
+    appendPolygon(&mesh.triangles, top, 108);
+    QVector<QVector3D> reversedBottom = bottom;
+    std::reverse(reversedBottom.begin(), reversedBottom.end());
+    appendPolygon(&mesh.triangles, reversedBottom, 82);
+
+    const int n = top.size();
+    for (int i = 0; i < n; ++i) {
+        const int j = (i + 1) % n;
+        mesh.triangles.append(makeTriangle(bottom[i], bottom[j], top[j], 92));
+        mesh.triangles.append(makeTriangle(bottom[i], top[j], top[i], 96));
+    }
+
+    mesh.shadowPoints = bottom + top;
+    return mesh;
+}
+
+static SceneMesh buildSquareMesh(const ShapeNode &shape)
+{
+    const float hx = shape.size.x() * 0.5f;
+    const float hy = shape.size.y() * 0.5f;
+    return buildFlatPolygonMesh({
+        QVector3D(-hx, -hy, 0.0f),
+        QVector3D( hx, -hy, 0.0f),
+        QVector3D( hx,  hy, 0.0f),
+        QVector3D(-hx,  hy, 0.0f)
+    }, shape);
+}
+
 static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
 {
     SceneMesh mesh;
@@ -364,6 +411,12 @@ SceneMesh buildShapeMesh(const ShapeNode &shape)
 
     if (shape.type == ShapeNode::Circle)
         return buildCircleMesh(shape);
+
+    if (shape.type == ShapeNode::Square)
+        return buildSquareMesh(shape);
+
+    if (shape.type == ShapeNode::Polygon2D)
+        return buildFlatPolygonMesh(shape.polyhedronPoints, shape);
 
     if (shape.type == ShapeNode::Sphere)
         return buildSphereMesh(shape);

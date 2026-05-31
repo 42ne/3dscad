@@ -342,6 +342,16 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
     if (toolName == QStringLiteral("circle")) {
         shape.type   = ShapeNode::Circle;
         shape.radius = 10.0f;
+    } else if (toolName == QStringLiteral("square")) {
+        shape.type = ShapeNode::Square;
+        shape.size = QVector3D(20, 20, 0.1f);
+    } else if (toolName == QStringLiteral("polygon")) {
+        shape.type = ShapeNode::Polygon2D;
+        shape.polyhedronPoints = {
+            QVector3D(0.0f, 12.0f, 0.0f),
+            QVector3D(-10.0f, -8.0f, 0.0f),
+            QVector3D(10.0f, -8.0f, 0.0f)
+        };
     } else if (toolName == QStringLiteral("sphere")) {
         shape.type   = ShapeNode::Sphere;
         shape.radius = 10.0f;
@@ -714,6 +724,119 @@ void SceneController::handleGroupRotated(int groupId, const QVector3D &deltaDegr
 void SceneController::handleGroupRotationDragFinished(int groupId)
 {
     handleGroupDragFinished(groupId);
+}
+
+static QVector<int> pointShapeIdsForPolyhedronElements(const SceneDocument &scene,
+                                                       const QVector<int> &elementNodeIds)
+{
+    QVector<int> pointShapeIds;
+    auto appendUniqueShapeId = [&](int shapeId) {
+        if (shapeId > 0 && !pointShapeIds.contains(shapeId))
+            pointShapeIds.append(shapeId);
+    };
+
+    for (int nodeId : elementNodeIds) {
+        const SceneDocument::TreeNode *node = scene.treeNodeById(nodeId);
+        if (!node || node->type != SceneDocument::TreeNode::Primitive)
+            continue;
+
+        const ShapeNode *shape = scene.shapeById(node->shapeId);
+        if (!shape)
+            continue;
+
+        if (shape->type == ShapeNode::Point3D) {
+            appendUniqueShapeId(shape->id);
+            continue;
+        }
+
+        if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
+            continue;
+
+        int parentGroupId = 0;
+        if (!SceneDocument::findChildParent(scene.treeRoot(), nodeId, &parentGroupId, nullptr))
+            continue;
+        const SceneDocument::TreeNode *parent = scene.treeNodeById(parentGroupId);
+        if (!parent || parent->operation != SceneDocument::TreeNode::Polyhedron)
+            continue;
+
+        QVector<int> groupPointShapeIds;
+        for (const SceneDocument::TreeNode &child : parent->children) {
+            if (child.type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *pointShape = scene.shapeById(child.shapeId);
+            if (pointShape && pointShape->type == ShapeNode::Point3D)
+                groupPointShapeIds.append(pointShape->id);
+        }
+
+        for (int pointIndex : shape->polyhedronFaces.first()) {
+            if (pointIndex >= 0 && pointIndex < groupPointShapeIds.size())
+                appendUniqueShapeId(groupPointShapeIds[pointIndex]);
+        }
+    }
+
+    return pointShapeIds;
+}
+
+void SceneController::handlePolyhedronElementsDragStarted(const QVector<int> &elementNodeIds)
+{
+    m_polyhedronElementsDragStartPoints.clear();
+    const QVector<int> pointShapeIds = pointShapeIdsForPolyhedronElements(m_scene, elementNodeIds);
+    for (int shapeId : pointShapeIds) {
+        const ShapeNode *shape = m_scene.shapeById(shapeId);
+        if (shape && shape->type == ShapeNode::Point3D)
+            m_polyhedronElementsDragStartPoints.append(*shape);
+    }
+
+    if (m_polyhedronElementsDragStartPoints.isEmpty()) {
+        m_polyhedronElementsDragActive = false;
+        return;
+    }
+
+    m_polyhedronElementsDragStartSnapshot = m_scene.snapshot();
+    m_polyhedronElementsDragActive = true;
+}
+
+void SceneController::handlePolyhedronElementsDragged(const QVector3D &delta)
+{
+    if (!m_polyhedronElementsDragActive)
+        return;
+
+    for (const ShapeNode &startShape : m_polyhedronElementsDragStartPoints) {
+        ShapeNode updated = startShape;
+        updated.position = startShape.position + delta;
+        if (ShapeNode *shape = m_scene.shapeById(startShape.id))
+            *shape = updated;
+    }
+    emit liveViewportUpdate();
+}
+
+void SceneController::handlePolyhedronElementsDragFinished()
+{
+    if (!m_polyhedronElementsDragActive)
+        return;
+    m_polyhedronElementsDragActive = false;
+
+    bool changed = false;
+    for (const ShapeNode &startShape : m_polyhedronElementsDragStartPoints) {
+        const ShapeNode *shape = m_scene.shapeById(startShape.id);
+        if (shape && shape->position != startShape.position) {
+            changed = true;
+            break;
+        }
+    }
+    if (!changed) {
+        m_polyhedronElementsDragStartPoints.clear();
+        return;
+    }
+
+    const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+    m_scene.restoreSnapshot(m_polyhedronElementsDragStartSnapshot);
+
+    auto *command = new ReplaceSceneCommand(&m_scene, newSnapshot,
+                                            [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_polyhedronElementsDragStartPoints.clear();
 }
 
 // ── Graphics-tree: tool drop ──────────────────────────────────────────────────
@@ -1266,6 +1389,99 @@ void SceneController::handleShapeParameterExpressionEdited(int nodeId,
     m_undoStack->push(command);
     m_ctrlHighlight.active = false;
     emit ctrlHighlightChanged();
+}
+
+static ShapeNode *polygon2DShapeForNode(SceneDocument *scene, int nodeId)
+{
+    if (!scene || nodeId <= 0)
+        return nullptr;
+    const SceneDocument::TreeNode *node = scene->treeNodeById(nodeId);
+    if (!node || node->type != SceneDocument::TreeNode::Primitive)
+        return nullptr;
+    ShapeNode *shape = scene->shapeById(node->shapeId);
+    if (!shape || shape->type != ShapeNode::Polygon2D)
+        return nullptr;
+    return shape;
+}
+
+void SceneController::handlePolygon2DAddPoint(int nodeId)
+{
+    const ShapeNode *shape = polygon2DShapeForNode(&m_scene, nodeId);
+    if (!shape)
+        return;
+
+    ShapeNode updated = *shape;
+    QVector3D newPoint(0.0f, 0.0f, 0.0f);
+    if (!updated.polyhedronPoints.isEmpty())
+        newPoint = updated.polyhedronPoints.last() + QVector3D(10.0f, 0.0f, 0.0f);
+    updated.polyhedronPoints.append(newPoint);
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updated,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+}
+
+void SceneController::handlePolygon2DRemovePoint(int nodeId, int pointIndex)
+{
+    const ShapeNode *shape = polygon2DShapeForNode(&m_scene, nodeId);
+    if (!shape || pointIndex < 0 || pointIndex >= shape->polyhedronPoints.size()
+        || shape->polyhedronPoints.size() <= 3)
+        return;
+
+    ShapeNode updated = *shape;
+    updated.polyhedronPoints.remove(pointIndex);
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updated,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+}
+
+void SceneController::handlePolygon2DPointAdjusted(int nodeId, int pointIndex, int coord, qreal delta)
+{
+    const ShapeNode *shape = polygon2DShapeForNode(&m_scene, nodeId);
+    if (!shape || pointIndex < 0 || pointIndex >= shape->polyhedronPoints.size()
+        || coord < 0 || coord > 1 || qFuzzyIsNull(delta))
+        return;
+
+    ShapeNode updated = *shape;
+    QVector3D &point = updated.polyhedronPoints[pointIndex];
+    if (coord == 0)
+        point.setX(point.x() + static_cast<float>(delta));
+    else
+        point.setY(point.y() + static_cast<float>(delta));
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updated,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+}
+
+void SceneController::handlePolygon2DPointExpressionEdited(int nodeId, int pointIndex, int coord, const QString &expression)
+{
+    const ShapeNode *shape = polygon2DShapeForNode(&m_scene, nodeId);
+    if (!shape || pointIndex < 0 || pointIndex >= shape->polyhedronPoints.size()
+        || coord < 0 || coord > 1)
+        return;
+
+    QHash<QString, qreal> varValues;
+    collectVariableValues(m_scene.treeRoot(), &varValues);
+    qreal value = 0.0;
+    if (!ExpressionSyntax::evaluate(expression.trimmed(), varValues, &value))
+        return;
+
+    ShapeNode updated = *shape;
+    QVector3D &point = updated.polyhedronPoints[pointIndex];
+    if (coord == 0)
+        point.setX(static_cast<float>(value));
+    else
+        point.setY(static_cast<float>(value));
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updated,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
 }
 
 void SceneController::handleVariableExpressionEdited(int nodeId, const QString &expression)

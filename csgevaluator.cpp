@@ -95,6 +95,28 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
                && qAbs(local.z()) <= 0.05f;
     }
 
+    if (shape.type == ShapeNode::Square) {
+        return qAbs(local.x()) <= shape.size.x() * 0.5f
+               && qAbs(local.y()) <= shape.size.y() * 0.5f
+               && qAbs(local.z()) <= 0.05f;
+    }
+
+    if (shape.type == ShapeNode::Polygon2D) {
+        if (shape.polyhedronPoints.size() < 3 || qAbs(local.z()) > 0.05f)
+            return false;
+        bool inside = false;
+        for (int i = 0, j = shape.polyhedronPoints.size() - 1;
+             i < shape.polyhedronPoints.size(); j = i++) {
+            const QVector3D &a = shape.polyhedronPoints[i];
+            const QVector3D &b = shape.polyhedronPoints[j];
+            const bool crosses = ((a.y() > local.y()) != (b.y() > local.y()))
+                && (local.x() < (b.x() - a.x()) * (local.y() - a.y()) / (b.y() - a.y()) + a.x());
+            if (crosses)
+                inside = !inside;
+        }
+        return inside;
+    }
+
     if (shape.type == ShapeNode::Cylinder) {
         const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
         return radialDistanceSquared <= shape.radius * shape.radius

@@ -49,6 +49,7 @@ public:
     void setSelectedIndex(int index);
     void setSelectedGroupId(int groupId);
     void setPolyhedronElementSelection(const QVector<int> &nodeIds);
+    void setPolyhedronElementHover(int nodeId);
     void setTreeTransformControlPreview(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void setTreeShapeParameterPreview(int shapeId, int parameter);
     void setRenderBackend(RenderBackend backend);
@@ -87,6 +88,9 @@ signals:
     void groupRotationDragStarted(int groupId);
     void groupRotated(int groupId, const QVector3D &deltaDegrees);
     void groupRotationDragFinished(int groupId);
+    void polyhedronElementsDragStarted(const QVector<int> &elementNodeIds);
+    void polyhedronElementsDragged(const QVector3D &delta);
+    void polyhedronElementsDragFinished();
     void darkViewportThemeChanged(bool darkTheme);
     void viewportColorVariantChanged(int variant);
     void builtInAppearanceSelected();
@@ -137,6 +141,16 @@ private:
     QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
     QVector3D selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const;
     bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
+    int polyhedronGroupIdForElementNode(int nodeId) const;
+    QVector<int> selectedPolyhedronPointNodeIds() const;
+    QVector<SceneDocument::TreeNode> polyhedronSelectionParentGroupStack() const;
+    QVector3D polyhedronSelectionOrigin() const;
+    QVector3D polyhedronSelectionWorldAxisVector(const QVector3D &localAxis) const;
+    float polyhedronSelectionGizmoAxisLength() const;
+    QVector3D polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position) const;
+    bool pickPolyhedronSelectionAxis(const QPoint &position, DragMode *dragMode) const;
+    bool hitTestPolyhedronSelection(const QPoint &position) const;
+    void drawPolyhedronSelectionMoveTool(QPainter &painter) const;
     bool pickBreadcrumbNode(const QPoint &position, int *nodeId) const;
     QVector3D dragDeltaForMousePosition(const QPoint &position) const;
     QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
@@ -154,6 +168,7 @@ private:
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
     QVector<int> m_selectedPolyhedronElementNodeIds;
+    int m_hoveredPolyhedronElementNodeId = 0;
     int m_treeTransformPreviewGroupId = 0;
     int m_treeTransformPreviewAxis = -1;
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;
@@ -176,11 +191,14 @@ private:
     QVector2D m_rotationDragScreenTangent;
     bool m_draggingShape = false;
     bool m_draggingGroup = false;
+    bool m_draggingPolyhedronElements = false;
+    bool m_polyhedronSelectionToolHovered = false;
     bool m_panningViewport = false;
     bool m_emptyClickCandidate = false;
     DragMode m_dragMode = NoDrag;
     int m_dragShapeIndex = -1;
     int m_dragGroupId = 0;
+    QVector<int> m_dragPolyhedronElementNodeIds;
     CsgPreview m_cachedCsgPreview;
     uint m_cachedCsgFingerprint = 0;
     uint m_pendingCsgFingerprint = 0;

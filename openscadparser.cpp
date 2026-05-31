@@ -279,6 +279,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
         QStringLiteral("circle"),
+        QStringLiteral("square"),
+        QStringLiteral("polygon"),
         QStringLiteral("linear_extrude"),
         QStringLiteral("polyhedron")
     };
@@ -549,6 +551,92 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     }
 
     // ── Cylinder / Cone ─────────────────────────────────────────────────────
+    if (extractCallArgs(line, "square", &argsStr) && line.endsWith(';')) {
+        const auto args = parseNamedArgs(argsStr, {"size", "center"});
+        QString sizeStr = args.value(QStringLiteral("size"));
+        if (sizeStr.isEmpty())
+            sizeStr = splitAtTopLevelCommas(argsStr).value(0).trimmed();
+        QStringList parts;
+        if (sizeStr.startsWith('[') && sizeStr.endsWith(']'))
+            parts = splitAtTopLevelCommas(sizeStr.mid(1, sizeStr.size() - 2));
+        else if (!sizeStr.isEmpty())
+            parts = QStringList() << sizeStr << sizeStr;
+        if (parts.size() != 2) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("square on line %1: expected size or [x, y]");
+            return false;
+        }
+        qreal x = 0.0, y = 0.0;
+        QString xe, ye;
+        if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
+            || !parseParamExpression(parts[1], state->variableValues, &y, &ye)) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("square on line %1: could not parse size");
+            return false;
+        }
+        shape->id = state->nextShapeId++;
+        shape->type = ShapeNode::Square;
+        shape->name = QStringLiteral("Square %1").arg(shape->id);
+        shape->size = QVector3D(x, y, 0.1f);
+        shape->parameterExpressions = QStringList({xe, ye});
+        return true;
+    }
+
+    if (extractCallArgs(line, "polygon", &argsStr) && line.endsWith(';')) {
+        const QString normalized = argsStr.trimmed();
+        const int pointsKey = normalized.indexOf(QStringLiteral("points"));
+        const int listStart = normalized.indexOf(QLatin1Char('['), pointsKey >= 0 ? pointsKey : 0);
+        int depth = 0;
+        int listEnd = -1;
+        for (int i = listStart; i >= 0 && i < normalized.size(); ++i) {
+            if (normalized[i] == QLatin1Char('[')) ++depth;
+            else if (normalized[i] == QLatin1Char(']')) {
+                --depth;
+                if (depth == 0) { listEnd = i; break; }
+            }
+        }
+        if (listStart < 0 || listEnd <= listStart) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("polygon on line %1: missing or malformed points");
+            return false;
+        }
+        const QString listText = normalized.mid(listStart + 1, listEnd - listStart - 1);
+        QVector<QVector3D> points;
+        int pos = 0;
+        while (pos < listText.size()) {
+            const int start = listText.indexOf(QLatin1Char('['), pos);
+            if (start < 0) break;
+            const int end = listText.indexOf(QLatin1Char(']'), start + 1);
+            if (end < 0) break;
+            const QStringList parts = splitAtTopLevelCommas(listText.mid(start + 1, end - start - 1));
+            if (parts.size() != 2) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("polygon on line %1: expected [x, y] points");
+                return false;
+            }
+            qreal x = 0.0, y = 0.0;
+            QString xe, ye;
+            if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
+                || !parseParamExpression(parts[1], state->variableValues, &y, &ye)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("polygon on line %1: could not parse point");
+                return false;
+            }
+            points.append(QVector3D(x, y, 0.0f));
+            pos = end + 1;
+        }
+        if (points.size() < 3) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("polygon on line %1: expected at least 3 points");
+            return false;
+        }
+        shape->id = state->nextShapeId++;
+        shape->type = ShapeNode::Polygon2D;
+        shape->name = QStringLiteral("Polygon %1").arg(shape->id);
+        shape->polyhedronPoints = points;
+        return true;
+    }
+
     if (extractCallArgs(line, "cylinder", &argsStr) && line.endsWith(';')) {
         const auto args = parseNamedArgs(argsStr, {"h", "r", "r1", "r2", "center"});
         if (!args.contains("h")) {

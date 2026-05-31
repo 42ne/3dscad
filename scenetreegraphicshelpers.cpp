@@ -164,6 +164,32 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
     const QColor faceDark(139, 176, 214);
 
     painter->setPen(QPen(outline, 1));
+    if (type == ShapeNode::Square) {
+        painter->setPen(QPen(outline, 1));
+        painter->setBrush(face);
+        painter->drawRoundedRect(rect.adjusted(2.0, 3.0, -2.0, -3.0), 3.0, 3.0);
+        painter->setPen(QPen(faceDark, 1));
+        painter->drawLine(rect.left() + rect.width() * 0.30, rect.top() + 4.0,
+                          rect.left() + rect.width() * 0.30, rect.bottom() - 4.0);
+        painter->drawLine(rect.left() + 4.0, rect.top() + rect.height() * 0.68,
+                          rect.right() - 4.0, rect.top() + rect.height() * 0.68);
+        return;
+    }
+    if (type == ShapeNode::Polygon2D) {
+        QPainterPath path;
+        path.moveTo(rect.center().x(), rect.top() + 3.0);
+        path.lineTo(rect.right() - 3.0, rect.top() + rect.height() * 0.46);
+        path.lineTo(rect.right() - rect.width() * 0.26, rect.bottom() - 3.0);
+        path.lineTo(rect.left() + 4.0, rect.bottom() - rect.height() * 0.28);
+        path.lineTo(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.28);
+        path.closeSubpath();
+        painter->setBrush(face);
+        painter->drawPath(path);
+        painter->setPen(QPen(faceDark, 1));
+        painter->drawLine(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.28,
+                          rect.right() - rect.width() * 0.26, rect.bottom() - 3.0);
+        return;
+    }
     if (type == ShapeNode::Sphere) {
         painter->setBrush(face);
         painter->drawEllipse(rect);
@@ -516,6 +542,10 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
     if (shape.type == ShapeNode::Sphere || shape.type == ShapeNode::Circle)
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)}};
 
+    if (shape.type == ShapeNode::Square)
+        return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
+                {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())}};
+
     if (shape.type == ShapeNode::Cylinder)
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)},
                 {QStringLiteral("H"), shape.height, expr(1, shape.height)}};
@@ -525,7 +555,7 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
                 {QStringLiteral("R2"), shape.radius2, expr(1, shape.radius2)},
                 {QStringLiteral("H"),  shape.height,  expr(2, shape.height)}};
 
-    if (shape.type == ShapeNode::Polyhedron)
+    if (shape.type == ShapeNode::Polyhedron || shape.type == ShapeNode::Polygon2D)
         return {};
 
     if (shape.type == ShapeNode::Point3D)
@@ -942,6 +972,11 @@ QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &prim
 
 QSizeF primitivePreviewSize(const ShapeNode &shape)
 {
+    if (shape.type == ShapeNode::Polygon2D) {
+        const int points = qMax(3, shape.polyhedronPoints.size());
+        return QSizeF(190.0, PrimitiveHeight + 10.0 + 22.0 + points * 21.0 + 24.0);
+    }
+
     const QFontMetricsF metrics(sceneTreeGraphicsFont());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
     qreal maxExprWidth = 0.0;
@@ -1103,7 +1138,15 @@ QSizeF previewSizeForTool(const QString &tool)
     if (tool == "call")
         return moduleCallPreviewSize(QStringLiteral("module"), {});
     if (ShapeNode::isPrimitiveTool(tool))
-        return defaultPreviewSize();
+    {
+        ShapeNode preview;
+        preview.type = ShapeNode::typeFromToolName(tool);
+        if (preview.type == ShapeNode::Polygon2D) {
+            preview.polyhedronPoints = {QVector3D(), QVector3D(), QVector3D()};
+            return primitivePreviewSize(preview);
+        }
+        return primitivePreviewSize(preview);
+    }
     if (tool == "difference")
         return differencePreviewSize();
     if (tool == "intersection")
@@ -1152,6 +1195,10 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
     const QString normalized = tool.toLower();
     if (normalized.contains("circle"))
         return ShapeNode::Circle;
+    if (normalized.contains("square"))
+        return ShapeNode::Square;
+    if (normalized.contains("polygon"))
+        return ShapeNode::Polygon2D;
     if (normalized.contains("sphere"))
         return ShapeNode::Sphere;
     if (normalized.contains("cone"))
@@ -1171,6 +1218,10 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
 {
     if (type == ShapeNode::Circle)
         return QStringLiteral("circle");
+    if (type == ShapeNode::Square)
+        return QStringLiteral("square");
+    if (type == ShapeNode::Polygon2D)
+        return QStringLiteral("polygon");
     if (type == ShapeNode::Sphere)
         return QStringLiteral("sphere");
     if (type == ShapeNode::Cylinder)

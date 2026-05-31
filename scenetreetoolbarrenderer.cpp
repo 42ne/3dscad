@@ -20,6 +20,8 @@ QStringList paletteTools()
     return {
         // ── Primitives ────────────────────────────────────────────────────────
         QStringLiteral("circle"),
+        QStringLiteral("square"),
+        QStringLiteral("polygon"),
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),

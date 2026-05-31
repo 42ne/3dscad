@@ -99,6 +99,11 @@ signals:
     void polyhedronTemplateRequested(int groupNodeId, int templateIndex);
     void polyhedronClearRequested(int groupNodeId);
     void polyhedronElementSelectionChanged(const QVector<int> &nodeIds);
+    void polyhedronElementHoverChanged(int nodeId);
+    void polygon2DPointAddRequested(int nodeId);
+    void polygon2DPointRemoveRequested(int nodeId, int pointIndex);
+    void polygon2DPointAdjusted(int nodeId, int pointIndex, int coord, qreal delta);
+    void polygon2DPointExpressionEdited(int nodeId, int pointIndex, int coord, const QString &expression);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -183,10 +188,12 @@ private:
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
     bool handlePolyhedronTableWheel(const QPointF &scenePosition, int wheelSteps);
+    bool handlePolygon2DTableWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
     void updateHoverHighlights(const QPointF &scenePosition);
+    void updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled);
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
@@ -202,6 +209,7 @@ private:
     bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter, int *numberStart, int *numberLength) const;
     bool polyhedronTableControlAt(const QPointF &scenePosition, PolyhedronTableItem::Cell *cell) const;
     int polyhedronGroupIdForCell(const QPointF &scenePosition) const;
+    bool polygon2DTableControlAt(const QPointF &scenePosition, Polygon2DTableItem::Cell *cell) const;
     bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool moduleCallParamControlAt(const QPointF &scenePosition, int *moduleCallNodeId, int *paramVarNodeId, int *start, int *length) const;
@@ -314,7 +322,8 @@ private:
             ShapeParameter,
             Variable,
             ModuleCallArgument,
-            PolyhedronParticipation
+            PolyhedronParticipation,
+            Polygon2DPoint
         };
         Kind kind = None;
         QRectF hoverRect;
@@ -333,6 +342,7 @@ private:
     int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
     QSet<int> m_selectedPolyhedronElementNodeIds;
+    int m_hoveredPolyhedronElementNodeId = 0;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
     bool            m_colorEditMode        = false;

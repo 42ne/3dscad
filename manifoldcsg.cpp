@@ -1,4 +1,5 @@
 #include "manifoldcsg.h"
+#include "scenemesh.h"
 #include "scenestringutils.h"
 
 #ifdef HAVE_MANIFOLD_CSG
@@ -151,6 +152,24 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
 {
     Manifold result;
 
+    auto manifoldFromSceneMesh = [](const SceneMesh &mesh) -> Manifold {
+        MeshGL meshGl;
+        meshGl.numProp = 3;
+        for (const MeshTriangle &triangle : mesh.triangles) {
+            const QVector3D vertices[3] = {triangle.a, triangle.b, triangle.c};
+            const uint32_t base = static_cast<uint32_t>(meshGl.vertProperties.size() / 3);
+            for (const QVector3D &vertex : vertices) {
+                meshGl.vertProperties.push_back(vertex.x());
+                meshGl.vertProperties.push_back(vertex.y());
+                meshGl.vertProperties.push_back(vertex.z());
+            }
+            meshGl.triVerts.push_back(base);
+            meshGl.triVerts.push_back(base + 1);
+            meshGl.triVerts.push_back(base + 2);
+        }
+        return Manifold(meshGl);
+    };
+
     if (shape.type == ShapeNode::Polyhedron
         || shape.type == ShapeNode::Point3D
         || shape.type == ShapeNode::Face3D)
@@ -158,6 +177,13 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
 
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
+    } else if (shape.type == ShapeNode::Square) {
+        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), true);
+    } else if (shape.type == ShapeNode::Polygon2D) {
+        ShapeNode localShape = shape;
+        localShape.position = QVector3D();
+        localShape.rotation = QVector3D();
+        result = manifoldFromSceneMesh(buildShapeMesh(localShape));
     } else if (shape.type == ShapeNode::Sphere) {
         result = Manifold::Sphere(shape.radius, 32);
     } else if (shape.type == ShapeNode::Cone) {

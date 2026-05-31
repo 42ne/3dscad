@@ -363,6 +363,13 @@ static int primitiveTreeNodeIdForShape(const SceneDocument::TreeNode &node, int 
     return 0;
 }
 
+static const ShapeNode *shapeForPrimitiveNode(const SceneDocument *scene, const SceneDocument::TreeNode *node)
+{
+    if (!scene || !node || node->type != SceneDocument::TreeNode::Primitive)
+        return nullptr;
+    return scene->shapeById(node->shapeId);
+}
+
 static ProjectedPoint projectWorldPoint(const QVector3D &world,
                                         const QSize &viewportSize,
                                         float yawDegrees,
@@ -522,6 +529,45 @@ static void drawHaloLine(QPainter *painter,
     painter->drawLine(start, end);
     painter->setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, joinStyle));
     painter->drawLine(start, end);
+}
+
+static void drawVolumetricGizmoAxis(QPainter *painter,
+                                    const QPointF &start,
+                                    const QPointF &end,
+                                    const QColor &color)
+{
+    QVector2D direction(end - start);
+    if (direction.lengthSquared() <= 0.0001f)
+        return;
+    direction.normalize();
+    const QPointF shaftEnd = end - (direction * 15.0f).toPointF();
+
+    const QPointF shadowOffset(3.0, 4.0);
+    painter->setPen(QPen(QColor(0, 0, 0, 54), 11.5, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(start + shadowOffset, shaftEnd + shadowOffset);
+
+    painter->setPen(QPen(QColor(255, 255, 255, 108), 10.0, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(start, shaftEnd);
+
+    painter->setPen(QPen(QColor(2, 5, 10, 168), 7.2, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(start, shaftEnd);
+
+    QLinearGradient shaftGradient(start, shaftEnd);
+    shaftGradient.setColorAt(0.0, color.lighter(165));
+    shaftGradient.setColorAt(0.42, color.lighter(118));
+    shaftGradient.setColorAt(1.0, color.darker(132));
+    painter->setPen(QPen(QBrush(shaftGradient), 4.4, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(start, shaftEnd);
+
+    const QVector2D normal(-direction.y(), direction.x());
+    const QPointF highlightA = start + (normal * 1.8f).toPointF();
+    const QPointF highlightB = shaftEnd + (normal * 1.8f).toPointF();
+    painter->setPen(QPen(QColor(255, 255, 255, 82), 1.2, Qt::SolidLine, Qt::RoundCap));
+    painter->drawLine(highlightA, highlightB);
+
+    QColor arrowColor = color;
+    arrowColor.setAlpha(qMin(205, arrowColor.alpha()));
+    drawArrowHead(painter, start, end, arrowColor, 23.0f, 11.0f, 3.4);
 }
 
 static void drawHaloPolyline(QPainter *painter,
@@ -1383,6 +1429,16 @@ void ViewportWidget::setPolyhedronElementSelection(const QVector<int> &nodeIds)
         return;
 
     m_selectedPolyhedronElementNodeIds = nodeIds;
+    m_polyhedronSelectionToolHovered = false;
+    update();
+}
+
+void ViewportWidget::setPolyhedronElementHover(int nodeId)
+{
+    if (m_hoveredPolyhedronElementNodeId == nodeId)
+        return;
+
+    m_hoveredPolyhedronElementNodeId = nodeId;
     update();
 }
 
@@ -2230,6 +2286,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     }
 
     drawPolyhedronElementSelectionOverlay(painter);
+    drawPolyhedronSelectionMoveTool(painter);
 
     if (m_navigationOverlayEnabled) {
         drawViewportHintOverlay(painter, csgStatus);
@@ -2244,8 +2301,16 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
 void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) const
 {
-    if (!m_scene || m_selectedPolyhedronElementNodeIds.isEmpty())
+    if (!m_scene
+        || (m_selectedPolyhedronElementNodeIds.isEmpty()
+            && m_hoveredPolyhedronElementNodeId <= 0))
         return;
+
+    QVector<int> overlayNodeIds = m_selectedPolyhedronElementNodeIds;
+    if (m_hoveredPolyhedronElementNodeId > 0
+        && !overlayNodeIds.contains(m_hoveredPolyhedronElementNodeId)) {
+        overlayNodeIds.append(m_hoveredPolyhedronElementNodeId);
+    }
 
     auto project = [&](const QVector3D &world) {
         return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
@@ -2264,12 +2329,13 @@ void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) co
         return true;
     };
 
-    const QColor faceFill(255, 199, 64, 58);
-    const QColor faceEdge(255, 220, 112, 235);
-    const QColor pointFill(255, 231, 130, 235);
-    const QColor pointEdge(42, 25, 0, 230);
-
-    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+    for (int nodeId : overlayNodeIds) {
+        const bool hoveredOnly = nodeId == m_hoveredPolyhedronElementNodeId
+                                 && !m_selectedPolyhedronElementNodeIds.contains(nodeId);
+        const QColor faceFill = hoveredOnly ? QColor(255, 210, 90, 26)
+                                            : QColor(255, 199, 64, 58);
+        const QColor faceEdge = hoveredOnly ? QColor(255, 226, 132, 150)
+                                            : QColor(255, 220, 112, 235);
         const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
         if (!node || node->type != SceneDocument::TreeNode::Primitive)
             continue;
@@ -2312,17 +2378,23 @@ void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) co
 
         painter.save();
         painter.setBrush(polygon.size() >= 3 ? QBrush(faceFill) : Qt::NoBrush);
-        painter.setPen(QPen(faceEdge, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setPen(QPen(faceEdge, hoveredOnly ? 1.5 : 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         if (polygon.size() >= 3)
             painter.drawPolygon(polygon);
         else
             painter.drawPolyline(polygon);
         painter.setBrush(Qt::NoBrush);
-        drawHaloPolyline(&painter, outline, faceEdge, 2.0);
+        drawHaloPolyline(&painter, outline, faceEdge, hoveredOnly ? 1.2 : 2.0);
         painter.restore();
     }
 
-    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+    for (int nodeId : overlayNodeIds) {
+        const bool hoveredOnly = nodeId == m_hoveredPolyhedronElementNodeId
+                                 && !m_selectedPolyhedronElementNodeIds.contains(nodeId);
+        const QColor pointFill = hoveredOnly ? QColor(255, 232, 145, 160)
+                                             : QColor(255, 231, 130, 235);
+        const QColor pointEdge = hoveredOnly ? QColor(80, 54, 10, 170)
+                                             : QColor(42, 25, 0, 230);
         QVector3D world;
         if (!pointWorldPosition(nodeId, &world))
             continue;
@@ -2330,16 +2402,78 @@ void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) co
         if (!pp.visible)
             continue;
 
-        const QRectF dot(pp.point.x() - 5.5, pp.point.y() - 5.5, 11.0, 11.0);
+        const qreal radius = hoveredOnly ? 4.4 : 5.5;
+        const QRectF dot(pp.point.x() - radius, pp.point.y() - radius, radius * 2.0, radius * 2.0);
         painter.save();
-        painter.setPen(QPen(QColor(255, 255, 255, 190), 5.0));
+        painter.setPen(QPen(QColor(255, 255, 255, hoveredOnly ? 105 : 190), hoveredOnly ? 3.0 : 5.0));
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(dot.adjusted(-1.5, -1.5, 1.5, 1.5));
-        painter.setPen(QPen(pointEdge, 2.0));
+        painter.drawEllipse(dot.adjusted(-1.2, -1.2, 1.2, 1.2));
+        painter.setPen(QPen(pointEdge, hoveredOnly ? 1.3 : 2.0));
         painter.setBrush(pointFill);
         painter.drawEllipse(dot);
         painter.restore();
     }
+}
+
+void ViewportWidget::drawPolyhedronSelectionMoveTool(QPainter &painter) const
+{
+    if (selectedPolyhedronPointNodeIds().isEmpty())
+        return;
+
+    const QVector3D origin = polyhedronSelectionOrigin();
+    const QPointF center = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const float axisLength = polyhedronSelectionGizmoAxisLength();
+    struct AxisDraw {
+        QVector3D axis;
+        QColor color;
+        float depth = 0.0f;
+        QPointF end;
+    };
+    QVector<AxisDraw> axes = {
+        {QVector3D(axisLength, 0.0f, 0.0f), QColor(255, 95, 120, 205), 0.0f, QPointF()},
+        {QVector3D(0.0f, axisLength, 0.0f), QColor(105, 245, 145, 205), 0.0f, QPointF()},
+        {QVector3D(0.0f, 0.0f, axisLength), QColor(105, 180, 255, 205), 0.0f, QPointF()}
+    };
+    for (AxisDraw &axis : axes) {
+        const ProjectedPoint projected = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axis.axis),
+                                                           size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+        axis.depth = projected.depth;
+        axis.end = projected.point;
+    }
+    std::sort(axes.begin(), axes.end(), [](const AxisDraw &a, const AxisDraw &b) {
+        return a.depth > b.depth;
+    });
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (const auto &axis : axes) {
+        drawVolumetricGizmoAxis(&painter, center, axis.end, axis.color);
+    }
+
+    QPolygonF hub;
+    hub << QPointF(center.x(), center.y() - 10.0)
+        << QPointF(center.x() + 10.0, center.y())
+        << QPointF(center.x(), center.y() + 10.0)
+        << QPointF(center.x() - 10.0, center.y());
+    QPolygonF hubShadow = hub.translated(2.7, 3.4);
+
+    QLinearGradient hubGradient(center - QPointF(5.0, 7.0), center + QPointF(7.0, 8.0));
+    hubGradient.setColorAt(0.0, QColor(255, 249, 178, 176));
+    hubGradient.setColorAt(0.45, QColor(255, 203, 72, 142));
+    hubGradient.setColorAt(1.0, QColor(103, 61, 4, 168));
+    painter.setPen(QPen(QColor(10, 8, 2, 148), 1.55));
+    painter.setBrush(QColor(0, 0, 0, 38));
+    painter.drawPolygon(hubShadow);
+    painter.setBrush(hubGradient);
+    painter.drawPolygon(hub);
+    painter.setPen(QPen(QColor(255, 255, 255, 96), 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawLine(QPointF(center.x() - 4.2, center.y() - 1.5),
+                     QPointF(center.x(), center.y() - 5.8));
+    painter.drawLine(QPointF(center.x(), center.y() - 5.8),
+                     QPointF(center.x() + 4.2, center.y() - 1.5));
+    painter.restore();
 }
 
 void ViewportWidget::paintOpenGLGrid()
@@ -3519,6 +3653,249 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
     return true;
 }
 
+int ViewportWidget::polyhedronGroupIdForElementNode(int nodeId) const
+{
+    if (!m_scene || nodeId <= 0)
+        return 0;
+
+    int parentId = 0;
+    if (!SceneDocument::findChildParent(m_scene->treeRoot(), nodeId, &parentId, nullptr))
+        return 0;
+
+    const SceneDocument::TreeNode *parent = m_scene->treeNodeById(parentId);
+    return parent && parent->operation == SceneDocument::TreeNode::Polyhedron ? parentId : 0;
+}
+
+QVector<int> ViewportWidget::selectedPolyhedronPointNodeIds() const
+{
+    QVector<int> pointNodeIds;
+    if (!m_scene)
+        return pointNodeIds;
+
+    auto appendUnique = [&](int nodeId) {
+        if (nodeId > 0 && !pointNodeIds.contains(nodeId))
+            pointNodeIds.append(nodeId);
+    };
+
+    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+        const ShapeNode *shape = shapeForPrimitiveNode(m_scene, node);
+        if (!shape)
+            continue;
+        if (shape->type == ShapeNode::Point3D) {
+            appendUnique(nodeId);
+            continue;
+        }
+        if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
+            continue;
+
+        const int groupId = polyhedronGroupIdForElementNode(nodeId);
+        const SceneDocument::TreeNode *group = groupId > 0 ? m_scene->treeNodeById(groupId) : nullptr;
+        if (!group)
+            continue;
+
+        QVector<int> groupPointNodeIds;
+        for (const SceneDocument::TreeNode &child : group->children) {
+            const ShapeNode *pointShape = shapeForPrimitiveNode(m_scene, &child);
+            if (pointShape && pointShape->type == ShapeNode::Point3D)
+                groupPointNodeIds.append(child.id);
+        }
+
+        for (int pointIndex : shape->polyhedronFaces.first()) {
+            if (pointIndex >= 0 && pointIndex < groupPointNodeIds.size())
+                appendUnique(groupPointNodeIds[pointIndex]);
+        }
+    }
+    return pointNodeIds;
+}
+
+QVector<SceneDocument::TreeNode> ViewportWidget::polyhedronSelectionParentGroupStack() const
+{
+    QVector<SceneDocument::TreeNode> groupStack;
+    if (!m_scene || m_selectedPolyhedronElementNodeIds.isEmpty())
+        return groupStack;
+
+    const int groupId = polyhedronGroupIdForElementNode(m_selectedPolyhedronElementNodeIds.first());
+    if (groupId > 0)
+        collectParentGroupStackForGroup(m_scene->treeRoot(), groupId, &groupStack);
+    return groupStack;
+}
+
+QVector3D ViewportWidget::polyhedronSelectionOrigin() const
+{
+    const QVector<int> pointNodeIds = selectedPolyhedronPointNodeIds();
+    if (pointNodeIds.isEmpty())
+        return QVector3D();
+
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack();
+    QVector3D sum;
+    int count = 0;
+    for (int nodeId : pointNodeIds) {
+        const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId) : nullptr;
+        const ShapeNode *shape = shapeForPrimitiveNode(m_scene, node);
+        if (!shape || shape->type != ShapeNode::Point3D)
+            continue;
+        sum += transformPointByGroupStack(shape->position, parentGroups);
+        ++count;
+    }
+    return count > 0 ? sum / float(count) : QVector3D();
+}
+
+QVector3D ViewportWidget::polyhedronSelectionWorldAxisVector(const QVector3D &localAxis) const
+{
+    return transformVectorByGroupStack(localAxis, polyhedronSelectionParentGroupStack());
+}
+
+float ViewportWidget::polyhedronSelectionGizmoAxisLength() const
+{
+    const float viewportSide = static_cast<float>(qMax(1, qMin(width(), height())));
+    const float baseScreenLength = qBound(52.0f, viewportSide * 0.12f, viewportSide * 0.20f);
+    const QVector3D originCamera = toCameraPoint(polyhedronSelectionOrigin(),
+                                                 m_cameraYaw,
+                                                 m_cameraPitch,
+                                                 m_cameraDistance,
+                                                 m_cameraTarget);
+    const float originDepth = qMax(8.0f, originCamera.z());
+    const float objectZoom = 220.0f / originDepth;
+    const float gizmoZoom = std::pow(objectZoom, 0.585f); // 2x object zoom -> ~1.5x gizmo zoom.
+    const float screenLength = qBound(34.0f, baseScreenLength * gizmoZoom, viewportSide * 0.25f);
+    return screenLength * originDepth / 420.0f;
+}
+
+QVector3D ViewportWidget::polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position) const
+{
+    const QPoint pixelDelta = position - m_dragStartMousePosition;
+    const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack();
+
+    if (m_dragMode == PlaneDrag) {
+        const QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
+                                   -pixelDelta.y() * worldUnitsPerPixel,
+                                   0.0f);
+        return inverseTransformVectorByGroupStack(worldDelta, parentGroups);
+    }
+
+    QVector3D axisVector;
+    if (m_dragMode == AxisXDrag)
+        axisVector = QVector3D(1.0f, 0.0f, 0.0f);
+    else if (m_dragMode == AxisYDrag)
+        axisVector = QVector3D(0.0f, 1.0f, 0.0f);
+    else if (m_dragMode == AxisZDrag)
+        axisVector = QVector3D(0.0f, 0.0f, 1.0f);
+
+    if (axisVector.isNull())
+        return QVector3D();
+
+    const QVector3D origin = polyhedronSelectionOrigin();
+    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF screenEnd = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axisVector * polyhedronSelectionGizmoAxisLength()),
+                                                size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    QVector2D screenAxis(screenEnd - screenOrigin);
+    if (screenAxis.lengthSquared() <= 0.0001f)
+        return QVector3D();
+
+    screenAxis.normalize();
+    const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
+    return axisVector * screenAmount * worldUnitsPerPixel;
+}
+
+bool ViewportWidget::pickPolyhedronSelectionAxis(const QPoint &position, DragMode *dragMode) const
+{
+    if (selectedPolyhedronPointNodeIds().isEmpty())
+        return false;
+
+    const QVector3D origin = polyhedronSelectionOrigin();
+    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    float bestDistance = 10.0f;
+    DragMode picked = NoDrag;
+
+    if (QVector2D(QPointF(position) - start).length() <= 9.0f) {
+        bestDistance = 0.0f;
+        picked = PlaneDrag;
+    }
+
+    const float axisLength = polyhedronSelectionGizmoAxisLength();
+    const QVector<QPair<DragMode, QVector3D>> axes = {
+        {AxisXDrag, QVector3D(axisLength, 0.0f, 0.0f)},
+        {AxisYDrag, QVector3D(0.0f, axisLength, 0.0f)},
+        {AxisZDrag, QVector3D(0.0f, 0.0f, axisLength)}
+    };
+    for (const auto &axis : axes) {
+        const QPointF end = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axis.second),
+                                              size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+        const float distance = distanceToSegment(position, start, end);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            picked = axis.first;
+        }
+    }
+
+    if (picked == NoDrag)
+        return false;
+    if (dragMode)
+        *dragMode = picked;
+    return true;
+}
+
+bool ViewportWidget::hitTestPolyhedronSelection(const QPoint &position) const
+{
+    if (!m_scene || m_selectedPolyhedronElementNodeIds.isEmpty())
+        return false;
+
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack();
+    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+        const ShapeNode *shape = shapeForPrimitiveNode(m_scene, node);
+        if (!shape)
+            continue;
+
+        if (shape->type == ShapeNode::Point3D) {
+            const QPointF screen = projectWorldPoint(transformPointByGroupStack(shape->position, parentGroups),
+                                                     size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+            if (QVector2D(QPointF(position) - screen).length() <= 10.0f)
+                return true;
+            continue;
+        }
+
+        if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
+            continue;
+
+        const int groupId = polyhedronGroupIdForElementNode(nodeId);
+        const SceneDocument::TreeNode *group = groupId > 0 ? m_scene->treeNodeById(groupId) : nullptr;
+        if (!group)
+            continue;
+
+        QVector<QVector3D> points;
+        for (const SceneDocument::TreeNode &child : group->children) {
+            const ShapeNode *pointShape = shapeForPrimitiveNode(m_scene, &child);
+            if (pointShape && pointShape->type == ShapeNode::Point3D)
+                points.append(transformPointByGroupStack(pointShape->position, parentGroups));
+        }
+
+        QPolygonF polygon;
+        for (int pointIndex : shape->polyhedronFaces.first()) {
+            if (pointIndex < 0 || pointIndex >= points.size())
+                continue;
+            polygon << projectWorldPoint(points[pointIndex], size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+        }
+        if (polygon.size() < 2)
+            continue;
+
+        QPainterPath path;
+        if (polygon.size() >= 3) {
+            path.addPolygon(polygon);
+            if (path.contains(position))
+                return true;
+        }
+        for (int i = 0; i < polygon.size(); ++i) {
+            if (distanceToSegment(position, polygon[i], polygon[(i + 1) % polygon.size()]) <= 8.0f)
+                return true;
+        }
+    }
+
+    return false;
+}
+
 bool ViewportWidget::pickBreadcrumbNode(const QPoint &position, int *nodeId) const
 {
     for (const BreadcrumbHit &hit : m_breadcrumbHits) {
@@ -3605,6 +3982,18 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
         int breadcrumbNodeId = 0;
         if (m_navigationOverlayEnabled && pickBreadcrumbNode(event->pos(), &breadcrumbNodeId)) {
             emit treeNodeClicked(breadcrumbNodeId);
+            event->accept();
+            return;
+        }
+
+        DragMode pickedPolyAxis = NoDrag;
+        if (pickPolyhedronSelectionAxis(event->pos(), &pickedPolyAxis)) {
+            m_draggingPolyhedronElements = true;
+            m_dragPolyhedronElementNodeIds = m_selectedPolyhedronElementNodeIds;
+            m_dragMode = pickedPolyAxis;
+            m_dragStartMousePosition = event->pos();
+            m_lastDragDelta = QVector3D();
+            emit polyhedronElementsDragStarted(m_dragPolyhedronElementNodeIds);
             event->accept();
             return;
         }
@@ -3713,6 +4102,19 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (m_draggingPolyhedronElements && (event->buttons() & Qt::LeftButton)) {
+        const QVector3D localDelta = polyhedronSelectionLocalDeltaForMousePosition(event->pos());
+        if ((localDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
+            m_lastMousePosition = event->pos();
+            return;
+        }
+
+        m_lastDragDelta = localDelta;
+        emit polyhedronElementsDragged(localDelta);
+        m_lastMousePosition = event->pos();
+        return;
+    }
+
     if ((m_draggingShape || m_draggingGroup) && (event->buttons() & Qt::LeftButton)) {
         if (isRotationDragMode(m_dragMode)) {
             const QVector3D rotationDelta = rotationDeltaForMousePosition(event->pos());
@@ -3747,6 +4149,17 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (!(event->buttons() & Qt::LeftButton)) {
+        DragMode ignored = NoDrag;
+        const bool hovered = hitTestPolyhedronSelection(event->pos())
+                             || pickPolyhedronSelectionAxis(event->pos(), &ignored);
+        if (m_polyhedronSelectionToolHovered != hovered) {
+            m_polyhedronSelectionToolHovered = hovered;
+            setCursor(hovered ? Qt::SizeAllCursor : Qt::ArrowCursor);
+            update();
+        }
+    }
+
     if (event->buttons() & Qt::LeftButton) {
         if (m_emptyClickCandidate
             && (event->pos() - m_emptyClickStartPosition).manhattanLength() > 3) {
@@ -3767,6 +4180,18 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
     if (event->button() == Qt::RightButton && m_panningViewport) {
         m_panningViewport = false;
         unsetCursor();
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton && m_draggingPolyhedronElements) {
+        m_emptyClickCandidate = false;
+        m_draggingPolyhedronElements = false;
+        m_dragPolyhedronElementNodeIds.clear();
+        m_dragMode = NoDrag;
+        m_lastDragDelta = QVector3D();
+        emit polyhedronElementsDragFinished();
+        update();
         event->accept();
         return;
     }

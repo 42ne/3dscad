@@ -14,6 +14,8 @@ struct ShapeNode
         Cylinder,
         Cone,
         Circle,
+        Square,
+        Polygon2D,
         Polyhedron,
         Point3D,
         Face3D
@@ -53,15 +55,17 @@ struct ShapeNode
     {
         switch (type) {
         case Cube:
+        case Square:
             if      (paramIndex == 0) size.setX(static_cast<float>(qMax<qreal>(0.1, rawValue)));
             else if (paramIndex == 1) size.setY(static_cast<float>(qMax<qreal>(0.1, rawValue)));
-            else if (paramIndex == 2) size.setZ(static_cast<float>(qMax<qreal>(0.1, rawValue)));
+            else if (type == Cube && paramIndex == 2) size.setZ(static_cast<float>(qMax<qreal>(0.1, rawValue)));
             break;
         case Sphere:
         case Circle:
             if (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
             break;
         case Polyhedron:
+        case Polygon2D:
             break;
         case Point3D:
             if      (paramIndex == 0) position.setX(static_cast<float>(rawValue));
@@ -103,7 +107,9 @@ struct ShapeNode
             || toolName == QLatin1String("sphere")
             || toolName == QLatin1String("cylinder")
             || toolName == QLatin1String("cone")
-            || toolName == QLatin1String("circle");
+            || toolName == QLatin1String("circle")
+            || toolName == QLatin1String("square")
+            || toolName == QLatin1String("polygon");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -113,6 +119,8 @@ struct ShapeNode
         if (toolName == QLatin1String("cylinder")) return Cylinder;
         if (toolName == QLatin1String("cone"))     return Cone;
         if (toolName == QLatin1String("circle"))   return Circle;
+        if (toolName == QLatin1String("square"))   return Square;
+        if (toolName == QLatin1String("polygon"))  return Polygon2D;
         return Cube;
     }
 };
