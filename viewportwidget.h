@@ -48,6 +48,7 @@ public:
     void setShapes(const QVector<ShapeNode> *shapes);
     void setSelectedIndex(int index);
     void setSelectedGroupId(int groupId);
+    void setPolyhedronElementSelection(const QVector<int> &nodeIds);
     void setTreeTransformControlPreview(int groupId, SceneDocument::TreeNode::Operation operation, int axis);
     void setTreeShapeParameterPreview(int shapeId, int parameter);
     void setRenderBackend(RenderBackend backend);
@@ -120,6 +121,7 @@ private:
     void drawAxisGizmo(QPainter &painter) const;
     void drawViewportHintOverlay(QPainter &painter, const QString &csgStatus) const;
     void drawSelectionBreadcrumb(QPainter &painter);
+    void drawPolyhedronElementSelectionOverlay(QPainter &painter) const;
     void drawTreeTransformControlPreview(QPainter &painter) const;
     void drawTreeShapeParameterPreview(QPainter &painter) const;
     void updateViewportControls();
@@ -151,6 +153,7 @@ private:
     ViewportAppearanceTheme m_customAppearanceTheme;
     int m_selectedIndex = -1;
     int m_selectedGroupId = 0;
+    QVector<int> m_selectedPolyhedronElementNodeIds;
     int m_treeTransformPreviewGroupId = 0;
     int m_treeTransformPreviewAxis = -1;
     SceneDocument::TreeNode::Operation m_treeTransformPreviewOperation = SceneDocument::TreeNode::Union;

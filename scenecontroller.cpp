@@ -219,35 +219,6 @@ static bool polygonValidXY(const QVector<int> &ring, const QVector<QVector3D> &p
     return true;
 }
 
-// Ear-clip triangulation of a CCW polygon in XY. Appends {a,b,c} to 'out'.
-static void earClipXY(QVector<int> ring, const QVector<QVector3D> &pts,
-                      QVector<QVector<int>> &out)
-{
-    while (ring.size() > 3) {
-        const int n = ring.size();
-        bool clipped = false;
-        for (int i = 0; i < n; ++i) {
-            const int a = ring[(i-1+n)%n], b = ring[i], c = ring[(i+1)%n];
-            if (cross2DXY(pts[a], pts[b], pts[c]) <= 0.0f) continue;
-            bool blocked = false;
-            for (int j = 0; j < n; ++j) {
-                if (j==(i-1+n)%n || j==i || j==(i+1)%n) continue;
-                const QVector3D &v = pts[ring[j]];
-                if (cross2DXY(pts[a],pts[b],v) > 0.0f &&
-                    cross2DXY(pts[b],pts[c],v) > 0.0f &&
-                    cross2DXY(pts[c],pts[a],v) > 0.0f) { blocked=true; break; }
-            }
-            if (blocked) continue;
-            out.append({a, b, c});
-            ring.remove(i);
-            clipped = true;
-            break;
-        }
-        if (!clipped) break;
-    }
-    if (ring.size() == 3) out.append({ring[0], ring[1], ring[2]});
-}
-
 // Sort index set into a CCW simple polygon order using angle from centroid.
 // Falls back to insertion order if the centroid-sort still produces crossings.
 static QVector<int> sortPolygonCCW(const QVector<int> &indices, const QVector<QVector3D> &pts)
@@ -312,19 +283,15 @@ static QVector<QVector<int>> buildExtrusionFaces(const QVector<int> &bottomIdx,
 
     QVector<QVector<int>> faces;
 
-    // Bottom cap: reverse triangle winding → outward normal -Z
+    // Bottom cap: reverse polygon winding for outward normal -Z.
     {
-        QVector<QVector<int>> tris;
-        earClipXY(bottomPoly, pts, tris);
-        for (const auto &t : tris)
-            faces.append({t[0], t[2], t[1]});
+        QVector<int> bottomCap = bottomPoly;
+        std::reverse(bottomCap.begin(), bottomCap.end());
+        faces.append(bottomCap);
     }
-    // Top cap: CCW winding → outward normal +Z
+    // Top cap: CCW polygon winding for outward normal +Z.
     {
-        QVector<QVector<int>> tris;
-        earClipXY(topPoly, pts, tris);
-        for (const auto &t : tris)
-            faces.append(t);
+        faces.append(topPoly);
     }
     // Side quads
     for (int i = 0; i < N; ++i) {

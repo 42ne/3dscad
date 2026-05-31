@@ -8,6 +8,7 @@
 #include <QGraphicsItem>
 #include <QImage>
 #include <QRectF>
+#include <QSet>
 #include <QVector>
 #include <functional>
 
@@ -36,7 +37,8 @@ public:
                         int theme = 0,
                         int activeShapeNodeId = 0,
                         int activeParamIndex = -1,
-                        int activeNumberStart = -1);
+                        int activeNumberStart = -1,
+                        const QSet<int> &selectedElementNodeIds = {});
 
     QRectF boundingRect() const override { return m_rect; }
 
@@ -66,6 +68,7 @@ private:
     int m_activeShapeNodeId = 0;
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
+    QSet<int> m_selectedElementNodeIds;
 
     struct PointData { int nodeId; QVector3D position; };
     struct FaceData  { int nodeId; QVector<int> indices; };

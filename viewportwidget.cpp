@@ -1377,6 +1377,15 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     update();
 }
 
+void ViewportWidget::setPolyhedronElementSelection(const QVector<int> &nodeIds)
+{
+    if (m_selectedPolyhedronElementNodeIds == nodeIds)
+        return;
+
+    m_selectedPolyhedronElementNodeIds = nodeIds;
+    update();
+}
+
 void ViewportWidget::setTreeTransformControlPreview(int groupId, SceneDocument::TreeNode::Operation operation, int axis)
 {
     if (m_treeTransformPreviewGroupId == groupId
@@ -2220,6 +2229,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
         }
     }
 
+    drawPolyhedronElementSelectionOverlay(painter);
+
     if (m_navigationOverlayEnabled) {
         drawViewportHintOverlay(painter, csgStatus);
         drawSelectionBreadcrumb(painter);
@@ -2229,6 +2240,106 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     drawTreeTransformControlPreview(painter);
     drawTreeShapeParameterPreview(painter);
     drawAxisGizmo(painter);
+}
+
+void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) const
+{
+    if (!m_scene || m_selectedPolyhedronElementNodeIds.isEmpty())
+        return;
+
+    auto project = [&](const QVector3D &world) {
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+    };
+    auto pointWorldPosition = [&](int nodeId, QVector3D *world) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+        if (!node || node->type != SceneDocument::TreeNode::Primitive)
+            return false;
+        const ShapeNode *shape = m_scene->shapeById(node->shapeId);
+        if (!shape || shape->type != ShapeNode::Point3D)
+            return false;
+
+        QVector<SceneDocument::TreeNode> parentGroups;
+        collectParentGroupStackForShape(m_scene->treeRoot(), shape->id, &parentGroups);
+        *world = transformPointByGroupStack(shape->position, parentGroups);
+        return true;
+    };
+
+    const QColor faceFill(255, 199, 64, 58);
+    const QColor faceEdge(255, 220, 112, 235);
+    const QColor pointFill(255, 231, 130, 235);
+    const QColor pointEdge(42, 25, 0, 230);
+
+    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
+        if (!node || node->type != SceneDocument::TreeNode::Primitive)
+            continue;
+        const ShapeNode *faceShape = m_scene->shapeById(node->shapeId);
+        if (!faceShape || faceShape->type != ShapeNode::Face3D || faceShape->polyhedronFaces.isEmpty())
+            continue;
+
+        int parentGroupId = 0;
+        if (!SceneDocument::findChildParent(m_scene->treeRoot(), nodeId, &parentGroupId, nullptr))
+            continue;
+        const SceneDocument::TreeNode *group = m_scene->treeNodeById(parentGroupId);
+        if (!group || group->operation != SceneDocument::TreeNode::Polyhedron)
+            continue;
+
+        QVector<SceneDocument::TreeNode> parentGroups;
+        collectParentGroupStackForGroup(m_scene->treeRoot(), parentGroupId, &parentGroups);
+
+        QVector<QVector3D> points;
+        for (const SceneDocument::TreeNode &child : group->children) {
+            if (child.type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *pointShape = m_scene->shapeById(child.shapeId);
+            if (pointShape && pointShape->type == ShapeNode::Point3D)
+                points.append(transformPointByGroupStack(pointShape->position, parentGroups));
+        }
+
+        QPolygonF polygon;
+        for (int pointIndex : faceShape->polyhedronFaces.first()) {
+            if (pointIndex < 0 || pointIndex >= points.size())
+                continue;
+            const ProjectedPoint pp = project(points[pointIndex]);
+            if (pp.visible)
+                polygon << pp.point;
+        }
+        if (polygon.size() < 2)
+            continue;
+        QPolygonF outline = polygon;
+        if (outline.size() >= 3)
+            outline << outline.first();
+
+        painter.save();
+        painter.setBrush(polygon.size() >= 3 ? QBrush(faceFill) : Qt::NoBrush);
+        painter.setPen(QPen(faceEdge, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        if (polygon.size() >= 3)
+            painter.drawPolygon(polygon);
+        else
+            painter.drawPolyline(polygon);
+        painter.setBrush(Qt::NoBrush);
+        drawHaloPolyline(&painter, outline, faceEdge, 2.0);
+        painter.restore();
+    }
+
+    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
+        QVector3D world;
+        if (!pointWorldPosition(nodeId, &world))
+            continue;
+        const ProjectedPoint pp = project(world);
+        if (!pp.visible)
+            continue;
+
+        const QRectF dot(pp.point.x() - 5.5, pp.point.y() - 5.5, 11.0, 11.0);
+        painter.save();
+        painter.setPen(QPen(QColor(255, 255, 255, 190), 5.0));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(dot.adjusted(-1.5, -1.5, 1.5, 1.5));
+        painter.setPen(QPen(pointEdge, 2.0));
+        painter.setBrush(pointFill);
+        painter.drawEllipse(dot);
+        painter.restore();
+    }
 }
 
 void ViewportWidget::paintOpenGLGrid()

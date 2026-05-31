@@ -39,6 +39,7 @@ public:
     const SceneDocument *sceneDocument() const { return m_scene; }
     SceneDocument *sceneDocument() { return const_cast<SceneDocument*>(m_scene); }
     void setSelectedTreeNodeId(int nodeId);
+    void setPolyhedronElementSelection(const QVector<int> &nodeIds);
     void setTreeTheme(int theme);
     int  treeTheme() const { return m_treeTheme; }
     void setCanvasBackgroundTheme(int theme);
@@ -97,6 +98,7 @@ signals:
     void polyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
     void polyhedronTemplateRequested(int groupNodeId, int templateIndex);
     void polyhedronClearRequested(int groupNodeId);
+    void polyhedronElementSelectionChanged(const QVector<int> &nodeIds);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -330,6 +332,7 @@ private:
     int m_treeTheme = 1;    // SceneTreePalette::Theme cast to int; 1 = second tree theme
     int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
+    QSet<int> m_selectedPolyhedronElementNodeIds;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
     bool            m_colorEditMode        = false;

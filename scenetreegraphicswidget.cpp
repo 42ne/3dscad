@@ -617,6 +617,20 @@ void SceneTreeGraphicsWidget::setSelectedTreeNodeId(int nodeId)
     refresh();
 }
 
+void SceneTreeGraphicsWidget::setPolyhedronElementSelection(const QVector<int> &nodeIds)
+{
+    QSet<int> next;
+    for (int nodeId : nodeIds) {
+        if (nodeId > 0)
+            next.insert(nodeId);
+    }
+    if (m_selectedPolyhedronElementNodeIds == next)
+        return;
+
+    m_selectedPolyhedronElementNodeIds = next;
+    refresh();
+}
+
 void SceneTreeGraphicsWidget::focusSelectedNodeAnimated()
 {
     if (!m_scene || m_selectedTreeNodeId <= 0 || !viewport()
@@ -1091,6 +1105,31 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     }
 
     // ── Polyhedron table buttons ────────────────────────────
+    if (!m_colorEditMode && event->button() == Qt::RightButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePos, &cell)
+            && (cell.type == PolyhedronTableItem::Cell::PtLabel
+                || cell.type == PolyhedronTableItem::Cell::FaceLabel)
+            && cell.nodeId > 0) {
+            const bool multi = event->modifiers() & Qt::ShiftModifier;
+            if (multi) {
+                if (m_selectedPolyhedronElementNodeIds.contains(cell.nodeId))
+                    m_selectedPolyhedronElementNodeIds.remove(cell.nodeId);
+                else
+                    m_selectedPolyhedronElementNodeIds.insert(cell.nodeId);
+            } else {
+                m_selectedPolyhedronElementNodeIds.clear();
+                m_selectedPolyhedronElementNodeIds.insert(cell.nodeId);
+            }
+
+            emit polyhedronElementSelectionChanged(m_selectedPolyhedronElementNodeIds.values().toVector());
+            refresh();
+            event->accept();
+            return;
+        }
+    }
+
     if (!m_colorEditMode && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         PolyhedronTableItem::Cell cell;
@@ -3648,7 +3687,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         auto *tableItem = new PolyhedronTableItem(tableRect, node.id, m_scene, nullptr, m_treeTheme,
                                                        m_activeShapeParameterNodeId,
                                                        m_activeShapeParameter,
-                                                       m_activeShapeParameterNumberStart);
+                                                       m_activeShapeParameterNumberStart,
+                                                       m_selectedPolyhedronElementNodeIds);
         m_graphicsScene->addItem(tableItem);
         m_treeItems.append(tableItem);
     }

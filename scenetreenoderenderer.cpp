@@ -148,7 +148,8 @@ PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
                                          int theme,
                                          int activeShapeNodeId,
                                          int activeParamIndex,
-                                         int activeNumberStart)
+                                         int activeNumberStart,
+                                         const QSet<int> &selectedElementNodeIds)
     : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
     , m_groupNodeId(groupNodeId)
     , m_scene(scene)
@@ -157,6 +158,7 @@ PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
     , m_activeShapeNodeId(activeShapeNodeId)
     , m_activeParamIndex(activeParamIndex)
     , m_activeNumberStart(activeNumberStart)
+    , m_selectedElementNodeIds(selectedElementNodeIds)
 {
     setPos(rect.topLeft());
     setZValue(999.0);
@@ -449,7 +451,15 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
         }
 
         if (c.type == Cell::PtLabel || c.type == Cell::FaceLabel) {
-            painter->setPen(SceneTreePalette::textMuted(pt));
+            const bool selected = m_selectedElementNodeIds.contains(c.nodeId);
+            if (selected) {
+                const QRectF halo = c.rect.adjusted(-2.0, -1.5, 2.0, 1.5);
+                paintRoundedPanel(painter, halo, 4.0,
+                                  QPen(QColor(255, 210, 90, 210), 1.4),
+                                  QBrush(QColor(255, 199, 64, 46)));
+            }
+            painter->setPen(selected ? QColor(255, 232, 150)
+                                     : SceneTreePalette::textMuted(pt));
             QString label;
             Qt::Alignment alignment = Qt::AlignRight | Qt::AlignVCenter;
             if (c.type == Cell::PtLabel) {

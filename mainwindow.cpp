@@ -314,6 +314,11 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handlePolyhedronApplyTemplate);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronClearRequested,
             m_controller, &SceneController::handlePolyhedronClearAll);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronElementSelectionChanged,
+            this, [this](const QVector<int> &nodeIds) {
+                if (m_viewport)
+                    m_viewport->setPolyhedronElementSelection(nodeIds);
+            });
 
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;
