@@ -1117,6 +1117,14 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
                     return;
                 }
             }
+            if (cell.type == PolyhedronTableItem::Cell::AutoFace) {
+                const int groupId = polyhedronGroupIdForCell(scenePos);
+                if (groupId > 0) {
+                    emit polyhedronAutofaceRequested(groupId);
+                    event->accept();
+                    return;
+                }
+            }
         }
     }
 
@@ -3481,39 +3489,12 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     QRectF moduleCallTemplateRect;
     QVector<ModuleCallParam> moduleCallTemplateParams;
 
-        // Polyhedron table height estimation
     const bool isPolyhedron = (node.operation == SceneDocument::TreeNode::Polyhedron);
-    qreal polyhedronTableHeight = 0.0;
-    qreal polyhedronTableWidth = 0.0;
-    const qreal polyRowH = 18.0, polyGap = 3.0, polyPad = 4.0, polySep = 6.0;
-    if (isPolyhedron && !collapsedGroup && m_scene) {
-        int ptCnt = 0, faceCnt = 0;
-        for (const auto &ch : node.children) {
-            if (ch.type != SceneDocument::TreeNode::Primitive) continue;
-            if (const ShapeNode *s = m_scene->shapeById(ch.shapeId)) {
-                if (s->type == ShapeNode::Point3D) ++ptCnt;
-                else if (s->type == ShapeNode::Face3D) ++faceCnt;
-            }
-        }
-        // Combined table: header row + data rows + footer
-        polyhedronTableHeight = polyPad
-            + (polyRowH + polyGap)                  // face remove buttons above headers
-            + (polyRowH + polyGap)                  // face labels
-            + polySep * 0.5
-            + ptCnt * (polyRowH + polyGap)          // data rows
-            + polySep * 0.5
-            + (polyRowH + polyGap)                  // footer
-            + polyPad;
-
-        const qreal polyPillW  = 44.0;
-        const qreal polyBtnW   = 16.0;
-        const qreal polyPtLabelW = 36.0;
-        const qreal polyFaceColW = 30.0;
-        const qreal ptLabelWidth = polyBtnW + polyGap + polyPtLabelW;
-        const qreal faceSectionX = polyPad + ptLabelWidth + polyPillW * 3.0 + polyGap * 3.0 + polySep;
-        const qreal faceColW = polyFaceColW + polySep * 0.5;
-        polyhedronTableWidth = faceSectionX + faceCnt * faceColW + polyBtnW + polyPad;
-    }
+    const QSizeF polyhedronTableSize = (isPolyhedron && !collapsedGroup && m_scene)
+        ? PolyhedronTableItem::estimateSize(node.id, m_scene)
+        : QSizeF();
+    const qreal polyhedronTableHeight = polyhedronTableSize.height();
+    const qreal polyhedronTableWidth  = polyhedronTableSize.width();
 
     auto drawChild = [&](const SceneDocument::TreeNode &child) {
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
@@ -3648,7 +3629,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
             rect.width() - GroupPadding * 2,
             polyhedronTableHeight
         );
-        auto *tableItem = new PolyhedronTableItem(tableRect, node.id, m_scene, nullptr, m_treeTheme);
+        auto *tableItem = new PolyhedronTableItem(tableRect, node.id, m_scene, nullptr, m_treeTheme,
+                                                       m_activeShapeParameterNodeId,
+                                                       m_activeShapeParameter,
+                                                       m_activeShapeParameterNumberStart);
         m_graphicsScene->addItem(tableItem);
         m_treeItems.append(tableItem);
     }
@@ -4118,7 +4102,6 @@ bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePos
     case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
     case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
     case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
-    case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
     default: return false;
     }
 
@@ -4139,6 +4122,7 @@ bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePos
     const int numberLength = expr.size();
 
     emit shapeParameterAdjusted(cell.nodeId, paramIndex, numberStart, numberLength, static_cast<qreal>(wheelSteps));
+    updateActiveShapeParameterControl(scenePosition, true);
     return true;
 }
 
@@ -4362,13 +4346,7 @@ int SceneTreeGraphicsWidget::polyhedronGroupIdForCell(const QPointF &scenePositi
         if (!tableItem) continue;
         if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
             continue;
-        // The table item's ctor stores m_groupNodeId — we can't access it directly.
-        // Instead, find the group node via the layout.
-        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-            if (area.rect.contains(scenePosition)
-                && area.operation == SceneDocument::TreeNode::Polyhedron)
-                return area.groupId;
-        }
+        return tableItem->groupNodeId();
     }
     return 0;
 }
@@ -4702,10 +4680,25 @@ void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &s
     int paramIndex = -1;
     int numberStart = -1;
     int numberLength = 0;
-    if (!enabled || !shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &paramIndex, &numberStart, &numberLength)) {
-        nodeId = 0;
-        paramIndex = -1;
-        numberStart = -1;
+    if (!enabled) {
+        // all cleared — fall through to update
+    } else if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &paramIndex, &numberStart, &numberLength)) {
+        // regular primitive card pill — already set above
+    } else {
+        // check polyhedron table PtX/PtY/PtZ cells
+        PolyhedronTableItem::Cell cell;
+        if (polyhedronTableControlAt(scenePosition, &cell)) {
+            switch (cell.type) {
+            case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
+            case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
+            case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
+            default: break;
+            }
+            if (paramIndex >= 0) {
+                nodeId = cell.nodeId;
+                numberStart = 0;
+            }
+        }
     }
 
     if (m_activeShapeParameterNodeId == nodeId
@@ -5078,7 +5071,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             }
         }
     }
-    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceN/FaceParticipate) ──
+    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceParticipate) ──
     {
         PolyhedronTableItem::Cell cell;
         if (polyhedronTableControlAt(scenePosition, &cell)) {
@@ -5086,7 +5079,6 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             case PolyhedronTableItem::Cell::PtX:
             case PolyhedronTableItem::Cell::PtY:
             case PolyhedronTableItem::Cell::PtZ:
-            case PolyhedronTableItem::Cell::FaceN:
             case PolyhedronTableItem::Cell::FaceParticipate: {
                 // Find the table item to map the cell rect to scene coords
                 for (QGraphicsItem *item : m_treeItems) {
@@ -5271,13 +5263,12 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
                 return true;
             }
 
-            // ── PtX/PtY/PtZ/FaceN (standard shape parameter) ──
+            // ── PtX/PtY/PtZ (standard shape parameter) ──
             int paramIndex = -1;
             switch (cell.type) {
             case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
             case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
             case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
-            case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
             default: continue;
             }
 

@@ -145,12 +145,18 @@ PolyhedronTableItem::PolyhedronTableItem(const QRectF &rect,
                                          int groupNodeId,
                                          const SceneDocument *scene,
                                          CellCallback onCellEdited,
-                                         int theme)
+                                         int theme,
+                                         int activeShapeNodeId,
+                                         int activeParamIndex,
+                                         int activeNumberStart)
     : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
     , m_groupNodeId(groupNodeId)
     , m_scene(scene)
     , m_onCellEdited(std::move(onCellEdited))
     , m_theme(theme)
+    , m_activeShapeNodeId(activeShapeNodeId)
+    , m_activeParamIndex(activeParamIndex)
+    , m_activeNumberStart(activeNumberStart)
 {
     setPos(rect.topLeft());
     setZValue(999.0);
@@ -284,14 +290,23 @@ void PolyhedronTableItem::computeLayout()
     y += sep * 0.5;
 
     // ── Footer buttons ──
-    // AddPt button (spans left side)
+    // AddPt button (left side, spans pt section)
     {
         x = pad;
         const qreal addPtW = ptLabelWidth + pillW * 3 + gap * 3;
         m_cells.append({QRectF(x, y, addPtW, innerH), Cell::AddPt, -1, -1, 0});
     }
 
-    // AddFace button (spans face section)
+    // AutoFace button (spans the gap between AddPt and AddFace)
+    {
+        const qreal addPtW = ptLabelWidth + pillW * 3 + gap * 3;
+        const qreal autoFaceX = pad + addPtW + gap;
+        const qreal addFaceX = faceSectionX + faceCount * (faceColW + sep * 0.5);
+        const qreal autoFaceW = qMax(60.0, addFaceX - autoFaceX - gap);
+        m_cells.append({QRectF(autoFaceX, y, autoFaceW, innerH), Cell::AutoFace, -1, -1, 0});
+    }
+
+    // AddFace button (vertical strip on the right)
     {
         x = faceSectionX + faceCount * (faceColW + sep * 0.5);
         const qreal addFaceTop = pad;
@@ -300,8 +315,50 @@ void PolyhedronTableItem::computeLayout()
     }
 
     y += rowH + gap + pad;
-    m_tableWidth  = m_rect.width();
+    {
+        const qreal addPtW = ptLabelWidth + pillW * 3 + gap * 3;
+        const qreal autoFaceMinWidth = 60.0;
+        const qreal faceColRight = faceSectionX + faceCount * (faceColW + sep * 0.5);
+        const qreal autoFaceRight = pad + addPtW + gap + autoFaceMinWidth;
+        const qreal rightEdge = btnW + pad;
+        m_tableWidth = qMax(faceColRight + rightEdge, autoFaceRight + gap + rightEdge);
+    }
     m_tableHeight = y;
+}
+
+QSizeF PolyhedronTableItem::estimateSize(int groupNodeId, const SceneDocument *scene)
+{
+    if (!scene) return QSizeF();
+    const auto *grp = scene->treeNodeById(groupNodeId);
+    if (!grp) return QSizeF();
+
+    int ptCount = 0, faceCount = 0;
+    for (const auto &child : grp->children) {
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *s = scene->shapeById(child.shapeId);
+        if (!s) continue;
+        if (s->type == ShapeNode::Point3D)  ++ptCount;
+        else if (s->type == ShapeNode::Face3D) ++faceCount;
+    }
+
+    constexpr qreal rowH = 18.0, gap = 3.0, pad = 4.0, sep = 6.0;
+    constexpr qreal btnW = 16.0, labelW = 36.0, pillW = 44.0, faceColW = 30.0;
+
+    const qreal h = pad + (rowH+gap)*2.0 + sep*0.5
+                    + ptCount*(rowH+gap)
+                    + sep*0.5
+                    + (rowH+gap) + pad;
+
+    const qreal ptLabelWidth = btnW + gap + labelW;
+    const qreal addPtW = ptLabelWidth + pillW*3.0 + gap*3.0;
+    const qreal faceSectionX = pad + addPtW + sep;
+    const qreal faceColAreaRight = faceSectionX + faceCount*(faceColW + sep*0.5);
+    const qreal autoFaceMinWidth = 60.0;
+    const qreal autoFaceRight = pad + addPtW + gap + autoFaceMinWidth;
+    const qreal rightAdd = btnW + pad;
+    const qreal w = qMax(faceColAreaRight + rightAdd, autoFaceRight + gap + rightAdd);
+
+    return QSizeF(w, h);
 }
 
 void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
@@ -318,33 +375,37 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
             continue;
 
         const bool isButton = (c.type == Cell::RemovePt || c.type == Cell::RemoveFace
-                               || c.type == Cell::AddPt || c.type == Cell::AddFace);
+                               || c.type == Cell::AddPt || c.type == Cell::AddFace
+                               || c.type == Cell::AutoFace);
         const bool isPill = (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ
-                             || c.type == Cell::FaceN || c.type == Cell::FaceV
                              || c.type == Cell::FaceParticipate);
 
         if (isButton) {
             const bool isAdd = (c.type == Cell::AddPt || c.type == Cell::AddFace);
-            const QColor btnFill = isAdd ? QColor(70, 180, 70) : QColor(210, 70, 70);
+            const QColor btnFill = (c.type == Cell::AutoFace) ? QColor(60, 130, 210)
+                                 : isAdd ? QColor(70, 180, 70) : QColor(210, 70, 70);
             paintRoundedPanel(painter, c.rect, 4.0,
                               QPen(btnFill.darker(130), 1.0), QBrush(btnFill));
             painter->setPen(Qt::white);
-            painter->drawText(c.rect, Qt::AlignCenter, isAdd ? QStringLiteral("+") : QStringLiteral("−"));
+            const QString label = (c.type == Cell::AutoFace) ? QStringLiteral("AutoFace")
+                               : isAdd ? QStringLiteral("+") : QStringLiteral("−");
+            painter->drawText(c.rect, Qt::AlignCenter, label);
             continue;
         }
 
         if (isPill) {
             QString text;
+            bool active = false;
             if (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ) {
                 if (c.index >= 0 && c.index < m_points.size()) {
-                    float v = (c.type == Cell::PtX) ? m_points[c.index].position.x()
-                            : (c.type == Cell::PtY) ? m_points[c.index].position.y()
+                    const int paramIdx = (c.type == Cell::PtX) ? 0 : (c.type == Cell::PtY) ? 1 : 2;
+                    float v = (paramIdx == 0) ? m_points[c.index].position.x()
+                            : (paramIdx == 1) ? m_points[c.index].position.y()
                             : m_points[c.index].position.z();
                     text = QString::number(static_cast<double>(v), 'f', 1);
+                    active = (m_points[c.index].nodeId == m_activeShapeNodeId
+                              && paramIdx == m_activeParamIndex);
                 }
-            } else if (c.type == Cell::FaceN) {
-                if (c.index >= 0 && c.index < m_faces.size())
-                    text = QString::number(m_faces[c.index].indices.size());
             } else if (c.type == Cell::FaceParticipate) {
                 if (c.index >= 0 && c.index < m_faces.size()
                     && c.sub >= 0 && c.sub < m_points.size()) {
@@ -355,7 +416,7 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
                         text = QStringLiteral("\u2212");  // minus sign for "not participating"
                 }
             }
-            pills.append({c.rect, text, false});
+            pills.append({c.rect, text, active});
             continue;
         }
 

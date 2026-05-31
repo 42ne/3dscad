@@ -306,6 +306,8 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handlePolyhedronAddPoint);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronAddFaceRequested,
             m_controller, &SceneController::handlePolyhedronAddFace);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronAutofaceRequested,
+            m_controller, &SceneController::handlePolyhedronAutoface);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronFaceParticipationAdjusted,
             m_controller, &SceneController::handlePolyhedronFaceParticipationAdjusted);
 

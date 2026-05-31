@@ -93,6 +93,7 @@ signals:
     void inlineThemeEdited();
     void polyhedronAddPointRequested(int groupNodeId);
     void polyhedronAddFaceRequested(int groupNodeId);
+    void polyhedronAutofaceRequested(int groupNodeId);
     void polyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
 
 protected:

@@ -20,7 +20,7 @@ class PolyhedronTableItem final : public QGraphicsItem
 public:
     struct Cell {
         QRectF rect;
-        enum Type { None, PtX, PtY, PtZ, FaceN, FaceV, RemovePt, RemoveFace, AddPt, AddFace, PtLabel, FaceLabel, FaceParticipate };
+        enum Type { None, PtX, PtY, PtZ, RemovePt, RemoveFace, AddPt, AddFace, AutoFace, PtLabel, FaceLabel, FaceParticipate };
         Type type = None;
         int index = -1;
         int sub   = -1;
@@ -33,16 +33,24 @@ public:
                         int groupNodeId,
                         const SceneDocument *scene,
                         CellCallback onCellEdited = nullptr,
-                        int theme = 0);
+                        int theme = 0,
+                        int activeShapeNodeId = 0,
+                        int activeParamIndex = -1,
+                        int activeNumberStart = -1);
 
     QRectF boundingRect() const override { return m_rect; }
 
     Cell cellAt(const QPointF &pos) const;
     const QVector<Cell> &cells() const { return m_cells; }
+    int groupNodeId() const { return m_groupNodeId; }
     int pointCount() const { return m_points.size(); }
     int faceCount() const { return m_faces.size(); }
     int pointNodeIdForIndex(int pointIndex) const { return (pointIndex >= 0 && pointIndex < m_points.size()) ? m_points[pointIndex].nodeId : 0; }
     int faceNodeIdForIndex(int faceIndex) const { return (faceIndex >= 0 && faceIndex < m_faces.size()) ? m_faces[faceIndex].nodeId : 0; }
+    qreal tableWidth() const { return m_tableWidth; }
+    qreal tableHeight() const { return m_tableHeight; }
+
+    static QSizeF estimateSize(int groupNodeId, const SceneDocument *scene);
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override;
 
@@ -55,6 +63,9 @@ private:
     const SceneDocument *m_scene;
     CellCallback m_onCellEdited;
     int m_theme = 0;
+    int m_activeShapeNodeId = 0;
+    int m_activeParamIndex = -1;
+    int m_activeNumberStart = -1;
 
     struct PointData { int nodeId; QVector3D position; };
     struct FaceData  { int nodeId; QVector<int> indices; };

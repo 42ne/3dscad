@@ -107,6 +107,7 @@ public:
     void handleCtrlReleased();
     void handlePolyhedronAddPoint(int groupNodeId);
     void handlePolyhedronAddFace(int groupNodeId);
+    void handlePolyhedronAutoface(int groupNodeId);
     void handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
 
 signals:

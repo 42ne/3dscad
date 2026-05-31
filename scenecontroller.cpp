@@ -88,6 +88,105 @@ static QString adjustedNumericToken(const QString &expression,
     return replacement;
 }
 
+// ── Convex hull helper ──────────────────────────────────────────────────────
+// Brute-force O(n⁴) convex hull for small point sets (<100 points typical).
+// Returns faces as CCW-ordered vertex indices, oriented outward.
+static QVector<QVector<int>> computeConvexHullFaces(const QVector<QVector3D> &pts)
+{
+    const int n = pts.size();
+    if (n < 4) return {};
+
+    const qreal eps = 1e-8f;
+    QVector3D centroid;
+    for (const auto &p : pts) centroid += p;
+    centroid /= static_cast<qreal>(n);
+
+    // Step 1: collect all valid face triangles
+    struct TriFace { int i, j, k; QVector3D normal; };
+    QVector<TriFace> triFaces;
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            for (int k = j + 1; k < n; ++k) {
+                const QVector3D &a = pts[i], &b = pts[j], &c = pts[k];
+                QVector3D normal = QVector3D::crossProduct(b - a, c - a);
+                const qreal len = normal.length();
+                if (len < eps) continue;
+                normal /= len;
+
+                bool allFront = true, allBack = true;
+                for (int l = 0; l < n; ++l) {
+                    if (l == i || l == j || l == k) continue;
+                    const qreal d = QVector3D::dotProduct(pts[l] - a, normal);
+                    if (d > eps) allBack = false;
+                    else if (d < -eps) allFront = false;
+                    if (!allFront && !allBack) break;
+                }
+
+                if (allFront || allBack) {
+                    QVector3D triCenter = (a + b + c) / 3.0f;
+                    if (QVector3D::dotProduct(normal, centroid - triCenter) > 0)
+                        normal = -normal;
+                    triFaces.append({i, j, k, normal});
+                }
+            }
+        }
+    }
+
+    if (triFaces.isEmpty()) return {};
+
+    // Step 2: group coplanar triangles into face groups
+    struct FaceGroup { QVector<int> indices; QVector3D normal; };
+    QVector<FaceGroup> groups;
+
+    for (const auto &tri : triFaces) {
+        const qreal d = QVector3D::dotProduct(tri.normal, pts[tri.i]);
+        bool found = false;
+        for (auto &g : groups) {
+            if ((g.normal - tri.normal).length() > eps * 100) continue;
+            const qreal gd = QVector3D::dotProduct(g.normal, pts[g.indices[0]]);
+            if (qAbs(d - gd) > eps * 100) continue;
+            for (int idx : {tri.i, tri.j, tri.k})
+                if (!g.indices.contains(idx))
+                    g.indices.append(idx);
+            found = true;
+            break;
+        }
+        if (!found)
+            groups.append({{tri.i, tri.j, tri.k}, tri.normal});
+    }
+
+    // Step 3: sort each face's vertices into CCW order around the face normal
+    QVector<QVector<int>> result;
+    for (auto &g : groups) {
+        if (g.indices.size() < 3) continue;
+
+        // Use face centroid as origin so all vertices have well-defined angles
+        QVector3D centroid;
+        for (int idx : g.indices)
+            centroid += pts[idx];
+        centroid /= static_cast<float>(g.indices.size());
+
+        const QVector3D ref = qAbs(g.normal.x()) < 0.9f
+                                  ? QVector3D(1, 0, 0) : QVector3D(0, 1, 0);
+        const QVector3D basis1 = QVector3D::crossProduct(g.normal, ref).normalized();
+        const QVector3D basis2 = QVector3D::crossProduct(g.normal, basis1).normalized();
+
+        std::sort(g.indices.begin(), g.indices.end(),
+                  [&](int a, int b) {
+                      const QVector3D da = pts[a] - centroid;
+                      const QVector3D db = pts[b] - centroid;
+                      const qreal aa = std::atan2(QVector3D::dotProduct(da, basis2),
+                                                  QVector3D::dotProduct(da, basis1));
+                      const qreal ab = std::atan2(QVector3D::dotProduct(db, basis2),
+                                                  QVector3D::dotProduct(db, basis1));
+                      return aa < ab;
+                  });
+        result.append(g.indices);
+    }
+    return result;
+}
+
 static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
 {
     auto displayName = [](const QString &tool) -> QString {
@@ -1189,6 +1288,66 @@ void SceneController::handlePolyhedronAddFace(int groupNodeId)
     ShapeNode shape = makeShapeForTool(QStringLiteral("face_3d"), m_scene.shapeCount() + 1);
     m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
                                           [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::handlePolyhedronAutoface(int groupNodeId)
+{
+    if (groupNodeId <= 0) return;
+    const auto *group = m_scene.treeNodeById(groupNodeId);
+    if (!group) return;
+
+    // Collect Point3D children and their positions
+    struct Pt { int nodeId; QVector3D pos; };
+    QVector<Pt> pts;
+    for (const auto &child : group->children) {
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *s = m_scene.shapeById(child.shapeId);
+        if (!s || s->type != ShapeNode::Point3D) continue;
+        pts.append({child.id, s->position});
+    }
+    if (pts.size() < 4) return;
+
+    // Compute convex hull faces
+    QVector<QVector3D> positions;
+    positions.reserve(pts.size());
+    for (const auto &p : pts)
+        positions.append(p.pos);
+
+    const auto faces = computeConvexHullFaces(positions);
+    if (faces.isEmpty()) return;
+
+    // Collect existing Face3D children to replace, before modifying the scene
+    struct FaceToRemove { int shapeId; int childIndex; };
+    QVector<FaceToRemove> toRemove;
+    for (int i = 0; i < group->children.size(); ++i) {
+        const auto &child = group->children[i];
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *s = m_scene.shapeById(child.shapeId);
+        if (s && s->type == ShapeNode::Face3D)
+            toRemove.append({child.shapeId, i});
+    }
+
+    m_undoStack->beginMacro(QObject::tr("Autoface"));
+
+    // Remove existing faces in reverse order so indices stay valid
+    for (int i = toRemove.size() - 1; i >= 0; --i) {
+        m_undoStack->push(new RemovePolyhedronElementCommand(&m_scene,
+                                                             toRemove[i].shapeId,
+                                                             groupNodeId,
+                                                             -1,
+                                                             [this]() { emit sceneChanged(); }));
+    }
+
+    // Add one Face3D per convex hull face
+    for (const auto &face : faces) {
+        ShapeNode shape;
+        shape.type = ShapeNode::Face3D;
+        shape.polyhedronFaces.append(face);
+        shape.name = QStringLiteral("F%1").arg(m_scene.shapeCount() + 1);
+        m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
+                                               [this]() { emit sceneChanged(); }));
+    }
+    m_undoStack->endMacro();
 }
 
 void SceneController::handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition)
