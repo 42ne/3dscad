@@ -24,7 +24,8 @@ QStringList paletteTools()
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
         QStringLiteral("cone"),
-        QStringLiteral("polyhedron"),
+        QStringLiteral("point_3d"),
+        QStringLiteral("face_3d"),
         // ── Boolean operations ────────────────────────────────────────────────
         QStringLiteral("union"),
         QStringLiteral("difference"),
@@ -38,6 +39,7 @@ QStringList paletteTools()
         // ── Geometry algorithms ───────────────────────────────────────────────
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),
+        QStringLiteral("polyhedron"),
         QStringLiteral("linear_extrude"),
         // ── Structure / control flow ──────────────────────────────────────────
         QStringLiteral("module"),

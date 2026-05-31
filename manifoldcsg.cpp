@@ -45,8 +45,10 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
 {
     Manifold result;
 
-    if (shape.type == ShapeNode::Polyhedron)
-        return {}; // polyhedron skipped in Manifold CSG; handled via preview only
+    if (shape.type == ShapeNode::Polyhedron
+        || shape.type == ShapeNode::Point3D
+        || shape.type == ShapeNode::Face3D)
+        return {}; // polyhedron / data components skipped in Manifold CSG
 
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
@@ -169,6 +171,49 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
 
     if (geometryChildren.isEmpty())
         return {};
+
+    if (evaluatedNode.operation == SceneDocument::TreeNode::Polyhedron) {
+        // Collect points and faces from Point3D and Face3D children
+        QVector<QVector3D> pts;
+        QVector<QVector<int>> faces;
+        for (const SceneDocument::TreeNode *child : geometryChildren) {
+            if (child->type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *shape = scene.shapeById(child->shapeId);
+            if (!shape)
+                continue;
+            if (shape->type == ShapeNode::Point3D)
+                pts.append(shape->position);
+            else if (shape->type == ShapeNode::Face3D && !shape->polyhedronFaces.isEmpty())
+                faces.append(shape->polyhedronFaces.first());
+        }
+        if (pts.isEmpty() || faces.isEmpty())
+            return {};
+        const int pointCount = pts.size();
+        // Build MeshGL: fan-triangulate each face (validate indices)
+        MeshGL meshGl;
+        meshGl.numProp = 3;
+        for (const QVector3D &pt : pts) {
+            meshGl.vertProperties.push_back(pt.x());
+            meshGl.vertProperties.push_back(pt.y());
+            meshGl.vertProperties.push_back(pt.z());
+        }
+        for (const QVector<int> &face : faces) {
+            if (face.size() < 3)
+                continue;
+            // Clamp indices to valid range
+            auto safe = [pointCount](int idx) -> int {
+                return qBound(0, idx, pointCount - 1);
+            };
+            // Fan triangulation from first vertex
+            for (int i = 1; i + 1 < face.size(); ++i) {
+                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[0])));
+                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[i])));
+                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[i + 1])));
+            }
+        }
+        return applyNodeTransform(Manifold(meshGl), evaluatedNode);
+    }
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {
         std::vector<Manifold> parts;

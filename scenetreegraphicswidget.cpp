@@ -2801,6 +2801,7 @@ static QString colorEditOpName(SceneDocument::TreeNode::Operation op)
     case SceneDocument::TreeNode::For:          return QStringLiteral("For");
     case SceneDocument::TreeNode::Scene:        return QStringLiteral("Scene");
     case SceneDocument::TreeNode::Minkowski:    return QStringLiteral("Minkowski");
+    case SceneDocument::TreeNode::Polyhedron:   return QStringLiteral("Polyhedron");
     case SceneDocument::TreeNode::Color:        return QStringLiteral("Color");
     case SceneDocument::TreeNode::LinearExtrude:return QStringLiteral("Linear extrude");
     }

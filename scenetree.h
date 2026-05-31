@@ -38,6 +38,7 @@ public:
             Mirror,     // reflect across plane with normal [x,y,z]; axis stored in position
             Hull,       // convex hull of children; no parameters
             Minkowski,  // Minkowski sum of children; no parameters
+            Polyhedron, // polyhedron group; expects Point3D and Face3D children
             For,
             Color,
             LinearExtrude,

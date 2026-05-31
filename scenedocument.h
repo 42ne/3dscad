@@ -70,6 +70,11 @@ public:
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
     bool updateGroupColor(int groupId, const QColor &color);
 
+    // Polyhedron face index helpers
+    static bool findChildParent(const TreeNode &node, int targetId, int *outParentId, int *outChildIndex);
+    void remapPolyhedronFacesAfterChildMove(int parentGroupId, int fromIndex, int toIndex);
+    void remapPolyhedronFacesAfterChildDelete(int parentGroupId, int deletedIndex);
+
 private:
     bool isValidIndex(int index) const;
     void ensureTreeContainsAllShapes();

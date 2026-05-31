@@ -279,7 +279,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
         QStringLiteral("circle"),
-        QStringLiteral("linear_extrude")
+        QStringLiteral("linear_extrude"),
+        QStringLiteral("polyhedron")
     };
     if (reservedCalls.contains(match.captured(1)))
         return false;
@@ -612,6 +613,115 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     return false; // not a primitive line at all
 }
 
+struct PolyhedronData
+{
+    QVector<QVector3D> points;
+    QVector<QVector<int>> faces;
+};
+
+static bool parsePolyhedron(const QString &line, PolyhedronData *data, QString *errorMessage)
+{
+    QString argsStr;
+    if (!extractCallArgs(line, "polyhedron", &argsStr) || !line.endsWith(';'))
+        return false;
+
+    const auto args = parseNamedArgs(argsStr, {"points", "faces"});
+    const QString pointsStr = args.value(QStringLiteral("points"));
+    const QString facesStr  = args.value(QStringLiteral("faces"));
+    if (pointsStr.isEmpty() || facesStr.isEmpty()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("polyhedron requires both points and faces arguments");
+        return false;
+    }
+
+    // Strip outer brackets of the array
+    auto stripBrackets = [](const QString &s) -> QString {
+        QString t = s.trimmed();
+        if (t.size() >= 2 && t.startsWith('[') && t.endsWith(']'))
+            return t.mid(1, t.size() - 2).trimmed();
+        return t;
+    };
+
+    // ── Parse points ───────────────────────────────────────────────────
+    const QString ptsInner = stripBrackets(pointsStr);
+    const QStringList ptTokens = splitAtTopLevelCommas(ptsInner);
+    QVector<QVector3D> points;
+    for (const QString &token : ptTokens) {
+        const QString inner = stripBrackets(token);
+        if (inner.isEmpty()) continue;
+        const QStringList coords = splitAtTopLevelCommas(inner);
+        if (coords.size() != 3) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("polyhedron: each point must have 3 coordinates");
+            return false;
+        }
+        float f[3];
+        if (!parseFloat(coords[0], &f[0]) || !parseFloat(coords[1], &f[1]) || !parseFloat(coords[2], &f[2]))
+            return false;
+        points.append(QVector3D(f[0], f[1], f[2]));
+    }
+
+    // ── Parse faces ────────────────────────────────────────────────────
+    const QString fcsInner = stripBrackets(facesStr);
+    const QStringList fcTokens = splitAtTopLevelCommas(fcsInner);
+    QVector<QVector<int>> faces;
+    for (const QString &token : fcTokens) {
+        const QString inner = stripBrackets(token);
+        if (inner.isEmpty()) continue;
+        const QStringList idxStrs = splitAtTopLevelCommas(inner);
+        QVector<int> face;
+        for (const QString &is : idxStrs) {
+            bool ok = false;
+            const int idx = is.trimmed().toInt(&ok);
+            if (!ok) return false;
+            face.append(idx);
+        }
+        if (face.size() >= 3)
+            faces.append(face);
+    }
+
+    if (data) {
+        data->points = points;
+        data->faces  = faces;
+    }
+    return true;
+}
+
+static void buildPolyhedronGroup(const PolyhedronData &data, ParserState *state,
+                                  SceneDocument::TreeNode *parent)
+{
+    SceneDocument::TreeNode group = makeGroupNode(SceneDocument::TreeNode::Polyhedron, state);
+    parent->children.append(group);
+    SceneDocument::TreeNode &grp = parent->children.last();
+
+    for (const QVector3D &pt : data.points) {
+        ShapeNode shape;
+        shape.id = state->nextShapeId++;
+        shape.type = ShapeNode::Point3D;
+        shape.name = QStringLiteral("Point %1").arg(shape.id);
+        shape.position = pt;
+        shape.parameterExpressions = QStringList()
+            << QString::number(pt.x(), 'g') << QString::number(pt.y(), 'g') << QString::number(pt.z(), 'g');
+        state->shapes.append(shape);
+        grp.children.append(makePrimitiveNode(shape, state));
+    }
+
+    for (const QVector<int> &face : data.faces) {
+        ShapeNode shape;
+        shape.id = state->nextShapeId++;
+        shape.type = ShapeNode::Face3D;
+        shape.name = QStringLiteral("Face %1").arg(shape.id);
+        shape.polyhedronFaces.append(face);
+        QStringList exprs;
+        exprs.append(QString::number(face.size()));
+        for (int idx : face)
+            exprs.append(QString::number(idx));
+        shape.parameterExpressions = exprs;
+        state->shapes.append(shape);
+        grp.children.append(makePrimitiveNode(shape, state));
+    }
+}
+
 // Like parseOperationLine but matches translate/rotate/scale WITHOUT a trailing "{".
 // Used to handle the OpenSCAD brace-free single-child shorthand:
 //   translate([x, y, 0])
@@ -657,7 +767,7 @@ static bool startsWithKnownKeyword(const QString &line)
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
         "union", "difference", "intersection", "hull", "minkowski", "for", "color", "linear_extrude",
-        "cube", "sphere", "cylinder", "circle"
+        "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
         if (line.startsWith(kw))
@@ -826,6 +936,40 @@ static bool parseBlock(ParserState *state,
             if (errorMessage) *errorMessage = msg;
             state->errorLine = current.number;
             return false;
+        }
+
+        // ── Polyhedron ──────────────────────────────────────────────────
+        if (line.startsWith(QStringLiteral("polyhedron("))) {
+            // Combine multi-line polyhedron statement until ); is found
+            QString polyLine = line;
+            if (!polyLine.endsWith(QLatin1Char(';'))) {
+                while (state->index < state->lines.size()) {
+                    const ParsedLine &next = state->lines[state->index];
+                    polyLine += next.text;
+                    ++state->index;
+                    if (next.text.endsWith(QLatin1Char(';')))
+                        break;
+                }
+            }
+
+            PolyhedronData polyData;
+            QString polyError;
+            if (!parsePolyhedron(polyLine, &polyData, &polyError)) {
+                if (polyError.isEmpty())
+                    polyError = QStringLiteral("malformed polyhedron call");
+                if (errorMessage)
+                    *errorMessage = polyError + QStringLiteral(" on line %1").arg(current.number);
+                state->errorLine = current.number;
+                return false;
+            }
+            if (polyData.points.isEmpty() || polyData.faces.isEmpty()) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("polyhedron on line %1 has no points or faces").arg(current.number);
+                state->errorLine = current.number;
+                return false;
+            }
+            buildPolyhedronGroup(polyData, state, parent);
+            continue;
         }
 
         // ── Brace-free single-child transform (OpenSCAD shorthand) ──────────
@@ -1232,6 +1376,40 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 *errorMessage = primitiveError.arg(current.number);
             if (errorLine) *errorLine = current.number;
             return false;
+        }
+
+        // ── Top-level polyhedron ──────────────────────────────────────────
+        if (line.startsWith(QStringLiteral("polyhedron("))) {
+            ++state.index; // consume first line
+            QString polyLine = line;
+            if (!polyLine.endsWith(QLatin1Char(';'))) {
+                while (state.index < state.lines.size()) {
+                    const ParsedLine &next = state.lines[state.index];
+                    polyLine += next.text;
+                    ++state.index;
+                    if (next.text.endsWith(QLatin1Char(';')))
+                        break;
+                }
+            }
+
+            PolyhedronData polyData;
+            QString polyError;
+            if (!parsePolyhedron(polyLine, &polyData, &polyError)) {
+                if (polyError.isEmpty())
+                    polyError = QStringLiteral("malformed polyhedron call");
+                if (errorMessage)
+                    *errorMessage = polyError + QStringLiteral(" on line %1").arg(current.number);
+                if (errorLine) *errorLine = current.number;
+                return false;
+            }
+            if (polyData.points.isEmpty() || polyData.faces.isEmpty()) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("polyhedron on line %1 has no points or faces").arg(current.number);
+                if (errorLine) *errorLine = current.number;
+                return false;
+            }
+            buildPolyhedronGroup(polyData, &state, &sceneNode);
+            continue;
         }
 
         // Brace-free single-child transform at top level.

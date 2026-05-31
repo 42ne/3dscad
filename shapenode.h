@@ -14,7 +14,9 @@ struct ShapeNode
         Cylinder,
         Cone,
         Circle,
-        Polyhedron
+        Polyhedron,
+        Point3D,
+        Face3D
     };
 
     enum BooleanMode {
@@ -61,6 +63,27 @@ struct ShapeNode
             break;
         case Polyhedron:
             break;
+        case Point3D:
+            if      (paramIndex == 0) position.setX(static_cast<float>(rawValue));
+            else if (paramIndex == 1) position.setY(static_cast<float>(rawValue));
+            else if (paramIndex == 2) position.setZ(static_cast<float>(rawValue));
+            break;
+        case Face3D: {
+            if (polyhedronFaces.isEmpty())
+                polyhedronFaces.append(QVector<int>());
+            auto &face = polyhedronFaces.first();
+            if (paramIndex == 0) {
+                // N: vertex count (clamp to 2..32)
+                const int newCount = qBound(2, static_cast<int>(qRound(rawValue)), 32);
+                face.resize(newCount);
+            } else {
+                // V[n]: vertex index (non-negative)
+                const int vi = paramIndex - 1;
+                if (vi >= 0 && vi < face.size())
+                    face[vi] = qMax(0, static_cast<int>(qRound(rawValue)));
+            }
+            break;
+        }
         case Cylinder:
             if      (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
             else if (paramIndex == 1) height = static_cast<float>(qMax<qreal>(0.1, rawValue));
@@ -81,7 +104,8 @@ struct ShapeNode
             || toolName == QLatin1String("cylinder")
             || toolName == QLatin1String("cone")
             || toolName == QLatin1String("circle")
-            || toolName == QLatin1String("polyhedron");
+            || toolName == QLatin1String("point_3d")
+            || toolName == QLatin1String("face_3d");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -90,8 +114,9 @@ struct ShapeNode
         if (toolName == QLatin1String("sphere"))   return Sphere;
         if (toolName == QLatin1String("cylinder")) return Cylinder;
         if (toolName == QLatin1String("cone"))     return Cone;
-        if (toolName == QLatin1String("circle"))     return Circle;
-        if (toolName == QLatin1String("polyhedron")) return Polyhedron;
+        if (toolName == QLatin1String("circle"))   return Circle;
+        if (toolName == QLatin1String("point_3d")) return Point3D;
+        if (toolName == QLatin1String("face_3d"))  return Face3D;
         return Cube;
     }
 };

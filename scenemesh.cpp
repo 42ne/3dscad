@@ -283,5 +283,17 @@ SceneMesh buildShapeMesh(const ShapeNode &shape)
     if (shape.type == ShapeNode::Cone)
         return buildConeMesh(shape);
 
+    if (shape.type == ShapeNode::Point3D) {
+        // Render as a small sphere (dot) at the point's position
+        ShapeNode dot;
+        dot.type = ShapeNode::Sphere;
+        dot.radius = 0.5f;
+        dot.position = shape.position;
+        return buildSphereMesh(dot);
+    }
+
+    if (shape.type == ShapeNode::Face3D)
+        return {};
+
     return buildCubeMesh(shape);
 }

@@ -31,6 +31,8 @@ private slots:
     void addSphere();
     void addCylinder();
     void addCone();
+    void addPointSet();
+    void addFaceSet();
     void addUnionGroup();
     void addDifferenceGroup();
     void addIntersectionGroup();

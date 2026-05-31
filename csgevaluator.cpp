@@ -124,6 +124,9 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
             && local.z() >= mn.z() && local.z() <= mx.z();
     }
 
+    if (shape.type == ShapeNode::Point3D || shape.type == ShapeNode::Face3D)
+        return false;
+
     const QVector3D half = shape.size * 0.5f;
     return qAbs(local.x()) <= half.x()
            && qAbs(local.y()) <= half.y()
@@ -727,6 +730,48 @@ static void appendTreeHelpers(CsgPreview *preview,
     const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
+
+    if (node.operation == SceneDocument::TreeNode::Polyhedron) {
+        // Build combined mesh from Point3D and Face3D children
+        QVector<QVector3D> pts;
+        QVector<QVector<int>> faces;
+        for (const SceneDocument::TreeNode &child : evaluatedNode.children) {
+            if (child.type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *shape = scene.shapeById(child.shapeId);
+            if (!shape) continue;
+            if (shape->type == ShapeNode::Point3D)
+                pts.append(shape->position);
+            else if (shape->type == ShapeNode::Face3D && !shape->polyhedronFaces.isEmpty())
+                faces.append(shape->polyhedronFaces.first());
+        }
+        if (!pts.isEmpty() && !faces.isEmpty()) {
+            // Validate/clamp face indices
+            const int pointCount = pts.size();
+            QVector<QVector<int>> validFaces;
+            validFaces.reserve(faces.size());
+            for (const QVector<int> &face : faces) {
+                if (face.size() < 3) continue;
+                QVector<int> clamped = face;
+                for (int &idx : clamped)
+                    idx = qBound(0, idx, pointCount - 1);
+                validFaces.append(clamped);
+            }
+            // Build a temporary ShapeNode to reuse buildPolyhedronMesh
+            ShapeNode polyShape;
+            polyShape.type = ShapeNode::Polyhedron;
+            polyShape.polyhedronPoints = pts;
+            polyShape.polyhedronFaces = validFaces;
+            CsgRenderItem item = renderItemFromShape(polyShape, -1, evaluatedNode.id);
+            item.mesh = transformedMesh(item.mesh, groupStack);
+            item.booleanMode = inheritedMode;
+            item.color = inheritedColor;
+            item.helper = helperItems;
+            preview->items.append(item);
+        }
+        return;
+    }
+
     const QColor localColor = node.operation == SceneDocument::TreeNode::Color ? node.color : inheritedColor;
     for (int i = 0; i < node.children.size(); ++i) {
         if (node.id == scene.treeRoot().id && isTopLevelModuleDeclaration(node.children[i]))
@@ -1059,6 +1104,7 @@ struct TreeCapabilities
     bool hasFor        = false; // For group anywhere in tree
     bool hasModuleCall = false; // ModuleCall node anywhere in tree
     bool hasColor      = false; // Color group anywhere in tree
+    bool hasPolyhedron = false; // Polyhedron group anywhere in tree
 };
 
 static bool hasVectorValue(const QVector3D &vector)
@@ -1076,7 +1122,7 @@ static bool hasScaleValue(const QVector3D &vector)
 static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCapabilities &caps)
 {
     // Early exit once every flag is set — no point descending further.
-    if (caps.hasBoolean && caps.hasTransform && caps.hasFor && caps.hasModuleCall && caps.hasColor)
+    if (caps.hasBoolean && caps.hasTransform && caps.hasFor && caps.hasModuleCall && caps.hasColor && caps.hasPolyhedron)
         return;
 
     if (node.type == SceneDocument::TreeNode::ModuleCall) {
@@ -1109,6 +1155,9 @@ static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCap
             break;
         case SceneDocument::TreeNode::Color:
             caps.hasColor = true;
+            break;
+        case SceneDocument::TreeNode::Polyhedron:
+            caps.hasPolyhedron = true;
             break;
         case SceneDocument::TreeNode::LinearExtrude:
             caps.hasTransform = true;
@@ -1168,6 +1217,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
     const bool hasForOperation   = caps.hasFor;
     const bool hasModuleCall     = caps.hasModuleCall;
     const bool hasColorOperation = caps.hasColor;
+    const bool hasPolyhedron     = caps.hasPolyhedron;
 
     bool hasModuleDeclaration = false;
     for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
@@ -1177,10 +1227,10 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
         }
     }
 
-    if (hasColorOperation && !hasTreeBoolean && !hasModuleDeclaration && !shapes.isEmpty())
+    if ((hasColorOperation || hasPolyhedron) && !hasTreeBoolean && !hasModuleDeclaration && !shapes.isEmpty())
         return buildColoredTreePreview(scene);
 
-    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration || hasColorOperation) && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration || hasColorOperation || hasPolyhedron) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -1211,8 +1261,14 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             return preview;
         }
 
-        CsgPreview preview = buildCsgPreview(shapes);
-        preview.statusText = QString("CSG preview: plain mesh (Manifold CSG unavailable: %1)").arg(manifoldError);
+        // Fall back to tree-based preview for Polyhedron and other tree operations
+        CsgPreview preview = buildColoredTreePreview(scene);
+        if (preview.items.isEmpty()) {
+            preview = buildCsgPreview(shapes);
+            preview.statusText = QString("CSG preview: plain mesh (Manifold CSG unavailable: %1)").arg(manifoldError);
+        } else {
+            preview.statusText = QString("CSG preview: colored tree mesh (Manifold CSG unavailable: %1)").arg(manifoldError);
+        }
         return preview;
     }
 

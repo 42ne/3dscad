@@ -42,6 +42,28 @@ QString toolbarToolTip(const QString &tool)
             "Drop at the scene level for a global variable, or into a module's parameters lane or body.");
     }
 
+    if (tool == QStringLiteral("polyhedron")) {
+        return QStringLiteral(
+            "Polyhedron group\n"
+            "A container that builds a polyhedron from its Point Set and Face Set children. "
+            "Drop Points3D and Faces3D inside it.");
+    }
+
+    if (tool == QStringLiteral("point_3d")) {
+        return QStringLiteral(
+            "3D Point\n"
+            "A single 3D vertex. Drop into a Polyhedron group. "
+            "Its index (number) is its position in the group's child list.");
+    }
+
+    if (tool == QStringLiteral("face_3d")) {
+        return QStringLiteral(
+            "3D Face\n"
+            "A single face defined by vertex indices. "
+            "Drop into a Polyhedron group alongside Point elements. "
+            "Edit N for vertex count, V0/V1/... for indices.");
+    }
+
     if (ShapeNode::isPrimitiveTool(tool)) {
         const QString name = tool.left(1).toUpper() + tool.mid(1);
         return QStringLiteral(
@@ -235,6 +257,37 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         painter->setPen(QPen(outline, 0.8));
         painter->drawLine(poly[0], poly[2]);
         painter->drawLine(poly[0], poly[3]);
+        return;
+    }
+
+    if (type == ShapeNode::Point3D) {
+        // Draw a single dot with coordinate crosshairs
+        const QPointF c = rect.center();
+        const qreal r = qMin(rect.width(), rect.height()) * 0.22;
+        painter->setPen(QPen(outline, 1));
+        painter->setBrush(face);
+        painter->drawEllipse(c, r, r);
+        painter->setPen(QPen(faceDark, 0.8, Qt::DashLine));
+        painter->drawLine(QPointF(c.x() - r * 2, c.y()), QPointF(c.x() + r * 2, c.y()));
+        painter->drawLine(QPointF(c.x(), c.y() - r * 2), QPointF(c.x(), c.y() + r * 2));
+        return;
+    }
+
+    if (type == ShapeNode::Face3D) {
+        // Draw a single triangle with a small number inside
+        const QPointF c = rect.center();
+        const qreal rx = rect.width() * 0.38, ry = rect.height() * 0.38;
+        QPolygonF tri;
+        tri << QPointF(c.x(), c.y() - ry)
+            << QPointF(c.x() - rx, c.y() + ry * 0.5)
+            << QPointF(c.x() + rx, c.y() + ry * 0.5);
+        painter->setPen(QPen(outline, 1));
+        painter->setBrush(face);
+        painter->drawPolygon(tri);
+        painter->setPen(QPen(faceDark, 0.8));
+        painter->drawLine(tri[0], c);
+        painter->drawLine(tri[1], c);
+        painter->drawLine(tri[2], c);
         return;
     }
 
@@ -464,6 +517,23 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
 
     if (shape.type == ShapeNode::Polyhedron)
         return {};
+
+    if (shape.type == ShapeNode::Point3D)
+        return {{QStringLiteral("X"), shape.position.x(), expr(0, shape.position.x())},
+                {QStringLiteral("Y"), shape.position.y(), expr(1, shape.position.y())},
+                {QStringLiteral("Z"), shape.position.z(), expr(2, shape.position.z())}};
+
+    if (shape.type == ShapeNode::Face3D) {
+        const int count = shape.polyhedronFaces.isEmpty() ? 0 : shape.polyhedronFaces.first().size();
+        QVector<ShapeParameterControl> controls;
+        controls.append({QStringLiteral("N"), static_cast<qreal>(count), expr(0, static_cast<qreal>(count))});
+        for (int i = 0; i < count; ++i) {
+            const QString label = QStringLiteral("V%1").arg(i);
+            controls.append({label, static_cast<qreal>(shape.polyhedronFaces.first()[i]),
+                            expr(1 + i, static_cast<qreal>(shape.polyhedronFaces.first()[i]))});
+        }
+        return controls;
+    }
 
     return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
             {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())},
@@ -1080,6 +1150,10 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
         return ShapeNode::Cylinder;
     if (normalized.contains("polyhedron"))
         return ShapeNode::Polyhedron;
+    if (normalized == "point_3d")
+        return ShapeNode::Point3D;
+    if (normalized == "face_3d")
+        return ShapeNode::Face3D;
     return ShapeNode::Cube;
 }
 
@@ -1095,6 +1169,10 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
         return QStringLiteral("cone");
     if (type == ShapeNode::Polyhedron)
         return QStringLiteral("polyhedron");
+    if (type == ShapeNode::Point3D)
+        return QStringLiteral("point_3d");
+    if (type == ShapeNode::Face3D)
+        return QStringLiteral("face_3d");
     return QStringLiteral("cube");
 }
 
@@ -1144,6 +1222,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Minkowski;
         return true;
     }
+    if (normalized == QStringLiteral("polyhedron")) {
+        *operation = SceneDocument::TreeNode::Polyhedron;
+        return true;
+    }
     if (normalized == QStringLiteral("linear_extrude") || normalized == QStringLiteral("extrude")) {
         *operation = SceneDocument::TreeNode::LinearExtrude;
         return true;
@@ -1172,6 +1254,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Mirror, "mirror", QColor(242, 218, 235), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Hull, "hull", QColor(218, 240, 218), GroupMinWidth},
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
+    {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), GroupMinWidth},
     {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},

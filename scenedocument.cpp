@@ -566,9 +566,23 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex, bool moduleParameterZone)
 {
+    // ── Snapshot for Point3D reordering ──────────────────────────────────
+    int oldParentId = 0;
+    int oldChildIndex = -1;
+    bool isPoint3DMove = false;
+
+    const TreeNode *before = m_tree.nodeById(nodeId);
+    if (before && before->type == TreeNode::Primitive) {
+        const ShapeNode *shape = shapeById(before->shapeId);
+        if (shape && shape->type == ShapeNode::Point3D
+            && findChildParent(m_tree.root(), nodeId, &oldParentId, &oldChildIndex)) {
+            const TreeNode *oldParent = m_tree.nodeById(oldParentId);
+            isPoint3DMove = oldParent && oldParent->operation == TreeNode::Polyhedron;
+        }
+    }
+
     // Snapshot the variable's current state before moving so we can detect
     // whether its isParameter flag changed and auto-rename accordingly.
-    const TreeNode *before = m_tree.nodeById(nodeId);
     const bool wasParameter = before && before->type == TreeNode::Variable
                               ? before->isParameter : false;
     const QString oldName = before ? before->variableName : QString();
@@ -576,6 +590,16 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex,
     const bool moved = m_tree.moveNode(nodeId, parentGroupId, insertIndex, moduleParameterZone);
     if (!moved)
         return false;
+
+    // ── Remap Face3D indices after Point3D reorder ───────────────────────
+    if (isPoint3DMove && oldParentId == parentGroupId) {
+        int newParentId = 0;
+        int newChildIndex = -1;
+        if (findChildParent(m_tree.root(), nodeId, &newParentId, &newChildIndex)
+            && newParentId == parentGroupId && newChildIndex >= 0) {
+            remapPolyhedronFacesAfterChildMove(parentGroupId, oldChildIndex, newChildIndex);
+        }
+    }
 
     // Auto-rename when a variable is promoted to parameter or demoted back.
     // Only touch names that match the auto-generated "varN" / "parN" pattern;
@@ -626,6 +650,93 @@ bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex,
     ensureTreeContainsAllShapes();
     synchronizeBooleanModesFromTree();
     return true;
+}
+
+// ── Polyhedron face index helpers ────────────────────────────────────────
+
+/* static */
+bool SceneDocument::findChildParent(const TreeNode &node, int targetId,
+                                    int *outParentId, int *outChildIndex)
+{
+    if (node.id == targetId)
+        return false; // root has no parent
+
+    for (int i = 0; i < node.children.size(); ++i) {
+        const TreeNode &child = node.children[i];
+        if (child.id == targetId) {
+            if (outParentId)    *outParentId    = node.id;
+            if (outChildIndex)  *outChildIndex  = i;
+            return true;
+        }
+        if (findChildParent(child, targetId, outParentId, outChildIndex))
+            return true;
+    }
+    return false;
+}
+
+void SceneDocument::remapPolyhedronFacesAfterChildMove(int parentGroupId,
+                                                       int fromIndex, int toIndex)
+{
+    TreeNode *parent = m_tree.nodeById(parentGroupId);
+    if (!parent || parent->operation != TreeNode::Polyhedron)
+        return;
+
+    for (const TreeNode &child : parent->children) {
+        if (child.type != TreeNode::Primitive) continue;
+        ShapeNode *shape = shapeById(child.shapeId);
+        if (!shape || shape->type != ShapeNode::Face3D) continue;
+        if (shape->polyhedronFaces.isEmpty()) continue;
+
+        bool changed = false;
+        QVector<int> &face = shape->polyhedronFaces.first();
+        for (int &idx : face) {
+            int newIdx = idx;
+            if (fromIndex < toIndex) {
+                if      (idx == fromIndex)               newIdx = toIndex;
+                else if (idx > fromIndex && idx <= toIndex) newIdx = idx - 1;
+            } else if (fromIndex > toIndex) {
+                if      (idx == fromIndex)               newIdx = toIndex;
+                else if (idx >= toIndex && idx < fromIndex) newIdx = idx + 1;
+            }
+            if (newIdx != idx) {
+                idx = newIdx;
+                changed = true;
+            }
+        }
+        if (changed)
+            updateShape(*shape);
+    }
+}
+
+void SceneDocument::remapPolyhedronFacesAfterChildDelete(int parentGroupId,
+                                                         int deletedIndex)
+{
+    TreeNode *parent = m_tree.nodeById(parentGroupId);
+    if (!parent || parent->operation != TreeNode::Polyhedron)
+        return;
+
+    for (const TreeNode &child : parent->children) {
+        if (child.type != TreeNode::Primitive) continue;
+        ShapeNode *shape = shapeById(child.shapeId);
+        if (!shape || shape->type != ShapeNode::Face3D) continue;
+        if (shape->polyhedronFaces.isEmpty()) continue;
+
+        bool changed = false;
+        QVector<int> &face = shape->polyhedronFaces.first();
+        for (int &idx : face) {
+            int newIdx = idx;
+            if (idx == deletedIndex)
+                newIdx = 0; // referenced point removed → fallback to 0
+            else if (idx > deletedIndex)
+                newIdx = idx - 1;
+            if (newIdx != idx) {
+                idx = newIdx;
+                changed = true;
+            }
+        }
+        if (changed)
+            updateShape(*shape);
+    }
 }
 
 bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions)

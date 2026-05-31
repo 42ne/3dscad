@@ -90,10 +90,14 @@ static QString adjustedNumericToken(const QString &expression,
 
 static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
 {
+    auto displayName = [](const QString &tool) -> QString {
+        if (tool == QLatin1String("point_3d")) return QStringLiteral("Point");
+        if (tool == QLatin1String("face_3d"))  return QStringLiteral("Face");
+        return tool.left(1).toUpper() + tool.mid(1);
+    };
+
     ShapeNode shape;
-    shape.name = QString("%1 %2")
-        .arg(toolName.left(1).toUpper() + toolName.mid(1))
-        .arg(shapeNumber);
+    shape.name = QString("%1 %2").arg(displayName(toolName)).arg(shapeNumber);
 
     if (toolName == QStringLiteral("circle")) {
         shape.type   = ShapeNode::Circle;
@@ -110,21 +114,13 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         shape.radius  = 10.0f;
         shape.radius2 = 0.0f;
         shape.height  = 30.0f;
-    } else if (toolName == QStringLiteral("polyhedron")) {
-        shape.type = ShapeNode::Polyhedron;
-        // Default tetrahedron
-        shape.polyhedronPoints.append(QVector3D( 10,  0, -7));
-        shape.polyhedronPoints.append(QVector3D(-10,  0, -7));
-        shape.polyhedronPoints.append(QVector3D(  0, 10,  7));
-        shape.polyhedronPoints.append(QVector3D(  0,-10,  7));
-        QVector<int> f0; f0 << 0 << 1 << 2;
-        QVector<int> f1; f1 << 0 << 3 << 1;
-        QVector<int> f2; f2 << 0 << 2 << 3;
-        QVector<int> f3; f3 << 1 << 3 << 2;
-        shape.polyhedronFaces.append(f0);
-        shape.polyhedronFaces.append(f1);
-        shape.polyhedronFaces.append(f2);
-        shape.polyhedronFaces.append(f3);
+    } else if (toolName == QStringLiteral("point_3d")) {
+        shape.type = ShapeNode::Point3D;
+        shape.position = QVector3D(0, 0, 0);
+    } else if (toolName == QStringLiteral("face_3d")) {
+        shape.type = ShapeNode::Face3D;
+        QVector<int> f; f << 0 << 1 << 2;
+        shape.polyhedronFaces.append(f);
     } else {
         shape.type = ShapeNode::Cube;
         shape.size = QVector3D(20, 20, 20);
@@ -273,6 +269,18 @@ void SceneController::addCone()
     s.radius  = 10;  // r1 bottom
     s.radius2 = 0;   // r2 top → true cone
     s.height  = 30;
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::addPointSet()
+{
+    ShapeNode s = makeShapeForTool(QStringLiteral("point_3d"), m_scene.shapeCount() + 1);
+    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::addFaceSet()
+{
+    ShapeNode s = makeShapeForTool(QStringLiteral("face_3d"), m_scene.shapeCount() + 1);
     m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
 }
 
@@ -587,6 +595,21 @@ void SceneController::handleNodeDeleteRequested(int nodeId)
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
     if (!node) return;
 
+    // ── Capture Point3D delete info for Face3D remap ─────
+    int deletedChildIndex = -1;
+    int polyhedronParentId = -1;
+    if (node->type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = m_scene.shapeById(node->shapeId);
+        if (shape && shape->type == ShapeNode::Point3D) {
+            int parentId = 0;
+            if (SceneDocument::findChildParent(m_scene.treeRoot(), nodeId, &parentId, &deletedChildIndex)) {
+                const auto *parent = m_scene.treeNodeById(parentId);
+                if (parent && parent->operation == SceneDocument::TreeNode::Polyhedron)
+                    polyhedronParentId = parentId;
+            }
+        }
+    }
+
     if (node->type == SceneDocument::TreeNode::ModuleCall) {
         auto *command = new RemoveModuleCallCommand(&m_scene, node->id,
                                                     [this]() { emit sceneChanged(); });
@@ -599,6 +622,12 @@ void SceneController::handleNodeDeleteRequested(int nodeId)
                                                [this]() { emit sceneChanged(); });
         if (!command->isValid()) { delete command; return; }
         m_undoStack->push(command);
+
+        // ── Remap Face3D indices after Point3D deletion ──
+        if (polyhedronParentId > 0 && deletedChildIndex >= 0) {
+            m_scene.remapPolyhedronFacesAfterChildDelete(polyhedronParentId, deletedChildIndex);
+            emit sceneChanged();
+        }
         return;
     }
     if (node->type == SceneDocument::TreeNode::Variable) {

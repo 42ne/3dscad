@@ -293,6 +293,42 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::Polyhedron) {
+        // Walk children to find Point3D and Face3D primitives
+        // Point index = order in the filtered children list
+        QVector<QVector3D> pts;
+        QVector<QVector<int>> faces;
+        for (const SceneDocument::TreeNode &child : node.children) {
+            if (child.type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *shape = scene.shapeById(child.shapeId);
+            if (!shape)
+                continue;
+            if (shape->type == ShapeNode::Point3D)
+                pts.append(shape->position);
+            else if (shape->type == ShapeNode::Face3D && !shape->polyhedronFaces.isEmpty())
+                faces.append(shape->polyhedronFaces.first());
+        }
+        QStringList ptsList;
+        for (const QVector3D &pt : pts)
+            ptsList.append(QString("[%1,%2,%3]").arg(pt.x(), 0, 'g').arg(pt.y(), 0, 'g').arg(pt.z(), 0, 'g'));
+        QStringList facesList;
+        const int pointCount = pts.size();
+        for (const QVector<int> &face : faces) {
+            QStringList idxList;
+            for (int idx : face)
+                idxList.append(QString::number(qBound(0, idx, pointCount - 1)));
+            facesList.append(QString("[%1]").arg(idxList.join(QLatin1Char(','))));
+        }
+        *code += QString("%1polyhedron(points=[%2], faces=[%3]);\n")
+                     .arg(indent,
+                          ptsList.join(QLatin1Char(',')),
+                          facesList.join(QLatin1Char(',')));
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
         const QString heightExpr = !node.transformExpressions.isEmpty()
                                        && !node.transformExpressions.first().trimmed().isEmpty()
@@ -365,27 +401,23 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(paramExpr(0, shape.radius))
             .arg(paramExpr(1, shape.radius2));
     }
-    if (shape.type == ShapeNode::Polyhedron) {
-        // Derive variable names from the shape name to avoid storing them in the struct
-        const QString safeName = QString(shape.name).replace(QLatin1Char(' '), QLatin1Char('_'));
-        const QString ptsVar  = safeName + QLatin1String("_pts");
-        const QString facesVar = safeName + QLatin1String("_faces");
-
-        QStringList ptsList;
-        for (const QVector3D &pt : shape.polyhedronPoints)
-            ptsList.append(QString("[%1,%2,%3]").arg(pt.x(), 0, 'g').arg(pt.y(), 0, 'g').arg(pt.z(), 0, 'g'));
-
-        QStringList facesList;
-        for (const QVector<int> &face : shape.polyhedronFaces) {
-            QStringList idxList;
-            for (int idx : face)
-                idxList.append(QString::number(idx));
-            facesList.append(QString("[%1]").arg(idxList.join(QLatin1Char(','))));
-        }
-
-        return QString("%1 = [%2];\n%3 = [%4];\npolyhedron(points=%1, faces=%3);\n")
-            .arg(ptsVar, ptsList.join(QLatin1Char(',')),
-                 facesVar, facesList.join(QLatin1Char(',')));
+    if (shape.type == ShapeNode::Point3D) {
+        // Single point: output as comment (data used by parent Polyhedron group)
+        return QString("// Point %1 at [%2,%3,%4]\n")
+            .arg(shape.name, QString::number(shape.position.x(), 'g'),
+                 QString::number(shape.position.y(), 'g'),
+                 QString::number(shape.position.z(), 'g'));
     }
+
+    if (shape.type == ShapeNode::Face3D) {
+        // Single face: output as comment
+        if (shape.polyhedronFaces.isEmpty())
+            return QString("// Face %1 (empty)\n").arg(shape.name);
+        QStringList idxList;
+        for (int idx : shape.polyhedronFaces.first())
+            idxList.append(QString::number(idx));
+        return QString("// Face %1 [%2]\n").arg(shape.name, idxList.join(QLatin1Char(',')));
+    }
+
     return QString();
 }
