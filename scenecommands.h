@@ -65,6 +65,16 @@ private:
     std::function<void()> m_onChanged;
 };
 
+class RemovePolyhedronElementCommand : public SnapshotCommand
+{
+public:
+    RemovePolyhedronElementCommand(SceneDocument *scene,
+                                   int shapeId,
+                                   int polyhedronGroupId,
+                                   int pointChildIndex,
+                                   std::function<void()> onChanged);
+};
+
 class UpdateShapeCommand : public QUndoCommand
 {
 public:
@@ -112,6 +122,12 @@ class RemoveGroupCommand : public SnapshotCommand
 {
 public:
     RemoveGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged);
+};
+
+class RemovePolyhedronGroupCommand : public SnapshotCommand
+{
+public:
+    RemovePolyhedronGroupCommand(SceneDocument *scene, int groupId, std::function<void()> onChanged);
 };
 
 class AddVariableCommand : public SnapshotCommand

@@ -272,18 +272,6 @@ void SceneController::addCone()
     m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
 }
 
-void SceneController::addPointSet()
-{
-    ShapeNode s = makeShapeForTool(QStringLiteral("point_3d"), m_scene.shapeCount() + 1);
-    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
-}
-
-void SceneController::addFaceSet()
-{
-    ShapeNode s = makeShapeForTool(QStringLiteral("face_3d"), m_scene.shapeCount() + 1);
-    m_undoStack->push(new AddShapeCommand(&m_scene, s, [this]() { emit sceneChanged(); }));
-}
-
 void SceneController::addGroup(SceneDocument::TreeNode::Operation operation)
 {
     auto *command = new AddGroupCommand(&m_scene, operation,
@@ -605,21 +593,6 @@ void SceneController::handleNodeDeleteRequested(int nodeId)
     const SceneDocument::TreeNode *node = m_scene.treeNodeById(nodeId);
     if (!node) return;
 
-    // ── Capture Point3D delete info for Face3D remap ─────
-    int deletedChildIndex = -1;
-    int polyhedronParentId = -1;
-    if (node->type == SceneDocument::TreeNode::Primitive) {
-        const ShapeNode *shape = m_scene.shapeById(node->shapeId);
-        if (shape && shape->type == ShapeNode::Point3D) {
-            int parentId = 0;
-            if (SceneDocument::findChildParent(m_scene.treeRoot(), nodeId, &parentId, &deletedChildIndex)) {
-                const auto *parent = m_scene.treeNodeById(parentId);
-                if (parent && parent->operation == SceneDocument::TreeNode::Polyhedron)
-                    polyhedronParentId = parentId;
-            }
-        }
-    }
-
     if (node->type == SceneDocument::TreeNode::ModuleCall) {
         auto *command = new RemoveModuleCallCommand(&m_scene, node->id,
                                                     [this]() { emit sceneChanged(); });
@@ -628,16 +601,30 @@ void SceneController::handleNodeDeleteRequested(int nodeId)
         return;
     }
     if (node->type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = m_scene.shapeById(node->shapeId);
+        if (shape && (shape->type == ShapeNode::Point3D || shape->type == ShapeNode::Face3D)) {
+            int parentId = 0;
+            int childIndex = -1;
+            if (SceneDocument::findChildParent(m_scene.treeRoot(), nodeId, &parentId, &childIndex)) {
+                const auto *parent = m_scene.treeNodeById(parentId);
+                if (parent && parent->operation == SceneDocument::TreeNode::Polyhedron) {
+                    const int pointChildIndex = shape->type == ShapeNode::Point3D ? childIndex : -1;
+                    auto *command = new RemovePolyhedronElementCommand(&m_scene,
+                                                                       node->shapeId,
+                                                                       parentId,
+                                                                       pointChildIndex,
+                                                                       [this]() { emit sceneChanged(); });
+                    if (!command->isValid()) { delete command; return; }
+                    m_undoStack->push(command);
+                    return;
+                }
+            }
+        }
+
         auto *command = new DeleteShapeCommand(&m_scene, node->shapeId,
                                                [this]() { emit sceneChanged(); });
         if (!command->isValid()) { delete command; return; }
         m_undoStack->push(command);
-
-        // ── Remap Face3D indices after Point3D deletion ──
-        if (polyhedronParentId > 0 && deletedChildIndex >= 0) {
-            m_scene.remapPolyhedronFacesAfterChildDelete(polyhedronParentId, deletedChildIndex);
-            emit sceneChanged();
-        }
         return;
     }
     if (node->type == SceneDocument::TreeNode::Variable) {
@@ -648,6 +635,15 @@ void SceneController::handleNodeDeleteRequested(int nodeId)
         return;
     }
     if (node->id == m_scene.treeRoot().id) return;
+
+    if (node->type == SceneDocument::TreeNode::Group
+        && node->operation == SceneDocument::TreeNode::Polyhedron) {
+        auto *command = new RemovePolyhedronGroupCommand(&m_scene, node->id,
+                                                         [this]() { emit sceneChanged(); });
+        if (!command->isValid()) { delete command; return; }
+        m_undoStack->push(command);
+        return;
+    }
 
     auto *command = new RemoveGroupCommand(&m_scene, node->id,
                                            [this]() { emit sceneChanged(); });
@@ -1193,4 +1189,57 @@ void SceneController::handlePolyhedronAddFace(int groupNodeId)
     ShapeNode shape = makeShapeForTool(QStringLiteral("face_3d"), m_scene.shapeCount() + 1);
     m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
                                           [this]() { emit sceneChanged(); }));
+}
+
+void SceneController::handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition)
+{
+    if (faceNodeId <= 0 || pointNodeId <= 0) return;
+
+    const SceneDocument::TreeNode *faceNode = m_scene.treeNodeById(faceNodeId);
+    if (!faceNode || faceNode->type != SceneDocument::TreeNode::Primitive) return;
+    const ShapeNode *shape = m_scene.shapeById(faceNode->shapeId);
+    if (!shape || shape->type != ShapeNode::Face3D) return;
+
+    // Find the polyhedron parent group
+    int parentId = 0;
+    int childIndex = 0;
+    if (!SceneDocument::findChildParent(m_scene.treeRoot(), faceNodeId, &parentId, &childIndex))
+        return;
+    const SceneDocument::TreeNode *parent = m_scene.treeNodeById(parentId);
+    if (!parent || parent->operation != SceneDocument::TreeNode::Polyhedron) return;
+
+    // Find the point's index (position among Point3D children)
+    int pointIndex = -1;
+    for (const auto &child : parent->children) {
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *cs = m_scene.shapeById(child.shapeId);
+        if (!cs || cs->type != ShapeNode::Point3D) continue;
+        ++pointIndex;
+        if (child.id == pointNodeId) break;
+    }
+    if (pointIndex < 0) return;
+
+    ShapeNode updated = *shape;
+    if (updated.polyhedronFaces.isEmpty())
+        updated.polyhedronFaces.append(QVector<int>());
+    auto &indices = updated.polyhedronFaces.first();
+
+    // Current position of this point in the face
+    const int oldPos = indices.indexOf(pointIndex);
+    if (oldPos == newPosition)
+        return; // no change
+
+    // Remove from old position if present
+    if (oldPos >= 0)
+        indices.remove(oldPos);
+
+    // Insert at new position (if >= 0)
+    if (newPosition >= 0) {
+        indices.insert(qBound(0, newPosition, indices.size()), pointIndex);
+    }
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updated,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
 }

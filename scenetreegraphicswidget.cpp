@@ -3484,7 +3484,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         // Polyhedron table height estimation
     const bool isPolyhedron = (node.operation == SceneDocument::TreeNode::Polyhedron);
     qreal polyhedronTableHeight = 0.0;
-    const qreal polyRowH = 18.0, polyGap = 3.0, polyPad = 4.0, polySecH = 20.0;
+    qreal polyhedronTableWidth = 0.0;
+    const qreal polyRowH = 18.0, polyGap = 3.0, polyPad = 4.0, polySep = 6.0;
     if (isPolyhedron && !collapsedGroup && m_scene) {
         int ptCnt = 0, faceCnt = 0;
         for (const auto &ch : node.children) {
@@ -3494,11 +3495,24 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                 else if (s->type == ShapeNode::Face3D) ++faceCnt;
             }
         }
-        polyhedronTableHeight = polyPad + polySecH + polyGap
-            + ptCnt * (polyRowH + polyGap) + (polyRowH + polyGap)
-            + polyGap * 2 + polySecH + polyGap
-            + faceCnt * (polyRowH + polyGap) + (polyRowH + polyGap)
+        // Combined table: header row + data rows + footer
+        polyhedronTableHeight = polyPad
+            + (polyRowH + polyGap)                  // face remove buttons above headers
+            + (polyRowH + polyGap)                  // face labels
+            + polySep * 0.5
+            + ptCnt * (polyRowH + polyGap)          // data rows
+            + polySep * 0.5
+            + (polyRowH + polyGap)                  // footer
             + polyPad;
+
+        const qreal polyPillW  = 44.0;
+        const qreal polyBtnW   = 16.0;
+        const qreal polyPtLabelW = 36.0;
+        const qreal polyFaceColW = 30.0;
+        const qreal ptLabelWidth = polyBtnW + polyGap + polyPtLabelW;
+        const qreal faceSectionX = polyPad + ptLabelWidth + polyPillW * 3.0 + polyGap * 3.0 + polySep;
+        const qreal faceColW = polyFaceColW + polySep * 0.5;
+        polyhedronTableWidth = faceSectionX + faceCnt * faceColW + polyBtnW + polyPad;
     }
 
     auto drawChild = [&](const SceneDocument::TreeNode &child) {
@@ -3544,7 +3558,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     } else if (isPolyhedron && !collapsedGroup) {
         // Reserve space for the polyhedron table — no individual children
         childTopLeft.ry() += polyhedronTableHeight;
-        maxChildWidth = qMax(maxChildWidth, 300.0);
+        maxChildWidth = qMax(maxChildWidth, polyhedronTableWidth);
     } else if (!collapsedGroup) {
         for (const SceneDocument::TreeNode &child : node.children)
             drawChild(child);
@@ -4051,13 +4065,60 @@ bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePos
     if (!polyhedronTableControlAt(scenePosition, &cell))
         return false;
 
+    // ── FaceParticipate (custom participation editing) ──
+    if (cell.type == PolyhedronTableItem::Cell::FaceParticipate) {
+        if (!m_scene) return false;
+        const SceneDocument::TreeNode *faceNode = m_scene->treeNodeById(cell.nodeId);
+        if (!faceNode || faceNode->type != SceneDocument::TreeNode::Primitive) return false;
+        const ShapeNode *shape = m_scene->shapeById(faceNode->shapeId);
+        if (!shape || shape->type != ShapeNode::Face3D) return false;
+
+        const QVector<int> face = shape->polyhedronFaces.isEmpty()
+                                      ? QVector<int>()
+                                      : shape->polyhedronFaces.first();
+        const int oldPos = face.indexOf(cell.sub);
+
+        int newPos = oldPos;
+        if (wheelSteps > 0) {
+            // Cycle forward through states: - -> 0 -> 1 -> ... -> -
+            if (oldPos < 0) {
+                newPos = 0;
+            } else if (oldPos >= face.size() - 1) {
+                newPos = -1;
+            } else {
+                newPos = oldPos + 1;
+            }
+        } else {
+            // Cycle backward through states: - -> last -> ... -> 0 -> -
+            if (oldPos < 0) {
+                newPos = face.size();
+            } else if (oldPos == 0) {
+                newPos = -1;
+            } else {
+                newPos = oldPos - 1;
+            }
+        }
+
+        // Find the point nodeId via the table item
+        int ptNodeId = 0;
+        for (QGraphicsItem *item : m_treeItems) {
+            auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
+            if (!tableItem) continue;
+            ptNodeId = tableItem->pointNodeIdForIndex(cell.sub);
+            break;
+        }
+        if (ptNodeId <= 0) return false;
+
+        emit polyhedronFaceParticipationAdjusted(cell.nodeId, ptNodeId, newPos);
+        return true;
+    }
+
     int paramIndex = -1;
     switch (cell.type) {
     case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
     case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
     case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
     case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
-    case PolyhedronTableItem::Cell::FaceV: paramIndex = 1 + cell.sub; break;
     default: return false;
     }
 
@@ -5017,7 +5078,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             }
         }
     }
-    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceN/FaceV) ──
+    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceN/FaceParticipate) ──
     {
         PolyhedronTableItem::Cell cell;
         if (polyhedronTableControlAt(scenePosition, &cell)) {
@@ -5026,7 +5087,7 @@ QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition
             case PolyhedronTableItem::Cell::PtY:
             case PolyhedronTableItem::Cell::PtZ:
             case PolyhedronTableItem::Cell::FaceN:
-            case PolyhedronTableItem::Cell::FaceV: {
+            case PolyhedronTableItem::Cell::FaceParticipate: {
                 // Find the table item to map the cell rect to scene coords
                 for (QGraphicsItem *item : m_treeItems) {
                     auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
@@ -5183,13 +5244,40 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
             if (cell.type == PolyhedronTableItem::Cell::None)
                 continue;
 
+            const QRectF sceneRect(tableItem->mapToScene(cell.rect.topLeft()),
+                                   tableItem->mapToScene(cell.rect.bottomRight()));
+
+            // ── Face participation (custom editing) ──
+            if (cell.type == PolyhedronTableItem::Cell::FaceParticipate) {
+                const SceneDocument::TreeNode *faceNode = m_scene->treeNodeById(cell.nodeId);
+                if (!faceNode || faceNode->type != SceneDocument::TreeNode::Primitive) continue;
+                const ShapeNode *faceShape = m_scene->shapeById(faceNode->shapeId);
+                if (!faceShape || faceShape->type != ShapeNode::Face3D) continue;
+
+                int pos = -1;
+                if (!faceShape->polyhedronFaces.isEmpty())
+                    pos = faceShape->polyhedronFaces.first().indexOf(cell.sub);
+
+                const int ptNodeId = tableItem->pointNodeIdForIndex(cell.sub);
+                if (target) {
+                    target->kind = ExpressionEditTarget::PolyhedronParticipation;
+                    target->hoverRect  = sceneRect;
+                    target->editRect   = sceneRect;
+                    target->label      = QStringLiteral("F%1 vertex").arg(cell.index);
+                    target->expression = QString::number(pos);
+                    target->nodeId     = cell.nodeId;   // face nodeId
+                    target->secondaryId = ptNodeId;     // point nodeId
+                }
+                return true;
+            }
+
+            // ── PtX/PtY/PtZ/FaceN (standard shape parameter) ──
             int paramIndex = -1;
             switch (cell.type) {
             case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
             case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
             case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
             case PolyhedronTableItem::Cell::FaceN: paramIndex = 0; break;
-            case PolyhedronTableItem::Cell::FaceV: paramIndex = 1 + cell.sub; break;
             default: continue;
             }
 
@@ -5201,15 +5289,13 @@ bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePositio
             const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
             if (paramIndex >= controls.size()) continue;
 
-            const QRectF sceneRect(tableItem->mapToScene(cell.rect.topLeft()),
-                                   tableItem->mapToScene(cell.rect.bottomRight()));
             if (target) {
                 target->kind = ExpressionEditTarget::ShapeParameter;
-                target->hoverRect = sceneRect;
-                target->editRect = sceneRect;
-                target->label = controls[paramIndex].label;
+                target->hoverRect  = sceneRect;
+                target->editRect   = sceneRect;
+                target->label      = controls[paramIndex].label;
                 target->expression = controls[paramIndex].expression;
-                target->nodeId = cell.nodeId;
+                target->nodeId     = cell.nodeId;
                 target->secondaryId = paramIndex;
             }
             return true;
@@ -5325,6 +5411,14 @@ bool SceneTreeGraphicsWidget::validateInlineExpression(const ExpressionEditTarge
     if (target.kind == ExpressionEditTarget::ModuleCallArgument)
         return ExpressionSyntax::validate(trimmed, errorMessage);
 
+    if (target.kind == ExpressionEditTarget::PolyhedronParticipation) {
+        bool ok = false;
+        trimmed.toInt(&ok);
+        if (!ok && errorMessage)
+            *errorMessage = QStringLiteral("Enter a vertex position (0–N) or -1 for none.");
+        return ok;
+    }
+
     QHash<QString, qreal> values;
     if (m_scene)
         collectVariableValues(m_scene->treeRoot(), &values,
@@ -5375,6 +5469,13 @@ void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarg
             case ExpressionEditTarget::ModuleCallArgument:
                 emit moduleCallArgumentExpressionEdited(target.nodeId, target.secondaryId, newExpression);
                 break;
+            case ExpressionEditTarget::PolyhedronParticipation: {
+                bool ok = false;
+                int newPos = newExpression.trimmed().toInt(&ok);
+                if (ok)
+                    emit polyhedronFaceParticipationAdjusted(target.nodeId, target.secondaryId, newPos);
+                break;
+            }
             case ExpressionEditTarget::None:
                 break;
             }

@@ -10,6 +10,7 @@
 #include <QMutex>
 #include <QStringList>
 #include <QtMath>
+#include <algorithm>
 
 // Manifold is not re-entrant: serialise all calls with this process-wide lock.
 // Both the viewport background render and the group thumbnail background render
@@ -39,6 +40,43 @@ static MeshTriangle makeTriangle(const QVector3D &a, const QVector3D &b, const Q
     triangle.normal = faceNormal(a, b, c);
     triangle.shade = 108;
     return triangle;
+}
+
+static QVector3D averagePoint(const QVector<QVector3D> &points)
+{
+    QVector3D sum;
+    for (const QVector3D &point : points)
+        sum += point;
+    return points.isEmpty() ? sum : sum / static_cast<float>(points.size());
+}
+
+static QVector3D polygonNormal(const QVector<QVector3D> &points, const QVector<int> &face)
+{
+    QVector3D normal;
+    for (int i = 0; i < face.size(); ++i) {
+        const QVector3D &a = points[face[i]];
+        const QVector3D &b = points[face[(i + 1) % face.size()]];
+        normal.setX(normal.x() + (a.y() - b.y()) * (a.z() + b.z()));
+        normal.setY(normal.y() + (a.z() - b.z()) * (a.x() + b.x()));
+        normal.setZ(normal.z() + (a.x() - b.x()) * (a.y() + b.y()));
+    }
+    return normal;
+}
+
+static QVector<int> orientedFaceOutward(const QVector<QVector3D> &points,
+                                        QVector<int> face,
+                                        const QVector3D &polyCenter)
+{
+    QVector<QVector3D> facePoints;
+    facePoints.reserve(face.size());
+    for (int index : face)
+        facePoints.append(points[index]);
+
+    const QVector3D faceCenter = averagePoint(facePoints);
+    const QVector3D normal = polygonNormal(points, face);
+    if (QVector3D::dotProduct(normal, faceCenter - polyCenter) < 0.0f)
+        std::reverse(face.begin(), face.end());
+    return face;
 }
 
 static Manifold manifoldFromShape(const ShapeNode &shape)
@@ -190,6 +228,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (pts.isEmpty() || faces.isEmpty())
             return {};
         const int pointCount = pts.size();
+        const QVector3D polyCenter = averagePoint(pts);
         // Build MeshGL: fan-triangulate each face (validate indices)
         MeshGL meshGl;
         meshGl.numProp = 3;
@@ -205,11 +244,16 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
             auto safe = [pointCount](int idx) -> int {
                 return qBound(0, idx, pointCount - 1);
             };
+            QVector<int> orientedFace = face;
+            for (int &idx : orientedFace)
+                idx = safe(idx);
+            orientedFace = orientedFaceOutward(pts, orientedFace, polyCenter);
+
             // Fan triangulation from first vertex
-            for (int i = 1; i + 1 < face.size(); ++i) {
-                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[0])));
-                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[i])));
-                meshGl.triVerts.push_back(static_cast<uint32_t>(safe(face[i + 1])));
+            for (int i = 1; i + 1 < orientedFace.size(); ++i) {
+                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[0]));
+                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[i]));
+                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[i + 1]));
             }
         }
         return applyNodeTransform(Manifold(meshGl), evaluatedNode);

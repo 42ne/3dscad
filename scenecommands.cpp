@@ -139,6 +139,31 @@ void DeleteShapeCommand::redo()
         m_onChanged();
 }
 
+RemovePolyhedronElementCommand::RemovePolyhedronElementCommand(SceneDocument *scene,
+                                                               int shapeId,
+                                                               int polyhedronGroupId,
+                                                               int pointChildIndex,
+                                                               std::function<void()> onChanged)
+    : SnapshotCommand("Remove polyhedron element", scene, std::move(onChanged))
+{
+    if (!m_scene || shapeId <= 0)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    const bool removed = m_scene->removeShapeById(shapeId);
+    if (!removed) {
+        m_scene->restoreSnapshot(m_oldSnapshot);
+        return;
+    }
+
+    if (polyhedronGroupId > 0 && pointChildIndex >= 0)
+        m_scene->remapPolyhedronFacesAfterChildDelete(polyhedronGroupId, pointChildIndex);
+
+    m_newSnapshot = m_scene->snapshot();
+    m_valid = true;
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
 UpdateShapeCommand::UpdateShapeCommand(SceneDocument *scene, const ShapeNode &oldShape, const ShapeNode &newShape, std::function<void()> onChanged)
     : QUndoCommand("Update shape")
     , m_scene(scene)
@@ -278,6 +303,48 @@ RemoveGroupCommand::RemoveGroupCommand(SceneDocument *scene, int groupId, std::f
     if (m_valid)
         m_newSnapshot = m_scene->snapshot();
 
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+RemovePolyhedronGroupCommand::RemovePolyhedronGroupCommand(SceneDocument *scene,
+                                                           int groupId,
+                                                           std::function<void()> onChanged)
+    : SnapshotCommand("Remove polyhedron", scene, std::move(onChanged))
+{
+    if (!m_scene || groupId <= 0)
+        return;
+
+    const SceneDocument::TreeNode *group = m_scene->treeNodeById(groupId);
+    if (!group || group->type != SceneDocument::TreeNode::Group
+        || group->operation != SceneDocument::TreeNode::Polyhedron) {
+        return;
+    }
+
+    QVector<int> dataShapeIds;
+    std::function<void(const SceneDocument::TreeNode &)> collectDataShapes =
+        [&](const SceneDocument::TreeNode &node) {
+            if (node.type == SceneDocument::TreeNode::Primitive) {
+                const ShapeNode *shape = m_scene->shapeById(node.shapeId);
+                if (shape && (shape->type == ShapeNode::Point3D || shape->type == ShapeNode::Face3D))
+                    dataShapeIds.append(node.shapeId);
+                return;
+            }
+            for (const SceneDocument::TreeNode &child : node.children)
+                collectDataShapes(child);
+        };
+    collectDataShapes(*group);
+
+    m_oldSnapshot = m_scene->snapshot();
+    if (!m_scene->removeGroupById(groupId)) {
+        m_scene->restoreSnapshot(m_oldSnapshot);
+        return;
+    }
+
+    for (int shapeId : dataShapeIds)
+        m_scene->removeShapeById(shapeId);
+
+    m_newSnapshot = m_scene->snapshot();
+    m_valid = true;
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 

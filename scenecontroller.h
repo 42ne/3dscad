@@ -50,8 +50,6 @@ public:
     void addSphere();
     void addCylinder();
     void addCone();
-    void addPointSet();
-    void addFaceSet();
     void addGroup(SceneDocument::TreeNode::Operation operation);
     void moveTreeNodeToGroup(int nodeId, int parentGroupId, int insertIndex = -1, bool isParameterZone = false);
 
@@ -109,6 +107,7 @@ public:
     void handleCtrlReleased();
     void handlePolyhedronAddPoint(int groupNodeId);
     void handlePolyhedronAddFace(int groupNodeId);
+    void handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
 
 signals:
     // Scene content changed (undo command committed).

@@ -20,7 +20,7 @@ class PolyhedronTableItem final : public QGraphicsItem
 public:
     struct Cell {
         QRectF rect;
-        enum Type { None, PtX, PtY, PtZ, FaceN, FaceV, RemovePt, RemoveFace, AddPt, AddFace, PtLabel, FaceLabel };
+        enum Type { None, PtX, PtY, PtZ, FaceN, FaceV, RemovePt, RemoveFace, AddPt, AddFace, PtLabel, FaceLabel, FaceParticipate };
         Type type = None;
         int index = -1;
         int sub   = -1;
@@ -41,6 +41,8 @@ public:
     const QVector<Cell> &cells() const { return m_cells; }
     int pointCount() const { return m_points.size(); }
     int faceCount() const { return m_faces.size(); }
+    int pointNodeIdForIndex(int pointIndex) const { return (pointIndex >= 0 && pointIndex < m_points.size()) ? m_points[pointIndex].nodeId : 0; }
+    int faceNodeIdForIndex(int faceIndex) const { return (faceIndex >= 0 && faceIndex < m_faces.size()) ? m_faces[faceIndex].nodeId : 0; }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override;
 

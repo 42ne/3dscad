@@ -1,5 +1,6 @@
 #include "scenemesh.h"
 
+#include <algorithm>
 #include <QtMath>
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
@@ -57,6 +58,38 @@ static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVecto
 
     for (int i = 1; i + 1 < vertices.size(); ++i)
         triangles->append(makeTriangle(vertices[0], vertices[i], vertices[i + 1], shade));
+}
+
+static QVector3D polygonNormal(const QVector<QVector3D> &vertices)
+{
+    QVector3D normal;
+    for (int i = 0; i < vertices.size(); ++i) {
+        const QVector3D &a = vertices[i];
+        const QVector3D &b = vertices[(i + 1) % vertices.size()];
+        normal.setX(normal.x() + (a.y() - b.y()) * (a.z() + b.z()));
+        normal.setY(normal.y() + (a.z() - b.z()) * (a.x() + b.x()));
+        normal.setZ(normal.z() + (a.x() - b.x()) * (a.y() + b.y()));
+    }
+    return normal;
+}
+
+static QVector3D averagePoint(const QVector<QVector3D> &points)
+{
+    QVector3D sum;
+    for (const QVector3D &point : points)
+        sum += point;
+    return points.isEmpty() ? sum : sum / static_cast<float>(points.size());
+}
+
+static void orientPolygonOutward(QVector<QVector3D> *vertices, const QVector3D &polyCenter)
+{
+    if (!vertices || vertices->size() < 3)
+        return;
+
+    const QVector3D faceCenter = averagePoint(*vertices);
+    const QVector3D normal = polygonNormal(*vertices);
+    if (QVector3D::dotProduct(normal, faceCenter - polyCenter) < 0.0f)
+        std::reverse(vertices->begin(), vertices->end());
 }
 
 static SceneMesh buildCubeMesh(const ShapeNode &shape)
@@ -249,6 +282,7 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
     if (shape.polyhedronPoints.isEmpty() || shape.polyhedronFaces.isEmpty())
         return mesh;
 
+    const QVector3D polyCenter = averagePoint(shape.polyhedronPoints);
     for (const QVector<int> &face : shape.polyhedronFaces) {
         if (face.size() < 3)
             continue;
@@ -258,8 +292,10 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
             if (idx < 0 || idx >= shape.polyhedronPoints.size()) { valid = false; break; }
             faceVertices.append(shape.polyhedronPoints[idx]);
         }
-        if (valid)
+        if (valid) {
+            orientPolygonOutward(&faceVertices, polyCenter);
             appendPolygon(&mesh.triangles, faceVertices);
+        }
     }
 
     mesh.shadowPoints = shape.polyhedronPoints;

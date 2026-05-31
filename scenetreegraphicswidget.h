@@ -93,6 +93,7 @@ signals:
     void inlineThemeEdited();
     void polyhedronAddPointRequested(int groupNodeId);
     void polyhedronAddFaceRequested(int groupNodeId);
+    void polyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -307,7 +308,8 @@ private:
             Transform,
             ShapeParameter,
             Variable,
-            ModuleCallArgument
+            ModuleCallArgument,
+            PolyhedronParticipation
         };
         Kind kind = None;
         QRectF hoverRect;

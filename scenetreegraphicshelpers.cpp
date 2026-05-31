@@ -45,23 +45,7 @@ QString toolbarToolTip(const QString &tool)
     if (tool == QStringLiteral("polyhedron")) {
         return QStringLiteral(
             "Polyhedron group\n"
-            "A container that builds a polyhedron from its Point Set and Face Set children. "
-            "Drop Points3D and Faces3D inside it.");
-    }
-
-    if (tool == QStringLiteral("point_3d")) {
-        return QStringLiteral(
-            "3D Point\n"
-            "A single 3D vertex. Drop into a Polyhedron group. "
-            "Its index (number) is its position in the group's child list.");
-    }
-
-    if (tool == QStringLiteral("face_3d")) {
-        return QStringLiteral(
-            "3D Face\n"
-            "A single face defined by vertex indices. "
-            "Drop into a Polyhedron group alongside Point elements. "
-            "Edit N for vertex count, V0/V1/... for indices.");
+            "A container that builds a polyhedron from the point and face table inside it.");
     }
 
     if (ShapeNode::isPrimitiveTool(tool)) {

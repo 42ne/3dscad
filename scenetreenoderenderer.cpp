@@ -193,91 +193,113 @@ void PolyhedronTableItem::computeLayout()
     m_tableWidth = 0;
     m_tableHeight = 0;
 
-    if (m_points.isEmpty() && m_faces.isEmpty())
+    const int ptCount  = m_points.size();
+    const int faceCount = m_faces.size();
+    if (ptCount == 0 && faceCount == 0)
         return;
 
     const qreal labelW  = 36.0;
+    const qreal faceColW = 30.0;
     const qreal pillW   = 44.0;
+    const qreal smallW  = 24.0;   // face participation pills
     const qreal btnW    = 16.0;
     const qreal rowH    = 18.0;
     const qreal gap     = 3.0;
     const qreal pad     = 4.0;
     const qreal innerH  = rowH;
-    qreal x = pad;
-    qreal y = pad;
+    const qreal sep     = 6.0;    // vertical separator between pt & face sections
 
-    // Section header
-    {
-        const qreal sh = 20.0;
-        m_cells.append({QRectF(x, y, m_rect.width() - pad * 2, sh), Cell::PtLabel, -1, -1, 0});
-        y += sh + gap;
+    // ── Header row: [X] [Y] [Z]  |  per-face: [Rm] [Fn] [N] ──
+    qreal y = pad + (rowH + gap) * 2.0 + sep * 0.5;
+
+    // Compute the column x-offsets for the point section and face section.
+    // Point section: btnW + gap + labelW + gap  (labels "PtN")
+    // Then X, Y, Z columns
+    // Then separator
+    // Then per-face columns
+    const qreal ptLabelWidth = btnW + gap + labelW;     // space for Remove + PtLabel
+
+    const qreal pointHeaderY = pad + rowH + gap;
+
+    // Header row: first, X Y Z headers over the point data columns
+    qreal x = pad + ptLabelWidth;
+    // X, Y, Z column headers (using PtLabel type with index=-2, sub=0/1/2)
+    m_cells.append({QRectF(x, pointHeaderY, pillW, innerH), Cell::PtLabel, -2, 0, 0});
+    x += pillW + gap;
+    m_cells.append({QRectF(x, pointHeaderY, pillW, innerH), Cell::PtLabel, -2, 1, 0});
+    x += pillW + gap;
+    m_cells.append({QRectF(x, pointHeaderY, pillW, innerH), Cell::PtLabel, -2, 2, 0});
+    x += pillW + gap;
+
+    x += sep;
+
+    // ── Face column headers ──
+    const qreal faceSectionX = pad + ptLabelWidth + pillW * 3 + gap * 3 + sep;
+    x = faceSectionX;
+    for (int fi = 0; fi < faceCount; ++fi) {
+        const int fnid = m_faces[fi].nodeId;
+
+        const qreal removeY = y - (rowH + gap) * 2.0;
+        const qreal labelY = y - rowH - gap;
+        m_cells.append({QRectF(x + (faceColW - btnW) * 0.5, removeY, btnW, innerH),
+                        Cell::RemoveFace, fi, -1, fnid});
+        m_cells.append({QRectF(x, labelY, faceColW, innerH), Cell::FaceLabel, fi, -1, fnid});
+
+        x += faceColW + sep * 0.5;
     }
 
-    // Point rows
-    for (int i = 0; i < m_points.size(); ++i) {
+    // ── Data rows (one per point) ──
+    for (int pi = 0; pi < ptCount; ++pi) {
         x = pad;
-        const int ptNodeId = m_points[i].nodeId;
+        const int pid = m_points[pi].nodeId;
 
-        m_cells.append({QRectF(x, y, btnW, innerH), Cell::RemovePt, i, -1, ptNodeId});
+        // Remove point button
+        m_cells.append({QRectF(x, y, btnW, innerH), Cell::RemovePt, pi, -1, pid});
         x += btnW + gap;
 
-        m_cells.append({QRectF(x, y, labelW, innerH), Cell::PtLabel, i, -1, ptNodeId});
+        // Pt label
+        m_cells.append({QRectF(x, y, labelW, innerH), Cell::PtLabel, pi, -1, pid});
         x += labelW + gap;
 
+        // X, Y, Z values
         for (int coord = 0; coord < 3; ++coord) {
             Cell::Type t = (coord == 0) ? Cell::PtX : (coord == 1) ? Cell::PtY : Cell::PtZ;
-            m_cells.append({QRectF(x, y, pillW, innerH), t, i, -1, ptNodeId});
+            m_cells.append({QRectF(x, y, pillW, innerH), t, pi, -1, pid});
             x += pillW + gap;
         }
-        y += rowH + gap;
-    }
 
-    // Add Point button
-    {
-        x = pad;
-        m_cells.append({QRectF(x, y, btnW + labelW + pillW * 0.5, innerH), Cell::AddPt, -1, -1, 0});
-        y += rowH + gap;
-    }
-
-    y += gap * 2;
-
-    // Face section header
-    {
-        const qreal sh = 20.0;
-        m_cells.append({QRectF(pad, y, m_rect.width() - pad * 2, sh), Cell::FaceLabel, -1, -1, 0});
-        y += sh + gap;
-    }
-
-    // Face rows
-    for (int i = 0; i < m_faces.size(); ++i) {
-        x = pad;
-        const int faceNodeId = m_faces[i].nodeId;
-
-        m_cells.append({QRectF(x, y, btnW, innerH), Cell::RemoveFace, i, -1, faceNodeId});
-        x += btnW + gap;
-
-        m_cells.append({QRectF(x, y, labelW, innerH), Cell::FaceLabel, i, -1, faceNodeId});
-        x += labelW + gap;
-
-        m_cells.append({QRectF(x, y, pillW * 0.5, innerH), Cell::FaceN, i, -1, faceNodeId});
-        x += pillW * 0.5 + gap;
-
-        const int n = m_faces[i].indices.size();
-        for (int vi = 0; vi < n; ++vi) {
-            m_cells.append({QRectF(x, y, pillW * 0.45, innerH), Cell::FaceV, i, vi, faceNodeId});
-            x += pillW * 0.45 + gap * 0.5;
+        // ── Face participation cells ──
+        x = faceSectionX;
+        for (int fi = 0; fi < faceCount; ++fi) {
+            const int fnid = m_faces[fi].nodeId;
+            // FaceParticipate pill centred in the full column
+            const qreal partX = x + (faceColW - smallW) * 0.5;
+            m_cells.append({QRectF(partX, y, smallW, innerH), Cell::FaceParticipate, fi, pi, fnid});
+            x += faceColW + sep * 0.5;
         }
+
         y += rowH + gap;
     }
 
-    // Add Face button
+    y += sep * 0.5;
+
+    // ── Footer buttons ──
+    // AddPt button (spans left side)
     {
         x = pad;
-        m_cells.append({QRectF(x, y, btnW + labelW + pillW * 0.5, innerH), Cell::AddFace, -1, -1, 0});
-        y += rowH + gap;
+        const qreal addPtW = ptLabelWidth + pillW * 3 + gap * 3;
+        m_cells.append({QRectF(x, y, addPtW, innerH), Cell::AddPt, -1, -1, 0});
     }
 
-    y += pad;
+    // AddFace button (spans face section)
+    {
+        x = faceSectionX + faceCount * (faceColW + sep * 0.5);
+        const qreal addFaceTop = pad;
+        const qreal addFaceBottom = y + rowH;
+        m_cells.append({QRectF(x, addFaceTop, btnW, qMax(innerH, addFaceBottom - addFaceTop)), Cell::AddFace, -1, -1, 0});
+    }
+
+    y += rowH + gap + pad;
     m_tableWidth  = m_rect.width();
     m_tableHeight = y;
 }
@@ -298,7 +320,8 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
         const bool isButton = (c.type == Cell::RemovePt || c.type == Cell::RemoveFace
                                || c.type == Cell::AddPt || c.type == Cell::AddFace);
         const bool isPill = (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ
-                             || c.type == Cell::FaceN || c.type == Cell::FaceV);
+                             || c.type == Cell::FaceN || c.type == Cell::FaceV
+                             || c.type == Cell::FaceParticipate);
 
         if (isButton) {
             const bool isAdd = (c.type == Cell::AddPt || c.type == Cell::AddFace);
@@ -322,10 +345,15 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
             } else if (c.type == Cell::FaceN) {
                 if (c.index >= 0 && c.index < m_faces.size())
                     text = QString::number(m_faces[c.index].indices.size());
-            } else if (c.type == Cell::FaceV) {
+            } else if (c.type == Cell::FaceParticipate) {
                 if (c.index >= 0 && c.index < m_faces.size()
-                    && c.sub >= 0 && c.sub < m_faces[c.index].indices.size())
-                    text = QString::number(m_faces[c.index].indices[c.sub]);
+                    && c.sub >= 0 && c.sub < m_points.size()) {
+                    const int pos = m_faces[c.index].indices.indexOf(c.sub);
+                    if (pos >= 0)
+                        text = QString::number(pos);
+                    else
+                        text = QStringLiteral("\u2212");  // minus sign for "not participating"
+                }
             }
             pills.append({c.rect, text, false});
             continue;
@@ -334,11 +362,20 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
         if (c.type == Cell::PtLabel || c.type == Cell::FaceLabel) {
             painter->setPen(SceneTreePalette::textMuted(pt));
             QString label;
-            if (c.type == Cell::PtLabel)
-                label = QStringLiteral("Pt %1").arg(c.index);
-            else
-                label = QStringLiteral("Face %1").arg(c.index);
-            painter->drawText(c.rect, Qt::AlignRight | Qt::AlignVCenter, label);
+            Qt::Alignment alignment = Qt::AlignRight | Qt::AlignVCenter;
+            if (c.type == Cell::PtLabel) {
+                if (c.index == -2) {
+                    static const char *xyz[] = {"X", "Y", "Z"};
+                    label = QString::fromLatin1(xyz[qBound(0, c.sub, 2)]);
+                    alignment = Qt::AlignCenter;
+                } else {
+                    label = QStringLiteral("Pt %1").arg(c.index);
+                }
+            } else {
+                label = QStringLiteral("F%1").arg(c.index);
+                alignment = Qt::AlignCenter;
+            }
+            painter->drawText(c.rect, alignment, label);
             continue;
         }
     }

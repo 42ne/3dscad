@@ -103,9 +103,7 @@ struct ShapeNode
             || toolName == QLatin1String("sphere")
             || toolName == QLatin1String("cylinder")
             || toolName == QLatin1String("cone")
-            || toolName == QLatin1String("circle")
-            || toolName == QLatin1String("point_3d")
-            || toolName == QLatin1String("face_3d");
+            || toolName == QLatin1String("circle");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -115,8 +113,6 @@ struct ShapeNode
         if (toolName == QLatin1String("cylinder")) return Cylinder;
         if (toolName == QLatin1String("cone"))     return Cone;
         if (toolName == QLatin1String("circle"))   return Circle;
-        if (toolName == QLatin1String("point_3d")) return Point3D;
-        if (toolName == QLatin1String("face_3d"))  return Face3D;
         return Cube;
     }
 };
