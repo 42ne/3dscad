@@ -1125,6 +1125,22 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
                     return;
                 }
             }
+            if (cell.type == PolyhedronTableItem::Cell::TemplateButton) {
+                const int groupId = polyhedronGroupIdForCell(scenePos);
+                if (groupId > 0 && cell.index >= 0) {
+                    emit polyhedronTemplateRequested(groupId, cell.index);
+                    event->accept();
+                    return;
+                }
+            }
+            if (cell.type == PolyhedronTableItem::Cell::ClearPolyhedron) {
+                const int groupId = polyhedronGroupIdForCell(scenePos);
+                if (groupId > 0) {
+                    emit polyhedronClearRequested(groupId);
+                    event->accept();
+                    return;
+                }
+            }
         }
     }
 

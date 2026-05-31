@@ -9,6 +9,7 @@
 #include <QHash>
 #include <QMutex>
 #include <QStringList>
+#include <QVector2D>
 #include <QtMath>
 #include <algorithm>
 
@@ -77,6 +78,73 @@ static QVector<int> orientedFaceOutward(const QVector<QVector3D> &points,
     if (QVector3D::dotProduct(normal, faceCenter - polyCenter) < 0.0f)
         std::reverse(face.begin(), face.end());
     return face;
+}
+
+// Ear-clip a face (as an index list into pts) and append triangle index triples to triVerts.
+static void earClipFace(const QVector<QVector3D> &pts, const QVector<int> &face,
+                        std::vector<uint32_t> &triVerts)
+{
+    const int n = face.size();
+    if (n < 3) return;
+    if (n == 3) {
+        triVerts.push_back(face[0]); triVerts.push_back(face[1]); triVerts.push_back(face[2]);
+        return;
+    }
+    // Project to 2D in the polygon's plane
+    const QVector3D nrm = polygonNormal(pts, face).normalized();
+    if (nrm.isNull()) return;
+    const QVector3D ref = qAbs(nrm.x()) < 0.9f ? QVector3D(1,0,0) : QVector3D(0,1,0);
+    const QVector3D bu  = QVector3D::crossProduct(ref, nrm).normalized();
+    const QVector3D bv  = QVector3D::crossProduct(nrm, bu).normalized();
+
+    QVector<QVector2D> p2(n);
+    for (int i = 0; i < n; ++i) {
+        const QVector3D &p = pts[face[i]];
+        p2[i] = {QVector3D::dotProduct(p, bu), QVector3D::dotProduct(p, bv)};
+    }
+    auto cross2 = [&](int a, int b, int c) -> float {
+        return (p2[b].x()-p2[a].x())*(p2[c].y()-p2[a].y())
+             - (p2[b].y()-p2[a].y())*(p2[c].x()-p2[a].x());
+    };
+
+    QVector<int> ring(n);
+    for (int i = 0; i < n; ++i) ring[i] = i;
+
+    float area = 0.0f;
+    for (int i = 0; i < n; ++i)
+        area += p2[ring[i]].x() * p2[ring[(i+1)%n]].y()
+              - p2[ring[(i+1)%n]].x() * p2[ring[i]].y();
+    const float winding = area >= 0.0f ? 1.0f : -1.0f;
+    constexpr float eps = 1.0e-5f;
+
+    while (ring.size() > 3) {
+        const int rn = ring.size();
+        bool clipped = false;
+        for (int i = 0; i < rn; ++i) {
+            const int a = ring[(i-1+rn)%rn], b = ring[i], c = ring[(i+1)%rn];
+            if (winding * cross2(a,b,c) <= eps) continue;
+            bool blocked = false;
+            for (int j = 0; j < rn && !blocked; ++j) {
+                if (j==(i-1+rn)%rn || j==i || j==(i+1)%rn) continue;
+                const int w = ring[j];
+                if (winding * cross2(a,b,w) >= -eps
+                    && winding * cross2(b,c,w) >= -eps
+                    && winding * cross2(c,a,w) >= -eps)
+                    blocked = true;
+            }
+            if (blocked) continue;
+            triVerts.push_back(face[a]); triVerts.push_back(face[b]); triVerts.push_back(face[c]);
+            ring.remove(i);
+            clipped = true;
+            break;
+        }
+        if (!clipped) break;
+    }
+    if (ring.size() == 3) {
+        triVerts.push_back(face[ring[0]]);
+        triVerts.push_back(face[ring[1]]);
+        triVerts.push_back(face[ring[2]]);
+    }
 }
 
 static Manifold manifoldFromShape(const ShapeNode &shape)
@@ -249,12 +317,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
                 idx = safe(idx);
             orientedFace = orientedFaceOutward(pts, orientedFace, polyCenter);
 
-            // Fan triangulation from first vertex
-            for (int i = 1; i + 1 < orientedFace.size(); ++i) {
-                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[0]));
-                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[i]));
-                meshGl.triVerts.push_back(static_cast<uint32_t>(orientedFace[i + 1]));
-            }
+            earClipFace(pts, orientedFace, meshGl.triVerts);
         }
         return applyNodeTransform(Manifold(meshGl), evaluatedNode);
     }

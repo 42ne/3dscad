@@ -262,31 +262,6 @@ AddPolyhedronGroupCommand::AddPolyhedronGroupCommand(SceneDocument *scene,
         return;
     }
 
-    // Default cube: 8 vertices, 6 faces (quads)
-    const QVector<QVector3D> pts = {
-        {-10,-10,-10}, {10,-10,-10}, {10,10,-10}, {-10,10,-10},
-        {-10,-10,10},  {10,-10,10},  {10,10,10},  {-10,10,10}
-    };
-    for (const auto &pt : pts) {
-        ShapeNode point;
-        point.type = ShapeNode::Point3D;
-        point.name = QStringLiteral("Point");
-        point.position = pt;
-        m_scene->addShape(point, groupId, -1);
-    }
-
-    const QVector<QVector<int>> faces = {
-        {0,1,2,3}, {4,5,6,7}, {0,1,5,4},
-        {2,3,7,6}, {0,3,7,4}, {1,2,6,5}
-    };
-    for (const auto &f : faces) {
-        ShapeNode faceShape;
-        faceShape.type = ShapeNode::Face3D;
-        faceShape.name = QStringLiteral("Face");
-        faceShape.polyhedronFaces.append(f);
-        m_scene->addShape(faceShape, groupId, -1);
-    }
-
     m_newSnapshot = m_scene->snapshot();
     m_valid = true;
     m_scene->restoreSnapshot(m_oldSnapshot);

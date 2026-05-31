@@ -20,7 +20,7 @@ class PolyhedronTableItem final : public QGraphicsItem
 public:
     struct Cell {
         QRectF rect;
-        enum Type { None, PtX, PtY, PtZ, RemovePt, RemoveFace, AddPt, AddFace, AutoFace, PtLabel, FaceLabel, FaceParticipate };
+        enum Type { None, PtX, PtY, PtZ, RemovePt, RemoveFace, AddPt, AddFace, AutoFace, PtLabel, FaceLabel, FaceParticipate, TemplateButton, ClearPolyhedron };
         Type type = None;
         int index = -1;
         int sub   = -1;

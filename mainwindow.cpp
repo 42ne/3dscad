@@ -310,6 +310,10 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handlePolyhedronAutoface);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronFaceParticipationAdjusted,
             m_controller, &SceneController::handlePolyhedronFaceParticipationAdjusted);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronTemplateRequested,
+            m_controller, &SceneController::handlePolyhedronApplyTemplate);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::polyhedronClearRequested,
+            m_controller, &SceneController::handlePolyhedronClearAll);
 
     leftLayout->addWidget(m_sceneTreeGraphics, 1);
     m_csgStatusLabel = new QLabel;

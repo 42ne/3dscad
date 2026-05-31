@@ -109,6 +109,8 @@ public:
     void handlePolyhedronAddFace(int groupNodeId);
     void handlePolyhedronAutoface(int groupNodeId);
     void handlePolyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
+    void handlePolyhedronApplyTemplate(int groupNodeId, int templateType);
+    void handlePolyhedronClearAll(int groupNodeId);
 
 signals:
     // Scene content changed (undo command committed).

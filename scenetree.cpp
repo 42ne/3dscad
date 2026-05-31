@@ -686,8 +686,10 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
         if (child.type != TreeNode::Group)
             continue;
         pruneEmptyGroups(&child);
-        // Never remove the Scene container, even when empty.
-        if (child.operation != TreeNode::Scene && child.children.isEmpty())
+        // Never remove the Scene container or Polyhedron groups (they show template buttons when empty).
+        if (child.operation != TreeNode::Scene
+            && child.operation != TreeNode::Polyhedron
+            && child.children.isEmpty())
             node->children.removeAt(i);
     }
 

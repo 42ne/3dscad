@@ -1,6 +1,7 @@
 #include "scenemesh.h"
 
 #include <algorithm>
+#include <QVector2D>
 #include <QtMath>
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
@@ -51,15 +52,6 @@ static MeshTriangle makeTriangle(const QVector3D &a, const QVector3D &b, const Q
     return triangle;
 }
 
-static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVector3D> &vertices, int shade = 100)
-{
-    if (vertices.size() < 3)
-        return;
-
-    for (int i = 1; i + 1 < vertices.size(); ++i)
-        triangles->append(makeTriangle(vertices[0], vertices[i], vertices[i + 1], shade));
-}
-
 static QVector3D polygonNormal(const QVector<QVector3D> &vertices)
 {
     QVector3D normal;
@@ -79,6 +71,69 @@ static QVector3D averagePoint(const QVector<QVector3D> &points)
     for (const QVector3D &point : points)
         sum += point;
     return points.isEmpty() ? sum : sum / static_cast<float>(points.size());
+}
+
+static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVector3D> &vertices, int shade = 100)
+{
+    const int n = vertices.size();
+    if (n < 3) return;
+    if (n == 3) {
+        triangles->append(makeTriangle(vertices[0], vertices[1], vertices[2], shade));
+        return;
+    }
+
+    // Project to the polygon's own 2D plane so ear-clip works for non-convex faces.
+    const QVector3D nrm = polygonNormal(vertices).normalized();
+    if (nrm.isNull()) return;
+    const QVector3D ref = qAbs(nrm.x()) < 0.9f ? QVector3D(1,0,0) : QVector3D(0,1,0);
+    const QVector3D bu  = QVector3D::crossProduct(ref, nrm).normalized();
+    const QVector3D bv  = QVector3D::crossProduct(nrm, bu).normalized();
+
+    QVector<QVector2D> p2(n);
+    for (int i = 0; i < n; ++i)
+        p2[i] = {QVector3D::dotProduct(vertices[i], bu),
+                 QVector3D::dotProduct(vertices[i], bv)};
+
+    auto cross2 = [&](int a, int b, int c) -> float {
+        return (p2[b].x()-p2[a].x())*(p2[c].y()-p2[a].y())
+             - (p2[b].y()-p2[a].y())*(p2[c].x()-p2[a].x());
+    };
+
+    QVector<int> ring(n);
+    for (int i = 0; i < n; ++i) ring[i] = i;
+
+    float area = 0.0f;
+    for (int i = 0; i < n; ++i)
+        area += p2[ring[i]].x() * p2[ring[(i+1)%n]].y()
+              - p2[ring[(i+1)%n]].x() * p2[ring[i]].y();
+    const float winding = area >= 0.0f ? 1.0f : -1.0f;
+    constexpr float eps = 1.0e-5f;
+
+    while (ring.size() > 3) {
+        const int rn = ring.size();
+        bool clipped = false;
+        for (int i = 0; i < rn; ++i) {
+            const int a = ring[(i-1+rn)%rn], b = ring[i], c = ring[(i+1)%rn];
+            if (winding * cross2(a, b, c) <= eps) continue;
+            bool blocked = false;
+            for (int j = 0; j < rn && !blocked; ++j) {
+                if (j==(i-1+rn)%rn || j==i || j==(i+1)%rn) continue;
+                const int w = ring[j];
+                if (winding * cross2(a,b,w) >= -eps
+                    && winding * cross2(b,c,w) >= -eps
+                    && winding * cross2(c,a,w) >= -eps)
+                    blocked = true;
+            }
+            if (blocked) continue;
+            triangles->append(makeTriangle(vertices[a], vertices[b], vertices[c], shade));
+            ring.remove(i);
+            clipped = true;
+            break;
+        }
+        if (!clipped) break; // degenerate polygon
+    }
+    if (ring.size() == 3)
+        triangles->append(makeTriangle(vertices[ring[0]], vertices[ring[1]], vertices[ring[2]], shade));
 }
 
 static void orientPolygonOutward(QVector<QVector3D> *vertices, const QVector3D &polyCenter)

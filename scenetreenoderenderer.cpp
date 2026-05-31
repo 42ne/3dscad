@@ -201,8 +201,20 @@ void PolyhedronTableItem::computeLayout()
 
     const int ptCount  = m_points.size();
     const int faceCount = m_faces.size();
-    if (ptCount == 0 && faceCount == 0)
+    if (ptCount == 0 && faceCount == 0) {
+        constexpr qreal btnH = 18.0, tpad = 6.0, tgap = 4.0, tBtnW = 120.0;
+        constexpr int numTemplates = 12, numCols = 2;
+        constexpr int numRows = (numTemplates + numCols - 1) / numCols;
+        const qreal colW = (tBtnW - tgap * (numCols - 1)) / numCols;
+        for (int i = 0; i < numTemplates; ++i) {
+            const qreal x = tpad + (i % numCols) * (colW + tgap);
+            const qreal y = tpad + (i / numCols) * (btnH + tgap);
+            m_cells.append({QRectF(x, y, colW, btnH), Cell::TemplateButton, i, -1, 0});
+        }
+        m_tableWidth  = tpad * 2 + tBtnW;
+        m_tableHeight = tpad + numRows * btnH + (numRows - 1) * tgap + tpad;
         return;
+    }
 
     const qreal labelW  = 36.0;
     const qreal faceColW = 30.0;
@@ -314,7 +326,7 @@ void PolyhedronTableItem::computeLayout()
         m_cells.append({QRectF(x, addFaceTop, btnW, qMax(innerH, addFaceBottom - addFaceTop)), Cell::AddFace, -1, -1, 0});
     }
 
-    y += rowH + gap + pad;
+    y += rowH + gap;
     {
         const qreal addPtW = ptLabelWidth + pillW * 3 + gap * 3;
         const qreal autoFaceMinWidth = 60.0;
@@ -323,6 +335,8 @@ void PolyhedronTableItem::computeLayout()
         const qreal rightEdge = btnW + pad;
         m_tableWidth = qMax(faceColRight + rightEdge, autoFaceRight + gap + rightEdge);
     }
+    m_cells.append({QRectF(pad, y, m_tableWidth - 2 * pad, innerH), Cell::ClearPolyhedron, -1, -1, 0});
+    y += rowH + gap + pad;
     m_tableHeight = y;
 }
 
@@ -344,10 +358,16 @@ QSizeF PolyhedronTableItem::estimateSize(int groupNodeId, const SceneDocument *s
     constexpr qreal rowH = 18.0, gap = 3.0, pad = 4.0, sep = 6.0;
     constexpr qreal btnW = 16.0, labelW = 36.0, pillW = 44.0, faceColW = 30.0;
 
+    if (ptCount == 0 && faceCount == 0) {
+        constexpr qreal btnH = 18.0, tpad = 6.0, tgap = 4.0, tBtnW = 120.0;
+        constexpr int numRows = 6;   // ceil(12 / 2)
+        return QSizeF(tpad * 2 + tBtnW, tpad + numRows * btnH + (numRows - 1) * tgap + tpad);
+    }
+
     const qreal h = pad + (rowH+gap)*2.0 + sep*0.5
                     + ptCount*(rowH+gap)
                     + sep*0.5
-                    + (rowH+gap) + pad;
+                    + (rowH+gap)*2.0 + pad;   // *2 = footer row + Clear row
 
     const qreal ptLabelWidth = btnW + gap + labelW;
     const qreal addPtW = ptLabelWidth + pillW*3.0 + gap*3.0;
@@ -376,18 +396,26 @@ void PolyhedronTableItem::paint(QPainter *painter, const QStyleOptionGraphicsIte
 
         const bool isButton = (c.type == Cell::RemovePt || c.type == Cell::RemoveFace
                                || c.type == Cell::AddPt || c.type == Cell::AddFace
-                               || c.type == Cell::AutoFace);
+                               || c.type == Cell::AutoFace
+                               || c.type == Cell::TemplateButton
+                               || c.type == Cell::ClearPolyhedron);
         const bool isPill = (c.type == Cell::PtX || c.type == Cell::PtY || c.type == Cell::PtZ
                              || c.type == Cell::FaceParticipate);
 
         if (isButton) {
             const bool isAdd = (c.type == Cell::AddPt || c.type == Cell::AddFace);
-            const QColor btnFill = (c.type == Cell::AutoFace) ? QColor(60, 130, 210)
+            const QColor btnFill = (c.type == Cell::AutoFace)    ? QColor(60, 130, 210)
+                                 : (c.type == Cell::TemplateButton) ? QColor(70, 120, 190)
+                                 : (c.type == Cell::ClearPolyhedron) ? QColor(160, 55, 55)
                                  : isAdd ? QColor(70, 180, 70) : QColor(210, 70, 70);
             paintRoundedPanel(painter, c.rect, 4.0,
                               QPen(btnFill.darker(130), 1.0), QBrush(btnFill));
             painter->setPen(Qt::white);
+            static const char *tmplNames[] = {"Pyramid","Prism","Box","Tetra","Octa","Frustum","Wedge","Hex","L-Shape","C-Shape","H-Shape","O-Shape"};
             const QString label = (c.type == Cell::AutoFace) ? QStringLiteral("AutoFace")
+                               : (c.type == Cell::TemplateButton && c.index >= 0 && c.index < 12)
+                                   ? QStringLiteral("+ ") + QString::fromLatin1(tmplNames[c.index])
+                               : (c.type == Cell::ClearPolyhedron) ? QStringLiteral("Clear")
                                : isAdd ? QStringLiteral("+") : QStringLiteral("−");
             painter->drawText(c.rect, Qt::AlignCenter, label);
             continue;

@@ -187,6 +187,180 @@ static QVector<QVector<int>> computeConvexHullFaces(const QVector<QVector3D> &pt
     return result;
 }
 
+// ── Non-convex polyhedron face builder ──────────────────────────────────────
+// Used when points lie on exactly two parallel Z-planes (extrusion profile).
+
+// Signed area of triangle (a,b,c) projected to XY (positive = CCW).
+static float cross2DXY(const QVector3D &a, const QVector3D &b, const QVector3D &c)
+{
+    return (b.x()-a.x())*(c.y()-a.y()) - (b.y()-a.y())*(c.x()-a.x());
+}
+
+// True if segments (a,b) and (c,d) properly intersect (not touching at shared endpoints).
+static bool segsCross2DXY(const QVector3D &a, const QVector3D &b,
+                          const QVector3D &c, const QVector3D &d)
+{
+    const float d1 = cross2DXY(c, d, a), d2 = cross2DXY(c, d, b);
+    const float d3 = cross2DXY(a, b, c), d4 = cross2DXY(a, b, d);
+    return ((d1>0.0f&&d2<0.0f)||(d1<0.0f&&d2>0.0f)) &&
+           ((d3>0.0f&&d4<0.0f)||(d3<0.0f&&d4>0.0f));
+}
+
+// True if the polygon (index list) has no self-intersecting edges in XY.
+static bool polygonValidXY(const QVector<int> &ring, const QVector<QVector3D> &pts)
+{
+    const int n = ring.size();
+    for (int i = 0; i < n; ++i)
+        for (int j = i+2; j < n; ++j) {
+            if (i==0 && j==n-1) continue;
+            if (segsCross2DXY(pts[ring[i]], pts[ring[(i+1)%n]],
+                              pts[ring[j]], pts[ring[(j+1)%n]])) return false;
+        }
+    return true;
+}
+
+// Ear-clip triangulation of a CCW polygon in XY. Appends {a,b,c} to 'out'.
+static void earClipXY(QVector<int> ring, const QVector<QVector3D> &pts,
+                      QVector<QVector<int>> &out)
+{
+    while (ring.size() > 3) {
+        const int n = ring.size();
+        bool clipped = false;
+        for (int i = 0; i < n; ++i) {
+            const int a = ring[(i-1+n)%n], b = ring[i], c = ring[(i+1)%n];
+            if (cross2DXY(pts[a], pts[b], pts[c]) <= 0.0f) continue;
+            bool blocked = false;
+            for (int j = 0; j < n; ++j) {
+                if (j==(i-1+n)%n || j==i || j==(i+1)%n) continue;
+                const QVector3D &v = pts[ring[j]];
+                if (cross2DXY(pts[a],pts[b],v) > 0.0f &&
+                    cross2DXY(pts[b],pts[c],v) > 0.0f &&
+                    cross2DXY(pts[c],pts[a],v) > 0.0f) { blocked=true; break; }
+            }
+            if (blocked) continue;
+            out.append({a, b, c});
+            ring.remove(i);
+            clipped = true;
+            break;
+        }
+        if (!clipped) break;
+    }
+    if (ring.size() == 3) out.append({ring[0], ring[1], ring[2]});
+}
+
+// Sort index set into a CCW simple polygon order using angle from centroid.
+// Falls back to insertion order if the centroid-sort still produces crossings.
+static QVector<int> sortPolygonCCW(const QVector<int> &indices, const QVector<QVector3D> &pts)
+{
+    // Prefer insertion order if it's already valid (typical for templates).
+    if (polygonValidXY(indices, pts)) {
+        // Ensure CCW
+        float area = 0.0f;
+        const int n = indices.size();
+        for (int i = 0; i < n; ++i) {
+            const QVector3D &a = pts[indices[i]], &b = pts[indices[(i+1)%n]];
+            area += a.x()*b.y() - b.x()*a.y();
+        }
+        if (area >= 0.0f) return indices;
+        QVector<int> rev = indices;
+        std::reverse(rev.begin(), rev.end());
+        return rev;
+    }
+
+    // Angle-sort around centroid
+    float cx = 0, cy = 0;
+    for (int i : indices) { cx += pts[i].x(); cy += pts[i].y(); }
+    cx /= indices.size(); cy /= indices.size();
+
+    QVector<int> sorted = indices;
+    std::sort(sorted.begin(), sorted.end(), [&](int a, int b) {
+        return std::atan2(pts[a].y()-cy, pts[a].x()-cx) <
+               std::atan2(pts[b].y()-cy, pts[b].x()-cx);
+    });
+
+    // Ensure CCW
+    float area = 0.0f;
+    const int n = sorted.size();
+    for (int i = 0; i < n; ++i) {
+        const QVector3D &a = pts[sorted[i]], &b = pts[sorted[(i+1)%n]];
+        area += a.x()*b.y() - b.x()*a.y();
+    }
+    if (area < 0.0f) std::reverse(sorted.begin(), sorted.end());
+    return sorted;
+}
+
+// Build all faces for a 2-layer extrusion: bottom cap + top cap + side quads.
+static QVector<QVector<int>> buildExtrusionFaces(const QVector<int> &bottomIdx,
+                                                  const QVector<int> &topIdx,
+                                                  const QVector<QVector3D> &pts)
+{
+    const QVector<int> bottomPoly = sortPolygonCCW(bottomIdx, pts);
+    const int N = bottomPoly.size();
+
+    // Match each bottom vertex to its corresponding top vertex (nearest XY).
+    QVector<int> topPoly(N);
+    for (int i = 0; i < N; ++i) {
+        float best = std::numeric_limits<float>::max();
+        topPoly[i] = topIdx[0];
+        for (int t : topIdx) {
+            const float dx = pts[t].x()-pts[bottomPoly[i]].x();
+            const float dy = pts[t].y()-pts[bottomPoly[i]].y();
+            const float d = dx*dx + dy*dy;
+            if (d < best) { best = d; topPoly[i] = t; }
+        }
+    }
+
+    QVector<QVector<int>> faces;
+
+    // Bottom cap: reverse triangle winding → outward normal -Z
+    {
+        QVector<QVector<int>> tris;
+        earClipXY(bottomPoly, pts, tris);
+        for (const auto &t : tris)
+            faces.append({t[0], t[2], t[1]});
+    }
+    // Top cap: CCW winding → outward normal +Z
+    {
+        QVector<QVector<int>> tris;
+        earClipXY(topPoly, pts, tris);
+        for (const auto &t : tris)
+            faces.append(t);
+    }
+    // Side quads
+    for (int i = 0; i < N; ++i) {
+        const int b0=bottomPoly[i], b1=bottomPoly[(i+1)%N];
+        const int t0=topPoly[i],    t1=topPoly[(i+1)%N];
+        faces.append({b0, b1, t1, t0});
+    }
+    return faces;
+}
+
+// Tries 2-layer extrusion first; falls back to convex hull for general 3D clouds.
+static QVector<QVector<int>> computePolyhedronFaces(const QVector<QVector3D> &pts)
+{
+    const int n = pts.size();
+    if (n < 4) return {};
+
+    float zMin = pts[0].z(), zMax = pts[0].z();
+    for (const auto &p : pts) { zMin = qMin(zMin, p.z()); zMax = qMax(zMax, p.z()); }
+
+    const float zEps = 0.01f;
+    if (zMax - zMin > zEps) {
+        QVector<int> bottom, top, other;
+        for (int i = 0; i < n; ++i) {
+            if      (qAbs(pts[i].z()-zMin) <= zEps) bottom.append(i);
+            else if (qAbs(pts[i].z()-zMax) <= zEps) top.append(i);
+            else    other.append(i);
+        }
+        if (other.isEmpty() && bottom.size()==top.size() && bottom.size()>=3)
+            return buildExtrusionFaces(bottom, top, pts);
+    }
+
+    return computeConvexHullFaces(pts);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
 {
     auto displayName = [](const QString &tool) -> QString {
@@ -1313,7 +1487,7 @@ void SceneController::handlePolyhedronAutoface(int groupNodeId)
     for (const auto &p : pts)
         positions.append(p.pos);
 
-    const auto faces = computeConvexHullFaces(positions);
+    const auto faces = computePolyhedronFaces(positions);
     if (faces.isEmpty()) return;
 
     // Collect existing Face3D children to replace, before modifying the scene
@@ -1346,6 +1520,151 @@ void SceneController::handlePolyhedronAutoface(int groupNodeId)
         shape.name = QStringLiteral("F%1").arg(m_scene.shapeCount() + 1);
         m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
                                                [this]() { emit sceneChanged(); }));
+    }
+    m_undoStack->endMacro();
+}
+
+void SceneController::handlePolyhedronApplyTemplate(int groupNodeId, int templateType)
+{
+    if (groupNodeId <= 0) return;
+
+    struct TemplateData {
+        QVector<QVector3D> points;
+        QVector<QVector<int>> faces;
+    };
+
+    static const TemplateData templates[] = {
+        // 0: Pyramid — square base 10×10, height 8
+        {
+            {{0,0,0},{10,0,0},{10,10,0},{0,10,0},{5,5,8}},
+            {{0,3,2,1},{0,1,4},{1,2,4},{2,3,4},{3,0,4}}
+        },
+        // 1: Prism — triangular base, height 8
+        {
+            {{0,0,0},{10,0,0},{5,9,0},{0,0,8},{10,0,8},{5,9,8}},
+            {{0,2,1},{3,4,5},{0,1,4,3},{1,2,5,4},{2,0,3,5}}
+        },
+        // 2: Box — 10×10×8 cuboid
+        {
+            {{0,0,0},{10,0,0},{10,10,0},{0,10,0},{0,0,8},{10,0,8},{10,10,8},{0,10,8}},
+            {{0,3,2,1},{4,5,6,7},{0,1,5,4},{1,2,6,5},{2,3,7,6},{3,0,4,7}}
+        },
+        // 3: Tetrahedron — 4 equilateral-ish faces, edge ~10
+        {
+            {{0,0,0},{10,0,0},{5,9,0},{5,3,8}},
+            {{0,2,1},{0,1,3},{1,2,3},{2,0,3}}
+        },
+        // 4: Octahedron — 6 vertices, 8 faces
+        {
+            {{5,5,10},{5,5,0},{10,5,5},{5,10,5},{0,5,5},{5,0,5}},
+            {{0,2,3},{0,3,4},{0,4,5},{0,5,2},{1,3,2},{1,4,3},{1,5,4},{1,2,5}}
+        },
+        // 5: Frustum — 10×10 bottom, 6×6 top, height 8
+        {
+            {{0,0,0},{10,0,0},{10,10,0},{0,10,0},{2,2,8},{8,2,8},{8,8,8},{2,8,8}},
+            {{0,3,2,1},{4,5,6,7},{0,1,5,4},{1,2,6,5},{2,3,7,6},{3,0,4,7}}
+        },
+        // 6: Wedge — ramp, l=10, w=6, h1=2, h2=8
+        {
+            {{0,0,0},{10,0,0},{10,6,0},{0,6,0},{0,0,2},{10,0,8},{10,6,8},{0,6,2}},
+            {{0,3,2,1},{4,5,6,7},{0,1,5,4},{1,2,6,5},{2,3,7,6},{3,0,4,7}}
+        },
+        // 7: Hex prism — hexagonal base, height 8
+        {
+            {{10,5,0},{8,9,0},{2,9,0},{0,5,0},{2,1,0},{8,1,0},
+             {10,5,8},{8,9,8},{2,9,8},{0,5,8},{2,1,8},{8,1,8}},
+            {{0,5,4,3,2,1},{6,7,8,9,10,11},
+             {0,1,7,6},{1,2,8,7},{2,3,9,8},{3,4,10,9},{4,5,11,10},{5,0,6,11}}
+        },
+        // 8: L-shape — L cross-section extrusion, 10×10 outer, bar 3, height 8
+        {
+            {{0,0,0},{10,0,0},{10,3,0},{3,3,0},{3,10,0},{0,10,0},
+             {0,0,8},{10,0,8},{10,3,8},{3,3,8},{3,10,8},{0,10,8}},
+            {{0,5,4,3,2,1},{6,7,8,9,10,11},
+             {0,1,7,6},{1,2,8,7},{2,3,9,8},{3,4,10,9},{4,5,11,10},{5,0,6,11}}
+        },
+        // 9: C-shape — C channel extrusion, 10×10 outer, bar 3, height 8
+        {
+            {{0,0,0},{10,0,0},{10,3,0},{3,3,0},{3,7,0},{10,7,0},{10,10,0},{0,10,0},
+             {0,0,8},{10,0,8},{10,3,8},{3,3,8},{3,7,8},{10,7,8},{10,10,8},{0,10,8}},
+            {{0,7,6,5,4,3,2,1},{8,9,10,11,12,13,14,15},
+             {0,1,9,8},{1,2,10,9},{2,3,11,10},{3,4,12,11},
+             {4,5,13,12},{5,6,14,13},{6,7,15,14},{7,0,8,15}}
+        },
+        // 10: H-shape — H cross-section extrusion, 10×10 outer, flanges 3, web y=4-6, height 8
+        {
+            {{0,0,0},{3,0,0},{3,4,0},{7,4,0},{7,0,0},{10,0,0},
+             {10,10,0},{7,10,0},{7,6,0},{3,6,0},{3,10,0},{0,10,0},
+             {0,0,8},{3,0,8},{3,4,8},{7,4,8},{7,0,8},{10,0,8},
+             {10,10,8},{7,10,8},{7,6,8},{3,6,8},{3,10,8},{0,10,8}},
+            {{0,11,10,9,8,7,6,5,4,3,2,1},{12,13,14,15,16,17,18,19,20,21,22,23},
+             {0,1,13,12},{1,2,14,13},{2,3,15,14},{3,4,16,15},{4,5,17,16},{5,6,18,17},
+             {6,7,19,18},{7,8,20,19},{8,9,21,20},{9,10,22,21},{10,11,23,22},{11,0,12,23}}
+        },
+        // 11: O-shape — square tube, outer 10×10, inner 6×6 (wall 2), height 8
+        {
+            {{0,0,0},{10,0,0},{10,10,0},{0,10,0},
+             {2,2,0},{8,2,0},{8,8,0},{2,8,0},
+             {0,0,8},{10,0,8},{10,10,8},{0,10,8},
+             {2,2,8},{8,2,8},{8,8,8},{2,8,8}},
+            {{0,4,5,1},{1,5,6,2},{2,6,7,3},{3,7,4,0},
+             {8,9,13,12},{9,10,14,13},{10,11,15,14},{11,8,12,15},
+             {0,1,9,8},{1,2,10,9},{2,3,11,10},{3,0,8,11},
+             {5,4,12,13},{6,5,13,14},{7,6,14,15},{4,7,15,12}}
+        }
+    };
+
+    if (templateType < 0 || templateType >= 12) return;
+    const TemplateData &tmpl = templates[templateType];
+
+    m_undoStack->beginMacro(QObject::tr("Apply template"));
+
+    for (const QVector3D &pos : tmpl.points) {
+        ShapeNode shape;
+        shape.type = ShapeNode::Point3D;
+        shape.position = pos;
+        shape.name = QStringLiteral("Point %1").arg(m_scene.shapeCount() + 1);
+        m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
+                                              [this]() { emit sceneChanged(); }));
+    }
+
+    for (const QVector<int> &face : tmpl.faces) {
+        ShapeNode shape;
+        shape.type = ShapeNode::Face3D;
+        shape.polyhedronFaces.append(face);
+        shape.name = QStringLiteral("Face %1").arg(m_scene.shapeCount() + 1);
+        m_undoStack->push(new AddShapeCommand(&m_scene, shape, groupNodeId, -1,
+                                              [this]() { emit sceneChanged(); }));
+    }
+
+    m_undoStack->endMacro();
+}
+
+void SceneController::handlePolyhedronClearAll(int groupNodeId)
+{
+    if (groupNodeId <= 0) return;
+    const auto *group = m_scene.treeNodeById(groupNodeId);
+    if (!group) return;
+
+    struct ToRemove { int shapeId; int childIndex; };
+    QVector<ToRemove> toRemove;
+    for (int i = 0; i < group->children.size(); ++i) {
+        const auto &child = group->children[i];
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *s = m_scene.shapeById(child.shapeId);
+        if (s && (s->type == ShapeNode::Point3D || s->type == ShapeNode::Face3D))
+            toRemove.append({child.shapeId, i});
+    }
+
+    if (toRemove.isEmpty()) return;
+
+    m_undoStack->beginMacro(QObject::tr("Clear polyhedron"));
+    for (int i = toRemove.size() - 1; i >= 0; --i) {
+        m_undoStack->push(new RemovePolyhedronElementCommand(&m_scene,
+                                                             toRemove[i].shapeId,
+                                                             groupNodeId,
+                                                             -1,
+                                                             [this]() { emit sceneChanged(); }));
     }
     m_undoStack->endMacro();
 }

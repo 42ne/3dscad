@@ -95,6 +95,8 @@ signals:
     void polyhedronAddFaceRequested(int groupNodeId);
     void polyhedronAutofaceRequested(int groupNodeId);
     void polyhedronFaceParticipationAdjusted(int faceNodeId, int pointNodeId, int newPosition);
+    void polyhedronTemplateRequested(int groupNodeId, int templateIndex);
+    void polyhedronClearRequested(int groupNodeId);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;

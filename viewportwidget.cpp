@@ -1582,9 +1582,11 @@ static QMatrix4x4 buildViewMatrix(float yawDeg, float pitchDeg, float dist,
 
 // buildProjectionMatrix: left-handed perspective matching projectWorldPoint().
 // focalLength=420 gives FOV consistent with the software renderer.
-static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH)
+static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH, float dist = 200.0f)
 {
-    const float focal = 420.0f, nearZ = 8.0f, farZ = 1200.0f;
+    const float focal = 420.0f;
+    const float nearZ = qMax(0.5f, dist * 0.005f);
+    const float farZ  = dist * 10.0f + 1000.0f;
     const float fx = 2.0f * focal / qMax(1.0f, viewW);
     const float fy = 2.0f * focal / qMax(1.0f, viewH);
     const float a  = (farZ + nearZ) / (farZ - nearZ);
@@ -2244,7 +2246,7 @@ void ViewportWidget::paintOpenGLGrid()
     glLineWidth(1.0f);
     m_glLineProgram->bind();
 
-    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()))
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance)
                           * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
     m_glLineProgram->setUniformValue("u_mvp", mvp);
     m_glLineProgram->setUniformValue("u_shimmer_phase", 0.0f);
@@ -2317,7 +2319,7 @@ void ViewportWidget::paintOpenGLContactShadows()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     m_glFlatProgram->bind();
 
-    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()))
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance)
                           * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
     m_glFlatProgram->setUniformValue("u_mvp",    mvp);
     m_glFlatProgram->setUniformValue("u_offset", QVector2D(0, 0));
@@ -2581,7 +2583,7 @@ void ViewportWidget::paintOpenGLPreview()
         return;
 
     const QMatrix4x4 V   = buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
-    const QMatrix4x4 P   = buildProjectionMatrix(float(width()), float(height()));
+    const QMatrix4x4 P   = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance);
     const QMatrix4x4 mvp = P * V;
 
     glEnable(GL_DEPTH_TEST);
@@ -3699,7 +3701,8 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
 
 void ViewportWidget::wheelEvent(QWheelEvent *event)
 {
-    m_cameraDistance -= event->angleDelta().y() * 0.12f;
-    m_cameraDistance = qBound(70.0f, m_cameraDistance, 700.0f);
+    const float factor = m_cameraDistance * 0.001f;
+    m_cameraDistance -= event->angleDelta().y() * qMax(0.05f, factor);
+    m_cameraDistance = qBound(2.0f, m_cameraDistance, 8000.0f);
     update();
 }
