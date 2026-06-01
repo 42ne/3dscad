@@ -119,28 +119,30 @@ public:
 
 private:
     void paintSoftware(QPainter &painter, bool drawSceneMeshes = true);
-    void paintOpenGLGrid();
-    void paintOpenGLContactShadows();
-    void paintOpenGLPreview();
-    void drawAxisGizmo(QPainter &painter) const;
+
     void drawViewportHintOverlay(QPainter &painter, const QString &csgStatus) const;
     void drawSelectionBreadcrumb(QPainter &painter);
-    void drawPolyhedronElementSelectionOverlay(QPainter &painter) const;
     void drawTreeTransformControlPreview(QPainter &painter) const;
     void drawTreeShapeParameterPreview(QPainter &painter) const;
-    void updateViewportControls();
-    void updateSelectionShimmerTimer();
     bool canUseOpenGLRenderBackend() const;
+    void updateSelectionShimmerTimer();
+    void updateViewportControls();
     void startAsyncCsgCompute();
     void onCsgPreviewReady();
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
     QVector3D transformOriginForGroup(int groupId) const;
     QVector3D worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const;
     QVector<SceneDocument::TreeNode> selectedParentGroupStack() const;
+    friend class ViewportGLRenderer;
+    friend class ViewportAxisGizmo;
+    bool pickBreadcrumbNode(const QPoint &position, int *nodeId) const;
+    QVector3D dragDeltaForMousePosition(const QPoint &position) const;
+    QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
+    bool isRotationDragMode(DragMode dragMode) const;
+
     QVector3D selectedTransformOrigin() const;
     QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
     QVector3D selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const;
-    bool pickSelectedTransformAxis(const QPoint &position, DragMode *dragMode) const;
     int polyhedronGroupIdForElementNode(int nodeId) const;
     QVector<int> selectedPolyhedronPointNodeIds() const;
     QVector<SceneDocument::TreeNode> polyhedronSelectionParentGroupStack() const;
@@ -148,13 +150,6 @@ private:
     QVector3D polyhedronSelectionWorldAxisVector(const QVector3D &localAxis) const;
     float polyhedronSelectionGizmoAxisLength() const;
     QVector3D polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position) const;
-    bool pickPolyhedronSelectionAxis(const QPoint &position, DragMode *dragMode) const;
-    bool hitTestPolyhedronSelection(const QPoint &position) const;
-    void drawPolyhedronSelectionMoveTool(QPainter &painter) const;
-    bool pickBreadcrumbNode(const QPoint &position, int *nodeId) const;
-    QVector3D dragDeltaForMousePosition(const QPoint &position) const;
-    QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
-    bool isRotationDragMode(DragMode dragMode) const;
 
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;

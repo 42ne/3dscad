@@ -44,7 +44,11 @@ SOURCES += \
     scenetree.cpp \
     scenemesh.cpp \
     scenedocument.cpp \
-    viewportwidget.cpp
+    viewportwidget.cpp \
+    viewporthelpers.cpp \
+    viewportsoftwarerenderer.cpp \
+    viewportglrenderer.cpp \
+    viewportaxisgizmo.cpp
 
 HEADERS += \
     animatedtitlebar.h \
@@ -76,7 +80,11 @@ HEADERS += \
     scenemesh.h \
     scenedocument.h \
     shapenode.h \
-    viewportwidget.h
+    viewportwidget.h \
+    viewporthelpers.h \
+    viewportsoftwarerenderer.h \
+    viewportglrenderer.h \
+    viewportaxisgizmo.h
 
 FORMS += \
     mainwindow.ui
