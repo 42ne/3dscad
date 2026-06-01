@@ -36,8 +36,8 @@ SOURCES += \
     scenetreecoloreditmode.cpp \
     scenetreehovermanager.cpp \
     scenetreeinlineeditor.cpp \
+    scenecanvasdraghandler.cpp \
     scenetreegraphicswidget.cpp \
-    scenetreegraphicswidget_canvasdrag.cpp \
     scenetreeinlinetextinput.cpp \
     scenetreelayout.cpp \
     scenetreenoderenderer.cpp \
@@ -77,6 +77,7 @@ HEADERS += \
     scenetreecoloreditmode.h \
     scenetreehovermanager.h \
     scenetreeinlineeditor.h \
+    scenecanvasdraghandler.h \
     scenetreegraphicswidget.h \
     scenetreeinlinetextinput.h \
     scenetreelayout.h \

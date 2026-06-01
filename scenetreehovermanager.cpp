@@ -1,6 +1,7 @@
 #include "scenetreehovermanager.h"
 #include "scenetreegraphicswidget.h"
 #include "scenetreeinlineeditor.h"
+#include "scenecanvasdraghandler.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenestringutils.h"
 #include "scenetreepalette.h"
@@ -269,7 +270,7 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
     };
 
     int collapseGroupId = 0;
-    if (m_widget->groupCollapseControlAt(scenePosition, &collapseGroupId)) {
+    if (m_widget->m_canvasDragHandler->groupCollapseControlAt(scenePosition, &collapseGroupId)) {
         const bool collapsed = m_widget->m_collapsedGroupIds.contains(collapseGroupId);
         setKey(QStringLiteral("group-collapse:%1:%2").arg(collapseGroupId).arg(collapsed));
         return collapsed
@@ -694,7 +695,7 @@ void SceneTreeHoverManager::updateHighlights(const QPointF &scenePosition)
     const QRectF newExpressionRect = onExpression ? expressionTarget.hoverRect : QRectF();
 
     int collapseGroupId = 0;
-    const bool onCollapseControl = m_widget->groupCollapseControlAt(scenePosition, &collapseGroupId);
+    const bool onCollapseControl = m_widget->m_canvasDragHandler->groupCollapseControlAt(scenePosition, &collapseGroupId);
     bool onCanvasGrip = false;
     for (const SceneTreeGraphicsWidget::CanvasMoveHandle &handle : m_widget->m_canvasMoveHandles) {
         if (handle.gripRect.contains(scenePosition)) {

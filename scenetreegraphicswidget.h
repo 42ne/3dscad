@@ -30,6 +30,7 @@ class SceneTreeInlineTextInput;
 class SceneTreeColorEditMode;
 class SceneTreeHoverManager;
 class SceneTreeInlineEditor;
+class SceneCanvasDragHandler;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -150,6 +151,7 @@ private:
     friend class SceneTreeColorEditMode;
     friend class SceneTreeHoverManager;
     friend class SceneTreeInlineEditor;
+    friend class SceneCanvasDragHandler;
     void clearColorEditHighlight();
     void updateColorEditHighlight(const QPointF &scenePos);
 
@@ -179,8 +181,6 @@ private:
     void handleModuleCallTemplateDrop(int moduleGroupId, const QPointF &scenePosition);
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
-    bool groupCollapseControlAt(const QPointF &scenePosition, int *groupId) const;
-    void toggleGroupCollapsed(int groupId);
     void snapZoom();
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
@@ -229,60 +229,22 @@ private:
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
     QVariantAnimation *m_focusAnimation = nullptr;
-    // Throttle state for canvas-drag debug logging (not used in production paths).
-    bool    m_dbgPrevSnapped    = false;
-    QPointF m_dbgLastLoggedPos;
 
     // ── Canvas-move drag ───────────────────────────────────────────────────────
     // Grip strip above each root-level block used to reposition it on the canvas.
     struct CanvasMoveHandle {
-        QRectF gripRect;  // 8 px strip above the block (scene coords)
+        QRectF gripRect;  // strip above the block (scene coords)
         QRectF blockRect; // full block rect including grip strip
         int    nodeId = 0;
     };
-    QVector<CanvasMoveHandle>  m_canvasMoveHandles;
-    QHash<int, QPointF>        m_nodeCanvasPositions; // custom top-lefts; absent → auto
+    QVector<CanvasMoveHandle> m_canvasMoveHandles;
+    QHash<int, QPointF>       m_nodeCanvasPositions; // custom top-lefts; absent → auto
 
-    // Snap settings for placement and root-block dragging.
-    static constexpr qreal kGripStripH   = 20.0;
-    static constexpr qreal kMagnetRadius = 80.0;
-
-    // Canvas drag state
-    bool              m_canvasDragPending  = false;
-    bool              m_canvasDragActive   = false;
-    int               m_canvasDragNodeId   = 0;
-    QPointF           m_canvasDragPressScene;
-    QPointF           m_canvasDragOrigPos;   // top-left of full block rect at drag start
-    QSizeF            m_canvasDragBlockSize;
-    QPointF           m_canvasDragCurrentPos;
-    bool              m_canvasDragSnapped   = false;
-    QGraphicsPathItem *m_canvasDragGhost   = nullptr;
-
-    // Cluster-movement state (blocks edge-touching the dragged block move together).
-    QVector<int>                          m_canvasDragCluster;       // nodeIds in the cluster
-    QHash<int, QPointF>                   m_canvasDragClusterOrigPos;// top-left at drag start
-    bool                                  m_canvasDragDetached  = false; // true = fast drag broke cluster
-    QPointF                               m_canvasDragPrevEventScene; // for velocity calculation
-    // Items that are physically moved during the drag (primary block + cluster members).
-    QVector<QGraphicsItem *>              m_canvasDragItems;
-    QHash<int, QVector<QGraphicsItem *>>  m_clusterDragItems;
-
-    static constexpr qreal kClusterVelocityThreshold = 16.0; // px/event -> detaches cluster
+    static constexpr qreal kGripStripH = 20.0;
 
     // Pending canvas position for the next toolbar-drop insertion.
     bool    m_hasPendingInsertPos         = false;
     QPointF m_pendingInsertCanvasPosition;
-
-    bool applyMagneticSnap(const QPointF &candidate, const QSizeF &size,
-                           int excludeId, QPointF *snapped,
-                           const QVector<int> &additionalExcludeIds = QVector<int>()) const;
-    QPointF nonOverlappingCanvasPosition(const QPointF &candidate,
-                                         const QSizeF &size,
-                                         const QVector<QRectF> &placedBlocks) const;
-    void showDragPlaceholder(const QPointF &pos, const QSizeF &size);
-    void clearCanvasDragGhost();
-    QVector<int>              findConnectedCluster(int startNodeId) const;
-    QVector<QGraphicsItem *>  itemsInBlockRect(const QRectF &blockRect) const;
 
     // ── Rename zones ──────────────────────────────────────────────────────────
     struct RenameZone {
@@ -300,9 +262,10 @@ private:
     QSet<QString> m_selectedPolygonPointKeys;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
-    SceneTreeHoverManager *m_hoverManager = nullptr;
-    SceneTreeInlineEditor *m_inlineEditor = nullptr;
-    SceneTreeColorEditMode *m_colorEdit = nullptr;
+    SceneTreeHoverManager  *m_hoverManager      = nullptr;
+    SceneTreeInlineEditor  *m_inlineEditor      = nullptr;
+    SceneCanvasDragHandler *m_canvasDragHandler = nullptr;
+    SceneTreeColorEditMode *m_colorEdit         = nullptr;
     QGraphicsItem  *m_colorEditToggleItem  = nullptr; // pointer to the toggle for priority check
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
