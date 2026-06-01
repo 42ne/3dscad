@@ -30,6 +30,15 @@ public:
     bool pickSelectedTransformAxis(const QPoint &position, ViewportWidget::DragMode *dragMode, ViewportWidget &w) const;
     bool pickPolyhedronSelectionAxis(const QPoint &position, ViewportWidget::DragMode *dragMode, ViewportWidget &w) const;
     bool hitTestPolyhedronSelection(const QPoint &position, ViewportWidget &w) const;
+    QVector3D polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position, const ViewportWidget &w) const;
+
+private:
+    int polyhedronGroupIdForElementNode(int nodeId, const ViewportWidget &w) const;
+    QVector<int> selectedPolyhedronPointNodeIds(const ViewportWidget &w) const;
+    QVector<SceneDocument::TreeNode> polyhedronSelectionParentGroupStack(const ViewportWidget &w) const;
+    QVector3D polyhedronSelectionOrigin(const ViewportWidget &w) const;
+    QVector3D polyhedronSelectionWorldAxisVector(const QVector3D &localAxis, const ViewportWidget &w) const;
+    float polyhedronSelectionGizmoAxisLength(const ViewportWidget &w) const;
 };
 
 #endif // VIEWPORTAXISGIZMO_H

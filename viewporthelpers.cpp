@@ -301,7 +301,7 @@ ProjectedPoint projectWorldPoint(const QVector3D &world,
                                  const QVector3D &cameraTarget,
                                  bool orthographic)
 {
-    const float focalLength = 420.0f;
+    const float focalLength = ViewportConstants::kFocalLength;
     ProjectedPoint projected;
     const QVector3D camera = toCameraPoint(world, yawDegrees, pitchDegrees, cameraDistance, cameraTarget);
     projected.depth = camera.z();
@@ -1208,7 +1208,7 @@ QMatrix4x4 buildViewMatrix(float yawDeg, float pitchDeg, float dist,
 
 QMatrix4x4 buildProjectionMatrix(float viewW, float viewH, float dist, bool ortho)
 {
-    const float focal = 420.0f;
+    const float focal = ViewportConstants::kFocalLength;
     const float safeW = qMax(1.0f, viewW);
     const float safeH = qMax(1.0f, viewH);
     const float safeDist = qMax(8.0f, dist);

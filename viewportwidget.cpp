@@ -3,6 +3,7 @@
 #include "viewportsoftwarerenderer.h"
 #include "viewportglrenderer.h"
 #include "viewportaxisgizmo.h"
+#include "viewportoverlaypreview.h"
 
 #include "scenedocument.h"
 #include "scenemesh.h"
@@ -40,7 +41,7 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     m_lightingPresetComboBox = new QComboBox(this);
     m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
     m_navigationOverlayCheckBox->setChecked(m_navigationOverlayEnabled);
-    m_orthographicCheckBox->setChecked(m_orthographicProjection);
+    m_orthographicCheckBox->setChecked(m_camera.orthographic);
     m_colorVariantComboBox->addItems({
         QStringLiteral("Neutral"),
         QStringLiteral("Mint"),
@@ -97,7 +98,7 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         update();
     });
     connect(m_orthographicCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
-        m_orthographicProjection = checked;
+        m_camera.orthographic = checked;
         update();
     });
     connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -152,7 +153,7 @@ void ViewportWidget::setSelectedIndex(int index)
     m_selectedIndex = index;
     if (index >= 0)
         m_selectedGroupId = 0;
-    m_vboMeshKey.clear();
+    m_glRenderer.clearMeshCache();
     updateSelectionShimmerTimer();
 
     update();
@@ -163,7 +164,7 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     m_selectedGroupId = groupId;
     if (groupId > 0)
         m_selectedIndex = -1;
-    m_vboMeshKey.clear();
+    m_glRenderer.clearMeshCache();
     updateSelectionShimmerTimer();
 
     update();
@@ -263,7 +264,7 @@ void ViewportWidget::setCustomAppearanceTheme(const ViewportAppearanceTheme &the
 {
     m_customAppearanceTheme = theme;
     m_hasCustomAppearanceTheme = true;
-    m_vboMeshKey.clear();
+    m_glRenderer.clearMeshCache();
     update();
 }
 
@@ -272,7 +273,7 @@ void ViewportWidget::clearCustomAppearanceTheme()
     if (!m_hasCustomAppearanceTheme)
         return;
     m_hasCustomAppearanceTheme = false;
-    m_vboMeshKey.clear();
+    m_glRenderer.clearMeshCache();
     update();
 }
 
@@ -379,162 +380,7 @@ void ViewportWidget::initializeGL()
     const QColor background = viewportBackgroundColor(m_darkViewportTheme,
         m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr);
     glClearColor(background.redF(), background.greenF(), background.blueF(), 1.0f);
-
-    m_glMeshProgram = new QOpenGLShaderProgram(this);
-    m_glMeshProgram->addShaderFromSourceCode(
-        QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"   // world space
-        "attribute vec3 a_normal;\n"     // world space
-        "attribute vec3 a_color;\n"
-        "uniform mat4 u_mvp;\n"
-        "varying vec3 v_normal;\n"       // world space — passed through unchanged
-        "varying vec3 v_world_pos;\n"    // world space — for view-direction in fragment
-        "varying vec3 v_color;\n"
-        "void main() {\n"
-        "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-        "    v_normal    = a_normal;\n"
-        "    v_world_pos = a_position;\n"
-        "    v_color     = a_color;\n"
-        "}\n");
-    m_glMeshProgram->addShaderFromSourceCode(
-        QOpenGLShader::Fragment,
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "varying vec3 v_normal;\n"
-        "varying vec3 v_world_pos;\n"
-        "varying vec3 v_color;\n"
-        "uniform vec3 u_camera_pos;\n"   // world space camera position
-        "uniform vec3 u_light_direction_a;\n"
-        "uniform vec3 u_light_direction_b;\n"
-        "uniform vec3 u_light_direction_c;\n"
-        "uniform vec3 u_light_color_a;\n"
-        "uniform vec3 u_light_color_b;\n"
-        "uniform vec3 u_light_color_c;\n"
-        "uniform float u_light_intensity_a;\n"
-        "uniform float u_light_intensity_b;\n"
-        "uniform float u_light_intensity_c;\n"
-        "uniform float u_ambient;\n"
-        "uniform float u_specular_strength;\n"
-        "void main() {\n"
-        "    vec3 n = normalize(v_normal);\n"
-        "    vec3 viewDir = normalize(u_camera_pos - v_world_pos);\n"
-        "    vec3 lightA = normalize(u_light_direction_a);\n"
-        "    vec3 lightB = normalize(u_light_direction_b);\n"
-        "    vec3 lightC = normalize(u_light_direction_c);\n"
-        "    float diffuseA = max(0.0, dot(n, lightA));\n"
-        "    float diffuseB = max(0.0, dot(n, lightB));\n"
-        "    float diffuseC = max(0.0, dot(n, lightC));\n"
-        "    vec3 reflectedView = reflect(-viewDir, n);\n"
-        "    float skyMix = clamp(reflectedView.z * 0.55 + 0.5, 0.0, 1.0);\n"  // z=up in world
-        "    vec3 environment = mix(vec3(0.18, 0.20, 0.22), vec3(0.58, 0.70, 0.82), skyMix);\n"
-        "    float fresnel = pow(1.0 - max(0.0, dot(n, viewDir)), 3.0);\n"
-        "    float specA = pow(max(0.0, dot(reflect(-lightA, n), viewDir)), 42.0);\n"
-        "    float specB = pow(max(0.0, dot(reflect(-lightB, n), viewDir)), 26.0);\n"
-        "    float rim = pow(1.0 - max(0.0, dot(n, viewDir)), 2.0);\n"
-        "    vec3 warmLight = u_light_color_a * diffuseA * u_light_intensity_a;\n"
-        "    vec3 coolLight = u_light_color_b * diffuseB * u_light_intensity_b;\n"
-        "    vec3 sideLight = u_light_color_c * diffuseC * u_light_intensity_c;\n"
-        "    vec3 shaded = v_color * (vec3(u_ambient + 0.10) + warmLight + coolLight + sideLight);\n"
-        "    vec3 tintedEnvironment = mix(environment, v_color, 0.68);\n"
-        "    shaded = mix(shaded, tintedEnvironment, 0.04 + fresnel * 0.09);\n"
-        "    shaded += vec3(1.0, 0.92, 0.74) * specA * u_specular_strength;\n"
-        "    shaded += vec3(0.70, 0.86, 1.0) * specB * (u_specular_strength * 0.43);\n"
-        "    shaded += mix(vec3(0.55, 0.75, 1.0), v_color, 0.45) * rim * 0.055;\n"
-        "    gl_FragColor = vec4(clamp(shaded, 0.0, 1.0), 1.0);\n"
-        "}\n");
-    m_glMeshProgram->link();
-
-    m_glLineProgram = new QOpenGLShaderProgram(this);
-    m_glLineProgram->addShaderFromSourceCode(
-        QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"  // world space
-        "attribute vec4 a_color;\n"
-        "uniform mat4 u_mvp;\n"
-        "uniform float u_shimmer_phase;\n"
-        "uniform float u_shimmer_amount;\n"
-        "uniform float u_shimmer_base_alpha;\n"   // 1.0 = normal pass, <1 = bloom pass
-        "uniform float u_depth_pull;\n"           // pull lines toward camera to beat GL_LEQUAL
-        "varying vec4 v_color;\n"
-        "void main() {\n"
-        "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-        "    gl_Position.z -= u_depth_pull * gl_Position.w;\n"
-        "    float raw  = 0.5 + 0.5 * sin(dot(a_position, vec3(0.23, 0.14, 0.19)) + u_shimmer_phase);\n"
-        "    float wave = raw * raw;\n"    // square → sharper peaks
-        "    float s    = wave * u_shimmer_amount;\n"
-        "    vec3 brightened = a_color.rgb + (vec3(1.0) - a_color.rgb) * s;\n"
-        // Alpha stays between 55 % (trough) and ~100 % (peak) of the base value.
-        // The previous (1 - amount*0.75 + s*0.75) formula dropped to 31 % at the
-        // trough — most edge positions were nearly invisible against dark backgrounds.
-        "    float alpha = a_color.a * u_shimmer_base_alpha * (0.55 + s * 0.45);\n"
-        "    v_color = vec4(brightened, clamp(alpha, 0.0, 1.0));\n"
-        "}\n");
-    m_glLineProgram->addShaderFromSourceCode(
-        QOpenGLShader::Fragment,
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "varying vec4 v_color;\n"
-        "void main() {\n"
-        "    gl_FragColor = v_color;\n"
-        "}\n");
-    m_glLineProgram->link();
-
-    m_glFlatProgram = new QOpenGLShaderProgram(this);
-    m_glFlatProgram->addShaderFromSourceCode(
-        QOpenGLShader::Vertex,
-        "attribute vec3 a_position;\n"  // world space
-        "attribute vec4 a_color;\n"
-        "uniform mat4 u_mvp;\n"
-        "uniform vec2 u_offset;\n"      // XY world-space offset (for shadow multi-sample)
-        "varying vec4 v_color;\n"
-        "void main() {\n"
-        "    vec3 pos = vec3(a_position.x + u_offset.x, a_position.y + u_offset.y, a_position.z);\n"
-        "    gl_Position = u_mvp * vec4(pos, 1.0);\n"
-        "    v_color = a_color;\n"
-        "}\n");
-    m_glFlatProgram->addShaderFromSourceCode(
-        QOpenGLShader::Fragment,
-        "#ifdef GL_ES\n"
-        "precision mediump float;\n"
-        "#endif\n"
-        "varying vec4 v_color;\n"
-        "void main() {\n"
-        "    gl_FragColor = v_color;\n"
-        "}\n");
-    m_glFlatProgram->link();
-
-    // ── Grid VBO (built once, never changes) ────────────────────────────────────
-    m_vboGrid.create();
-    m_vboGrid.setUsagePattern(QOpenGLBuffer::StaticDraw);
-    {
-        QVector<OpenGLLineVertex> gridVerts;
-        gridVerts.reserve(504 + 6);
-        auto appendLine = [&](const QVector3D &from, const QVector3D &to, const QColor &color) {
-            const QVector4D c = colorToVector4(color);
-            gridVerts.append({from, c});
-            gridVerts.append({to,   c});
-        };
-        const QColor minor(128, 128, 128); // placeholder; real color set at draw time via clear+rebuild if theme changes
-        for (int i = -120; i <= 120; i += 20) {
-            appendLine({-120, float(i), 0}, {120, float(i), 0}, minor);
-            appendLine({float(i), -120, 0}, {float(i), 120, 0}, minor);
-        }
-        appendLine({-130, 0, 0}, {130, 0, 0}, QColor(210, 80, 80));
-        appendLine({0, -130, 0}, {0, 130, 0}, QColor(80, 180, 110));
-        appendLine({0, 0, 0},    {0, 0, 90},  QColor(90, 150, 230));
-        m_vboGrid.bind();
-        m_vboGrid.allocate(gridVerts.constData(), gridVerts.size() * int(sizeof(OpenGLLineVertex)));
-        m_vboGrid.release();
-        m_vboGridCount = gridVerts.size();
-    }
-
-    // ── Mesh / helper / shadow VBOs — created here, filled on first draw ───────
-    m_vboMesh.create();        m_vboMesh.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    m_vboSelectionEdges.create(); m_vboSelectionEdges.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    m_vboHelperFront.create(); m_vboHelperFront.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    m_vboHelperXray.create();  m_vboHelperXray.setUsagePattern(QOpenGLBuffer::DynamicDraw);
-    m_vboShadow.create();      m_vboShadow.setUsagePattern(QOpenGLBuffer::DynamicDraw);
+    m_glRenderer.initialize(*this);
 }
 
 void ViewportWidget::resizeGL(int w, int h)
@@ -557,10 +403,9 @@ void ViewportWidget::paintGL()
 
     const bool useOpenGLPreview = m_renderBackend == OpenGLRenderBackend && canUseOpenGLRenderBackend();
     if (useOpenGLPreview) {
-        ViewportGLRenderer glRenderer;
-        glRenderer.renderGrid(*this);
-        glRenderer.renderContactShadows(*this);
-        glRenderer.renderPreview(*this);
+        m_glRenderer.renderGrid(*this);
+        m_glRenderer.renderContactShadows(*this);
+        m_glRenderer.renderPreview(*this);
     }
 
     glDisable(GL_DEPTH_TEST);
@@ -705,11 +550,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     ViewportSoftwareRenderer renderer;
 
     ViewportSoftwareRenderer::Context ctx;
-    ctx.cameraYaw = m_cameraYaw;
-    ctx.cameraPitch = m_cameraPitch;
-    ctx.cameraDistance = m_cameraDistance;
-    ctx.cameraTarget = m_cameraTarget;
-    ctx.orthographicProjection = m_orthographicProjection;
+    ctx.camera = m_camera;
     ctx.viewportSize = size();
     ctx.darkViewportTheme = m_darkViewportTheme;
     ctx.viewportColorVariant = m_viewportColorVariant;
@@ -742,8 +583,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     } else {
         m_breadcrumbHits.clear();
     }
-    drawTreeTransformControlPreview(painter);
-    drawTreeShapeParameterPreview(painter);
+    ViewportOverlayPreview preview;
+    preview.drawTransformControlPreview(painter, *this);
+    preview.drawShapeParameterPreview(painter, *this);
     gizmo.drawAxisGizmo(painter, *this);
 }
 
@@ -881,226 +723,6 @@ void ViewportWidget::drawSelectionBreadcrumb(QPainter &painter)
     painter.restore();
 }
 
-void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
-{
-    if (!m_scene || m_treeTransformPreviewGroupId <= 0 || m_treeTransformPreviewAxis < 0)
-        return;
-
-    const SceneDocument::TreeNode *group = m_scene->treeNodeById(m_treeTransformPreviewGroupId);
-    if (!group)
-        return;
-
-    const bool translatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Translate;
-    const bool rotatePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Rotate;
-    const bool scalePreview = m_treeTransformPreviewOperation == SceneDocument::TreeNode::Scale;
-    if (!translatePreview && !rotatePreview && !scalePreview)
-        return;
-
-    const QVector3D origin = transformOriginForGroup(m_treeTransformPreviewGroupId);
-    QVector3D localAxis;
-    QColor accent;
-    if (m_treeTransformPreviewAxis == 0) {
-        localAxis = QVector3D(1.0f, 0.0f, 0.0f);
-        accent = QColor(255, 95, 120);
-    } else if (m_treeTransformPreviewAxis == 1) {
-        localAxis = QVector3D(0.0f, 1.0f, 0.0f);
-        accent = QColor(105, 245, 145);
-    } else {
-        localAxis = QVector3D(0.0f, 0.0f, 1.0f);
-        accent = QColor(105, 180, 255);
-    }
-
-    auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-    };
-    auto axisName = [&]() {
-        if (m_treeTransformPreviewAxis == 0)
-            return QStringLiteral("X");
-        if (m_treeTransformPreviewAxis == 1)
-            return QStringLiteral("Y");
-        return QStringLiteral("Z");
-    };
-    auto axisValue = [&]() {
-        const QVector3D values = translatePreview
-                                     ? group->position
-                                     : rotatePreview
-                                           ? group->rotation
-                                           : group->scale;
-        if (m_treeTransformPreviewAxis == 0)
-            return values.x();
-        if (m_treeTransformPreviewAxis == 1)
-            return values.y();
-        return values.z();
-    };
-    const QString valueLabel = QStringLiteral("%1%2 %3")
-                                   .arg(scalePreview ? QStringLiteral("S") : rotatePreview ? QStringLiteral("R") : QStringLiteral("T"),
-                                        axisName(),
-                                        formatPreviewValue(axisValue(), scalePreview ? 1 : -1));
-
-    painter.save();
-    painter.setRenderHint(QPainter::Antialiasing, true);
-
-    if (translatePreview || scalePreview) {
-        QVector3D worldAxis = worldAxisVectorForGroup(m_treeTransformPreviewGroupId, localAxis);
-        if (worldAxis.lengthSquared() <= 0.0001f)
-            worldAxis = localAxis;
-        worldAxis.normalize();
-
-        const QPointF center = project(origin);
-        const float axisLength = scalePreview ? 42.0f : 34.0f;
-        const QPointF negative = project(origin - worldAxis * axisLength);
-        const QPointF positive = project(origin + worldAxis * axisLength);
-        drawHaloLine(&painter, negative, positive, accent, 4.0);
-        drawArrowHead(&painter, center, positive, accent);
-        drawArrowHead(&painter, center, negative, accent);
-        drawDirectionLabel(&painter, positive, center, "+");
-        drawDirectionLabel(&painter, negative, center, "-");
-        drawValueLabel(&painter, center + QPointF(0.0, -28.0), valueLabel);
-    } else {
-        QVector<QPointF> arcPoints;
-        const float radius = 48.0f;
-        const QVector<SceneDocument::TreeNode> stack = parentGroupStackForGroup(m_treeTransformPreviewGroupId);
-        for (int step = -7; step <= 7; ++step) {
-            const float angle = qDegreesToRadians(step * 8.0f);
-            const float c = qCos(angle) * radius;
-            const float s = qSin(angle) * radius;
-            QVector3D localPoint;
-            if (m_treeTransformPreviewAxis == 0)
-                localPoint = QVector3D(0.0f, c, s);
-            else if (m_treeTransformPreviewAxis == 1)
-                localPoint = QVector3D(c, 0.0f, s);
-            else
-                localPoint = QVector3D(c, s, 0.0f);
-
-            arcPoints.append(project(origin + transformVectorByGroupStack(localPoint, stack)));
-        }
-
-        if (arcPoints.size() >= 2) {
-            drawHaloPolyline(&painter, QPolygonF(arcPoints), accent, 3.0);
-            drawArrowHead(&painter, arcPoints[1], arcPoints.first(), accent);
-            drawArrowHead(&painter, arcPoints[arcPoints.size() - 2], arcPoints.last(), accent);
-            const QPointF center = project(origin);
-            drawDirectionLabel(&painter, arcPoints.last(), center, "+");
-            drawDirectionLabel(&painter, arcPoints.first(), center, "-");
-            drawValueLabel(&painter, center + QPointF(0.0, -62.0), valueLabel);
-        }
-    }
-
-    painter.restore();
-}
-
-void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
-{
-    if (!m_shapes || m_treeShapePreviewShapeId <= 0 || m_treeShapePreviewParameter < 0)
-        return;
-
-    const ShapeNode *shape = nullptr;
-    for (const ShapeNode &candidate : *m_shapes) {
-        if (candidate.id == m_treeShapePreviewShapeId) {
-            shape = &candidate;
-            break;
-        }
-    }
-
-    if (!shape)
-        return;
-
-    auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-    };
-
-    QVector<SceneDocument::TreeNode> parentGroups;
-    if (m_scene)
-        collectParentGroupStackForShape(m_scene->treeRoot(), shape->id, &parentGroups);
-
-    auto transformed = [&](const QVector3D &local) {
-        const QVector3D shapeSpace = rotatePoint(local, shape->rotation) + shape->position;
-        return transformPointByGroupStack(shapeSpace, parentGroups);
-    };
-
-    auto drawDimension = [&](const QVector3D &localAxis,
-                             float halfLength,
-                             float sideOffset,
-                             const QColor &accent,
-                             const QString &label,
-                             float value) {
-        if (halfLength <= 0.001f)
-            return;
-
-        QVector3D localSide;
-        if (qAbs(localAxis.z()) > 0.5f)
-            localSide = QVector3D(1.0f, 0.0f, 0.0f);
-        else
-            localSide = QVector3D(0.0f, 0.0f, 1.0f);
-
-        const QVector3D negative = transformed(-localAxis * halfLength + localSide * sideOffset);
-        const QVector3D positive = transformed(localAxis * halfLength + localSide * sideOffset);
-        const QVector3D center = transformed(localSide * sideOffset);
-        const QPointF negativePoint = project(negative);
-        const QPointF positivePoint = project(positive);
-        const QPointF centerPoint = project(center);
-
-        drawHaloLine(&painter, negativePoint, positivePoint, accent, 2.6);
-        drawArrowHead(&painter, centerPoint, positivePoint, accent, 12.0f, 5.0f, 2.0);
-        drawArrowHead(&painter, centerPoint, negativePoint, accent, 12.0f, 5.0f, 2.0);
-        drawDirectionLabel(&painter, positivePoint, centerPoint, "+");
-        drawDirectionLabel(&painter, negativePoint, centerPoint, "-");
-        drawValueLabel(&painter, centerPoint + QPointF(0.0, -24.0), QStringLiteral("%1 %2").arg(label, formatPreviewValue(value)));
-    };
-
-    painter.save();
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    if (shape->type == ShapeNode::Cube) {
-        QVector3D localAxis;
-        QColor accent;
-        float halfLength = 0.0f;
-        if (m_treeShapePreviewParameter == 0) {
-            localAxis = QVector3D(1.0f, 0.0f, 0.0f);
-            accent = QColor(255, 95, 120);
-            halfLength = shape->size.x() * 0.5f;
-            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("X"), shape->size.x());
-        } else if (m_treeShapePreviewParameter == 1) {
-            localAxis = QVector3D(0.0f, 1.0f, 0.0f);
-            accent = QColor(105, 245, 145);
-            halfLength = shape->size.y() * 0.5f;
-            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("Y"), shape->size.y());
-        } else if (m_treeShapePreviewParameter == 2) {
-            localAxis = QVector3D(0.0f, 0.0f, 1.0f);
-            accent = QColor(105, 180, 255);
-            halfLength = shape->size.z() * 0.5f;
-            drawDimension(localAxis, halfLength, 9.0f, accent, QStringLiteral("Z"), shape->size.z());
-        }
-    } else if (shape->type == ShapeNode::Cylinder && m_treeShapePreviewParameter == 1) {
-        drawDimension(QVector3D(0.0f, 0.0f, 1.0f), shape->height * 0.5f, shape->radius + 8.0f, QColor(105, 180, 255), QStringLiteral("H"), shape->height);
-    } else {
-        const float radius = shape->radius;
-        if (radius > 0.001f) {
-            const QColor accent(255, 190, 85);
-            QVector<QPointF> circlePoints;
-            for (int step = 0; step <= 48; ++step) {
-                const float angle = qDegreesToRadians(step * 360.0f / 48.0f);
-                circlePoints.append(project(transformed(QVector3D(qCos(angle) * radius, qSin(angle) * radius, 0.0f))));
-            }
-
-            drawHaloPolyline(&painter, QPolygonF(circlePoints), accent, 2.4);
-
-            const QVector3D center = transformed(QVector3D());
-            const QVector3D edge = transformed(QVector3D(radius, 0.0f, 0.0f));
-            const QVector3D inward = transformed(QVector3D(radius * 0.45f, 0.0f, 0.0f));
-            const QPointF centerPoint = project(center);
-            const QPointF edgePoint = project(edge);
-            const QPointF inwardPoint = project(inward);
-            drawHaloLine(&painter, centerPoint, edgePoint, accent, 2.6);
-            drawArrowHead(&painter, inwardPoint, edgePoint, accent, 12.0f, 5.0f, 2.0);
-            drawArrowHead(&painter, inwardPoint, centerPoint, accent, 12.0f, 5.0f, 2.0);
-            drawDirectionLabel(&painter, edgePoint, inwardPoint, "+");
-            drawDirectionLabel(&painter, centerPoint, inwardPoint, "-");
-            drawValueLabel(&painter, inwardPoint + QPointF(0.0, -24.0), QStringLiteral("R %1").arg(formatPreviewValue(radius)));
-        }
-    }
-
-    painter.restore();
-}
 
 bool ViewportWidget::canUseOpenGLRenderBackend() const
 {
@@ -1144,7 +766,7 @@ void ViewportWidget::updateViewportControls()
     m_navigationOverlayCheckBox->blockSignals(false);
 
     m_orthographicCheckBox->blockSignals(true);
-    m_orthographicCheckBox->setChecked(m_orthographicProjection);
+    m_orthographicCheckBox->setChecked(m_camera.orthographic);
     m_orthographicCheckBox->blockSignals(false);
 
     m_colorVariantComboBox->blockSignals(true);
@@ -1254,151 +876,15 @@ QVector3D ViewportWidget::selectedLocalDeltaFromWorldDelta(const QVector3D &worl
 
 
 
-int ViewportWidget::polyhedronGroupIdForElementNode(int nodeId) const
-{
-    if (!m_scene || nodeId <= 0)
-        return 0;
 
-    int parentId = 0;
-    if (!SceneDocument::findChildParent(m_scene->treeRoot(), nodeId, &parentId, nullptr))
-        return 0;
 
-    const SceneDocument::TreeNode *parent = m_scene->treeNodeById(parentId);
-    return parent && parent->operation == SceneDocument::TreeNode::Polyhedron ? parentId : 0;
-}
 
-QVector<int> ViewportWidget::selectedPolyhedronPointNodeIds() const
-{
-    QVector<int> pointNodeIds;
-    if (!m_scene)
-        return pointNodeIds;
 
-    auto appendUnique = [&](int nodeId) {
-        if (nodeId > 0 && !pointNodeIds.contains(nodeId))
-            pointNodeIds.append(nodeId);
-    };
 
-    for (int nodeId : m_selectedPolyhedronElementNodeIds) {
-        const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
-        const ShapeNode *shape = shapeForPrimitiveNode(m_scene, node);
-        if (!shape)
-            continue;
-        if (shape->type == ShapeNode::Point3D) {
-            appendUnique(nodeId);
-            continue;
-        }
-        if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
-            continue;
 
-        const int groupId = polyhedronGroupIdForElementNode(nodeId);
-        const SceneDocument::TreeNode *group = groupId > 0 ? m_scene->treeNodeById(groupId) : nullptr;
-        if (!group)
-            continue;
 
-        QVector<int> groupPointNodeIds;
-        for (const SceneDocument::TreeNode &child : group->children) {
-            const ShapeNode *pointShape = shapeForPrimitiveNode(m_scene, &child);
-            if (pointShape && pointShape->type == ShapeNode::Point3D)
-                groupPointNodeIds.append(child.id);
-        }
 
-        for (int pointIndex : shape->polyhedronFaces.first()) {
-            if (pointIndex >= 0 && pointIndex < groupPointNodeIds.size())
-                appendUnique(groupPointNodeIds[pointIndex]);
-        }
-    }
-    return pointNodeIds;
-}
 
-QVector<SceneDocument::TreeNode> ViewportWidget::polyhedronSelectionParentGroupStack() const
-{
-    QVector<SceneDocument::TreeNode> groupStack;
-    if (!m_scene || m_selectedPolyhedronElementNodeIds.isEmpty())
-        return groupStack;
-
-    const int groupId = polyhedronGroupIdForElementNode(m_selectedPolyhedronElementNodeIds.first());
-    if (groupId > 0)
-        collectParentGroupStackForGroup(m_scene->treeRoot(), groupId, &groupStack);
-    return groupStack;
-}
-
-QVector3D ViewportWidget::polyhedronSelectionOrigin() const
-{
-    const QVector<int> pointNodeIds = selectedPolyhedronPointNodeIds();
-    if (pointNodeIds.isEmpty())
-        return QVector3D();
-
-    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack();
-    QVector3D sum;
-    int count = 0;
-    for (int nodeId : pointNodeIds) {
-        const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId) : nullptr;
-        const ShapeNode *shape = shapeForPrimitiveNode(m_scene, node);
-        if (!shape || shape->type != ShapeNode::Point3D)
-            continue;
-        sum += transformPointByGroupStack(shape->position, parentGroups);
-        ++count;
-    }
-    return count > 0 ? sum / float(count) : QVector3D();
-}
-
-QVector3D ViewportWidget::polyhedronSelectionWorldAxisVector(const QVector3D &localAxis) const
-{
-    return transformVectorByGroupStack(localAxis, polyhedronSelectionParentGroupStack());
-}
-
-float ViewportWidget::polyhedronSelectionGizmoAxisLength() const
-{
-    const float viewportSide = static_cast<float>(qMax(1, qMin(width(), height())));
-    const float baseScreenLength = qBound(52.0f, viewportSide * 0.12f, viewportSide * 0.20f);
-    const QVector3D originCamera = toCameraPoint(polyhedronSelectionOrigin(),
-                                                 m_cameraYaw,
-                                                 m_cameraPitch,
-                                                 m_cameraDistance,
-                                                 m_cameraTarget);
-    const float originDepth = qMax(8.0f, originCamera.z());
-    const float objectZoom = 220.0f / originDepth;
-    const float gizmoZoom = std::pow(objectZoom, 0.585f); // 2x object zoom -> ~1.5x gizmo zoom.
-    const float screenLength = qBound(34.0f, baseScreenLength * gizmoZoom, viewportSide * 0.25f);
-    return screenLength * originDepth / 420.0f;
-}
-
-QVector3D ViewportWidget::polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position) const
-{
-    const QPoint pixelDelta = position - m_dragStartMousePosition;
-    const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
-    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack();
-
-    if (m_dragMode == PlaneDrag) {
-        const QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
-                                   -pixelDelta.y() * worldUnitsPerPixel,
-                                   0.0f);
-        return inverseTransformVectorByGroupStack(worldDelta, parentGroups);
-    }
-
-    QVector3D axisVector;
-    if (m_dragMode == AxisXDrag)
-        axisVector = QVector3D(1.0f, 0.0f, 0.0f);
-    else if (m_dragMode == AxisYDrag)
-        axisVector = QVector3D(0.0f, 1.0f, 0.0f);
-    else if (m_dragMode == AxisZDrag)
-        axisVector = QVector3D(0.0f, 0.0f, 1.0f);
-
-    if (axisVector.isNull())
-        return QVector3D();
-
-    const QVector3D origin = polyhedronSelectionOrigin();
-    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-    const QPointF screenEnd = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axisVector * polyhedronSelectionGizmoAxisLength()),
-                                                size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-    QVector2D screenAxis(screenEnd - screenOrigin);
-    if (screenAxis.lengthSquared() <= 0.0001f)
-        return QVector3D();
-
-    screenAxis.normalize();
-    const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
-    return axisVector * screenAmount * worldUnitsPerPixel;
-}
 
 
 bool ViewportWidget::pickBreadcrumbNode(const QPoint &position, int *nodeId) const
@@ -1415,7 +901,7 @@ bool ViewportWidget::pickBreadcrumbNode(const QPoint &position, int *nodeId) con
 QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) const
 {
     const QPoint pixelDelta = position - m_dragStartMousePosition;
-    const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
+    const float worldUnitsPerPixel = m_camera.distance / 420.0f;
     QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
                          -pixelDelta.y() * worldUnitsPerPixel,
                          0.0f);
@@ -1432,17 +918,11 @@ QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) cons
         axisVector = QVector3D(0.0f, 0.0f, 1.0f);
 
     const QVector3D origin = selectedTransformOrigin();
-    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-    const QPointF screenEnd = projectWorldPoint(origin + selectedWorldAxisVector(axisVector * 36.0f),
-                                                size(),
-                                                m_cameraYaw,
-                                                m_cameraPitch,
-                                                m_cameraDistance,
-                                                m_cameraTarget,
-                                                m_orthographicProjection).point;
+    const QPointF screenOrigin = m_camera.project(origin, size()).point;
+    const QPointF screenEnd = m_camera.project(origin + selectedWorldAxisVector(axisVector * ViewportConstants::kAxisPickLength), size()).point;
     QVector2D screenAxis(screenEnd - screenOrigin);
 
-    if (screenAxis.lengthSquared() <= 0.0001f)
+    if (screenAxis.lengthSquared() <= ViewportConstants::kEpsilon)
         return QVector3D();
 
     screenAxis.normalize();
@@ -1456,7 +936,7 @@ QVector3D ViewportWidget::rotationDeltaForMousePosition(const QPoint &position) 
         return QVector3D();
 
     QVector2D tangent = m_rotationDragScreenTangent;
-    if (tangent.lengthSquared() <= 0.0001f) {
+    if (tangent.lengthSquared() <= ViewportConstants::kEpsilon) {
         tangent = QVector2D(1.0f, 0.0f);
     } else {
         tangent.normalize();
@@ -1512,21 +992,14 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
             m_lastDragDelta = QVector3D();
             m_lastRotationDelta = QVector3D();
 
-            const QPointF screenOrigin = projectWorldPoint(selectedTransformOrigin(),
-                                                           size(),
-                                                           m_cameraYaw,
-                                                           m_cameraPitch,
-                                                           m_cameraDistance,
-                                                           m_cameraTarget,
-                                                           m_orthographicProjection).point;
+            const QPointF screenOrigin = m_camera.project(selectedTransformOrigin(), size()).point;
             QVector2D radiusVector(QPointF(event->pos()) - screenOrigin);
             m_rotationDragScreenTangent = QVector2D(-radiusVector.y(), radiusVector.x());
 
             if (m_selectedGroupId > 0) {
                 m_draggingGroup = true;
                 m_dragGroupId = m_selectedGroupId;
-                m_vboMeshKey.clear();
-                m_vboSelectionEdgesKey.clear();
+                m_glRenderer.clearMeshCache();
                 updateSelectionShimmerTimer();
                 if (isRotationDragMode(m_dragMode))
                     emit groupRotationDragStarted(m_selectedGroupId);
@@ -1554,8 +1027,8 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
                 continue;
 
             for (const auto &edge : meshEdges(item.mesh)) {
-                const QPointF a = projectWorldPoint(edge.first, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
-                const QPointF b = projectWorldPoint(edge.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
+                const QPointF a = m_camera.project(edge.first, size()).point;
+                const QPointF b = m_camera.project(edge.second, size()).point;
                 const float distance = distanceToSegment(event->pos(), a, b);
 
                 if (distance < bestDistance) {
@@ -1600,10 +1073,10 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 {
     if (m_panningViewport && (event->buttons() & Qt::RightButton)) {
         const QPoint delta = event->pos() - m_lastMousePosition;
-        const float worldUnitsPerPixel = m_cameraDistance / 420.0f;
-        const QVector3D right = cameraRightVector(m_cameraYaw);
-        const QVector3D up = cameraUpVector(m_cameraYaw, m_cameraPitch);
-        m_cameraTarget += (-right * delta.x() + up * delta.y()) * worldUnitsPerPixel;
+        const float worldUnitsPerPixel = m_camera.distance / 420.0f;
+        const QVector3D right = m_camera.rightVector();
+        const QVector3D up = m_camera.upVector();
+        m_camera.target += (-right * delta.x() + up * delta.y()) * worldUnitsPerPixel;
         m_lastMousePosition = event->pos();
         update();
         event->accept();
@@ -1611,8 +1084,9 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     if (m_draggingPolyhedronElements && (event->buttons() & Qt::LeftButton)) {
-        const QVector3D localDelta = polyhedronSelectionLocalDeltaForMousePosition(event->pos());
-        if ((localDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
+        ViewportAxisGizmo gizmo;
+        const QVector3D localDelta = gizmo.polyhedronSelectionLocalDeltaForMousePosition(event->pos(), *this);
+        if ((localDelta - m_lastDragDelta).lengthSquared() < ViewportConstants::kEpsilon) {
             m_lastMousePosition = event->pos();
             return;
         }
@@ -1627,7 +1101,7 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
         if (isRotationDragMode(m_dragMode)) {
             const QVector3D rotationDelta = rotationDeltaForMousePosition(event->pos());
 
-            if ((rotationDelta - m_lastRotationDelta).lengthSquared() < 0.0001f) {
+            if ((rotationDelta - m_lastRotationDelta).lengthSquared() < ViewportConstants::kEpsilon) {
                 m_lastMousePosition = event->pos();
                 return;
             }
@@ -1643,7 +1117,7 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
 
         const QVector3D worldDelta = dragDeltaForMousePosition(event->pos());
 
-        if ((worldDelta - m_lastDragDelta).lengthSquared() < 0.0001f) {
+        if ((worldDelta - m_lastDragDelta).lengthSquared() < ViewportConstants::kEpsilon) {
             m_lastMousePosition = event->pos();
             return;
         }
@@ -1676,8 +1150,8 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent *event)
         }
 
         const QPoint delta = event->pos() - m_lastMousePosition;
-        m_cameraYaw = normalizedDegrees(m_cameraYaw - delta.x() * 0.45f);
-        m_cameraPitch = normalizedDegrees(m_cameraPitch + delta.y() * 0.35f);
+        m_camera.yaw = normalizedDegrees(m_camera.yaw - delta.x() * 0.45f);
+        m_camera.pitch = normalizedDegrees(m_camera.pitch + delta.y() * 0.35f);
         update();
     }
 
@@ -1717,8 +1191,7 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
         m_dragShapeIndex = -1;
         m_dragGroupId = 0;
         m_rotationDragScreenTangent = QVector2D();
-        m_vboMeshKey.clear();
-        m_vboSelectionEdgesKey.clear();
+        m_glRenderer.clearMeshCache();
         updateSelectionShimmerTimer();
         if (wasDraggingGroup) {
             if (wasRotating)
@@ -1746,8 +1219,8 @@ void ViewportWidget::mouseReleaseEvent(QMouseEvent *event)
 
 void ViewportWidget::wheelEvent(QWheelEvent *event)
 {
-    const float factor = m_cameraDistance * 0.001f;
-    m_cameraDistance -= event->angleDelta().y() * qMax(0.05f, factor);
-    m_cameraDistance = qBound(2.0f, m_cameraDistance, 8000.0f);
+    const float factor = m_camera.distance * 0.001f;
+    m_camera.distance -= event->angleDelta().y() * qMax(0.05f, factor);
+    m_camera.distance = qBound(2.0f, m_camera.distance, 8000.0f);
     update();
 }

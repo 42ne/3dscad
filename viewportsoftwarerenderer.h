@@ -6,6 +6,7 @@
 #include "scenemesh.h"
 #include "csgevaluator.h"
 #include "shapenode.h"
+#include "viewportcamera.h"
 
 #include <QColor>
 #include <QImage>
@@ -22,11 +23,7 @@ class ViewportSoftwareRenderer
 public:
     struct Context {
         // Camera
-        float cameraYaw = -35.0f;
-        float cameraPitch = -28.0f;
-        float cameraDistance = 220.0f;
-        QVector3D cameraTarget;
-        bool orthographicProjection = false;
+        ViewportCamera camera;
         // Viewport
         QSize viewportSize;
         // Theme

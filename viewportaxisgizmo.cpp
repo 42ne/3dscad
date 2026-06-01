@@ -3,6 +3,7 @@
 
 #include <QPainter>
 #include <QPainterPath>
+#include <cmath>
 
 using namespace ViewportHelpers;
 
@@ -13,13 +14,13 @@ void ViewportAxisGizmo::drawAxisGizmo(QPainter &painter, ViewportWidget &w) cons
     const float axisLength = 27.0f;
 
     QVector<AxisGizmoAxis> axes = {
-        {QStringLiteral("X"), QVector3D(1.0f, 0.0f, 0.0f), QColor(235, 80, 80), QPointF(), 0.0f},
-        {QStringLiteral("Y"), QVector3D(0.0f, 1.0f, 0.0f), QColor(80, 210, 120), QPointF(), 0.0f},
-        {QStringLiteral("Z"), QVector3D(0.0f, 0.0f, 1.0f), QColor(90, 155, 245), QPointF(), 0.0f}
+        {QStringLiteral("X"), QVector3D(1.0f, 0.0f, 0.0f), ViewportConstants::kRotateXColor, QPointF(), 0.0f},
+        {QStringLiteral("Y"), QVector3D(0.0f, 1.0f, 0.0f), ViewportConstants::kRotateYColor, QPointF(), 0.0f},
+        {QStringLiteral("Z"), QVector3D(0.0f, 0.0f, 1.0f), ViewportConstants::kRotateZColor, QPointF(), 0.0f}
     };
 
     for (AxisGizmoAxis &axis : axes) {
-        const QVector3D cameraDirection = toCameraDirection(axis.direction, w.m_cameraYaw, w.m_cameraPitch);
+        const QVector3D cameraDirection = w.m_camera.toCameraDirection(axis.direction);
         axis.end = center + QPointF(cameraDirection.x() * axisLength, -cameraDirection.y() * axisLength);
         axis.cameraDepth = cameraDirection.z();
     }
@@ -78,7 +79,7 @@ void ViewportAxisGizmo::drawPolyhedronElementSelectionOverlay(QPainter &painter,
     }
 
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection);
+        return w.m_camera.project(world, w.size());
     };
     auto pointWorldPosition = [&](int nodeId, QVector3D *world) {
         const SceneDocument::TreeNode *node = w.m_scene->treeNodeById(nodeId);
@@ -182,12 +183,12 @@ void ViewportAxisGizmo::drawPolyhedronElementSelectionOverlay(QPainter &painter,
 
 void ViewportAxisGizmo::drawPolyhedronSelectionMoveTool(QPainter &painter, ViewportWidget &w) const
 {
-    if (w.selectedPolyhedronPointNodeIds().isEmpty())
+    if (selectedPolyhedronPointNodeIds(w).isEmpty())
         return;
 
-    const QVector3D origin = w.polyhedronSelectionOrigin();
-    const QPointF center = projectWorldPoint(origin, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
-    const float axisLength = w.polyhedronSelectionGizmoAxisLength();
+    const QVector3D origin = polyhedronSelectionOrigin(w);
+    const QPointF center = w.m_camera.project(origin, w.size()).point;
+    const float axisLength = polyhedronSelectionGizmoAxisLength(w);
     struct AxisDraw {
         QVector3D axis;
         QColor color;
@@ -195,13 +196,12 @@ void ViewportAxisGizmo::drawPolyhedronSelectionMoveTool(QPainter &painter, Viewp
         QPointF end;
     };
     QVector<AxisDraw> axes = {
-        {QVector3D(axisLength, 0.0f, 0.0f), QColor(255, 95, 120, 205), 0.0f, QPointF()},
-        {QVector3D(0.0f, axisLength, 0.0f), QColor(105, 245, 145, 205), 0.0f, QPointF()},
-        {QVector3D(0.0f, 0.0f, axisLength), QColor(105, 180, 255, 205), 0.0f, QPointF()}
+        {QVector3D(axisLength, 0.0f, 0.0f), ViewportConstants::kAxisXColor, 0.0f, QPointF()},
+        {QVector3D(0.0f, axisLength, 0.0f), ViewportConstants::kAxisYColor, 0.0f, QPointF()},
+        {QVector3D(0.0f, 0.0f, axisLength), ViewportConstants::kAxisZColor, 0.0f, QPointF()}
     };
     for (AxisDraw &axis : axes) {
-        const ProjectedPoint projected = projectWorldPoint(origin + w.polyhedronSelectionWorldAxisVector(axis.axis),
-                                                           w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection);
+        const ProjectedPoint projected = w.m_camera.project(origin + polyhedronSelectionWorldAxisVector(axis.axis, w), w.size());
         axis.depth = projected.depth;
         axis.end = projected.point;
     }
@@ -257,17 +257,17 @@ bool ViewportAxisGizmo::pickSelectedTransformAxis(const QPoint &position, Viewpo
     const QVector3D origin = w.selectedTransformOrigin();
     float bestDistance = 9.0f;
     ViewportWidget::DragMode pickedAxis = ViewportWidget::NoDrag;
-    const QPointF start = projectWorldPoint(origin, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+    const QPointF start = w.m_camera.project(origin, w.size()).point;
 
     const QVector<QPair<ViewportWidget::DragMode, QVector3D>> axes = {
-        {ViewportWidget::AxisXDrag, w.selectedWorldAxisVector(QVector3D(36.0f, 0.0f, 0.0f))},
-        {ViewportWidget::AxisYDrag, w.selectedWorldAxisVector(QVector3D(0.0f, 36.0f, 0.0f))},
-        {ViewportWidget::AxisZDrag, w.selectedWorldAxisVector(QVector3D(0.0f, 0.0f, 36.0f))}
+        {ViewportWidget::AxisXDrag, w.selectedWorldAxisVector(QVector3D(ViewportConstants::kAxisPickLength, 0.0f, 0.0f))},
+        {ViewportWidget::AxisYDrag, w.selectedWorldAxisVector(QVector3D(0.0f, ViewportConstants::kAxisPickLength, 0.0f))},
+        {ViewportWidget::AxisZDrag, w.selectedWorldAxisVector(QVector3D(0.0f, 0.0f, ViewportConstants::kAxisPickLength))}
     };
 
     if (allowMoveAxes) {
         for (const auto &axis : axes) {
-            const QPointF end = projectWorldPoint(origin + axis.second, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+            const QPointF end = w.m_camera.project(origin + axis.second, w.size()).point;
             const float distance = distanceToSegment(position, start, end);
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -282,9 +282,9 @@ bool ViewportAxisGizmo::pickSelectedTransformAxis(const QPoint &position, Viewpo
             QPointF previous;
             bool hasPrevious = false;
 
-            for (int step = 0; step <= 72; ++step) {
-                const QVector3D worldPoint = rotationRingPoint(origin, ring, 48.0f, step * 5.0f);
-                const QPointF current = projectWorldPoint(worldPoint, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+            for (int step = 0; step <= ViewportConstants::kRingSegments; ++step) {
+                const QVector3D worldPoint = rotationRingPoint(origin, ring, ViewportConstants::kRotationRingRadius, step * ViewportConstants::kRingStepDegrees);
+                const QPointF current = w.m_camera.project(worldPoint, w.size()).point;
                 if (hasPrevious) {
                     const float distance = distanceToSegment(position, previous, current);
                     if (distance < bestDistance) {
@@ -308,11 +308,11 @@ bool ViewportAxisGizmo::pickSelectedTransformAxis(const QPoint &position, Viewpo
 
 bool ViewportAxisGizmo::pickPolyhedronSelectionAxis(const QPoint &position, ViewportWidget::DragMode *dragMode, ViewportWidget &w) const
 {
-    if (w.selectedPolyhedronPointNodeIds().isEmpty())
+    if (selectedPolyhedronPointNodeIds(w).isEmpty())
         return false;
 
-    const QVector3D origin = w.polyhedronSelectionOrigin();
-    const QPointF start = projectWorldPoint(origin, w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+    const QVector3D origin = polyhedronSelectionOrigin(w);
+    const QPointF start = w.m_camera.project(origin, w.size()).point;
     float bestDistance = 10.0f;
     ViewportWidget::DragMode picked = ViewportWidget::NoDrag;
 
@@ -321,15 +321,14 @@ bool ViewportAxisGizmo::pickPolyhedronSelectionAxis(const QPoint &position, View
         picked = ViewportWidget::PlaneDrag;
     }
 
-    const float axisLength = w.polyhedronSelectionGizmoAxisLength();
+    const float axisLength = polyhedronSelectionGizmoAxisLength(w);
     const QVector<QPair<ViewportWidget::DragMode, QVector3D>> axes = {
         {ViewportWidget::AxisXDrag, QVector3D(axisLength, 0.0f, 0.0f)},
         {ViewportWidget::AxisYDrag, QVector3D(0.0f, axisLength, 0.0f)},
         {ViewportWidget::AxisZDrag, QVector3D(0.0f, 0.0f, axisLength)}
     };
     for (const auto &axis : axes) {
-        const QPointF end = projectWorldPoint(origin + w.polyhedronSelectionWorldAxisVector(axis.second),
-                                              w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+        const QPointF end = w.m_camera.project(origin + polyhedronSelectionWorldAxisVector(axis.second, w), w.size()).point;
         const float distance = distanceToSegment(position, start, end);
         if (distance < bestDistance) {
             bestDistance = distance;
@@ -349,7 +348,7 @@ bool ViewportAxisGizmo::hitTestPolyhedronSelection(const QPoint &position, Viewp
     if (!w.m_scene || w.m_selectedPolyhedronElementNodeIds.isEmpty())
         return false;
 
-    const QVector<SceneDocument::TreeNode> parentGroups = w.polyhedronSelectionParentGroupStack();
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack(w);
     for (int nodeId : w.m_selectedPolyhedronElementNodeIds) {
         const SceneDocument::TreeNode *node = w.m_scene->treeNodeById(nodeId);
         const ShapeNode *shape = shapeForPrimitiveNode(w.m_scene, node);
@@ -357,8 +356,7 @@ bool ViewportAxisGizmo::hitTestPolyhedronSelection(const QPoint &position, Viewp
             continue;
 
         if (shape->type == ShapeNode::Point3D) {
-            const QPointF screen = projectWorldPoint(transformPointByGroupStack(shape->position, parentGroups),
-                                                     w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+            const QPointF screen = w.m_camera.project(transformPointByGroupStack(shape->position, parentGroups), w.size()).point;
             if (QVector2D(QPointF(position) - screen).length() <= 10.0f)
                 return true;
             continue;
@@ -367,7 +365,7 @@ bool ViewportAxisGizmo::hitTestPolyhedronSelection(const QPoint &position, Viewp
         if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
             continue;
 
-        const int groupId = w.polyhedronGroupIdForElementNode(nodeId);
+        const int groupId = polyhedronGroupIdForElementNode(nodeId, w);
         const SceneDocument::TreeNode *group = groupId > 0 ? w.m_scene->treeNodeById(groupId) : nullptr;
         if (!group)
             continue;
@@ -383,7 +381,7 @@ bool ViewportAxisGizmo::hitTestPolyhedronSelection(const QPoint &position, Viewp
         for (int pointIndex : shape->polyhedronFaces.first()) {
             if (pointIndex < 0 || pointIndex >= points.size())
                 continue;
-            polygon << projectWorldPoint(points[pointIndex], w.size(), w.m_cameraYaw, w.m_cameraPitch, w.m_cameraDistance, w.m_cameraTarget, w.m_orthographicProjection).point;
+            polygon << w.m_camera.project(points[pointIndex], w.size()).point;
         }
         if (polygon.size() < 2)
             continue;
@@ -401,4 +399,145 @@ bool ViewportAxisGizmo::hitTestPolyhedronSelection(const QPoint &position, Viewp
     }
 
     return false;
+}
+
+int ViewportAxisGizmo::polyhedronGroupIdForElementNode(int nodeId, const ViewportWidget &w) const
+{
+    if (!w.m_scene || nodeId <= 0)
+        return 0;
+
+    int parentId = 0;
+    if (!SceneDocument::findChildParent(w.m_scene->treeRoot(), nodeId, &parentId, nullptr))
+        return 0;
+
+    const SceneDocument::TreeNode *parent = w.m_scene->treeNodeById(parentId);
+    return parent && parent->operation == SceneDocument::TreeNode::Polyhedron ? parentId : 0;
+}
+
+QVector<int> ViewportAxisGizmo::selectedPolyhedronPointNodeIds(const ViewportWidget &w) const
+{
+    QVector<int> pointNodeIds;
+    if (!w.m_scene)
+        return pointNodeIds;
+
+    auto appendUnique = [&](int nodeId) {
+        if (nodeId > 0 && !pointNodeIds.contains(nodeId))
+            pointNodeIds.append(nodeId);
+    };
+
+    for (int nodeId : w.m_selectedPolyhedronElementNodeIds) {
+        const SceneDocument::TreeNode *node = w.m_scene->treeNodeById(nodeId);
+        const ShapeNode *shape = shapeForPrimitiveNode(w.m_scene, node);
+        if (!shape)
+            continue;
+        if (shape->type == ShapeNode::Point3D) {
+            appendUnique(nodeId);
+            continue;
+        }
+        if (shape->type != ShapeNode::Face3D || shape->polyhedronFaces.isEmpty())
+            continue;
+
+        const int groupId = polyhedronGroupIdForElementNode(nodeId, w);
+        const SceneDocument::TreeNode *group = groupId > 0 ? w.m_scene->treeNodeById(groupId) : nullptr;
+        if (!group)
+            continue;
+
+        QVector<int> groupPointNodeIds;
+        for (const SceneDocument::TreeNode &child : group->children) {
+            const ShapeNode *pointShape = shapeForPrimitiveNode(w.m_scene, &child);
+            if (pointShape && pointShape->type == ShapeNode::Point3D)
+                groupPointNodeIds.append(child.id);
+        }
+
+        for (int pointIndex : shape->polyhedronFaces.first()) {
+            if (pointIndex >= 0 && pointIndex < groupPointNodeIds.size())
+                appendUnique(groupPointNodeIds[pointIndex]);
+        }
+    }
+    return pointNodeIds;
+}
+
+QVector<SceneDocument::TreeNode> ViewportAxisGizmo::polyhedronSelectionParentGroupStack(const ViewportWidget &w) const
+{
+    QVector<SceneDocument::TreeNode> groupStack;
+    if (!w.m_scene || w.m_selectedPolyhedronElementNodeIds.isEmpty())
+        return groupStack;
+
+    const int groupId = polyhedronGroupIdForElementNode(w.m_selectedPolyhedronElementNodeIds.first(), w);
+    if (groupId > 0)
+        collectParentGroupStackForGroup(w.m_scene->treeRoot(), groupId, &groupStack);
+    return groupStack;
+}
+
+QVector3D ViewportAxisGizmo::polyhedronSelectionOrigin(const ViewportWidget &w) const
+{
+    const QVector<int> pointNodeIds = selectedPolyhedronPointNodeIds(w);
+    if (pointNodeIds.isEmpty())
+        return QVector3D();
+
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack(w);
+    QVector3D sum;
+    int count = 0;
+    for (int nodeId : pointNodeIds) {
+        const SceneDocument::TreeNode *node = w.m_scene ? w.m_scene->treeNodeById(nodeId) : nullptr;
+        const ShapeNode *shape = shapeForPrimitiveNode(w.m_scene, node);
+        if (!shape || shape->type != ShapeNode::Point3D)
+            continue;
+        sum += transformPointByGroupStack(shape->position, parentGroups);
+        ++count;
+    }
+    return count > 0 ? sum / float(count) : QVector3D();
+}
+
+QVector3D ViewportAxisGizmo::polyhedronSelectionWorldAxisVector(const QVector3D &localAxis, const ViewportWidget &w) const
+{
+    return transformVectorByGroupStack(localAxis, polyhedronSelectionParentGroupStack(w));
+}
+
+float ViewportAxisGizmo::polyhedronSelectionGizmoAxisLength(const ViewportWidget &w) const
+{
+    const float viewportSide = static_cast<float>(qMax(1, qMin(w.width(), w.height())));
+    const float baseScreenLength = qBound(52.0f, viewportSide * 0.12f, viewportSide * 0.20f);
+    const QVector3D originCamera = w.m_camera.toCameraPoint(polyhedronSelectionOrigin(w));
+    const float originDepth = qMax(8.0f, originCamera.z());
+    const float objectZoom = 220.0f / originDepth;
+    const float gizmoZoom = std::pow(objectZoom, 0.585f);
+    const float screenLength = qBound(34.0f, baseScreenLength * gizmoZoom, viewportSide * 0.25f);
+    return screenLength * originDepth / 420.0f;
+}
+
+QVector3D ViewportAxisGizmo::polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position, const ViewportWidget &w) const
+{
+    const QPoint pixelDelta = position - w.m_dragStartMousePosition;
+    const float worldUnitsPerPixel = w.m_camera.distance / 420.0f;
+    const QVector<SceneDocument::TreeNode> parentGroups = polyhedronSelectionParentGroupStack(w);
+
+    if (w.m_dragMode == ViewportWidget::PlaneDrag) {
+        const QVector3D worldDelta(pixelDelta.x() * worldUnitsPerPixel,
+                                   -pixelDelta.y() * worldUnitsPerPixel,
+                                   0.0f);
+        return inverseTransformVectorByGroupStack(worldDelta, parentGroups);
+    }
+
+    QVector3D axisVector;
+    if (w.m_dragMode == ViewportWidget::AxisXDrag)
+        axisVector = QVector3D(1.0f, 0.0f, 0.0f);
+    else if (w.m_dragMode == ViewportWidget::AxisYDrag)
+        axisVector = QVector3D(0.0f, 1.0f, 0.0f);
+    else if (w.m_dragMode == ViewportWidget::AxisZDrag)
+        axisVector = QVector3D(0.0f, 0.0f, 1.0f);
+
+    if (axisVector.isNull())
+        return QVector3D();
+
+    const QVector3D origin = polyhedronSelectionOrigin(w);
+    const QPointF screenOrigin = w.m_camera.project(origin, w.size()).point;
+    const QPointF screenEnd = w.m_camera.project(origin + polyhedronSelectionWorldAxisVector(axisVector * polyhedronSelectionGizmoAxisLength(w), w), w.size()).point;
+    QVector2D screenAxis(screenEnd - screenOrigin);
+    if (screenAxis.lengthSquared() <= 0.0001f)
+        return QVector3D();
+
+    screenAxis.normalize();
+    const float screenAmount = QVector2D::dotProduct(QVector2D(pixelDelta), screenAxis);
+    return axisVector * screenAmount * worldUnitsPerPixel;
 }

@@ -7,6 +7,7 @@
 #include "csgevaluator.h"
 #include "appearancethemes.h"
 #include "shapenode.h"
+#include "viewportconstants.h"
 
 #include <QColor>
 #include <QImage>

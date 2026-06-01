@@ -25,15 +25,14 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
 
     const QSize &vpSize = ctx.viewportSize;
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, vpSize, ctx.cameraYaw, ctx.cameraPitch,
-                                 ctx.cameraDistance, ctx.cameraTarget, ctx.orthographicProjection);
+        return ctx.camera.project(world, vpSize);
     };
 
     auto drawMinorGrid = [&]() {
         painter.setPen(viewportMinorGridColor(ctx.darkViewportTheme,
                        ctx.hasCustomAppearanceTheme ? &ctx.customAppearanceTheme : nullptr));
 
-        for (int i = -120; i <= 120; i += 20) {
+        for (int i = -ViewportConstants::kGridExtent; i <= ViewportConstants::kGridExtent; i += ViewportConstants::kGridStep) {
             painter.drawLine(project(QVector3D(-120, i, 0)).point, project(QVector3D(120, i, 0)).point);
             painter.drawLine(project(QVector3D(i, -120, 0)).point, project(QVector3D(i, 120, 0)).point);
         }
@@ -41,23 +40,21 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
 
     auto drawGridAxes = [&]() {
         const QPointF origin2D = project(QVector3D(0, 0, 0)).point;
-        const float originDepth = qMax(8.0f, toCameraPoint(QVector3D(0, 0, 0),
-                                                             ctx.cameraYaw, ctx.cameraPitch,
-                                                             ctx.cameraDistance, ctx.cameraTarget).z());
+        const float originDepth = qMax(8.0f, ctx.camera.toCameraPoint(QVector3D(0, 0, 0)).z());
         const float axisLen = 130.0f * 420.0f / originDepth;
 
         auto screenEnd = [&](const QVector3D &worldDir, float len) {
-            const QVector3D camDir = toCameraDirection(worldDir, ctx.cameraYaw, ctx.cameraPitch);
+            const QVector3D camDir = ctx.camera.toCameraDirection(worldDir);
             const QVector2D sd(camDir.x(), -camDir.y());
             return sd.isNull() ? origin2D : origin2D + (sd.normalized() * len).toPointF();
         };
 
         painter.setRenderHint(QPainter::Antialiasing, true);
-        painter.setPen(QPen(QColor(210, 80, 80), 2));
+        painter.setPen(QPen(ViewportConstants::kGridAxisXColor, 2));
         painter.drawLine(screenEnd(QVector3D(-1, 0, 0), axisLen), screenEnd(QVector3D(1, 0, 0), axisLen));
-        painter.setPen(QPen(QColor(80, 180, 110), 2));
+        painter.setPen(QPen(ViewportConstants::kGridAxisYColor, 2));
         painter.drawLine(screenEnd(QVector3D(0, -1, 0), axisLen), screenEnd(QVector3D(0, 1, 0), axisLen));
-        painter.setPen(QPen(QColor(90, 150, 230), 2));
+        painter.setPen(QPen(ViewportConstants::kGridAxisZColor, 2));
         painter.drawLine(origin2D, screenEnd(QVector3D(0, 0, 1), axisLen));
         painter.setRenderHint(QPainter::Antialiasing, false);
     };
@@ -143,7 +140,7 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                                      const SceneMesh &mesh,
                                      const QColor &color,
                                      bool visibleFacesOnly = false) {
-        const auto edges = characteristicMeshEdges(mesh, ctx.cameraYaw, ctx.cameraPitch,
+        const auto edges = characteristicMeshEdges(mesh, ctx.camera.yaw, ctx.camera.pitch,
                                                    visibleFacesOnly);
         for (const auto &edge : edges) {
             Line2D line;
@@ -183,11 +180,11 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
             if (drawSceneMeshes) {
                 for (int i = 0; i < ctx.shapes->size(); ++i) {
                     const ShapeNode &shape = ctx.shapes->at(i);
-                    QColor color = QColor(80, 160, 255);
+                    QColor color = ViewportConstants::kDefaultMeshColor;
                     if (shape.booleanMode == ShapeNode::Subtract)
-                        color = QColor(225, 95, 95);
+                        color = ViewportConstants::kSubtractColor;
                     else if (shape.booleanMode == ShapeNode::Intersect)
-                        color = QColor(150, 115, 240);
+                        color = ViewportConstants::kIntersectColor;
 
                     const bool selected = selectedShapeIds.contains(shape.id);
                     if (hasViewportSelection)
@@ -210,9 +207,9 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                     ? (item.color.isValid() ? item.color : viewportComputedSolidColor(ctx.darkViewportTheme, ctx.viewportColorVariant, ctx.hasCustomAppearanceTheme ? &ctx.customAppearanceTheme : nullptr))
                     : (item.color.isValid() ? item.color : viewportPlainSolidColor(ctx.darkViewportTheme, ctx.viewportColorVariant, ctx.hasCustomAppearanceTheme ? &ctx.customAppearanceTheme : nullptr));
                 if (!item.computed && item.booleanMode == ShapeNode::Subtract)
-                    color = QColor(225, 95, 95);
+                    color = ViewportConstants::kSubtractColor;
                 else if (!item.computed && item.booleanMode == ShapeNode::Intersect)
-                    color = QColor(150, 115, 240);
+                    color = ViewportConstants::kIntersectColor;
                 if (!item.helper && hasViewportSelection)
                     color = selectionHighlightColor(color, selected);
 
@@ -290,9 +287,9 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
             const bool showRotationRings = selectedGroup->operation == SceneDocument::TreeNode::Rotate;
             const QVector3D origin = transformOriginForGroup(ctx);
             const QVector<QPair<QVector3D, QColor>> axes = {
-                {QVector3D(38.0f, 0.0f, 0.0f), QColor(255, 95, 120)},
-                {QVector3D(0.0f, 38.0f, 0.0f), QColor(105, 245, 145)},
-                {QVector3D(0.0f, 0.0f, 38.0f), QColor(105, 180, 255)}
+                {QVector3D(38.0f, 0.0f, 0.0f), ViewportConstants::kAxisXColor},
+                {QVector3D(0.0f, 38.0f, 0.0f), ViewportConstants::kAxisYColor},
+                {QVector3D(0.0f, 0.0f, 38.0f), ViewportConstants::kAxisZColor}
             };
 
             if (showMoveAxes) {
@@ -305,16 +302,16 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
             }
 
             const QVector<QPair<ViewportWidget::DragMode, QColor>> rings = {
-                {ViewportWidget::RotateXDrag, QColor(235, 80, 80, 185)},
-                {ViewportWidget::RotateYDrag, QColor(80, 210, 120, 185)},
-                {ViewportWidget::RotateZDrag, QColor(90, 155, 245, 185)}
+                {ViewportWidget::RotateXDrag, ViewportConstants::kRotateXColor},
+                {ViewportWidget::RotateYDrag, ViewportConstants::kRotateYColor},
+                {ViewportWidget::RotateZDrag, ViewportConstants::kRotateZColor}
             };
 
             if (showRotationRings) {
                 for (const auto &ring : rings) {
                     QPolygonF ringPath;
-                    for (int step = 0; step <= 72; ++step) {
-                        const QVector3D worldPoint = rotationRingPoint(origin, ring.first, 48.0f, step * 5.0f);
+                    for (int step = 0; step <= ViewportConstants::kRingSegments; ++step) {
+                        const QVector3D worldPoint = rotationRingPoint(origin, ring.first, ViewportConstants::kRotationRingRadius, step * ViewportConstants::kRingStepDegrees);
                         ringPath << project(worldPoint).point;
                     }
 

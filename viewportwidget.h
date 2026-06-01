@@ -4,10 +4,11 @@
 #include "csgevaluator.h"
 #include "appearancethemes.h"
 #include "shapenode.h"
+#include "viewportglrenderer.h"
+#include "viewportcamera.h"
 
 #include <QFutureWatcher>
 #include <QImage>
-#include <QOpenGLBuffer>
 #include <QOpenGLFunctions>
 #include <QOpenGLWidget>
 #include <QPoint>
@@ -18,7 +19,6 @@
 #include <QVector2D>
 
 class QMouseEvent;
-class QOpenGLShaderProgram;
 class QPainter;
 class QCheckBox;
 class QComboBox;
@@ -122,8 +122,6 @@ private:
 
     void drawViewportHintOverlay(QPainter &painter, const QString &csgStatus) const;
     void drawSelectionBreadcrumb(QPainter &painter);
-    void drawTreeTransformControlPreview(QPainter &painter) const;
-    void drawTreeShapeParameterPreview(QPainter &painter) const;
     bool canUseOpenGLRenderBackend() const;
     void updateSelectionShimmerTimer();
     void updateViewportControls();
@@ -135,6 +133,7 @@ private:
     QVector<SceneDocument::TreeNode> selectedParentGroupStack() const;
     friend class ViewportGLRenderer;
     friend class ViewportAxisGizmo;
+    friend class ViewportOverlayPreview;
     bool pickBreadcrumbNode(const QPoint &position, int *nodeId) const;
     QVector3D dragDeltaForMousePosition(const QPoint &position) const;
     QVector3D rotationDeltaForMousePosition(const QPoint &position) const;
@@ -143,20 +142,11 @@ private:
     QVector3D selectedTransformOrigin() const;
     QVector3D selectedWorldAxisVector(const QVector3D &localAxis) const;
     QVector3D selectedLocalDeltaFromWorldDelta(const QVector3D &worldDelta) const;
-    int polyhedronGroupIdForElementNode(int nodeId) const;
-    QVector<int> selectedPolyhedronPointNodeIds() const;
-    QVector<SceneDocument::TreeNode> polyhedronSelectionParentGroupStack() const;
-    QVector3D polyhedronSelectionOrigin() const;
-    QVector3D polyhedronSelectionWorldAxisVector(const QVector3D &localAxis) const;
-    float polyhedronSelectionGizmoAxisLength() const;
-    QVector3D polyhedronSelectionLocalDeltaForMousePosition(const QPoint &position) const;
-
     const SceneDocument *m_scene = nullptr;
     const QVector<ShapeNode> *m_shapes = nullptr;
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     bool m_darkViewportTheme = true;
     bool m_navigationOverlayEnabled = true;
-    bool m_orthographicProjection = false;
     int m_viewportColorVariant = 0;
     int m_lightingPreset = 0;
     bool m_hasCustomAppearanceTheme = false;
@@ -175,10 +165,7 @@ private:
         QRectF rect;
     };
     QVector<BreadcrumbHit> m_breadcrumbHits;
-    float m_cameraYaw = -35.0f;
-    float m_cameraPitch = -28.0f;
-    float m_cameraDistance = 220.0f;
-    QVector3D m_cameraTarget;
+    ViewportCamera m_camera;
     QPoint m_lastMousePosition;
     QPoint m_dragStartMousePosition;
     QPoint m_emptyClickStartPosition;
@@ -213,33 +200,7 @@ private:
     QComboBox *m_colorVariantComboBox = nullptr;
     QComboBox *m_lightingPresetComboBox = nullptr;
     QCheckBox *m_orthographicCheckBox = nullptr;
-    QOpenGLShaderProgram *m_glMeshProgram = nullptr;
-    QOpenGLShaderProgram *m_glLineProgram = nullptr;
-    QOpenGLShaderProgram *m_glFlatProgram = nullptr;
-
-    // Persistent VBOs — rebuilt only when scene/camera-independent data changes.
-    // Grid: world-space line vertices, built once in initializeGL.
-    // Mesh/helper/shadow: world-space triangle vertices, rebuilt when scene fingerprint
-    // or selection/theme changes. Camera movement only updates MVP uniforms.
-    QOpenGLBuffer m_vboGrid        { QOpenGLBuffer::VertexBuffer };
-    QOpenGLBuffer m_vboMesh        { QOpenGLBuffer::VertexBuffer };
-    QOpenGLBuffer m_vboSelectionEdges { QOpenGLBuffer::VertexBuffer };
-    QOpenGLBuffer m_vboHelperFront { QOpenGLBuffer::VertexBuffer };
-    QOpenGLBuffer m_vboHelperXray  { QOpenGLBuffer::VertexBuffer };
-    QOpenGLBuffer m_vboShadow      { QOpenGLBuffer::VertexBuffer };
-    int     m_vboGridCount        = 0;
-    int     m_vboMeshCount        = 0;
-    int     m_vboSelectionHiddenEdgeCount = 0;
-    int     m_vboSelectionEdgeCount = 0;
-    int     m_vboSelectionSilhouetteCount = 0;
-    int     m_vboHelperFrontCount = 0;
-    int     m_vboHelperXrayCount  = 0;
-    int     m_vboShadowCount      = 0;
-    QString m_vboMeshKey;   // fingerprint|selectedIndex|theme|colorVariant
-    QVector<ViewportSelectionEdgeCandidate> m_selectionEdgeCandidates;
-    QString m_selectionEdgeTopologyKey; // fingerprint|selection; independent of camera
-    QString m_vboSelectionEdgesKey; // fingerprint|selection|camera direction
-    QString m_vboShadowKey; // fingerprint only
+    ViewportGLRenderer m_glRenderer;
 };
 
 #endif

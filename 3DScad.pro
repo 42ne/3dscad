@@ -48,7 +48,9 @@ SOURCES += \
     viewporthelpers.cpp \
     viewportsoftwarerenderer.cpp \
     viewportglrenderer.cpp \
-    viewportaxisgizmo.cpp
+    viewportaxisgizmo.cpp \
+    viewportoverlaypreview.cpp \
+    viewportcamera.cpp
 
 HEADERS += \
     animatedtitlebar.h \
@@ -84,7 +86,10 @@ HEADERS += \
     viewporthelpers.h \
     viewportsoftwarerenderer.h \
     viewportglrenderer.h \
-    viewportaxisgizmo.h
+    viewportaxisgizmo.h \
+    viewportoverlaypreview.h \
+    viewportcamera.h \
+    viewportconstants.h
 
 FORMS += \
     mainwindow.ui
