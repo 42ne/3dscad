@@ -9,14 +9,15 @@
 #include <QVector>
 
 #include "scenedocument.h"
+#include "scenetreegraphicswidget.h"
 
 class QGraphicsItem;
-class SceneTreeGraphicsWidget;
 
 class SceneTreeHoverManager : public QObject
 {
     Q_OBJECT
     friend class SceneTreeGraphicsWidget;
+    friend class SceneTreeInlineEditor;
 
 public:
     explicit SceneTreeHoverManager(SceneTreeGraphicsWidget *widget);
@@ -35,6 +36,7 @@ public:
     void updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled);
     void updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled);
     void updateActiveModuleCallParamControl(const QPointF &scenePosition, bool enabled);
+    bool expressionEditTargetAt(const QPointF &scenePosition, SceneTreeGraphicsWidget::ExpressionEditTarget *target) const;
 
 private:
     void updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled);

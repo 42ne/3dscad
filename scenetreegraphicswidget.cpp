@@ -12,6 +12,7 @@
 #include "scenestringutils.h"
 #include "scenetreecoloreditmode.h"
 #include "scenetreehovermanager.h"
+#include "scenetreeinlineeditor.h"
 
 #include <QApplication>
 #include <QColorDialog>
@@ -504,8 +505,6 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
     }
 
-    m_inlineInput = new SceneTreeInlineTextInput(this);
-
     m_dropPreviewAnimationTimer->setInterval(16);
     connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
         advanceDropPreviewAnimation();
@@ -542,6 +541,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
             this, &SceneTreeGraphicsWidget::inlineThemeEdited);
 
     m_hoverManager = new SceneTreeHoverManager(this);
+    m_inlineEditor = new SceneTreeInlineEditor(this);
 
     connect(m_zoomAnimTimer, &QTimer::timeout, this, [this]() {
         // ── Physics step: accel → velocity → zoom ──────────────────────────
@@ -591,7 +591,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         // ── Only redraw UI when zoom actually changed noticeably ──────────
         if (qAbs(newLevel - m_zoomLevel) > 0.001) {
             m_zoomLevel = newLevel;
-            updateInlineInputGeometry();
+            m_inlineEditor->updateInlineInputGeometry();
             updateToolbarOverlay();
         }
     });
@@ -639,7 +639,7 @@ void SceneTreeGraphicsWidget::setPolyhedronElementSelection(const QVector<int> &
 void SceneTreeGraphicsWidget::focusSelectedNodeAnimated()
 {
     if (!m_scene || m_selectedTreeNodeId <= 0 || !viewport()
-        || m_dragActive || m_canvasDragActive || m_inlineInputActive) {
+        || m_dragActive || m_canvasDragActive || m_inlineEditor->m_inlineInputActive) {
         return;
     }
 
@@ -705,7 +705,8 @@ void SceneTreeGraphicsWidget::focusSelectedNodeAnimated()
                 setTransform(focusedTransform);
                 m_zoomLevel = transform().m11();
                 centerOn(startCenter + (targetCenter - startCenter) * progress);
-                updateInlineInputGeometry();
+                m_zoomLevel = transform().m11();
+                m_inlineEditor->updateInlineInputGeometry();
                 updateToolbarOverlay();
             });
     connect(animation, &QVariantAnimation::finished, this, [this, animation]() {
@@ -1195,8 +1196,8 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     if (!colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         ExpressionEditTarget target;
-        if (expressionEditTargetAt(scenePos, &target)) {
-            startInlineExpressionEdit(target);
+        if (m_hoverManager->expressionEditTargetAt(scenePos, &target)) {
+            m_inlineEditor->startInlineExpressionEdit(target);
             event->accept();
             return;
         }
@@ -1569,7 +1570,7 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
                 const bool isModule = node->type == SceneDocument::TreeNode::Group
                                       && node->operation == SceneDocument::TreeNode::Module;
                 const QString currentName = isModule ? node->moduleName : node->variableName;
-                startInlineRename(renameNodeId, isModule, renameRect, currentName);
+                m_inlineEditor->startInlineRename(renameNodeId, isModule, renameRect, currentName);
                 event->accept();
                 return;
             }
@@ -1600,7 +1601,7 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
 void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
-    updateInlineInputGeometry();
+    m_inlineEditor->updateInlineInputGeometry();
     // Clear hover state when the canvas scrolls (positions shift under the cursor).
     const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
                          || m_hoverManager->m_hoveredExpressionRect.isValid();
@@ -1634,7 +1635,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
 void SceneTreeGraphicsWidget::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
-    updateInlineInputGeometry();
+    m_inlineEditor->updateInlineInputGeometry();
     updateToolbarOverlay();
 }
 
@@ -3368,455 +3369,6 @@ bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePos
 }
 
 
-
-bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePosition,
-                                                     ExpressionEditTarget *target) const
-{
-    if (!m_scene || colorEditMode())
-        return false;
-
-    const QFontMetricsF metrics(sceneTreeGraphicsFont());
-
-    const GroupHitArea *bestTransform = nullptr;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.collapsed || !area.rect.contains(scenePosition))
-            continue;
-        if (area.operation != SceneDocument::TreeNode::Translate
-            && area.operation != SceneDocument::TreeNode::Rotate
-            && area.operation != SceneDocument::TreeNode::Scale
-            && area.operation != SceneDocument::TreeNode::Mirror) {
-            continue;
-        }
-        if (!bestTransform || area.depth > bestTransform->depth)
-            bestTransform = &area;
-    }
-    if (bestTransform) {
-        const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestTransform->groupId);
-        if (node) {
-            const qreal headerWidth = transformHeaderWidthForNode(*node);
-            for (int axis = 0; axis < 3; ++axis) {
-                const QRectF rowRect = transformParameterControlRect(bestTransform->rect, axis, headerWidth);
-                if (!rowRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
-                    continue;
-                static const char *AxisNames[] = {"X", "Y", "Z"};
-                const QRectF editRect(rowRect.left() + TransformParamLabelArea,
-                                      rowRect.top(),
-                                      rowRect.width() - TransformParamLabelArea,
-                                      rowRect.height());
-                if (target) {
-                    target->kind = ExpressionEditTarget::Transform;
-                    target->hoverRect = rowRect;
-                    target->editRect = editRect;
-                    target->label = QStringLiteral("%1 %2")
-                                        .arg(labelForOperation(bestTransform->operation),
-                                             QString::fromLatin1(AxisNames[axis]));
-                    target->expression = transformAxisExpression(*node, axis);
-                    target->nodeId = bestTransform->groupId;
-                    target->secondaryId = axis;
-                }
-                return true;
-            }
-        }
-    }
-
-    const GroupHitArea *bestLinearExtrude = nullptr;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.operation != SceneDocument::TreeNode::LinearExtrude
-            || !area.rect.contains(scenePosition)) {
-            continue;
-        }
-        if (!bestLinearExtrude || area.depth > bestLinearExtrude->depth)
-            bestLinearExtrude = &area;
-    }
-    if (bestLinearExtrude) {
-        const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestLinearExtrude->groupId);
-        if (node) {
-            const QString expression = linearExtrudeHeightExpression(*node);
-            const QRectF textRect = linearExtrudeHeightTextRect(bestLinearExtrude->rect, metrics);
-            const qreal prefixLeft = bestLinearExtrude->rect.left() + 68.0;
-            const qreal expressionRight = textRect.left()
-                                          + qMax<qreal>(40.0, metrics.horizontalAdvance(expression) + 8.0);
-            const QRectF hoverRect(prefixLeft,
-                                   textRect.top() - 1.0,
-                                   qMin(bestLinearExtrude->rect.right() - prefixLeft - 28.0,
-                                        expressionRight - prefixLeft),
-                                   textRect.height() + 2.0);
-            if (hoverRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition)) {
-                if (target) {
-                    target->kind = ExpressionEditTarget::Transform;
-                    target->hoverRect = hoverRect;
-                    target->editRect = textRect;
-                    target->label = QStringLiteral("Linear extrude height");
-                    target->expression = expression;
-                    target->nodeId = bestLinearExtrude->groupId;
-                    target->secondaryId = 0;
-                }
-                return true;
-            }
-        }
-    }
-
-    const SceneDocument::TreeNode *bestNode = nullptr;
-    QRectF bestRect;
-    int bestDepth = -1;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        for (const ChildLayout &child : area.children) {
-            if (!child.rect.contains(scenePosition))
-                continue;
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
-            if (!node)
-                continue;
-            if (node->type != SceneDocument::TreeNode::Primitive
-                && node->type != SceneDocument::TreeNode::Variable
-                && node->type != SceneDocument::TreeNode::ModuleCall) {
-                continue;
-            }
-            if (area.depth > bestDepth) {
-                bestNode = node;
-                bestRect = child.rect;
-                bestDepth = area.depth;
-            }
-        }
-    }
-
-    // ── Polyhedron table pills (inline edit) ────────────────
-    if (!bestNode) {
-        for (QGraphicsItem *item : m_treeItems) {
-            if (auto *polygonTable = dynamic_cast<Polygon2DTableItem *>(item)) {
-                const QPointF localPos = polygonTable->mapFromScene(scenePosition);
-                if (!polygonTable->boundingRect().contains(localPos))
-                    continue;
-                const Polygon2DTableItem::Cell cell = polygonTable->cellAt(localPos);
-                if (cell.type != Polygon2DTableItem::Cell::PtX
-                    && cell.type != Polygon2DTableItem::Cell::PtY)
-                    continue;
-
-                const SceneDocument::TreeNode *node = m_scene->treeNodeById(cell.nodeId);
-                const ShapeNode *shape = (node && node->type == SceneDocument::TreeNode::Primitive)
-                    ? m_scene->shapeById(node->shapeId) : nullptr;
-                if (!shape || cell.index < 0 || cell.index >= shape->polyhedronPoints.size())
-                    continue;
-
-                const bool isX = cell.type == Polygon2DTableItem::Cell::PtX;
-                const QRectF sceneRect(polygonTable->mapToScene(cell.rect.topLeft()),
-                                       polygonTable->mapToScene(cell.rect.bottomRight()));
-                if (target) {
-                    target->kind = ExpressionEditTarget::Polygon2DPoint;
-                    target->hoverRect = sceneRect;
-                    target->editRect = sceneRect;
-                    target->label = QStringLiteral("Pt %1 %2").arg(cell.index).arg(isX ? QStringLiteral("X") : QStringLiteral("Y"));
-                    target->expression = QString::number(isX ? shape->polyhedronPoints[cell.index].x()
-                                                             : shape->polyhedronPoints[cell.index].y(), 'g');
-                    target->nodeId = cell.nodeId;
-                    target->secondaryId = cell.index * 2 + (isX ? 0 : 1);
-                }
-                return true;
-            }
-
-            auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
-            if (!tableItem) continue;
-            const QPointF localPos = tableItem->mapFromScene(scenePosition);
-            if (!tableItem->boundingRect().contains(localPos))
-                continue;
-            const PolyhedronTableItem::Cell cell = tableItem->cellAt(localPos);
-            if (cell.type == PolyhedronTableItem::Cell::None)
-                continue;
-
-            const QRectF sceneRect(tableItem->mapToScene(cell.rect.topLeft()),
-                                   tableItem->mapToScene(cell.rect.bottomRight()));
-
-            // ── Face participation (custom editing) ──
-            if (cell.type == PolyhedronTableItem::Cell::FaceParticipate) {
-                const SceneDocument::TreeNode *faceNode = m_scene->treeNodeById(cell.nodeId);
-                if (!faceNode || faceNode->type != SceneDocument::TreeNode::Primitive) continue;
-                const ShapeNode *faceShape = m_scene->shapeById(faceNode->shapeId);
-                if (!faceShape || faceShape->type != ShapeNode::Face3D) continue;
-
-                int pos = -1;
-                if (!faceShape->polyhedronFaces.isEmpty())
-                    pos = faceShape->polyhedronFaces.first().indexOf(cell.sub);
-
-                const int ptNodeId = tableItem->pointNodeIdForIndex(cell.sub);
-                if (target) {
-                    target->kind = ExpressionEditTarget::PolyhedronParticipation;
-                    target->hoverRect  = sceneRect;
-                    target->editRect   = sceneRect;
-                    target->label      = QStringLiteral("F%1 vertex").arg(cell.index);
-                    target->expression = QString::number(pos);
-                    target->nodeId     = cell.nodeId;   // face nodeId
-                    target->secondaryId = ptNodeId;     // point nodeId
-                }
-                return true;
-            }
-
-            // ── PtX/PtY/PtZ (standard shape parameter) ──
-            int paramIndex = -1;
-            switch (cell.type) {
-            case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
-            case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
-            case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
-            default: continue;
-            }
-
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(cell.nodeId);
-            if (!node || node->type != SceneDocument::TreeNode::Primitive) continue;
-            const ShapeNode *shape = m_scene->shapeById(node->shapeId);
-            if (!shape) continue;
-
-            const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-            if (paramIndex >= controls.size()) continue;
-
-            if (target) {
-                target->kind = ExpressionEditTarget::ShapeParameter;
-                target->hoverRect  = sceneRect;
-                target->editRect   = sceneRect;
-                target->label      = controls[paramIndex].label;
-                target->expression = controls[paramIndex].expression;
-                target->nodeId     = cell.nodeId;
-                target->secondaryId = paramIndex;
-            }
-            return true;
-        }
-    }
-
-    if (!bestNode)
-        return false;
-
-    if (bestNode->type == SceneDocument::TreeNode::Primitive) {
-        const ShapeNode *shape = m_scene->shapeById(bestNode->shapeId);
-        if (!shape)
-            return false;
-        const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-        for (int i = 0; i < controls.size(); ++i) {
-            const QRectF rowRect = shapeParameterControlRect(bestRect, i, controls.size());
-            if (!rowRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
-                continue;
-            const QRectF editRect(rowRect.left() + PrimitiveParamLabelArea,
-                                  rowRect.top(),
-                                  rowRect.width() - PrimitiveParamLabelArea,
-                                  rowRect.height());
-            if (target) {
-                target->kind = ExpressionEditTarget::ShapeParameter;
-                target->hoverRect = rowRect;
-                target->editRect = editRect;
-                target->label = QStringLiteral("Shape %1").arg(controls[i].label);
-                target->expression = controls[i].expression;
-                target->nodeId = bestNode->id;
-                target->secondaryId = i;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    if (bestNode->type == SceneDocument::TreeNode::Variable) {
-        const qreal nameW = metrics.horizontalAdvance(bestNode->variableName);
-        const QRectF editRect = variableExpressionTextRect(bestRect, nameW);
-        const QRectF hoverRect(bestRect.left() + 38.0 + nameW,
-                               bestRect.top() + (VariableHeight - 18.0) * 0.5,
-                               bestRect.right() - (bestRect.left() + 38.0 + nameW) - 4.0,
-                               18.0);
-        if (!hoverRect.adjusted(-2.0, -2.0, 2.0, 2.0).contains(scenePosition))
-            return false;
-        if (target) {
-            target->kind = ExpressionEditTarget::Variable;
-            target->hoverRect = hoverRect;
-            target->editRect = editRect;
-            target->label = QStringLiteral("Variable %1").arg(bestNode->variableName);
-            target->expression = bestNode->variableExpression;
-            target->nodeId = bestNode->id;
-        }
-        return true;
-    }
-
-    if (bestNode->type == SceneDocument::TreeNode::ModuleCall) {
-        const SceneDocument::TreeNode *moduleNode = m_scene->treeNodeById(bestNode->shapeId);
-        if (!moduleNode || moduleNode->operation != SceneDocument::TreeNode::Module)
-            return false;
-
-        QVector<ModuleCallParam> params;
-        const QHash<QString, QString> overrides = resolveModuleArguments(bestNode->moduleCallArguments, *moduleNode);
-        for (const SceneDocument::TreeNode &child : moduleNode->children) {
-            if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
-                const QString expr = overrides.value(child.variableName,
-                                                     child.variableExpression.trimmed().isEmpty()
-                                                         ? QString::number(child.variableValue)
-                                                         : child.variableExpression.trimmed());
-                params.append({child.id, child.variableName, expr});
-            }
-        }
-
-        qreal x = bestRect.left() + 46.0 + metrics.horizontalAdvance(bestNode->moduleName + QStringLiteral("("));
-        for (int i = 0; i < params.size(); ++i) {
-            const qreal labelLeft = x;
-            x += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
-            const qreal exprWidth = qMax<qreal>(40.0, metrics.horizontalAdvance(params[i].expression) + 10.0);
-            const QRectF editRect(x, bestRect.top(), qMin(exprWidth, bestRect.right() - x), VariableHeight);
-            const QRectF hoverRect(labelLeft, bestRect.top(), qMin(x + exprWidth - labelLeft, bestRect.right() - labelLeft), VariableHeight);
-            if (hoverRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition)) {
-                if (target) {
-                    target->kind = ExpressionEditTarget::ModuleCallArgument;
-                    target->hoverRect = hoverRect;
-                    target->editRect = editRect;
-                    target->label = QStringLiteral("Argument %1").arg(params[i].name);
-                    target->expression = params[i].expression;
-                    target->nodeId = bestNode->id;
-                    target->secondaryId = params[i].varNodeId;
-                }
-                return true;
-            }
-            x += metrics.horizontalAdvance(params[i].expression);
-            if (i < params.size() - 1)
-                x += metrics.horizontalAdvance(QStringLiteral(", "));
-        }
-    }
-
-    return false;
-}
-
-bool SceneTreeGraphicsWidget::validateInlineExpression(const ExpressionEditTarget &target,
-                                                       const QString &expression,
-                                                       QString *errorMessage) const
-{
-    const QString trimmed = expression.trimmed();
-    if (trimmed.isEmpty()) {
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Expression cannot be empty.");
-        return false;
-    }
-
-    if (target.kind == ExpressionEditTarget::ModuleCallArgument)
-        return ExpressionSyntax::validate(trimmed, errorMessage);
-
-    if (target.kind == ExpressionEditTarget::PolyhedronParticipation) {
-        bool ok = false;
-        trimmed.toInt(&ok);
-        if (!ok && errorMessage)
-            *errorMessage = QStringLiteral("Enter a vertex position (0–N) or -1 for none.");
-        return ok;
-    }
-
-    QHash<QString, qreal> values;
-    if (m_scene)
-        collectVariableValues(m_scene->treeRoot(), &values,
-                              target.kind == ExpressionEditTarget::Variable ? target.nodeId : 0);
-
-    qreal value = 0.0;
-    return ExpressionSyntax::evaluate(trimmed, values, &value, errorMessage);
-}
-
-void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarget &target)
-{
-    if (!m_inlineInput || target.kind == ExpressionEditTarget::None)
-        return;
-
-    m_inlineInputActive = true;
-    m_inlineInputSceneRect = target.editRect;
-
-    m_inlineInput->startEditing(
-        mapFromScene(target.editRect).boundingRect(),
-        target.expression,
-        [this, target](const QString &newExpression) {
-            QString error;
-            if (!validateInlineExpression(target, newExpression, &error)) {
-                m_hoverManager->updateHoverHint(QStringLiteral("expression-error:%1:%2")
-                                    .arg(target.nodeId).arg(target.secondaryId),
-                                QStringLiteral("Expression error\n%1\nEditing stays active").arg(error));
-                return false;
-            }
-
-            m_inlineInputActive = false;
-            m_inlineInputSceneRect = QRectF();
-            m_hoverManager->m_hoveredExpressionRect = QRectF();
-            if (newExpression == target.expression.trimmed()) {
-                m_hoverManager->updateHighlightOverlay();
-                return true;
-            }
-
-            switch (target.kind) {
-            case ExpressionEditTarget::Transform:
-                emit transformExpressionEdited(target.nodeId, target.secondaryId, newExpression);
-                break;
-            case ExpressionEditTarget::ShapeParameter:
-                emit shapeParameterExpressionEdited(target.nodeId, target.secondaryId, newExpression);
-                break;
-            case ExpressionEditTarget::Polygon2DPoint: {
-                const int pointIndex = target.secondaryId / 2;
-                const int coord = target.secondaryId % 2;
-                emit polygon2DPointExpressionEdited(target.nodeId, pointIndex, coord, newExpression);
-                break;
-            }
-            case ExpressionEditTarget::Variable:
-                emit variableExpressionEdited(target.nodeId, newExpression);
-                break;
-            case ExpressionEditTarget::ModuleCallArgument:
-                emit moduleCallArgumentExpressionEdited(target.nodeId, target.secondaryId, newExpression);
-                break;
-            case ExpressionEditTarget::PolyhedronParticipation: {
-                bool ok = false;
-                int newPos = newExpression.trimmed().toInt(&ok);
-                if (ok)
-                    emit polyhedronFaceParticipationAdjusted(target.nodeId, target.secondaryId, newPos);
-                break;
-            }
-            case ExpressionEditTarget::None:
-                break;
-            }
-            m_hoverManager->updateHighlightOverlay();
-            return true;
-        },
-        [this]() {
-            m_inlineInputActive = false;
-            m_inlineInputSceneRect = QRectF();
-            m_hoverManager->m_hoveredExpressionRect = QRectF();
-            m_hoverManager->updateHighlightOverlay();
-        });
-}
-
-void SceneTreeGraphicsWidget::startInlineRename(int nodeId,
-                                                bool isModule,
-                                                const QRectF &sceneRect,
-                                                const QString &currentName)
-{
-    if (!m_inlineInput)
-        return;
-
-    m_inlineInputActive = true;
-    m_inlineInputSceneRect = sceneRect;
-
-    m_inlineInput->startEditing(
-        mapFromScene(sceneRect).boundingRect(),
-        currentName,
-        [this, nodeId, isModule](const QString &newName) {
-            m_inlineInputActive = false;
-            m_inlineInputSceneRect = QRectF();
-            if (newName.isEmpty() || newName == (isModule
-                    ? (m_scene ? m_scene->treeNodeById(nodeId) ?
-                           m_scene->treeNodeById(nodeId)->moduleName : QString() : QString())
-                    : (m_scene ? m_scene->treeNodeById(nodeId) ?
-                           m_scene->treeNodeById(nodeId)->variableName : QString() : QString())))
-                return true;
-            if (isModule) {
-                emit moduleRenameRequested(nodeId, newName);
-            } else {
-                emit variableRenameRequested(nodeId, newName);
-            }
-            return true;
-        },
-        [this]() {
-            m_inlineInputActive = false;
-            m_inlineInputSceneRect = QRectF();
-        });
-}
-
-void SceneTreeGraphicsWidget::updateInlineInputGeometry()
-{
-    if (!m_inlineInput || !m_inlineInputActive || !m_inlineInputSceneRect.isValid())
-        return;
-
-    m_inlineInput->reposition(mapFromScene(m_inlineInputSceneRect).boundingRect());
-    m_inlineInput->raise();
-}
 
 QRectF SceneTreeGraphicsWidget::debugGroupRect(int groupId) const { return groupRectForNode(groupId); }
 QRectF SceneTreeGraphicsWidget::debugChildRect(int nodeId)  const { return rectForChildNode(nodeId); }

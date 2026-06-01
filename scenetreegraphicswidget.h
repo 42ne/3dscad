@@ -29,6 +29,7 @@ class NodeThumbnailCache;
 class SceneTreeInlineTextInput;
 class SceneTreeColorEditMode;
 class SceneTreeHoverManager;
+class SceneTreeInlineEditor;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -59,6 +60,25 @@ public:
     // Debug/inspection — for use by debug tools only.
     QRectF debugGroupRect(int groupId) const;
     QRectF debugChildRect(int nodeId) const;
+
+    struct ExpressionEditTarget {
+        enum Kind {
+            None,
+            Transform,
+            ShapeParameter,
+            Variable,
+            ModuleCallArgument,
+            PolyhedronParticipation,
+            Polygon2DPoint
+        };
+        Kind kind = None;
+        QRectF hoverRect;
+        QRectF editRect;
+        QString label;
+        QString expression;
+        int nodeId = 0;
+        int secondaryId = 0;
+    };
 
 signals:
     void toolDropped(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone);
@@ -129,6 +149,7 @@ private:
 
     friend class SceneTreeColorEditMode;
     friend class SceneTreeHoverManager;
+    friend class SceneTreeInlineEditor;
     void clearColorEditHighlight();
     void updateColorEditHighlight(const QPointF &scenePos);
 
@@ -169,12 +190,6 @@ private:
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
-    void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
-    struct ExpressionEditTarget;
-    bool expressionEditTargetAt(const QPointF &scenePosition, ExpressionEditTarget *target) const;
-    void startInlineExpressionEdit(const ExpressionEditTarget &target);
-    bool validateInlineExpression(const ExpressionEditTarget &target, const QString &expression, QString *errorMessage) const;
-    void updateInlineInputGeometry();
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
     bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
@@ -278,29 +293,6 @@ private:
     };
     QVector<RenameZone> m_renameZones;
 
-    struct ExpressionEditTarget {
-        enum Kind {
-            None,
-            Transform,
-            ShapeParameter,
-            Variable,
-            ModuleCallArgument,
-            PolyhedronParticipation,
-            Polygon2DPoint
-        };
-        Kind kind = None;
-        QRectF hoverRect;
-        QRectF editRect;
-        QString label;
-        QString expression;
-        int nodeId = 0;
-        int secondaryId = 0;
-    };
-
-    SceneTreeInlineTextInput *m_inlineInput     = nullptr;
-    bool                      m_inlineInputActive = false;
-    QRectF                    m_inlineInputSceneRect;
-
     int m_treeTheme = 1;    // SceneTreePalette::Theme cast to int; 1 = second tree theme
     int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
@@ -309,6 +301,7 @@ private:
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
     SceneTreeHoverManager *m_hoverManager = nullptr;
+    SceneTreeInlineEditor *m_inlineEditor = nullptr;
     SceneTreeColorEditMode *m_colorEdit = nullptr;
     QGraphicsItem  *m_colorEditToggleItem  = nullptr; // pointer to the toggle for priority check
     QPoint m_lastPanPoint;
