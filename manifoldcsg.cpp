@@ -10,7 +10,6 @@
 #include <QHash>
 #include <QMutex>
 #include <QStringList>
-#include <QVector2D>
 #include <QtMath>
 #include <algorithm>
 
@@ -44,141 +43,47 @@ static MeshTriangle makeTriangle(const QVector3D &a, const QVector3D &b, const Q
     return triangle;
 }
 
-static QVector3D averagePoint(const QVector<QVector3D> &points)
+static Manifold manifoldFromSceneMesh(const SceneMesh &mesh)
 {
-    QVector3D sum;
-    for (const QVector3D &point : points)
-        sum += point;
-    return points.isEmpty() ? sum : sum / static_cast<float>(points.size());
-}
-
-static QVector3D polygonNormal(const QVector<QVector3D> &points, const QVector<int> &face)
-{
-    QVector3D normal;
-    for (int i = 0; i < face.size(); ++i) {
-        const QVector3D &a = points[face[i]];
-        const QVector3D &b = points[face[(i + 1) % face.size()]];
-        normal.setX(normal.x() + (a.y() - b.y()) * (a.z() + b.z()));
-        normal.setY(normal.y() + (a.z() - b.z()) * (a.x() + b.x()));
-        normal.setZ(normal.z() + (a.x() - b.x()) * (a.y() + b.y()));
-    }
-    return normal;
-}
-
-static QVector<int> orientedFaceOutward(const QVector<QVector3D> &points,
-                                        QVector<int> face,
-                                        const QVector3D &polyCenter)
-{
-    QVector<QVector3D> facePoints;
-    facePoints.reserve(face.size());
-    for (int index : face)
-        facePoints.append(points[index]);
-
-    const QVector3D faceCenter = averagePoint(facePoints);
-    const QVector3D normal = polygonNormal(points, face);
-    if (QVector3D::dotProduct(normal, faceCenter - polyCenter) < 0.0f)
-        std::reverse(face.begin(), face.end());
-    return face;
-}
-
-// Ear-clip a face (as an index list into pts) and append triangle index triples to triVerts.
-static void earClipFace(const QVector<QVector3D> &pts, const QVector<int> &face,
-                        std::vector<uint32_t> &triVerts)
-{
-    const int n = face.size();
-    if (n < 3) return;
-    if (n == 3) {
-        triVerts.push_back(face[0]); triVerts.push_back(face[1]); triVerts.push_back(face[2]);
-        return;
-    }
-    // Project to 2D in the polygon's plane
-    const QVector3D nrm = polygonNormal(pts, face).normalized();
-    if (nrm.isNull()) return;
-    const QVector3D ref = qAbs(nrm.x()) < 0.9f ? QVector3D(1,0,0) : QVector3D(0,1,0);
-    const QVector3D bu  = QVector3D::crossProduct(ref, nrm).normalized();
-    const QVector3D bv  = QVector3D::crossProduct(nrm, bu).normalized();
-
-    QVector<QVector2D> p2(n);
-    for (int i = 0; i < n; ++i) {
-        const QVector3D &p = pts[face[i]];
-        p2[i] = {QVector3D::dotProduct(p, bu), QVector3D::dotProduct(p, bv)};
-    }
-    auto cross2 = [&](int a, int b, int c) -> float {
-        return (p2[b].x()-p2[a].x())*(p2[c].y()-p2[a].y())
-             - (p2[b].y()-p2[a].y())*(p2[c].x()-p2[a].x());
-    };
-
-    QVector<int> ring(n);
-    for (int i = 0; i < n; ++i) ring[i] = i;
-
-    float area = 0.0f;
-    for (int i = 0; i < n; ++i)
-        area += p2[ring[i]].x() * p2[ring[(i+1)%n]].y()
-              - p2[ring[(i+1)%n]].x() * p2[ring[i]].y();
-    const float winding = area >= 0.0f ? 1.0f : -1.0f;
-    constexpr float eps = 1.0e-5f;
-
-    while (ring.size() > 3) {
-        const int rn = ring.size();
-        bool clipped = false;
-        for (int i = 0; i < rn; ++i) {
-            const int a = ring[(i-1+rn)%rn], b = ring[i], c = ring[(i+1)%rn];
-            if (winding * cross2(a,b,c) <= eps) continue;
-            bool blocked = false;
-            for (int j = 0; j < rn && !blocked; ++j) {
-                if (j==(i-1+rn)%rn || j==i || j==(i+1)%rn) continue;
-                const int w = ring[j];
-                if (winding * cross2(a,b,w) >= -eps
-                    && winding * cross2(b,c,w) >= -eps
-                    && winding * cross2(c,a,w) >= -eps)
-                    blocked = true;
-            }
-            if (blocked) continue;
-            triVerts.push_back(face[a]); triVerts.push_back(face[b]); triVerts.push_back(face[c]);
-            ring.remove(i);
-            clipped = true;
-            break;
+    MeshGL meshGl;
+    meshGl.numProp = 3;
+    for (const MeshTriangle &triangle : mesh.triangles) {
+        const QVector3D vertices[3] = {triangle.a, triangle.b, triangle.c};
+        const uint32_t base = static_cast<uint32_t>(meshGl.vertProperties.size() / 3);
+        for (const QVector3D &vertex : vertices) {
+            meshGl.vertProperties.push_back(vertex.x());
+            meshGl.vertProperties.push_back(vertex.y());
+            meshGl.vertProperties.push_back(vertex.z());
         }
-        if (!clipped) break;
+        meshGl.triVerts.push_back(base);
+        meshGl.triVerts.push_back(base + 1);
+        meshGl.triVerts.push_back(base + 2);
     }
-    if (ring.size() == 3) {
-        triVerts.push_back(face[ring[0]]);
-        triVerts.push_back(face[ring[1]]);
-        triVerts.push_back(face[ring[2]]);
-    }
+
+    // buildShapeMesh() emits render-style triangles with duplicate position
+    // vertices. Merge them back into topological vertices before asking
+    // Manifold to validate the solid.
+    meshGl.Merge();
+    return Manifold(meshGl);
 }
 
 static Manifold manifoldFromShape(const ShapeNode &shape)
 {
     Manifold result;
 
-    auto manifoldFromSceneMesh = [](const SceneMesh &mesh) -> Manifold {
-        MeshGL meshGl;
-        meshGl.numProp = 3;
-        for (const MeshTriangle &triangle : mesh.triangles) {
-            const QVector3D vertices[3] = {triangle.a, triangle.b, triangle.c};
-            const uint32_t base = static_cast<uint32_t>(meshGl.vertProperties.size() / 3);
-            for (const QVector3D &vertex : vertices) {
-                meshGl.vertProperties.push_back(vertex.x());
-                meshGl.vertProperties.push_back(vertex.y());
-                meshGl.vertProperties.push_back(vertex.z());
-            }
-            meshGl.triVerts.push_back(base);
-            meshGl.triVerts.push_back(base + 1);
-            meshGl.triVerts.push_back(base + 2);
-        }
-        return Manifold(meshGl);
-    };
-
-    if (shape.type == ShapeNode::Polyhedron
-        || shape.type == ShapeNode::Point3D
+    if (shape.type == ShapeNode::Point3D
         || shape.type == ShapeNode::Face3D)
-        return {}; // polyhedron / data components skipped in Manifold CSG
+        return {}; // polyhedron data components are handled by their group
 
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
     } else if (shape.type == ShapeNode::Square) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), true);
+    } else if (shape.type == ShapeNode::Polyhedron) {
+        ShapeNode localShape = shape;
+        localShape.position = QVector3D();
+        localShape.rotation = QVector3D();
+        result = manifoldFromSceneMesh(buildShapeMesh(localShape));
     } else if (shape.type == ShapeNode::Polygon2D) {
         ShapeNode localShape = shape;
         localShape.position = QVector3D();
@@ -322,15 +227,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (pts.isEmpty() || faces.isEmpty())
             return {};
         const int pointCount = pts.size();
-        const QVector3D polyCenter = averagePoint(pts);
-        // Build MeshGL: fan-triangulate each face (validate indices)
-        MeshGL meshGl;
-        meshGl.numProp = 3;
-        for (const QVector3D &pt : pts) {
-            meshGl.vertProperties.push_back(pt.x());
-            meshGl.vertProperties.push_back(pt.y());
-            meshGl.vertProperties.push_back(pt.z());
-        }
+        QVector<QVector<int>> validFaces;
+        validFaces.reserve(faces.size());
         for (const QVector<int> &face : faces) {
             if (face.size() < 3)
                 continue;
@@ -338,14 +236,17 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
             auto safe = [pointCount](int idx) -> int {
                 return qBound(0, idx, pointCount - 1);
             };
-            QVector<int> orientedFace = face;
-            for (int &idx : orientedFace)
+            QVector<int> clampedFace = face;
+            for (int &idx : clampedFace)
                 idx = safe(idx);
-            orientedFace = orientedFaceOutward(pts, orientedFace, polyCenter);
-
-            earClipFace(pts, orientedFace, meshGl.triVerts);
+            validFaces.append(clampedFace);
         }
-        return applyNodeTransform(Manifold(meshGl), evaluatedNode);
+
+        ShapeNode polyShape;
+        polyShape.type = ShapeNode::Polyhedron;
+        polyShape.polyhedronPoints = pts;
+        polyShape.polyhedronFaces = validFaces;
+        return applyNodeTransform(manifoldFromSceneMesh(buildShapeMesh(polyShape)), evaluatedNode);
     }
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::Hull) {

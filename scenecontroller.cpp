@@ -6,12 +6,15 @@
 #include "scenetreegraphicshelpers.h"
 #include "scenestringutils.h"
 
-#include <QApplication>
-#include <QUndoStack>
 #include <QAction>
+#include <QApplication>
+#include <QElapsedTimer>
+#include <QSet>
+#include <QUndoStack>
 
 #include <functional>
 #include <cmath>
+#include <limits>
 
 // ────────────────────────────────────────────────────────────────────────────
 // File-local helpers (moved here from mainwindow.cpp)
@@ -302,28 +305,209 @@ static QVector<QVector<int>> buildExtrusionFaces(const QVector<int> &bottomIdx,
     return faces;
 }
 
-// Tries 2-layer extrusion first; falls back to convex hull for general 3D clouds.
-static QVector<QVector<int>> computePolyhedronFaces(const QVector<QVector3D> &pts)
+static qreal cross2D(const QVector3D &origin, const QVector3D &a, const QVector3D &b)
 {
+    return (a.x() - origin.x()) * (b.y() - origin.y())
+           - (a.y() - origin.y()) * (b.x() - origin.x());
+}
+
+static QVector<int> convexHullXY(QVector<int> indices, const QVector<QVector3D> &pts)
+{
+    if (indices.size() < 3)
+        return {};
+
+    std::sort(indices.begin(), indices.end(), [&](int left, int right) {
+        if (!qFuzzyCompare(pts[left].x(), pts[right].x()))
+            return pts[left].x() < pts[right].x();
+        if (!qFuzzyCompare(pts[left].y(), pts[right].y()))
+            return pts[left].y() < pts[right].y();
+        return left < right;
+    });
+
+    QVector<int> hull;
+    hull.reserve(indices.size() * 2);
+    constexpr qreal eps = 1.0e-6;
+
+    for (int idx : indices) {
+        while (hull.size() >= 2
+               && cross2D(pts[hull[hull.size() - 2]], pts[hull.last()], pts[idx]) <= eps)
+            hull.removeLast();
+        hull.append(idx);
+    }
+
+    const int lowerSize = hull.size();
+    for (int i = indices.size() - 2; i >= 0; --i) {
+        const int idx = indices[i];
+        while (hull.size() > lowerSize
+               && cross2D(pts[hull[hull.size() - 2]], pts[hull.last()], pts[idx]) <= eps)
+            hull.removeLast();
+        hull.append(idx);
+    }
+
+    if (!hull.isEmpty())
+        hull.removeLast();
+    return hull.size() >= 3 ? hull : QVector<int>();
+}
+
+static QVector<int> mapTopLoopFromBottom(const QVector<int> &bottomLoop,
+                                         const QVector<int> &topIdx,
+                                         const QVector<QVector3D> &pts)
+{
+    QVector<int> topLoop;
+    topLoop.reserve(bottomLoop.size());
+    QSet<int> usedTop;
+
+    for (int bottom : bottomLoop) {
+        float best = std::numeric_limits<float>::max();
+        int bestTop = -1;
+        for (int top : topIdx) {
+            if (usedTop.contains(top))
+                continue;
+            const float dx = pts[top].x() - pts[bottom].x();
+            const float dy = pts[top].y() - pts[bottom].y();
+            const float d = dx * dx + dy * dy;
+            if (d < best) {
+                best = d;
+                bestTop = top;
+            }
+        }
+        if (bestTop < 0)
+            return {};
+        usedTop.insert(bestTop);
+        topLoop.append(bestTop);
+    }
+
+    return topLoop;
+}
+
+static bool pointOnSegmentXY(const QVector3D &point,
+                             const QVector3D &a,
+                             const QVector3D &b)
+{
+    constexpr qreal eps = 1.0e-5;
+    if (qAbs(cross2D(a, b, point)) > eps)
+        return false;
+
+    return point.x() >= qMin(a.x(), b.x()) - eps
+           && point.x() <= qMax(a.x(), b.x()) + eps
+           && point.y() >= qMin(a.y(), b.y()) - eps
+           && point.y() <= qMax(a.y(), b.y()) + eps;
+}
+
+static bool allPointsStrictlyInsideHullXY(const QVector<int> &points,
+                                          const QVector<int> &hull,
+                                          const QVector<QVector3D> &pts)
+{
+    if (points.isEmpty() || hull.size() < 3)
+        return false;
+
+    for (int idx : points) {
+        for (int i = 0; i < hull.size(); ++i) {
+            const QVector3D &a = pts[hull[i]];
+            const QVector3D &b = pts[hull[(i + 1) % hull.size()]];
+            if (pointOnSegmentXY(pts[idx], a, b))
+                return false;
+        }
+    }
+
+    return true;
+}
+
+static QVector<QVector<int>> buildSingleHoleExtrusionFaces(const QVector<int> &bottomIdx,
+                                                           const QVector<int> &topIdx,
+                                                           const QVector<QVector3D> &pts)
+{
+    if (bottomIdx.size() != topIdx.size() || bottomIdx.size() < 6)
+        return {};
+
+    const QVector<int> outer = convexHullXY(bottomIdx, pts);
+    if (outer.size() < 3 || outer.size() == bottomIdx.size())
+        return {};
+
+    QVector<int> inner;
+    for (int idx : bottomIdx)
+        if (!outer.contains(idx))
+            inner.append(idx);
+    if (inner.size() < 3 || inner.size() != outer.size())
+        return {};
+    if (!allPointsStrictlyInsideHullXY(inner, outer, pts))
+        return {};
+
+    QVector<int> innerLoop = sortPolygonCCW(inner, pts);
+    if (!polygonValidXY(innerLoop, pts))
+        return {};
+
+    const QVector<int> outerTop = mapTopLoopFromBottom(outer, topIdx, pts);
+    const QVector<int> innerTop = mapTopLoopFromBottom(innerLoop, topIdx, pts);
+    if (outerTop.size() != outer.size() || innerTop.size() != innerLoop.size())
+        return {};
+
+    QVector<QVector<int>> faces;
+    faces.reserve(outer.size() * 4);
+    const int n = outer.size();
+    for (int i = 0; i < n; ++i) {
+        const int next = (i + 1) % n;
+        faces.append({outer[i], innerLoop[i], innerLoop[next], outer[next]});
+    }
+    for (int i = 0; i < n; ++i) {
+        const int next = (i + 1) % n;
+        faces.append({outerTop[i], outerTop[next], innerTop[next], innerTop[i]});
+    }
+    for (int i = 0; i < n; ++i) {
+        const int next = (i + 1) % n;
+        faces.append({outer[i], outer[next], outerTop[next], outerTop[i]});
+    }
+    for (int i = 0; i < n; ++i) {
+        const int next = (i + 1) % n;
+        faces.append({innerLoop[next], innerLoop[i], innerTop[i], innerTop[next]});
+    }
+    return faces;
+}
+
+static QVector<QVector<QVector<int>>> computePolyhedronFaceVariants(const QVector<QVector3D> &pts)
+{
+    QVector<QVector<QVector<int>>> variants;
     const int n = pts.size();
-    if (n < 4) return {};
+    if (n < 4)
+        return variants;
+
+    QElapsedTimer timer;
+    timer.start();
 
     float zMin = pts[0].z(), zMax = pts[0].z();
-    for (const auto &p : pts) { zMin = qMin(zMin, p.z()); zMax = qMax(zMax, p.z()); }
+    for (const auto &p : pts) {
+        zMin = qMin(zMin, p.z());
+        zMax = qMax(zMax, p.z());
+    }
 
     const float zEps = 0.01f;
     if (zMax - zMin > zEps) {
         QVector<int> bottom, top, other;
         for (int i = 0; i < n; ++i) {
-            if      (qAbs(pts[i].z()-zMin) <= zEps) bottom.append(i);
-            else if (qAbs(pts[i].z()-zMax) <= zEps) top.append(i);
+            if      (qAbs(pts[i].z() - zMin) <= zEps) bottom.append(i);
+            else if (qAbs(pts[i].z() - zMax) <= zEps) top.append(i);
             else    other.append(i);
         }
-        if (other.isEmpty() && bottom.size()==top.size() && bottom.size()>=3)
-            return buildExtrusionFaces(bottom, top, pts);
+        if (other.isEmpty() && bottom.size() == top.size() && bottom.size() >= 3) {
+            const QVector<QVector<int>> holeFaces = buildSingleHoleExtrusionFaces(bottom, top, pts);
+            if (!holeFaces.isEmpty())
+                variants.append(holeFaces);
+
+            if (variants.isEmpty()) {
+                const QVector<QVector<int>> extrusionFaces = buildExtrusionFaces(bottom, top, pts);
+                if (!extrusionFaces.isEmpty())
+                    variants.append(extrusionFaces);
+            }
+        }
     }
 
-    return computeConvexHullFaces(pts);
+    if (variants.isEmpty() && timer.elapsed() < 150) {
+        const QVector<QVector<int>> hullFaces = computeConvexHullFaces(pts);
+        if (!hullFaces.isEmpty())
+            variants.append(hullFaces);
+    }
+
+    return variants;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1670,7 +1854,25 @@ void SceneController::handlePolyhedronAutoface(int groupNodeId)
     for (const auto &p : pts)
         positions.append(p.pos);
 
-    const auto faces = computePolyhedronFaces(positions);
+    const auto variants = computePolyhedronFaceVariants(positions);
+    if (variants.isEmpty()) return;
+
+    QVector<QVector<int>> currentFaces;
+    for (const auto &child : group->children) {
+        if (child.type != SceneDocument::TreeNode::Primitive) continue;
+        const ShapeNode *s = m_scene.shapeById(child.shapeId);
+        if (s && s->type == ShapeNode::Face3D && !s->polyhedronFaces.isEmpty())
+            currentFaces.append(s->polyhedronFaces.first());
+    }
+
+    int variantIndex = 0;
+    for (int i = 0; i < variants.size(); ++i) {
+        if (variants[i] == currentFaces) {
+            variantIndex = (i + 1) % variants.size();
+            break;
+        }
+    }
+    const auto faces = variants[variantIndex];
     if (faces.isEmpty()) return;
 
     // Collect existing Face3D children to replace, before modifying the scene

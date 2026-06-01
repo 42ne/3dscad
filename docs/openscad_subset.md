@@ -115,6 +115,8 @@ Preferred generated forms:
 cube([10, 20, 30], center=true);
 sphere(r=12);
 cylinder(h=30, r=8, center=true);
+polyhedron(points=[[0,0,0],[10,0,0],[0,10,0],[0,0,10]],
+           faces=[[0,2,1],[0,1,3],[1,2,3],[2,0,3]]);
 ```
 
 Dimension arguments may also be expressions:
@@ -144,8 +146,18 @@ Additional accepted forms for each primitive:
 - `cylinder(h=30, r=8, center=true)` — named arguments in any order
 - `cylinder(30, 8)` — positional `h`, `r` (third positional is `center`)
 
+**Polyhedron:**
+- `polyhedron(points=[...], faces=[...])` imports as an editable `Polyhedron`
+  group with point and face rows.
+- Point coordinates and face indices are currently parsed as numeric literals.
+- Face winding is preserved from the OpenSCAD source; the editor does not
+  auto-flip faces for concave polyhedra.
+- `AutoFace` detects simple two-layer extrusions with one inner loop and builds
+  ring faces instead of a single self-intersecting cap.
+
 The tree stores cube size, sphere radius, and cylinder height/radius as editable
-expressions when they fit the supported expression syntax.
+expressions when they fit the supported expression syntax. Polyhedron point and
+face values are editable through the polyhedron table.
 
 ## Variables And Expressions
 
@@ -250,7 +262,7 @@ These constructs are outside the current round-trippable subset:
 - positional module arguments in the visual editor workflow
 - `offset`, `projection`
 - `linear_extrude`, `rotate_extrude`
-- `polyhedron`, `import`, `surface`, `text`
+- `import`, `surface`, `text`
 - arbitrary named arguments on primitives beyond the generated forms
 
 For reliable tree reconstruction, keep generated block structure and one

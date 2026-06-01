@@ -38,6 +38,43 @@ using namespace SceneTreeGraphics;
 
 namespace {
 
+static bool isPolyhedronEditableNumberCell(PolyhedronTableItem::Cell::Type type)
+{
+    return type == PolyhedronTableItem::Cell::PtX
+           || type == PolyhedronTableItem::Cell::PtY
+           || type == PolyhedronTableItem::Cell::PtZ
+           || type == PolyhedronTableItem::Cell::FaceParticipate;
+}
+
+static bool isPolyhedronButtonCell(PolyhedronTableItem::Cell::Type type)
+{
+    return type == PolyhedronTableItem::Cell::RemovePt
+           || type == PolyhedronTableItem::Cell::RemoveFace
+           || type == PolyhedronTableItem::Cell::AddPt
+           || type == PolyhedronTableItem::Cell::AddFace
+           || type == PolyhedronTableItem::Cell::AutoFace
+           || type == PolyhedronTableItem::Cell::TemplateButton
+           || type == PolyhedronTableItem::Cell::ClearPolyhedron;
+}
+
+static bool isPolyhedronSelectableLabelCell(PolyhedronTableItem::Cell::Type type)
+{
+    return type == PolyhedronTableItem::Cell::PtLabel
+           || type == PolyhedronTableItem::Cell::FaceLabel;
+}
+
+static bool isPolygonEditableNumberCell(Polygon2DTableItem::Cell::Type type)
+{
+    return type == Polygon2DTableItem::Cell::PtX
+           || type == Polygon2DTableItem::Cell::PtY;
+}
+
+static bool isPolygonButtonCell(Polygon2DTableItem::Cell::Type type)
+{
+    return type == Polygon2DTableItem::Cell::RemovePt
+           || type == Polygon2DTableItem::Cell::AddPt;
+}
+
 // ---------------------------------------------------------------------------
 // GridBlinkItem — paints a grid overlay at a fixed spacing with a given color.
 // Used to blink the minor/major grid when that property is selected in color-edit mode.
@@ -1042,6 +1079,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
         updateActiveVariableNumberControl(scenePosition, true);
         updateActiveForLoopRangeControl(scenePosition, true);
         updateActiveModuleCallParamControl(scenePosition, true);
+        updateHoverHighlights(scenePosition);
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
@@ -1627,6 +1665,7 @@ void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
         updateActiveVariableNumberControl(QPointF(), false);
         updateActiveForLoopRangeControl(QPointF(), false);
         updateActiveModuleCallParamControl(QPointF(), false);
+        updateHoverHighlights(mapToScene(m_lastMousePosition));
         emit ctrlReleased();
     }
 
@@ -4619,6 +4658,22 @@ QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePo
                    .arg(int(expressionTarget.kind))
                    .arg(expressionTarget.nodeId)
                    .arg(expressionTarget.secondaryId));
+        if (controlDown) {
+            return QStringLiteral("%1\nMouse wheel: change this value\nClick: edit the full expression")
+                .arg(expressionTarget.label);
+        }
+        if (expressionTarget.kind == ExpressionEditTarget::PolyhedronParticipation) {
+            return QStringLiteral("%1\nClick: type participation position (-1 excludes)\nHold Ctrl + mouse wheel: cycle point participation")
+                .arg(expressionTarget.label);
+        }
+        if (expressionTarget.kind == ExpressionEditTarget::Polygon2DPoint) {
+            return QStringLiteral("%1 coordinate\nClick: edit value\nHold Ctrl + mouse wheel: move this polygon point")
+                .arg(expressionTarget.label);
+        }
+        if (expressionTarget.kind == ExpressionEditTarget::ShapeParameter) {
+            return QStringLiteral("%1\nClick: edit value\nHold Ctrl + mouse wheel: change this value")
+                .arg(expressionTarget.label);
+        }
         return QStringLiteral("%1 expression\nClick: edit the full value after =\nEnter: apply; Esc: cancel")
             .arg(expressionTarget.label);
     }
@@ -4719,6 +4774,27 @@ QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePo
     {
         PolyhedronTableItem::Cell cell;
         if (polyhedronTableControlAt(scenePosition, &cell)) {
+            if (isPolyhedronButtonCell(cell.type)) {
+                setKey(QStringLiteral("poly-button:%1:%2:%3").arg(cell.nodeId).arg(cell.index).arg(int(cell.type)));
+                switch (cell.type) {
+                case PolyhedronTableItem::Cell::AddPt:
+                    return QStringLiteral("Add polyhedron point\nClick: append a new 3D point");
+                case PolyhedronTableItem::Cell::AddFace:
+                    return QStringLiteral("Add polyhedron face\nClick: append a new face row");
+                case PolyhedronTableItem::Cell::AutoFace:
+                    return QStringLiteral("AutoFace\nClick: rebuild faces from points; repeated clicks cycle available variants");
+                case PolyhedronTableItem::Cell::ClearPolyhedron:
+                    return QStringLiteral("Clear polyhedron\nClick: remove all point and face rows");
+                case PolyhedronTableItem::Cell::RemovePt:
+                    return QStringLiteral("Remove point\nClick: delete this polyhedron point");
+                case PolyhedronTableItem::Cell::RemoveFace:
+                    return QStringLiteral("Remove face\nClick: delete this polyhedron face");
+                case PolyhedronTableItem::Cell::TemplateButton:
+                    return QStringLiteral("Polyhedron template\nClick: replace contents with this template");
+                default:
+                    break;
+                }
+            }
             if (cell.type == PolyhedronTableItem::Cell::PtLabel) {
                 setKey(QStringLiteral("poly-pt-label:%1").arg(cell.nodeId));
                 return QStringLiteral("Polyhedron point label\nRight-click: highlight this point in viewport\nShift + right-click: add/remove from selection");
@@ -4726,6 +4802,30 @@ QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePo
             if (cell.type == PolyhedronTableItem::Cell::FaceLabel) {
                 setKey(QStringLiteral("poly-face-label:%1").arg(cell.nodeId));
                 return QStringLiteral("Polyhedron face label\nRight-click: highlight this face in viewport\nShift + right-click: add/remove from selection");
+            }
+            if (cell.type != PolyhedronTableItem::Cell::None) {
+                setKey(QStringLiteral("poly-passive:%1:%2").arg(cell.nodeId).arg(int(cell.type)));
+                return QStringLiteral("Polyhedron table\nPoint coordinates and face membership cells are editable; labels select elements");
+            }
+        }
+    }
+
+    {
+        Polygon2DTableItem::Cell cell;
+        if (polygon2DTableControlAt(scenePosition, &cell)) {
+            if (isPolygonButtonCell(cell.type)) {
+                setKey(QStringLiteral("polygon-button:%1:%2:%3").arg(cell.nodeId).arg(cell.index).arg(int(cell.type)));
+                return cell.type == Polygon2DTableItem::Cell::AddPt
+                    ? QStringLiteral("Add polygon point\nClick: append a new 2D point")
+                    : QStringLiteral("Remove polygon point\nClick: delete this 2D point");
+            }
+            if (cell.type == Polygon2DTableItem::Cell::PtLabel) {
+                setKey(QStringLiteral("polygon-point-label:%1:%2").arg(cell.nodeId).arg(cell.index));
+                return QStringLiteral("Polygon point label\nCoordinate fields on this row can be edited or adjusted with Ctrl + wheel");
+            }
+            if (cell.type == Polygon2DTableItem::Cell::HeaderLabel) {
+                setKey(QStringLiteral("polygon-header:%1").arg(cell.nodeId));
+                return QStringLiteral("Polygon point table\nEdit X/Y fields or use Ctrl + wheel over a coordinate");
             }
         }
     }
@@ -5054,21 +5154,38 @@ void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition
         }
     }
     PolyhedronTableItem::Cell polyCell;
-    const bool onPolyhedronElementLabel = polyhedronTableControlAt(scenePosition, &polyCell)
-        && (polyCell.type == PolyhedronTableItem::Cell::PtLabel
-            || polyCell.type == PolyhedronTableItem::Cell::FaceLabel)
+    const bool onPolyhedronCell = polyhedronTableControlAt(scenePosition, &polyCell);
+    const bool onPolyhedronElementLabel = onPolyhedronCell
+        && isPolyhedronSelectableLabelCell(polyCell.type)
         && polyCell.nodeId > 0;
     updatePolyhedronElementHover(scenePosition, onPolyhedronElementLabel);
 
+    Polygon2DTableItem::Cell polygonCell;
+    const bool onPolygonCell = polygon2DTableControlAt(scenePosition, &polygonCell);
+
     // Update cursor.
-    if (newExpressionRect.isValid() || newRenameRect.isValid())
+    if (controlDown && newExpressionRect.isValid())
+        setCursor(Qt::SizeVerCursor);
+    else if (controlDown
+             && ((onPolyhedronCell && isPolyhedronEditableNumberCell(polyCell.type))
+                 || (onPolygonCell && isPolygonEditableNumberCell(polygonCell.type))))
+        setCursor(Qt::SizeVerCursor);
+    else if (newExpressionRect.isValid()
+             || newRenameRect.isValid()
+             || (onPolyhedronCell && isPolyhedronEditableNumberCell(polyCell.type))
+             || (onPolygonCell && isPolygonEditableNumberCell(polygonCell.type)))
         setCursor(Qt::IBeamCursor);
     else if (newScrollRect.isValid())
         setCursor(Qt::SizeVerCursor);
-    else if (onCollapseControl || onPolyhedronElementLabel)
+    else if (onCollapseControl
+             || onPolyhedronElementLabel
+             || (onPolyhedronCell && isPolyhedronButtonCell(polyCell.type))
+             || (onPolygonCell && isPolygonButtonCell(polygonCell.type)))
         setCursor(Qt::PointingHandCursor);
     else if (onCanvasGrip)
         setCursor(Qt::SizeAllCursor);
+    else if (onPolyhedronCell || onPolygonCell)
+        setCursor(Qt::ArrowCursor);
     else
         setCursor(Qt::OpenHandCursor);
 

@@ -65,14 +65,6 @@ static QVector3D polygonNormal(const QVector<QVector3D> &vertices)
     return normal;
 }
 
-static QVector3D averagePoint(const QVector<QVector3D> &points)
-{
-    QVector3D sum;
-    for (const QVector3D &point : points)
-        sum += point;
-    return points.isEmpty() ? sum : sum / static_cast<float>(points.size());
-}
-
 static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVector3D> &vertices, int shade = 100)
 {
     const int n = vertices.size();
@@ -134,17 +126,6 @@ static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVecto
     }
     if (ring.size() == 3)
         triangles->append(makeTriangle(vertices[ring[0]], vertices[ring[1]], vertices[ring[2]], shade));
-}
-
-static void orientPolygonOutward(QVector<QVector3D> *vertices, const QVector3D &polyCenter)
-{
-    if (!vertices || vertices->size() < 3)
-        return;
-
-    const QVector3D faceCenter = averagePoint(*vertices);
-    const QVector3D normal = polygonNormal(*vertices);
-    if (QVector3D::dotProduct(normal, faceCenter - polyCenter) < 0.0f)
-        std::reverse(vertices->begin(), vertices->end());
 }
 
 static SceneMesh buildCubeMesh(const ShapeNode &shape)
@@ -384,7 +365,6 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
     if (shape.polyhedronPoints.isEmpty() || shape.polyhedronFaces.isEmpty())
         return mesh;
 
-    const QVector3D polyCenter = averagePoint(shape.polyhedronPoints);
     for (const QVector<int> &face : shape.polyhedronFaces) {
         if (face.size() < 3)
             continue;
@@ -394,10 +374,8 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
             if (idx < 0 || idx >= shape.polyhedronPoints.size()) { valid = false; break; }
             faceVertices.append(shape.polyhedronPoints[idx]);
         }
-        if (valid) {
-            orientPolygonOutward(&faceVertices, polyCenter);
+        if (valid)
             appendPolygon(&mesh.triangles, faceVertices);
-        }
     }
 
     mesh.shadowPoints = shape.polyhedronPoints;
