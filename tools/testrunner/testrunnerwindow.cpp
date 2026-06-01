@@ -3,6 +3,7 @@
 #include "../../scenetreegraphicswidget.h"
 #include "../../scenedocument.h"
 
+#include <cmath>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QHBoxLayout>
@@ -221,16 +222,22 @@ void TestRunnerWindow::buildNodeRefs()
         return n ? n->id : 0;
     };
 
-    m_refs.translateId  = fOp(SceneDocument::TreeNode::Translate);
-    m_refs.forId        = fOp(SceneDocument::TreeNode::For);
-    m_refs.unionId      = fOp(SceneDocument::TreeNode::Union);
-    m_refs.diffId       = fOp(SceneDocument::TreeNode::Difference);
-    m_refs.rotateId     = fOp(SceneDocument::TreeNode::Rotate);
-    m_refs.scaleId      = fOp(SceneDocument::TreeNode::Scale);
-    m_refs.moduleId     = fOp(SceneDocument::TreeNode::Module);
-    m_refs.callId       = fTy(SceneDocument::TreeNode::ModuleCall);
-    m_refs.firstVarId   = fTy(SceneDocument::TreeNode::Variable);
-    m_refs.firstPrimId  = fTy(SceneDocument::TreeNode::Primitive);
+    m_refs.translateId     = fOp(SceneDocument::TreeNode::Translate);
+    m_refs.forId           = fOp(SceneDocument::TreeNode::For);
+    m_refs.unionId         = fOp(SceneDocument::TreeNode::Union);
+    m_refs.diffId          = fOp(SceneDocument::TreeNode::Difference);
+    m_refs.rotateId        = fOp(SceneDocument::TreeNode::Rotate);
+    m_refs.scaleId         = fOp(SceneDocument::TreeNode::Scale);
+    m_refs.mirrorId        = fOp(SceneDocument::TreeNode::Mirror);
+    m_refs.colorId         = fOp(SceneDocument::TreeNode::Color);
+    m_refs.moduleId        = fOp(SceneDocument::TreeNode::Module);
+    m_refs.hullId          = fOp(SceneDocument::TreeNode::Hull);
+    m_refs.minkowskiId     = fOp(SceneDocument::TreeNode::Minkowski);
+    m_refs.linearExtrudeId = fOp(SceneDocument::TreeNode::LinearExtrude);
+    m_refs.polyhedronId    = fOp(SceneDocument::TreeNode::Polyhedron);
+    m_refs.callId          = fTy(SceneDocument::TreeNode::ModuleCall);
+    m_refs.firstVarId      = fTy(SceneDocument::TreeNode::Variable);
+    m_refs.firstPrimId     = fTy(SceneDocument::TreeNode::Primitive);
     // sceneId = first child of root (the Scene block)
     m_refs.sceneId = 0;
     for (const auto &c : root.children)
@@ -376,6 +383,37 @@ int TestRunnerWindow::step_addPrimitive(ShapeNode::Type type, int parentId,
         s.radius2 = exprs.size() >= 2 ? exprs[1].toFloat() : 2.0f;
         s.height  = exprs.size() >= 3 ? exprs[2].toFloat() : 20.0f;
         if (exprs.size() < 3) s.parameterExpressions = QStringList{QStringLiteral("8"), QStringLiteral("2"), QStringLiteral("20")};
+        break;
+    case ShapeNode::Circle:
+        s.radius = exprs.size() >= 1 ? exprs[0].toFloat() : 10.0f;
+        if (exprs.isEmpty()) s.parameterExpressions = QStringList{QStringLiteral("10")};
+        break;
+    case ShapeNode::Square:
+        if (exprs.size() >= 2) {
+            s.size = QVector3D(exprs[0].toFloat(), exprs[1].toFloat(), 0.1f);
+        } else {
+            s.size = QVector3D(20, 20, 0.1f);
+            s.parameterExpressions = QStringList{QStringLiteral("20"), QStringLiteral("20")};
+        }
+        break;
+    case ShapeNode::Polygon2D:
+        if (exprs.size() >= 2) {
+            // exprs[0]=count, exprs[1]=radius — generate regular polygon
+            const int n = qMax(3, exprs[0].toInt());
+            const float r = exprs[1].toFloat();
+            for (int i = 0; i < n; ++i) {
+                const float a = 6.283185f * i / n;
+                s.polyhedronPoints.append(QVector3D(r * cosf(a), r * sinf(a), 0.0f));
+            }
+        } else {
+            s.polyhedronPoints = {QVector3D(0.0f, 12.0f, 0.0f), QVector3D(-10.0f, -8.0f, 0.0f), QVector3D(10.0f, -8.0f, 0.0f)};
+        }
+        break;
+    case ShapeNode::Polyhedron:
+    case ShapeNode::Point3D:
+    case ShapeNode::Face3D:
+        // Polyhedron is created as a group, Point3D/Face3D as children of it.
+        // These types have no numeric parameters handled here.
         break;
     }
     int shapeId = m_scene->addShape(s, parentId, -1);
@@ -843,6 +881,191 @@ TestScenario TestRunnerWindow::makeScenario_varInvalidDrop()
     };
 }
 
+// ── Scenario 13: Polyhedron ───────────────────────────────────────────────────
+TestScenario TestRunnerWindow::makeScenario_polyhedron()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Create Polyhedron group"), [this]() {
+        int id = m_scene->addGroup(SceneDocument::TreeNode::Polyhedron, 0, -1);
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Polyhedron group #%1 created").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Add 4 base Point3D children"), [this]() {
+        int gid = m_state.selectedNodeId;
+        for (int i = 0; i < 4; ++i) {
+            ShapeNode p; p.type = ShapeNode::Point3D;
+            p.position = QVector3D(i < 2 ? 0.0f : 10.0f,
+                                    i % 2 == 0 ? 0.0f : 10.0f, 0.0f);
+            m_scene->addShape(p, gid, -1);
+        }
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("4 base points added to polyhedron #%1").arg(gid));
+    }});
+
+    steps.append({QStringLiteral("Add top Point3D (apex)"), [this]() {
+        int gid = m_state.selectedNodeId;
+        ShapeNode p; p.type = ShapeNode::Point3D;
+        p.position = QVector3D(5.0f, 5.0f, 8.0f);
+        m_scene->addShape(p, gid, -1);
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Apex point added to polyhedron #%1").arg(gid));
+    }});
+
+    steps.append({QStringLiteral("Add faces (pyramid)"), [this]() {
+        int gid = m_state.selectedNodeId;
+        auto addFace = [&](QVector<int> indices) {
+            ShapeNode f; f.type = ShapeNode::Face3D; f.polyhedronFaces.append(indices);
+            m_scene->addShape(f, gid, -1);
+        };
+        addFace({0, 3, 2, 1});
+        addFace({0, 1, 4});
+        addFace({1, 2, 4});
+        addFace({2, 3, 4});
+        addFace({3, 0, 4});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("5 faces added — pyramid complete"));
+    }});
+
+    steps.append({QStringLiteral("Apply Clear to polyhedron"), [this]() {
+        int gid = m_state.selectedNodeId;
+        const auto *grp = m_scene->treeNodeById(gid);
+        if (!grp) { log(QStringLiteral("Polyhedron group not found")); return; }
+        QVector<int> toRemove;
+        for (const auto &ch : grp->children) {
+            if (ch.type != SceneDocument::TreeNode::Primitive) continue;
+            const ShapeNode *s = m_scene->shapeById(ch.shapeId);
+            if (s && (s->type == ShapeNode::Point3D || s->type == ShapeNode::Face3D))
+                toRemove.append(ch.shapeId);
+        }
+        for (int shId : toRemove)
+            m_scene->removeShapeById(shId);
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Cleared %1 elements from polyhedron #%2 — should be empty")
+            .arg(toRemove.size()).arg(gid));
+    }});
+
+    return {
+        QStringLiteral("scenario_polyhedron"),
+        QStringLiteral("13. Polyhedron"),
+        QStringLiteral("Create polyhedron group, add points, faces, clear"),
+        QStringLiteral("polyhedron table editor"),
+        steps
+    };
+}
+
+// ── Scenario 14: Polygon2D ────────────────────────────────────────────────────
+TestScenario TestRunnerWindow::makeScenario_polygon2D()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Add Polygon2D triangle"), [this]() {
+        int primId = step_addPrimitive(ShapeNode::Polygon2D, 0, {});
+        log(QStringLiteral("Polygon2D added, node=#%1").arg(primId));
+        m_state.selectedNodeId = primId;
+    }});
+
+    steps.append({QStringLiteral("Add point to polygon"), [this]() {
+        int nodeId = m_state.selectedNodeId;
+        const auto *node = m_scene->treeNodeById(nodeId);
+        if (!node) { log(QStringLiteral("Node not found")); return; }
+        ShapeNode *shape = m_scene->shapeById(node->shapeId);
+        if (!shape || shape->type != ShapeNode::Polygon2D) {
+            log(QStringLiteral("Not a Polygon2D shape")); return;
+        }
+        shape->polyhedronPoints.append(QVector3D(-5.0f, 0.0f, 0.0f));
+        m_scene->updateShape(*shape);
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Point added to polygon — now %1 points").arg(shape->polyhedronPoints.size()));
+    }});
+
+    steps.append({QStringLiteral("Remove a point from polygon"), [this]() {
+        int nodeId = m_state.selectedNodeId;
+        ShapeNode *shape = m_scene->shapeById(
+            m_scene->treeNodeById(nodeId)->shapeId);
+        if (!shape || shape->type != ShapeNode::Polygon2D) return;
+        if (shape->polyhedronPoints.size() <= 3) {
+            log(QStringLiteral("Cannot remove — need ≥3 points")); return;
+        }
+        shape->polyhedronPoints.removeLast();
+        m_scene->updateShape(*shape);
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("Point removed — now %1 points").arg(shape->polyhedronPoints.size()));
+    }});
+
+    return {
+        QStringLiteral("scenario_polygon2d"),
+        QStringLiteral("14. Polygon2D"),
+        QStringLiteral("Add polygon, add/remove points"),
+        QStringLiteral("polygon2D table editor"),
+        steps
+    };
+}
+
+// ── Scenario 15: LinearExtrude ────────────────────────────────────────────────
+TestScenario TestRunnerWindow::makeScenario_linearExtrude()
+{
+    QVector<TestStep> steps;
+
+    steps.append({QStringLiteral("Clear scene"), [this]() {
+        step_clearScene();
+        log(QStringLiteral("Scene cleared."));
+    }});
+
+    steps.append({QStringLiteral("Create LinearExtrude group"), [this]() {
+        int id = step_addGroup(SceneDocument::TreeNode::LinearExtrude, 0);
+        m_scene->updateGroupTransform(id, {}, {}, QVector3D(1,1,1),
+                                      {QStringLiteral("30"), QStringLiteral("0"), QStringLiteral("0")});
+        m_treeWidget->refresh();
+        QApplication::processEvents();
+        log(QStringLiteral("LinearExtrude #%1 created with height=30").arg(id));
+        m_state.selectedNodeId = id;
+    }});
+
+    steps.append({QStringLiteral("Add Circle inside LinearExtrude"), [this]() {
+        int gid = m_state.selectedNodeId;
+        int primId = step_addPrimitive(ShapeNode::Circle, gid, {QStringLiteral("10")});
+        log(QStringLiteral("Circle #%1 added inside LinearExtrude #%2 — will extrude to cylinder")
+            .arg(primId).arg(gid));
+    }});
+
+    steps.append({QStringLiteral("Adjust extruded height via wheel"), [this]() {
+        int gid = m_state.selectedNodeId;
+        buildNodeRefs();
+        int extrudeId = m_refs.linearExtrudeId;
+        if (extrudeId <= 0) extrudeId = gid;
+        wheelAt(extrudeId, 120);
+        log(QStringLiteral("Wheel +120 on LinearExtrude #%1 — height increased").arg(extrudeId));
+    }});
+
+    return {
+        QStringLiteral("scenario_extrude"),
+        QStringLiteral("15. LinearExtrude"),
+        QStringLiteral("Extrude group with circle child, wheel height adjustment"),
+        QStringLiteral("linear_extrude"),
+        steps
+    };
+}
+
 void TestRunnerWindow::buildAllScenarios()
 {
     m_scenarios.clear();
@@ -859,6 +1082,9 @@ void TestRunnerWindow::buildAllScenarios()
     m_scenarios.append(makeScenario_geometryOps());
     m_scenarios.append(makeScenario_mirrorScale());
     m_scenarios.append(makeScenario_varInvalidDrop());
+    m_scenarios.append(makeScenario_polyhedron());
+    m_scenarios.append(makeScenario_polygon2D());
+    m_scenarios.append(makeScenario_linearExtrude());
 
     for (int i = 0; i < m_scenarios.size(); ++i) {
         auto *item = new QListWidgetItem;

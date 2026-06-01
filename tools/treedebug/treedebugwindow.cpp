@@ -482,10 +482,17 @@ void TreeDebugWindow::appendSnapshotForNode(QString &out,
         const QRectF rect = m_treeWidget->debugChildRect(node.id);
         const ShapeNode *shape = m_scene.shapeById(node.shapeId);
         const QString shapeDesc = shape
-            ? (shape->type == ShapeNode::Cube     ? QStringLiteral("cube")
-             : shape->type == ShapeNode::Sphere   ? QStringLiteral("sphere")
-             : shape->type == ShapeNode::Cone     ? QStringLiteral("cone")
-                                                  : QStringLiteral("cylinder"))
+            ? (shape->type == ShapeNode::Cube       ? QStringLiteral("cube")
+             : shape->type == ShapeNode::Sphere     ? QStringLiteral("sphere")
+             : shape->type == ShapeNode::Cylinder   ? QStringLiteral("cylinder")
+             : shape->type == ShapeNode::Cone       ? QStringLiteral("cone")
+             : shape->type == ShapeNode::Circle     ? QStringLiteral("circle")
+             : shape->type == ShapeNode::Square     ? QStringLiteral("square")
+             : shape->type == ShapeNode::Polygon2D  ? QStringLiteral("polygon")
+             : shape->type == ShapeNode::Polyhedron ? QStringLiteral("polyhedron")
+             : shape->type == ShapeNode::Point3D    ? QStringLiteral("point3d")
+             : shape->type == ShapeNode::Face3D     ? QStringLiteral("face3d")
+                                                    : QStringLiteral("shape"))
             : QStringLiteral("?");
         out += indent + QStringLiteral("[Prim#%1  %2]  card=%3\n")
             .arg(node.id).arg(shapeDesc).arg(formatRectShort(rect));
@@ -669,6 +676,18 @@ void TreeDebugWindow::buildUi()
             ShapeNode s; s.type = ShapeNode::Cone; s.radius = 5.0f; s.radius2 = 0.0f; s.height = 10.0f;
             s.parameterExpressions = QStringList{QStringLiteral("5"),QStringLiteral("0"),QStringLiteral("10")};
             m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("circle")) {
+            ShapeNode s; s.type = ShapeNode::Circle; s.radius = 10.0f;
+            s.parameterExpressions = QStringList{QStringLiteral("10")};
+            m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("square")) {
+            ShapeNode s; s.type = ShapeNode::Square; s.size = QVector3D(20, 20, 0.1f);
+            s.parameterExpressions = QStringList{QStringLiteral("20"),QStringLiteral("20")};
+            m_scene.addShape(s, parentId, insertIndex);
+        } else if (tool == QStringLiteral("polygon")) {
+            ShapeNode s; s.type = ShapeNode::Polygon2D;
+            s.polyhedronPoints = {QVector3D(0.0f, 12.0f, 0.0f), QVector3D(-10.0f, -8.0f, 0.0f), QVector3D(10.0f, -8.0f, 0.0f)};
+            m_scene.addShape(s, parentId, insertIndex);
         } else if (tool == QStringLiteral("module")) {
             const int gId = m_scene.addGroup(SceneDocument::TreeNode::Module, 0, insertIndex);
             m_scene.setModuleName(gId, QStringLiteral("module"));
@@ -699,6 +718,9 @@ void TreeDebugWindow::buildUi()
             else if (tool == QStringLiteral("mirror"))       op = SceneDocument::TreeNode::Mirror;
             else if (tool == QStringLiteral("hull"))         op = SceneDocument::TreeNode::Hull;
             else if (tool == QStringLiteral("minkowski"))    op = SceneDocument::TreeNode::Minkowski;
+            else if (tool == QStringLiteral("polyhedron"))   op = SceneDocument::TreeNode::Polyhedron;
+            else if (tool == QStringLiteral("linear_extrude")) op = SceneDocument::TreeNode::LinearExtrude;
+            else if (tool == QStringLiteral("color"))        op = SceneDocument::TreeNode::Color;
             else if (tool == QStringLiteral("for"))          op = SceneDocument::TreeNode::For;
             const int gId = m_scene.addGroup(op, parentId, insertIndex);
             if (op == SceneDocument::TreeNode::Translate
@@ -709,6 +731,11 @@ void TreeDebugWindow::buildUi()
             } else if (op == SceneDocument::TreeNode::Mirror) {
                 m_scene.updateGroupTransform(gId, QVector3D(1,0,0), {}, {},
                                              {QStringLiteral("1"),QStringLiteral("0"),QStringLiteral("0")});
+            } else if (op == SceneDocument::TreeNode::LinearExtrude) {
+                m_scene.updateGroupTransform(gId, {}, {}, QVector3D(1,1,1),
+                                             {QStringLiteral("20"), QStringLiteral("0"), QStringLiteral("0")});
+            } else if (op == SceneDocument::TreeNode::Color) {
+                m_scene.updateGroupColor(gId, QColor(200, 200, 200));
             } else if (op == SceneDocument::TreeNode::For) {
                 m_scene.updateForLoop(gId, QStringLiteral("i"), QStringLiteral("[0 : 1 : 10]"));
             }
@@ -1289,6 +1316,108 @@ void TreeDebugWindow::buildTestDocument()
 
     // module call
     m_scene.addModuleCall(gadgetId, 0, -1, QStringLiteral("r = 12, h = 35"));
+
+    // ── New primitives ────────────────────────────────────────────────────────
+
+    // cone (was missing in the original test doc)
+    {
+        ShapeNode s; s.type = ShapeNode::Cone; s.radius = 8.0f; s.radius2 = 2.0f; s.height = 20.0f;
+        s.parameterExpressions = QStringList{QStringLiteral("8"), QStringLiteral("2"), QStringLiteral("20")};
+        m_scene.addShape(s, 0);
+    }
+
+    // circle
+    {
+        ShapeNode s; s.type = ShapeNode::Circle; s.radius = 12.0f;
+        s.parameterExpressions = QStringList{QStringLiteral("12")};
+        m_scene.addShape(s, 0);
+    }
+
+    // square
+    {
+        ShapeNode s; s.type = ShapeNode::Square; s.size = QVector3D(30, 20, 0.1f);
+        s.parameterExpressions = QStringList{QStringLiteral("30"), QStringLiteral("20")};
+        m_scene.addShape(s, 0);
+    }
+
+    // polygon2d — triangle
+    {
+        ShapeNode s; s.type = ShapeNode::Polygon2D;
+        s.polyhedronPoints = {QVector3D(0.0f, 15.0f, 0.0f), QVector3D(-12.0f, -10.0f, 0.0f), QVector3D(12.0f, -10.0f, 0.0f)};
+        m_scene.addShape(s, 0);
+    }
+
+    // ── New groups ────────────────────────────────────────────────────────────
+
+    // mirror across X axis
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::Mirror);
+        m_scene.updateGroupTransform(id, QVector3D(1, 0, 0), {}, {},
+                                     {QStringLiteral("1"), QStringLiteral("0"), QStringLiteral("0")});
+        ShapeNode s; s.type = ShapeNode::Cube; s.size = QVector3D(15, 15, 15);
+        s.parameterExpressions = QStringList{QStringLiteral("15"), QStringLiteral("15"), QStringLiteral("15")};
+        m_scene.addShape(s, id);
+    }
+
+    // color group (grey)
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::Color);
+        m_scene.updateGroupColor(id, QColor(180, 200, 220));
+        ShapeNode s; s.type = ShapeNode::Sphere; s.radius = 12.0f;
+        s.parameterExpressions = QStringList{QStringLiteral("12")};
+        m_scene.addShape(s, id);
+    }
+
+    // hull group
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::Hull);
+        ShapeNode s1; s1.type = ShapeNode::Sphere; s1.radius = 10.0f;
+        s1.parameterExpressions = QStringList{QStringLiteral("10")};
+        m_scene.addShape(s1, id);
+        ShapeNode s2; s2.type = ShapeNode::Cube; s2.size = QVector3D(20, 5, 5);
+        s2.parameterExpressions = QStringList{QStringLiteral("20"), QStringLiteral("5"), QStringLiteral("5")};
+        m_scene.addShape(s2, id);
+    }
+
+    // minkowski group
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::Minkowski);
+        ShapeNode s1; s1.type = ShapeNode::Cube; s1.size = QVector3D(12, 12, 12);
+        s1.parameterExpressions = QStringList{QStringLiteral("12"), QStringLiteral("12"), QStringLiteral("12")};
+        m_scene.addShape(s1, id);
+        ShapeNode s2; s2.type = ShapeNode::Sphere; s2.radius = 3.0f;
+        s2.parameterExpressions = QStringList{QStringLiteral("3")};
+        m_scene.addShape(s2, id);
+    }
+
+    // linear_extrude with circle child
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::LinearExtrude);
+        m_scene.updateGroupTransform(id, {}, {}, QVector3D(1,1,1),
+                                     {QStringLiteral("25"), QStringLiteral("0"), QStringLiteral("0")});
+        ShapeNode s; s.type = ShapeNode::Circle; s.radius = 10.0f;
+        s.parameterExpressions = QStringList{QStringLiteral("10")};
+        m_scene.addShape(s, id);
+    }
+
+    // polyhedron group with pyramid template
+    {
+        const int id = m_scene.addGroup(SceneDocument::TreeNode::Polyhedron);
+        auto addPt = [&](float x, float y, float z) {
+            ShapeNode p; p.type = ShapeNode::Point3D; p.position = QVector3D(x, y, z);
+            m_scene.addShape(p, id);
+        };
+        addPt(0, 0, 0); addPt(10, 0, 0); addPt(10, 10, 0); addPt(0, 10, 0); addPt(5, 5, 8);
+        auto addFace = [&](QVector<int> indices) {
+            ShapeNode f; f.type = ShapeNode::Face3D; f.polyhedronFaces.append(indices);
+            m_scene.addShape(f, id);
+        };
+        addFace({0, 3, 2, 1});
+        addFace({0, 1, 4});
+        addFace({1, 2, 4});
+        addFace({2, 3, 4});
+        addFace({3, 0, 4});
+    }
 }
 
 // ─── nativeEvent (frameless resize on Windows) ───────────────────────────────

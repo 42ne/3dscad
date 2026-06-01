@@ -80,6 +80,9 @@ private:
     TestScenario makeScenario_geometryOps();
     TestScenario makeScenario_mirrorScale();
     TestScenario makeScenario_varInvalidDrop();
+    TestScenario makeScenario_polyhedron();
+    TestScenario makeScenario_polygon2D();
+    TestScenario makeScenario_linearExtrude();
 
     // Shared step primitives
     void step_clearScene();
@@ -125,17 +128,23 @@ private:
     SceneDocument::Snapshot m_undoSnapshot;
 
     struct NodeRef {
-        int translateId = 0;
-        int forId       = 0;
-        int unionId     = 0;
-        int diffId      = 0;
-        int rotateId    = 0;
-        int scaleId     = 0;
-        int moduleId    = 0;
-        int callId      = 0;
-        int sceneId     = 0;
-        int firstVarId  = 0;
-        int firstPrimId = 0;
+        int translateId     = 0;
+        int forId           = 0;
+        int unionId         = 0;
+        int diffId          = 0;
+        int rotateId        = 0;
+        int scaleId         = 0;
+        int mirrorId        = 0;
+        int colorId         = 0;
+        int moduleId        = 0;
+        int callId          = 0;
+        int hullId          = 0;
+        int minkowskiId     = 0;
+        int linearExtrudeId = 0;
+        int polyhedronId    = 0;
+        int sceneId         = 0;
+        int firstVarId      = 0;
+        int firstPrimId     = 0;
     };
     NodeRef m_refs;
 };
