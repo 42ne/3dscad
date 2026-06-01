@@ -10,7 +10,6 @@
 #include <QHash>
 
 class QComboBox;
-class QGraphicsScene;
 class QLabel;
 class QLineEdit;
 class ThemePreviewView;
@@ -31,35 +30,28 @@ class ThemeEditorDialog : public QDialog
 public:
     enum Target {
         WindowTarget,
-        TreeTarget,
         ViewportTarget
     };
 
     explicit ThemeEditorDialog(const QPixmap &screenshot,
                                 const ThemeSpec &windowTheme,
-                                const TreeAppearanceTheme &treeTheme,
                                 const ViewportAppearanceTheme &viewportTheme,
                                 QWidget *parent = nullptr);
 
     Target target() const;
     QString themeName() const;
     ThemeSpec windowTheme() const { return m_windowTheme; }
-    TreeAppearanceTheme treeTheme() const { return m_treeTheme; }
     ViewportAppearanceTheme viewportTheme() const { return m_viewportTheme; }
     void chooseColorForRole(const QString &role);
     void updateHint(const QString &role);
 
 private:
     void buildScene();
-    void buildTreePreview(QGraphicsScene *scene);
 
     ThemeSpec m_windowTheme;
-    TreeAppearanceTheme m_treeTheme;
     ViewportAppearanceTheme m_viewportTheme;
     QPixmap m_screenshot;
     RegionMap m_regionMap;
-    TreeAppearanceTheme m_savedCustomTheme;
-    bool m_hadCustomTheme = false;
     QComboBox *m_targetCombo = nullptr;
     QLineEdit *m_nameEdit = nullptr;
     QLabel *m_hintLabel = nullptr;

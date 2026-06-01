@@ -160,6 +160,7 @@ private:
     void drawCanvasBackgroundSwitcher();
     void clearToolbar();
     void updateToolbarOverlay();
+    void repositionToolbarItems();
     void handleThemeSwitcherClick(int themeIndex);
     void handleCanvasBackgroundSwitcherClick(int backgroundIndex);
     void resetGraphicsScene();
@@ -294,6 +295,10 @@ private:
     bool m_dropPreviewActive = false;
     bool m_dropPreviewFinishing = false;
     bool m_treeItemsVisible = true;
+
+    // Viewport-pixel offsets for each toolbar item — used by repositionToolbarItems()
+    // to reposition without recreating. Kept in sync with m_toolbarItems by updateToolbarOverlay().
+    QVector<QPointF> m_toolbarVpOffsets;
 };
 
 #endif

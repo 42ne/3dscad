@@ -28,8 +28,8 @@ namespace SceneTreeGraphics {
 
 constexpr qreal ToolbarX = 12.0;
 constexpr qreal ToolbarY = 12.0;
-constexpr qreal ToolSize = 54.0;
-constexpr qreal ToolGap = 8.0;
+constexpr qreal ToolSize = 36.0;
+constexpr qreal ToolGap = 5.0;
 constexpr qreal TreeX = 12.0;
 constexpr qreal TreeY = 92.0;
 constexpr qreal PrimitiveWidth = 104.0;

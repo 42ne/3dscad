@@ -127,20 +127,26 @@ private:
 class ThemeSwitcherSwatchItem : public QGraphicsEllipseItem
 {
 public:
+    // hoverPen: pen applied while the cursor is over this item (optional).
     ThemeSwitcherSwatchItem(const QPointF &center,
                              qreal radius,
                              const QPen &pen,
                              const QBrush &brush,
                              int themeIndex,
-                             std::function<void(int)> onClick)
+                             std::function<void(int)> onClick,
+                             const QPen &hoverPen = QPen(Qt::NoPen))
         : QGraphicsEllipseItem(center.x() - radius, center.y() - radius,
                                 radius * 2.0, radius * 2.0)
         , m_themeIndex(themeIndex)
         , m_onClick(std::move(onClick))
+        , m_normalPen(pen)
+        , m_hoverPen(hoverPen)
     {
         setPen(pen);
         setBrush(brush);
         setAcceptedMouseButtons(Qt::LeftButton);
+        if (m_hoverPen.style() != Qt::NoPen)
+            setAcceptHoverEvents(true);
     }
 
 protected:
@@ -155,9 +161,25 @@ protected:
         }
     }
 
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        setPen(m_hoverPen);
+        update();
+        event->accept();
+    }
+
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
+    {
+        setPen(m_normalPen);
+        update();
+        event->accept();
+    }
+
 private:
     int m_themeIndex = 0;
     std::function<void(int)> m_onClick;
+    QPen m_normalPen;
+    QPen m_hoverPen;
 };
 
 // ---------------------------------------------------------------------------
@@ -583,18 +605,31 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         const qreal newLevel = transform().m11();
 
         // ── Stop when both are negligible ───────────────────────────────────
-        if (qAbs(m_zoomVelocity) < 0.002 && qAbs(m_zoomAccel) < 0.0001) {
+        const bool zoomJustStopped = qAbs(m_zoomVelocity) < 0.002 && qAbs(m_zoomAccel) < 0.0001;
+        if (zoomJustStopped) {
             m_zoomAnimTimer->stop();
             m_zoomIdleTimer->stop();
             m_zoomVelocity = 0.0;
             m_zoomAccel    = 0.0;
+            for (QGraphicsItem *item : m_treeItems)
+                item->setCacheMode(QGraphicsItem::NoCache);
+            setRenderHint(QPainter::Antialiasing, true);
+            setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
+            viewport()->update();
         }
 
-        // ── Only redraw UI when zoom actually changed noticeably ──────────
+        // ── Reposition UI when zoom actually changed noticeably ──────────
+        // During animation: cheap reposition only (scrollContentsBy from the
+        // scroll bar adjustments above usually covers this, but reposition here
+        // too in case the anchor scroll delta was zero).
+        // After stop: one full rebuild so toolbarScale-dependent layout is correct.
         if (qAbs(newLevel - m_zoomLevel) > 0.001) {
             m_zoomLevel = newLevel;
             m_inlineEditor->updateInlineInputGeometry();
-            updateToolbarOverlay();
+            if (zoomJustStopped)
+                updateToolbarOverlay();
+            else
+                repositionToolbarItems();
         }
     });
 
@@ -990,7 +1025,10 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
 {
     const CanvasBackgroundTheme background = activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
     painter->fillRect(rect, background.background);
-    drawCanvasGrid(painter, rect, 24.0, background.minorGrid, 1);
+    const qreal scale = qMax(0.001, std::abs(transform().m11()));
+    // Skip minor grid when zoomed out so far that lines would be < 4px apart on screen.
+    if (24.0 * scale >= 4.0)
+        drawCanvasGrid(painter, rect, 24.0, background.minorGrid, 1);
     drawCanvasGrid(painter, rect, 120.0, background.majorGrid, 1);
 }
 
@@ -1362,7 +1400,7 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     m_hoverManager->updatePolygonPointHover(QPointF(), false);
     if (changed && !m_dragActive)
         m_hoverManager->updateHighlightOverlay();
-    updateToolbarOverlay();
+    repositionToolbarItems();
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
@@ -1454,8 +1492,13 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
         m_zoomIdle = false;
         m_zoomIdleTimer->start();  // restart — will set idle after 80ms
 
-        if (!m_zoomAnimTimer->isActive())
+        if (!m_zoomAnimTimer->isActive()) {
+            for (QGraphicsItem *item : m_treeItems)
+                item->setCacheMode(QGraphicsItem::ItemCoordinateCache);
+            setRenderHint(QPainter::Antialiasing, false);
+            setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
             m_zoomAnimTimer->start();
+        }
         event->accept();
     }
 }
@@ -1503,6 +1546,7 @@ void SceneTreeGraphicsWidget::clearToolbar()
         delete item;
     }
     m_toolbarItems.clear();
+    m_toolbarVpOffsets.clear();
 }
 
 void SceneTreeGraphicsWidget::updateToolbarOverlay()
@@ -1515,6 +1559,31 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
     drawCanvasBackgroundSwitcher();
     drawThemeSwitcher();
     m_hoverManager->drawHintOverlay();
+
+    // Compute VP-pixel offsets from each item's current scene position so that
+    // repositionToolbarItems() can cheaply update positions without rebuilding.
+    const QPointF vtl = mapToScene(QPoint(0, 0));
+    const qreal s = qMax(0.001, std::abs(transform().m11()));
+    m_toolbarVpOffsets.resize(m_toolbarItems.size());
+    for (int i = 0; i < m_toolbarItems.size(); ++i) {
+        const QPointF delta = m_toolbarItems[i]->pos() - vtl;
+        m_toolbarVpOffsets[i] = QPointF(delta.x() * s, delta.y() * s);
+    }
+}
+
+void SceneTreeGraphicsWidget::repositionToolbarItems()
+{
+    if (m_toolbarItems.isEmpty())
+        return;
+    if (m_toolbarItems.size() != m_toolbarVpOffsets.size()) {
+        updateToolbarOverlay();
+        return;
+    }
+    const QPointF vtl = mapToScene(QPoint(0, 0));
+    const qreal s = qMax(0.001, std::abs(transform().m11()));
+    for (int i = 0; i < m_toolbarItems.size(); ++i)
+        m_toolbarItems[i]->setPos(vtl + QPointF(m_toolbarVpOffsets[i].x() / s,
+                                                 m_toolbarVpOffsets[i].y() / s));
 }
 
 void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
@@ -1601,6 +1670,9 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
     panel->setData(0, QStringLiteral("glass_toolbar"));
     m_toolbarItems.append(panel);
 
+    // Active ring: high-contrast vs. the glass panel to make the selection clear.
+    const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
+
     for (int i = 0; i < CanvasBackgroundThemeCount; ++i) {
         const bool active = i == m_canvasBackgroundTheme;
         const QColor swatch = canvasBackgroundTheme(i).background;
@@ -1609,7 +1681,7 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
         if (active) {
             auto *ring = new ThemeSwitcherSwatchItem(
                 center, SwatchR + 2.8,
-                QPen(QColor(255, 255, 255, 210), 1.6), Qt::NoBrush,
+                QPen(ringColor, 1.6), Qt::NoBrush,
                 i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
             ring->setPos(panelTopLeft);
@@ -1618,11 +1690,18 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
             m_graphicsScene->addItem(ring);
             m_toolbarItems.append(ring);
         }
+        // Border and hover adapt to each swatch's own lightness: dark swatch → lighter ring,
+        // light swatch → darker ring. Stays in the same tonal family, never jarring.
+        const bool swatchDark  = swatch.lightness() < 128;
+        const QColor borderCol = swatchDark ? swatch.lighter(145) : swatch.darker(118);
+        const QColor hoverCol  = swatchDark ? swatch.lighter(170) : swatch.darker(135);
+        const QPen normalPen = active ? QPen(Qt::NoPen) : QPen(borderCol, 1.0);
+        const QPen hoverPen  = active ? QPen(Qt::NoPen) : QPen(hoverCol,  2.0);
         auto *circle = new ThemeSwitcherSwatchItem(
             center, SwatchR,
-            active ? QPen(Qt::NoPen) : QPen(swatch.darker(150), 1.0),
-            QBrush(swatch),
-            i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
+            normalPen, QBrush(swatch),
+            i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); },
+            hoverPen);
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
         circle->setZValue(LocalOverlayZ + 0.5);
@@ -1721,6 +1800,9 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     panel->setData(0, QStringLiteral("glass_toolbar"));
     m_toolbarItems.append(panel);
 
+    // Active ring: high-contrast vs. glass panel for clear selection indication.
+    const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
+
     // One swatch circle per theme.
     for (int i = 0; i < n; ++i) {
         const auto  th      = static_cast<SceneTreePalette::Theme>(i);
@@ -1734,7 +1816,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
             const qreal ringR = SwatchR + 2.8;
             auto *ring = new ThemeSwitcherSwatchItem(
                 QPointF(cx, cy), ringR,
-                QPen(QColor(255, 255, 255, 210), 1.6),
+                QPen(ringColor, 1.6),
                 Qt::NoBrush,
                 i, [this](int idx) { handleThemeSwitcherClick(idx); });
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
@@ -1745,15 +1827,18 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
             m_toolbarItems.append(ring);
         }
 
-        // Filled swatch circle.
-        const QPen swatchPen = active
-            ? QPen(Qt::NoPen)
-            : QPen(swatch.darker(150), 1.0);
+        // Border and hover adapt to each swatch's own lightness.
+        const bool swatchDark  = swatch.lightness() < 128;
+        const QColor borderCol = swatchDark ? swatch.lighter(145) : swatch.darker(118);
+        const QColor hoverCol  = swatchDark ? swatch.lighter(170) : swatch.darker(135);
+        const QPen normalPen = active ? QPen(Qt::NoPen) : QPen(borderCol, 1.0);
+        const QPen hoverPen  = active ? QPen(Qt::NoPen) : QPen(hoverCol,  2.0);
         auto *circle = new ThemeSwitcherSwatchItem(
             QPointF(cx, cy), SwatchR,
-            swatchPen,
+            normalPen,
             QBrush(swatch),
-            i, [this](int idx) { handleThemeSwitcherClick(idx); });
+            i, [this](int idx) { handleThemeSwitcherClick(idx); },
+            hoverPen);
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
         circle->setZValue(LocalOverlayZ + 0.5);

@@ -1,7 +1,4 @@
 #include "themeeditordialog.h"
-#include "scenetreepalette.h"
-#include "scenetreenoderenderer.h"
-#include "shapenode.h"
 
 #include <QColorDialog>
 #include <QComboBox>
@@ -9,11 +6,11 @@
 #include <QFormLayout>
 #include <QGraphicsScene>
 #include <QGraphicsSceneHoverEvent>
+#include <QGraphicsTextItem>
 #include <QGraphicsView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QLinearGradient>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QToolButton>
@@ -37,21 +34,6 @@ QString roleLabel(const QString &role)
         {QStringLiteral("accent"), QStringLiteral("Selection accent")},
         {QStringLiteral("accentHover"), QStringLiteral("Accent hover")},
         {QStringLiteral("danger"), QStringLiteral("Danger / close")},
-        {QStringLiteral("canvas"), QStringLiteral("Tree canvas")},
-        {QStringLiteral("minorGrid"), QStringLiteral("Tree minor grid")},
-        {QStringLiteral("majorGrid"), QStringLiteral("Tree major grid")},
-        {QStringLiteral("card"), QStringLiteral("Tree card body")},
-        {QStringLiteral("header"), QStringLiteral("Tree card header")},
-        {QStringLiteral("input"), QStringLiteral("Tree input field")},
-        {QStringLiteral("glassTop"), QStringLiteral("Glass top tint")},
-        {QStringLiteral("glassBottom"), QStringLiteral("Glass bottom tint")},
-        {QStringLiteral("glassBorder"), QStringLiteral("Glass border")},
-        {QStringLiteral("numBorder"), QStringLiteral("Number pill border")},
-        {QStringLiteral("numFill"), QStringLiteral("Number pill fill")},
-        {QStringLiteral("numBorderActive"), QStringLiteral("Pill active border")},
-        {QStringLiteral("numFillActive"), QStringLiteral("Pill active fill")},
-        {QStringLiteral("numText"), QStringLiteral("Number text")},
-        {QStringLiteral("numLabelText"), QStringLiteral("Number label text")},
         {QStringLiteral("background"), QStringLiteral("Viewport background")},
         {QStringLiteral("grid"), QStringLiteral("Viewport grid")},
         {QStringLiteral("solid"), QStringLiteral("Viewport object")},
@@ -95,41 +77,6 @@ RegionMap buildRegionMap()
           QRectF(0.02, 0.50, 0.18, 0.04) },
     };
 
-    map[ThemeEditorDialog::TreeTarget] = {
-        { QStringLiteral("canvas"),       QStringLiteral("Tree canvas"),
-          QRectF(0.00, 0.08, 0.22, 0.92) },
-        { QStringLiteral("minorGrid"),    QStringLiteral("Minor grid"),
-          QRectF(0.01, 0.10, 0.20, 0.15) },
-        { QStringLiteral("majorGrid"),    QStringLiteral("Major grid"),
-          QRectF(0.01, 0.26, 0.20, 0.03) },
-        { QStringLiteral("card"),         QStringLiteral("Card body"),
-          QRectF(0.02, 0.30, 0.18, 0.25) },
-        { QStringLiteral("header"),       QStringLiteral("Card header"),
-          QRectF(0.02, 0.30, 0.18, 0.05) },
-        { QStringLiteral("text"),         QStringLiteral("Node label"),
-          QRectF(0.04, 0.31, 0.14, 0.04) },
-        { QStringLiteral("input"),        QStringLiteral("Numeric input"),
-          QRectF(0.05, 0.42, 0.12, 0.05) },
-        { QStringLiteral("accent"),       QStringLiteral("Selection tint"),
-          QRectF(0.05, 0.48, 0.12, 0.04) },
-        { QStringLiteral("glassTop"),     QStringLiteral("Glass overlay"),
-          QRectF(0.02, 0.80, 0.18, 0.08) },
-        { QStringLiteral("mutedText"),    QStringLiteral("Secondary text"),
-          QRectF(0.04, 0.55, 0.14, 0.03) },
-        { QStringLiteral("numFill"),      QStringLiteral("Pill background"),
-          QRectF(0.01, 0.60, 0.06, 0.04) },
-        { QStringLiteral("numBorder"),    QStringLiteral("Pill border"),
-          QRectF(0.01, 0.60, 0.06, 0.04) },
-        { QStringLiteral("numText"),      QStringLiteral("Pill number text"),
-          QRectF(0.02, 0.61, 0.04, 0.02) },
-        { QStringLiteral("numLabelText"), QStringLiteral("Axis / operator text"),
-          QRectF(0.08, 0.61, 0.10, 0.02) },
-        { QStringLiteral("numFillActive"),QStringLiteral("Active pill fill"),
-          QRectF(0.01, 0.66, 0.06, 0.04) },
-        { QStringLiteral("numBorderActive"),QStringLiteral("Active pill border"),
-          QRectF(0.01, 0.66, 0.06, 0.04) },
-    };
-
     map[ThemeEditorDialog::ViewportTarget] = {
         { QStringLiteral("background"),   QStringLiteral("Viewport bg"),
           QRectF(0.22, 0.08, 0.56, 0.92) },
@@ -153,61 +100,6 @@ RegionMap buildRegionMap()
 }
 
 } // namespace
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  InvisibleZoneItem — clickable zone with NO visible paint, only hover hint
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class InvisibleZoneItem : public QGraphicsItem
-{
-public:
-    InvisibleZoneItem(const QString &id, const QString &label, const QRectF &rect,
-                      ThemeEditorDialog *dialog)
-        : m_id(id), m_label(label), m_rect(rect), m_dialog(dialog)
-    {
-        setAcceptHoverEvents(true);
-        setCursor(Qt::PointingHandCursor);
-    }
-
-    QRectF boundingRect() const override { return m_rect; }
-
-    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
-    {
-        if (!m_hovered)
-            return;
-        // Subtle highlight on hover
-        painter->setPen(QPen(QColor(255, 255, 255, 80), 1));
-        painter->drawRect(m_rect);
-    }
-
-protected:
-    void hoverEnterEvent(QGraphicsSceneHoverEvent *) override
-    {
-        m_hovered = true;
-        update();
-        if (m_dialog) m_dialog->updateHint(m_id);
-    }
-
-    void hoverLeaveEvent(QGraphicsSceneHoverEvent *) override
-    {
-        m_hovered = false;
-        update();
-        if (m_dialog) m_dialog->updateHint(QString());
-    }
-
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton && m_dialog)
-            m_dialog->chooseColorForRole(m_id);
-    }
-
-private:
-    QString m_id;
-    QString m_label;
-    QRectF m_rect;
-    ThemeEditorDialog *m_dialog = nullptr;
-    bool m_hovered = false;
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  RegionOverlayItem — visible coloured overlay for screenshot targets
@@ -292,26 +184,6 @@ private:
             if (m_id == QLatin1String("accent"))       return m_dialog->windowTheme().accent;
             if (m_id == QLatin1String("accentHover"))  return m_dialog->windowTheme().accentHover;
             if (m_id == QLatin1String("danger"))       return m_dialog->windowTheme().danger;
-        }
-        if (m_target == ThemeEditorDialog::TreeTarget) {
-            if (m_id == QLatin1String("canvas"))       return m_dialog->treeTheme().canvas;
-            if (m_id == QLatin1String("minorGrid"))    return m_dialog->treeTheme().minorGrid;
-            if (m_id == QLatin1String("majorGrid"))    return m_dialog->treeTheme().majorGrid;
-            if (m_id == QLatin1String("card"))         return m_dialog->treeTheme().card;
-            if (m_id == QLatin1String("header"))       return m_dialog->treeTheme().header;
-            if (m_id == QLatin1String("input"))        return m_dialog->treeTheme().input;
-            if (m_id == QLatin1String("text"))         return m_dialog->treeTheme().text;
-            if (m_id == QLatin1String("mutedText"))    return m_dialog->treeTheme().mutedText;
-            if (m_id == QLatin1String("glassTop"))     return m_dialog->treeTheme().glassTop;
-            if (m_id == QLatin1String("glassBottom"))  return m_dialog->treeTheme().glassBottom;
-            if (m_id == QLatin1String("glassBorder"))  return m_dialog->treeTheme().glassBorder;
-            if (m_id == QLatin1String("accent"))       return m_dialog->treeTheme().accent;
-            if (m_id == QLatin1String("numBorder"))    return m_dialog->treeTheme().numBorder;
-            if (m_id == QLatin1String("numFill"))      return m_dialog->treeTheme().numFill;
-            if (m_id == QLatin1String("numBorderActive")) return m_dialog->treeTheme().numBorderActive;
-            if (m_id == QLatin1String("numFillActive"))return m_dialog->treeTheme().numFillActive;
-            if (m_id == QLatin1String("numText"))      return m_dialog->treeTheme().numText;
-            if (m_id == QLatin1String("numLabelText")) return m_dialog->treeTheme().numLabelText;
         }
         if (m_target == ThemeEditorDialog::ViewportTarget) {
             if (m_id == QLatin1String("background"))   return m_dialog->viewportTheme().background;
@@ -418,12 +290,10 @@ private:
 
 ThemeEditorDialog::ThemeEditorDialog(const QPixmap &screenshot,
                                       const ThemeSpec &windowTheme,
-                                      const TreeAppearanceTheme &treeTheme,
                                       const ViewportAppearanceTheme &viewportTheme,
                                       QWidget *parent)
     : QDialog(parent)
     , m_windowTheme(windowTheme)
-    , m_treeTheme(treeTheme)
     , m_viewportTheme(viewportTheme)
     , m_screenshot(screenshot)
     , m_regionMap(buildRegionMap())
@@ -440,7 +310,6 @@ ThemeEditorDialog::ThemeEditorDialog(const QPixmap &screenshot,
     m_targetCombo = new QComboBox(this);
     m_targetCombo->addItems({
         QStringLiteral("Window (title, panels, text)"),
-        QStringLiteral("Scene Tree (cards, canvas, grid)"),
         QStringLiteral("Viewport (background, objects, grid)")
     });
     m_nameEdit = new QLineEdit(this);
@@ -501,21 +370,9 @@ ThemeEditorDialog::ThemeEditorDialog(const QPixmap &screenshot,
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
 
-    // ── Save and override global custom theme for preview ─────────────────
-    m_hadCustomTheme = SceneTreePalette::hasCustomTheme();
-    m_savedCustomTheme = SceneTreePalette::customTheme();
-    SceneTreePalette::setCustomTheme(m_treeTheme);
-
     // ── Connections ────────────────────────────────────────────────────────
     connect(m_targetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) { buildScene(); });
-
-    connect(this, &QDialog::finished, this, [this]() {
-        if (m_hadCustomTheme)
-            SceneTreePalette::setCustomTheme(m_savedCustomTheme);
-        else
-            SceneTreePalette::clearCustomTheme();
-    });
 
     buildScene();
 }
@@ -536,11 +393,6 @@ void ThemeEditorDialog::buildScene()
     scene->clear();
 
     const Target t = target();
-
-    if (t == TreeTarget) {
-        buildTreePreview(scene);
-        return;
-    }
 
     // Window / Viewport — screenshot approach
     const QVector<RoleRegion> regions = m_regionMap.value(t);
@@ -574,186 +426,6 @@ void ThemeEditorDialog::buildScene()
     updateHint(QString());
 }
 
-void ThemeEditorDialog::buildTreePreview(QGraphicsScene *scene)
-{
-    // ── Override global custom theme so rendered items use our preview colours ──
-    SceneTreePalette::setCustomTheme(m_treeTheme);
-
-    constexpr qreal W = 400;
-    constexpr qreal H = 340;
-    scene->setSceneRect(0, 0, W, H);
-
-    // ── Canvas background + grid ─────────────────────────────────────────────
-    auto *bg = scene->addRect(0, 0, W, H, Qt::NoPen, m_treeTheme.canvas);
-    bg->setZValue(-2);
-
-    for (int x = 0; x <= W; x += 20)
-        scene->addLine(x, 0, x, H, QPen(m_treeTheme.minorGrid, 1))->setZValue(-1);
-    for (int y = 0; y <= H; y += 20)
-        scene->addLine(0, y, W, y, QPen(m_treeTheme.minorGrid, 1))->setZValue(-1);
-    for (int x = 0; x <= W; x += 100)
-        scene->addLine(x, 0, x, H, QPen(m_treeTheme.majorGrid, 1.5))->setZValue(-1);
-    for (int y = 0; y <= H; y += 100)
-        scene->addLine(0, y, W, y, QPen(m_treeTheme.majorGrid, 1.5))->setZValue(-1);
-
-    // Helper to add an invisible clickable zone
-    auto zone = [&](const QString &id, const QString &label, const QRectF &r) {
-        auto *z = new InvisibleZoneItem(id, label, r, this);
-        z->setZValue(20);
-        scene->addItem(z);
-    };
-
-    // ── 1. For-loop group (horizontal header) ────────────────────────────────
-    {
-        SceneDocument::TreeNode node;
-        node.id       = 1;
-        node.type     = SceneDocument::TreeNode::Group;
-        node.operation = SceneDocument::TreeNode::For;
-        node.loopVariable        = QStringLiteral("i");
-        node.loopRangeExpression = QStringLiteral("[0 : 1 : 10]");
-
-        constexpr qreal y0 = 8;
-        const QRectF r(10, y0, 360, 28);
-        SceneTreeNodeRenderer(scene, 0, nullptr).renderGroup(node, r, 0, 0);
-
-        zone(QStringLiteral("header"), QStringLiteral("Card header"), r);
-        // range pills at approximate positions [0, 1, 10]
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(10 + 78, y0 + 1, 28, 22));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(10 + 78, y0 + 1, 28, 22));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(10 + 78, y0 + 1, 28, 22));
-        zone(QStringLiteral("numLabelText"), QStringLiteral("separator"), QRectF(10 + 108, y0 + 2, 10, 18));
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(10 + 116, y0 + 1, 22, 22));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(10 + 116, y0 + 1, 22, 22));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(10 + 116, y0 + 1, 22, 22));
-    }
-
-    // ── 2. Translate group (vertical header) ────────────────────────────────
-    {
-        SceneDocument::TreeNode node;
-        node.id       = 2;
-        node.type     = SceneDocument::TreeNode::Group;
-        node.operation = SceneDocument::TreeNode::Translate;
-        node.position = QVector3D(24, 10, 5);
-        node.transformExpressions = QStringList()
-            << QStringLiteral("24")
-            << QStringLiteral("10")
-            << QStringLiteral("5");
-
-        constexpr qreal y0 = 42;
-        const QRectF r(10, y0, 360, 80);
-        SceneTreeNodeRenderer(scene, 0, nullptr).renderGroup(node, r, 0, 0);
-
-        zone(QStringLiteral("header"), QStringLiteral("Header stripe"), QRectF(10, y0, 36, 80));
-        zone(QStringLiteral("card"),   QStringLiteral("Card body"),    QRectF(10 + 36, y0, 360 - 36, 80));
-
-        // X row (rowTop = y0 + 8, h=13)
-        zone(QStringLiteral("numLabelText"), QStringLiteral("Axis X"), QRectF(10 + 40, y0 + 8, 20, 13));
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(10 + 62, y0 + 8, 32, 13));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(10 + 62, y0 + 8, 32, 13));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(10 + 62, y0 + 8, 32, 13));
-
-        // Y row (rowTop = y0 + 23)
-        zone(QStringLiteral("numLabelText"), QStringLiteral("Axis Y"), QRectF(10 + 40, y0 + 23, 20, 13));
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(10 + 62, y0 + 23, 32, 13));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(10 + 62, y0 + 23, 32, 13));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(10 + 62, y0 + 23, 32, 13));
-
-        // Z row (rowTop = y0 + 38)
-        zone(QStringLiteral("numLabelText"), QStringLiteral("Axis Z"), QRectF(10 + 40, y0 + 38, 20, 13));
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(10 + 62, y0 + 38, 32, 13));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(10 + 62, y0 + 38, 32, 13));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(10 + 62, y0 + 38, 32, 13));
-    }
-
-    // ── 3. Sphere primitive ─────────────────────────────────────────────────
-    {
-        ShapeNode shape;
-        shape.id   = 3;
-        shape.type = ShapeNode::Sphere;
-        shape.name = QStringLiteral("sphere");
-        shape.radius               = 15.0f;
-        shape.parameterExpressions = QStringList() << QStringLiteral("15");
-
-        SceneDocument::TreeNode node;
-        node.id       = 3;
-        node.type     = SceneDocument::TreeNode::Primitive;
-        node.shapeId  = 3;
-        node.variableExpression = QStringLiteral("15");
-
-        constexpr qreal y0 = 130;
-        const QRectF r(20, y0, 200, 38);
-        SceneTreeNodeRenderer(scene, 0, nullptr)
-            .renderPrimitive(node, r, QStringLiteral("sphere"), &shape);
-
-        zone(QStringLiteral("card"),   QStringLiteral("Card body"), QRectF(20, y0, 54, 38));
-        zone(QStringLiteral("text"),   QStringLiteral("Label"),     QRectF(20 + 56, y0, 30, 38));
-        zone(QStringLiteral("numFill"),   QStringLiteral("Pill fill"),   QRectF(20 + 90, y0 + 1, 30, 14));
-        zone(QStringLiteral("numBorder"), QStringLiteral("Pill border"), QRectF(20 + 90, y0 + 1, 30, 14));
-        zone(QStringLiteral("numText"),   QStringLiteral("Pill text"),    QRectF(20 + 90, y0 + 1, 30, 14));
-    }
-
-    // ── 4. Variable card: r = 24 ─────────────────────────────────────────────
-    {
-        SceneDocument::TreeNode node;
-        node.id               = 4;
-        node.type             = SceneDocument::TreeNode::Variable;
-        node.variableName     = QStringLiteral("r");
-        node.variableExpression = QStringLiteral("24");
-        node.isParameter      = false;
-
-        constexpr qreal y0 = 176;
-        const QRectF r(20, y0, 360, 26);
-        SceneTreeNodeRenderer(scene, 0, nullptr).renderVariable(node, r);
-
-        zone(QStringLiteral("card"),       QStringLiteral("Card body"),    r);
-        zone(QStringLiteral("text"),       QStringLiteral("Name"),         QRectF(20 + 38, y0, 20, 26));
-        zone(QStringLiteral("numFill"),    QStringLiteral("Pill fill"),    QRectF(20 + 60, y0 + 1, 28, 16));
-        zone(QStringLiteral("numBorder"),  QStringLiteral("Pill border"),  QRectF(20 + 60, y0 + 1, 28, 16));
-        zone(QStringLiteral("numText"),    QStringLiteral("Pill text"),     QRectF(20 + 60, y0 + 1, 28, 16));
-        zone(QStringLiteral("mutedText"),  QStringLiteral("Comment"),      QRectF(20 + 100, y0, 80, 26));
-    }
-
-    // ── 5. Variable card: $fn = 64 ───────────────────────────────────────────
-    {
-        SceneDocument::TreeNode node;
-        node.id               = 5;
-        node.type             = SceneDocument::TreeNode::Variable;
-        node.variableName     = QStringLiteral("$fn");
-        node.variableExpression = QStringLiteral("64");
-        node.isParameter      = true;
-
-        constexpr qreal y0 = 208;
-        const QRectF r(20, y0, 360, 26);
-        SceneTreeNodeRenderer(scene, 0, nullptr).renderVariable(node, r);
-
-        zone(QStringLiteral("card"),       QStringLiteral("Card body"),    r);
-        zone(QStringLiteral("text"),       QStringLiteral("Name"),         QRectF(20 + 38, y0, 30, 26));
-        zone(QStringLiteral("numFill"),    QStringLiteral("Pill fill"),    QRectF(20 + 70, y0 + 1, 28, 16));
-        zone(QStringLiteral("numBorder"),  QStringLiteral("Pill border"),  QRectF(20 + 70, y0 + 1, 28, 16));
-        zone(QStringLiteral("numText"),    QStringLiteral("Pill text"),     QRectF(20 + 70, y0 + 1, 28, 16));
-        zone(QStringLiteral("mutedText"),  QStringLiteral("Comment"),      QRectF(20 + 115, y0, 64, 26));
-    }
-
-    // ── 6. Glass overlay ────────────────────────────────────────────────────
-    {
-        constexpr qreal y0 = 248;
-        constexpr qreal gh = 64;
-        QLinearGradient grad(0, y0, 0, y0 + gh);
-        grad.setColorAt(0, m_treeTheme.glassTop);
-        grad.setColorAt(1, m_treeTheme.glassBottom);
-        scene->addRect(10, y0, 360, gh,
-                       QPen(m_treeTheme.glassBorder, 1.5), QBrush(grad))->setZValue(10);
-
-        const QRectF gr(10, y0, 360, gh);
-        zone(QStringLiteral("glassTop"),    QStringLiteral("Glass top"),    gr);
-        zone(QStringLiteral("glassBottom"), QStringLiteral("Glass bottom"), gr);
-        zone(QStringLiteral("glassBorder"), QStringLiteral("Glass border"), gr);
-    }
-
-    m_preview->fitContent();
-    updateHint(QString());
-}
-
 void ThemeEditorDialog::updateHint(const QString &role)
 {
     if (role.isEmpty()) {
@@ -776,25 +448,6 @@ void ThemeEditorDialog::updateHint(const QString &role)
             else if (role == QLatin1String("accent"))  c = m_windowTheme.accent;
             else if (role == QLatin1String("accentHover"))c = m_windowTheme.accentHover;
             else if (role == QLatin1String("danger"))  c = m_windowTheme.danger;
-        } else if (t == TreeTarget) {
-            if (role == QLatin1String("canvas"))       c = m_treeTheme.canvas;
-            else if (role == QLatin1String("minorGrid"))c = m_treeTheme.minorGrid;
-            else if (role == QLatin1String("majorGrid"))c = m_treeTheme.majorGrid;
-            else if (role == QLatin1String("card"))    c = m_treeTheme.card;
-            else if (role == QLatin1String("header"))  c = m_treeTheme.header;
-            else if (role == QLatin1String("input"))   c = m_treeTheme.input;
-            else if (role == QLatin1String("text"))    c = m_treeTheme.text;
-            else if (role == QLatin1String("mutedText"))c = m_treeTheme.mutedText;
-            else if (role == QLatin1String("glassTop"))c = m_treeTheme.glassTop;
-            else if (role == QLatin1String("glassBottom"))c = m_treeTheme.glassBottom;
-            else if (role == QLatin1String("glassBorder"))c = m_treeTheme.glassBorder;
-            else if (role == QLatin1String("accent"))  c = m_treeTheme.accent;
-            else if (role == QLatin1String("numBorder"))c = m_treeTheme.numBorder;
-            else if (role == QLatin1String("numFill")) c = m_treeTheme.numFill;
-            else if (role == QLatin1String("numBorderActive"))c = m_treeTheme.numBorderActive;
-            else if (role == QLatin1String("numFillActive"))c = m_treeTheme.numFillActive;
-            else if (role == QLatin1String("numText")) c = m_treeTheme.numText;
-            else if (role == QLatin1String("numLabelText"))c = m_treeTheme.numLabelText;
         } else {
             if (role == QLatin1String("background"))   c = m_viewportTheme.background;
             else if (role == QLatin1String("grid"))    c = m_viewportTheme.grid;
@@ -831,25 +484,6 @@ void ThemeEditorDialog::chooseColorForRole(const QString &role)
         else if (role == QLatin1String("accent"))   color = &m_windowTheme.accent;
         else if (role == QLatin1String("accentHover"))color = &m_windowTheme.accentHover;
         else if (role == QLatin1String("danger"))   color = &m_windowTheme.danger;
-    } else if (t == TreeTarget) {
-        if (role == QLatin1String("canvas"))        color = &m_treeTheme.canvas;
-        else if (role == QLatin1String("minorGrid"))color = &m_treeTheme.minorGrid;
-        else if (role == QLatin1String("majorGrid"))color = &m_treeTheme.majorGrid;
-        else if (role == QLatin1String("card"))     color = &m_treeTheme.card;
-        else if (role == QLatin1String("header"))   color = &m_treeTheme.header;
-        else if (role == QLatin1String("input"))    color = &m_treeTheme.input;
-        else if (role == QLatin1String("text"))     color = &m_treeTheme.text;
-        else if (role == QLatin1String("mutedText"))color = &m_treeTheme.mutedText;
-        else if (role == QLatin1String("glassTop")) color = &m_treeTheme.glassTop;
-        else if (role == QLatin1String("glassBottom"))color = &m_treeTheme.glassBottom;
-        else if (role == QLatin1String("glassBorder"))color = &m_treeTheme.glassBorder;
-        else if (role == QLatin1String("accent"))   color = &m_treeTheme.accent;
-        else if (role == QLatin1String("numBorder"))color = &m_treeTheme.numBorder;
-        else if (role == QLatin1String("numFill"))  color = &m_treeTheme.numFill;
-        else if (role == QLatin1String("numBorderActive"))color = &m_treeTheme.numBorderActive;
-        else if (role == QLatin1String("numFillActive"))color = &m_treeTheme.numFillActive;
-        else if (role == QLatin1String("numText"))  color = &m_treeTheme.numText;
-        else if (role == QLatin1String("numLabelText"))color = &m_treeTheme.numLabelText;
     } else {
         if (role == QLatin1String("background"))    color = &m_viewportTheme.background;
         else if (role == QLatin1String("grid"))     color = &m_viewportTheme.grid;
@@ -874,12 +508,6 @@ void ThemeEditorDialog::chooseColorForRole(const QString &role)
         return;
 
     *color = selected;
-    if (target() == TreeTarget) {
-        // Push updated theme to the global palette so tree items repaint correctly
-        SceneTreePalette::setCustomTheme(m_treeTheme);
-        buildScene();
-    } else {
-        m_preview->scene()->update();
-    }
+    m_preview->scene()->update();
     updateHint(role);
 }

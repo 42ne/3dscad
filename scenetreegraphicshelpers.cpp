@@ -330,9 +330,21 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
 
 QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected)
 {
-    const QRectF frameRect = rect.adjusted(2.0, 2.0, -2.0, -2.0);
+    constexpr qreal kOuterRadius = 8.0;   // corner radius of the dark mat
+    constexpr qreal kGap         = 4.0;   // gap between outer edge and glass panel
+    constexpr qreal kGlassRadius = 5.5;   // corner radius of the glass panel
+
+    // Dark semi-transparent mat that fills the icon cell — this is the visible gap
+    QPainterPath outerPath;
+    outerPath.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), kOuterRadius, kOuterRadius);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 88));
+    painter->drawPath(outerPath);
+
+    // Glass panel inset inside the dark mat
+    const QRectF frameRect = rect.adjusted(kGap, kGap, -kGap, -kGap);
     QPainterPath glassPath;
-    glassPath.addRoundedRect(frameRect, 7.0, 7.0);
+    glassPath.addRoundedRect(frameRect, kGlassRadius, kGlassRadius);
 
     QLinearGradient glass(frameRect.topLeft(), frameRect.bottomLeft());
     glass.setColorAt(0.0, QColor(32, 42, 58, 224));
@@ -342,8 +354,10 @@ QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor
     painter->setBrush(glass);
     painter->drawPath(glassPath);
 
+    // Accent tint overlay inside the glass panel
     QPainterPath tintPath;
-    tintPath.addRoundedRect(rect.adjusted(5.0, 5.0, -5.0, -5.0), 6.0, 6.0);
+    tintPath.addRoundedRect(rect.adjusted(kGap + 2.0, kGap + 2.0, -(kGap + 2.0), -(kGap + 2.0)),
+                            kGlassRadius - 1.5, kGlassRadius - 1.5);
     QColor tint = accent;
     tint.setAlpha(34);
     painter->setPen(Qt::NoPen);
@@ -1731,19 +1745,20 @@ public:
         }
 
         QRectF glyphRect = paintToolbarIconFrame(painter, boundingRect(), iconAccent);
+        const qreal s = ToolSize / 54.0;
         if (m_label == QStringLiteral("module"))
-            glyphRect = QRectF(8.0, 6.0, 38.0, 40.0);
+            glyphRect = QRectF(8.0*s, 6.0*s, 38.0*s, 40.0*s);
         if (isVariableToolName(m_label)) {
-            const QRectF badgeRect = glyphRect.adjusted(0.0, 8.0, 0.0, -8.0);
+            const QRectF badgeRect = glyphRect.adjusted(0.0, 8.0*s, 0.0, -8.0*s);
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor(0, 0, 0, 35));
-            painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), 4.0, 4.0);
+            painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), 4.0*s, 4.0*s);
             QLinearGradient badgeGradient(badgeRect.topLeft(), badgeRect.bottomLeft());
             badgeGradient.setColorAt(0.0, QColor(255, 237, 172));
             badgeGradient.setColorAt(1.0, QColor(193, 143, 48));
             painter->setPen(QPen(QColor(255, 248, 218, 170), 1.0));
             painter->setBrush(QBrush(badgeGradient));
-            painter->drawRoundedRect(badgeRect, 4.0, 4.0);
+            painter->drawRoundedRect(badgeRect, 4.0*s, 4.0*s);
             QFont font = painter->font();
             font.setBold(true);
             font.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 1.0));

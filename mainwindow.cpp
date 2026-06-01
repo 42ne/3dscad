@@ -602,17 +602,13 @@ void MainWindow::applySavedViewportTheme(const QString &name)
 
 void MainWindow::openThemeEditor()
 {
-    TreeAppearanceTheme treeTheme = AppearanceThemes::defaultTreeTheme();
     ViewportAppearanceTheme viewportTheme = AppearanceThemes::defaultViewportTheme();
-    if (!m_customTreeThemeName.isEmpty())
-        AppearanceThemes::loadTreeTheme(m_customTreeThemeName, &treeTheme);
     if (!m_customViewportThemeName.isEmpty())
         AppearanceThemes::loadViewportTheme(m_customViewportThemeName, &viewportTheme);
 
-    // freeze current window as preview background
     const QPixmap snapshot = grab();
 
-    ThemeEditorDialog editor(snapshot, m_activeWindowTheme, treeTheme, viewportTheme, this);
+    ThemeEditorDialog editor(snapshot, m_activeWindowTheme, viewportTheme, this);
     if (editor.exec() != QDialog::Accepted)
         return;
 
@@ -620,9 +616,6 @@ void MainWindow::openThemeEditor()
     if (editor.target() == ThemeEditorDialog::WindowTarget) {
         AppearanceThemes::saveWindowTheme(name, editor.windowTheme());
         applySavedWindowTheme(name);
-    } else if (editor.target() == ThemeEditorDialog::TreeTarget) {
-        AppearanceThemes::saveTreeTheme(name, editor.treeTheme());
-        applySavedTreeTheme(name);
     } else {
         AppearanceThemes::saveViewportTheme(name, editor.viewportTheme());
         applySavedViewportTheme(name);
