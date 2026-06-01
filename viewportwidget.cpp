@@ -375,15 +375,16 @@ static ProjectedPoint projectWorldPoint(const QVector3D &world,
                                         float yawDegrees,
                                         float pitchDegrees,
                                         float cameraDistance,
-                                        const QVector3D &cameraTarget = QVector3D())
+                                        const QVector3D &cameraTarget = QVector3D(),
+                                        bool orthographic = false)
 {
     const float focalLength = 420.0f;
     ProjectedPoint projected;
     const QVector3D camera = toCameraPoint(world, yawDegrees, pitchDegrees, cameraDistance, cameraTarget);
     projected.depth = camera.z();
-    projected.visible = camera.z() > 8.0f;
+    projected.visible = orthographic || camera.z() > 8.0f;
 
-    const float scale = focalLength / qMax(8.0f, camera.z());
+    const float scale = focalLength / (orthographic ? qMax(8.0f, cameraDistance) : qMax(8.0f, camera.z()));
     projected.point = QPointF(
         viewportSize.width() / 2.0f + camera.x() * scale,
         viewportSize.height() / 2.0f - camera.y() * scale);
@@ -1118,7 +1119,7 @@ static QVector<QPair<QVector3D, QVector3D>> characteristicMeshEdges(const SceneM
         edge.from = a;
         edge.to = b;
         edge.normals.append(normal.normalized());
-        edge.frontFacing.append(toCameraDirection(normal, cameraYaw, cameraPitch).z() < 0.0f);
+        edge.frontFacing.append(toCameraDirection(normal, cameraYaw, cameraPitch).z() >= 0.0f);
     };
 
     QHash<QString, EdgeInfo> edges;
@@ -1301,10 +1302,12 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     m_openGLViewportCheckBox = new QCheckBox(QStringLiteral("OpenGL"), this);
     m_darkViewportCheckBox = new QCheckBox(QStringLiteral("Dark"), this);
     m_navigationOverlayCheckBox = new QCheckBox(QStringLiteral("Nav UI"), this);
+    m_orthographicCheckBox = new QCheckBox(QStringLiteral("Ortho"), this);
     m_colorVariantComboBox = new QComboBox(this);
     m_lightingPresetComboBox = new QComboBox(this);
     m_darkViewportCheckBox->setChecked(m_darkViewportTheme);
     m_navigationOverlayCheckBox->setChecked(m_navigationOverlayEnabled);
+    m_orthographicCheckBox->setChecked(m_orthographicProjection);
     m_colorVariantComboBox->addItems({
         QStringLiteral("Neutral"),
         QStringLiteral("Mint"),
@@ -1333,11 +1336,13 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     m_openGLViewportCheckBox->setStyleSheet(controlStyle);
     m_darkViewportCheckBox->setStyleSheet(controlStyle);
     m_navigationOverlayCheckBox->setStyleSheet(controlStyle);
+    m_orthographicCheckBox->setStyleSheet(controlStyle);
     m_colorVariantComboBox->setStyleSheet(controlStyle);
     m_lightingPresetComboBox->setStyleSheet(controlStyle);
     m_openGLViewportCheckBox->setToolTip(QStringLiteral("Use OpenGL rendering for viewport meshes and grid."));
     m_darkViewportCheckBox->setToolTip(QStringLiteral("Switch viewport between dark and light theme."));
     m_navigationOverlayCheckBox->setToolTip(QStringLiteral("Show the viewport glass hint and selectable tree-path breadcrumb."));
+    m_orthographicCheckBox->setToolTip(QStringLiteral("Switch between perspective and orthographic projection."));
     m_colorVariantComboBox->setToolTip(QStringLiteral("Choose viewport material color variant."));
     m_lightingPresetComboBox->setToolTip(QStringLiteral("Choose viewport lighting preset."));
 
@@ -1356,6 +1361,10 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         m_navigationOverlayEnabled = checked;
         if (!checked)
             m_breadcrumbHits.clear();
+        update();
+    });
+    connect(m_orthographicCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        m_orthographicProjection = checked;
         update();
     });
     connect(m_colorVariantComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -1649,15 +1658,33 @@ static QMatrix4x4 buildViewMatrix(float yawDeg, float pitchDeg, float dist,
     return V;
 }
 
-// buildProjectionMatrix: left-handed perspective matching projectWorldPoint().
+// buildProjectionMatrix: left-handed perspective (or orthographic) matching projectWorldPoint().
 // focalLength=420 gives FOV consistent with the software renderer.
-static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH, float dist = 200.0f)
+// Ortho mode produces the same world-space magnification as perspective at distance dist.
+static QMatrix4x4 buildProjectionMatrix(float viewW, float viewH, float dist = 200.0f, bool ortho = false)
 {
     const float focal = 420.0f;
+    const float safeW = qMax(1.0f, viewW);
+    const float safeH = qMax(1.0f, viewH);
+    const float safeDist = qMax(8.0f, dist);
+
+    if (ortho) {
+        const float nearZ = -(safeDist * 5.0f + 500.0f);
+        const float farZ  = safeDist * 10.0f + 1000.0f;
+        QMatrix4x4 P;
+        P.fill(0.0f);
+        P(0,0) = 2.0f * focal / (safeW * safeDist);
+        P(1,1) = 2.0f * focal / (safeH * safeDist);
+        P(2,2) = 2.0f / (farZ - nearZ);
+        P(2,3) = -(farZ + nearZ) / (farZ - nearZ);
+        P(3,3) = 1.0f;
+        return P;
+    }
+
     const float nearZ = qMax(0.5f, dist * 0.005f);
     const float farZ  = dist * 10.0f + 1000.0f;
-    const float fx = 2.0f * focal / qMax(1.0f, viewW);
-    const float fy = 2.0f * focal / qMax(1.0f, viewH);
+    const float fx = 2.0f * focal / safeW;
+    const float fy = 2.0f * focal / safeH;
     const float a  = (farZ + nearZ) / (farZ - nearZ);
     const float b  = -2.0f * farZ * nearZ / (farZ - nearZ);
     QMatrix4x4 P;
@@ -2003,31 +2030,40 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     const QVector<SceneLight> lights = viewportLightsForPreset(m_lightingPreset);
 
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection);
     };
 
-    auto drawGrid = [&]() {
+    auto drawMinorGrid = [&]() {
         painter.setPen(viewportMinorGridColor(m_darkViewportTheme,
                        m_hasCustomAppearanceTheme ? &m_customAppearanceTheme : nullptr));
 
         for (int i = -120; i <= 120; i += 20) {
-            const ProjectedPoint xStart = project(QVector3D(-120, i, 0));
-            const ProjectedPoint xEnd = project(QVector3D(120, i, 0));
-            const ProjectedPoint yStart = project(QVector3D(i, -120, 0));
-            const ProjectedPoint yEnd = project(QVector3D(i, 120, 0));
-
-            painter.drawLine(xStart.point, xEnd.point);
-            painter.drawLine(yStart.point, yEnd.point);
+            painter.drawLine(project(QVector3D(-120, i, 0)).point, project(QVector3D(120, i, 0)).point);
+            painter.drawLine(project(QVector3D(i, -120, 0)).point, project(QVector3D(i, 120, 0)).point);
         }
+    };
 
+    auto drawGridAxes = [&]() {
+        const QPointF origin2D = project(QVector3D(0, 0, 0)).point;
+        const float originDepth = qMax(8.0f, toCameraPoint(QVector3D(0, 0, 0),
+                                                            m_cameraYaw, m_cameraPitch,
+                                                            m_cameraDistance, m_cameraTarget).z());
+        const float axisLen = 130.0f * 420.0f / originDepth;
+
+        auto screenEnd = [&](const QVector3D &worldDir, float len) {
+            const QVector3D camDir = toCameraDirection(worldDir, m_cameraYaw, m_cameraPitch);
+            const QVector2D sd(camDir.x(), -camDir.y());
+            return sd.isNull() ? origin2D : origin2D + (sd.normalized() * len).toPointF();
+        };
+
+        painter.setRenderHint(QPainter::Antialiasing, true);
         painter.setPen(QPen(QColor(210, 80, 80), 2));
-        painter.drawLine(project(QVector3D(-130, 0, 0)).point, project(QVector3D(130, 0, 0)).point);
-
+        painter.drawLine(screenEnd(QVector3D(-1, 0, 0), axisLen), screenEnd(QVector3D(1, 0, 0), axisLen));
         painter.setPen(QPen(QColor(80, 180, 110), 2));
-        painter.drawLine(project(QVector3D(0, -130, 0)).point, project(QVector3D(0, 130, 0)).point);
-
+        painter.drawLine(screenEnd(QVector3D(0, -1, 0), axisLen), screenEnd(QVector3D(0, 1, 0), axisLen));
         painter.setPen(QPen(QColor(90, 150, 230), 2));
-        painter.drawLine(project(QVector3D(0, 0, 0)).point, project(QVector3D(0, 0, 90)).point);
+        painter.drawLine(origin2D, screenEnd(QVector3D(0, 0, 1), axisLen));
+        painter.setRenderHint(QPainter::Antialiasing, false);
     };
 
     auto drawShadow = [&](const QVector<QVector3D> &points) {
@@ -2111,7 +2147,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                                      const SceneMesh &mesh,
                                      const QColor &color,
                                      bool visibleFacesOnly = false) {
-        const auto edges = characteristicMeshEdges(mesh, m_cameraYaw, m_cameraPitch, visibleFacesOnly);
+        const auto edges = characteristicMeshEdges(mesh, m_cameraYaw, m_cameraPitch,
+                                                   visibleFacesOnly);
         for (const auto &edge : edges) {
             Line2D line;
             line.a = project(edge.first).point;
@@ -2122,7 +2159,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     };
 
     if (drawSceneMeshes)
-        drawGrid();
+        drawMinorGrid();
     QString csgStatus = "CSG preview: plain mesh";
 
     if (m_shapes) {
@@ -2161,8 +2198,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
 
                     const SceneMesh mesh = interactionMeshForShape(m_scene, shape);
                     appendMesh(triangles, mesh, color, i);
-                    if (selected)
-                        appendCutFeatureEdges(selectedFeatureLines, mesh, selectionFeatureColor, true);
+                    if (selected) {
+                        appendCutFeatureEdges(selectedFeatureLines, mesh, selectionFeatureColor, false);
+                    }
                 }
             }
         } else {
@@ -2204,7 +2242,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
                     appendMesh(triangles, item.mesh, color, item.shapeIndex);
                 }
                 if (!item.helper && selected && drawSceneMeshes) {
-                    appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
+                    appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, false);
                 }
             }
         }
@@ -2219,6 +2257,9 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             drawTrianglesWithDepth(&painter, triangles, size(), &m_pickBuffer, &m_depthBuffer, &m_renderImage);
         }
 
+        if (drawSceneMeshes)
+            drawGridAxes();
+
         drawTransparentTriangles(&painter, translucentHelperTriangles);
 
         for (const auto &outline : cutHelperOutlines) {
@@ -2232,6 +2273,7 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
             painter.setPen(QPen(line.color, 1.15, Qt::SolidLine, Qt::RoundCap));
             painter.drawLine(line.a, line.b);
         }
+
 
         for (const Line2D &line : selectedFeatureLines) {
             // Glow outer: wider, softer
@@ -2317,7 +2359,7 @@ void ViewportWidget::drawPolyhedronElementSelectionOverlay(QPainter &painter) co
     }
 
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection);
     };
     auto pointWorldPosition = [&](int nodeId, QVector3D *world) {
         const SceneDocument::TreeNode *node = m_scene->treeNodeById(nodeId);
@@ -2425,7 +2467,7 @@ void ViewportWidget::drawPolyhedronSelectionMoveTool(QPainter &painter) const
         return;
 
     const QVector3D origin = polyhedronSelectionOrigin();
-    const QPointF center = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF center = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     const float axisLength = polyhedronSelectionGizmoAxisLength();
     struct AxisDraw {
         QVector3D axis;
@@ -2440,7 +2482,7 @@ void ViewportWidget::drawPolyhedronSelectionMoveTool(QPainter &painter) const
     };
     for (AxisDraw &axis : axes) {
         const ProjectedPoint projected = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axis.axis),
-                                                           size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
+                                                           size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection);
         axis.depth = projected.depth;
         axis.end = projected.point;
     }
@@ -2495,7 +2537,7 @@ void ViewportWidget::paintOpenGLGrid()
     glLineWidth(1.0f);
     m_glLineProgram->bind();
 
-    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance)
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance, m_orthographicProjection)
                           * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
     m_glLineProgram->setUniformValue("u_mvp", mvp);
     m_glLineProgram->setUniformValue("u_shimmer_phase", 0.0f);
@@ -2568,7 +2610,7 @@ void ViewportWidget::paintOpenGLContactShadows()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     m_glFlatProgram->bind();
 
-    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance)
+    const QMatrix4x4 mvp = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance, m_orthographicProjection)
                           * buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
     m_glFlatProgram->setUniformValue("u_mvp",    mvp);
     m_glFlatProgram->setUniformValue("u_offset", QVector2D(0, 0));
@@ -2832,7 +2874,7 @@ void ViewportWidget::paintOpenGLPreview()
         return;
 
     const QMatrix4x4 V   = buildViewMatrix(m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget);
-    const QMatrix4x4 P   = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance);
+    const QMatrix4x4 P   = buildProjectionMatrix(float(width()), float(height()), m_cameraDistance, m_orthographicProjection);
     const QMatrix4x4 mvp = P * V;
 
     glEnable(GL_DEPTH_TEST);
@@ -3259,7 +3301,7 @@ void ViewportWidget::drawTreeTransformControlPreview(QPainter &painter) const
     }
 
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     };
     auto axisName = [&]() {
         if (m_treeTransformPreviewAxis == 0)
@@ -3354,7 +3396,7 @@ void ViewportWidget::drawTreeShapeParameterPreview(QPainter &painter) const
         return;
 
     auto project = [&](const QVector3D &world) {
-        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+        return projectWorldPoint(world, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     };
 
     QVector<SceneDocument::TreeNode> parentGroups;
@@ -3473,7 +3515,7 @@ void ViewportWidget::updateSelectionShimmerTimer()
 void ViewportWidget::updateViewportControls()
 {
     if (!m_openGLViewportCheckBox || !m_darkViewportCheckBox || !m_navigationOverlayCheckBox
-        || !m_colorVariantComboBox || !m_lightingPresetComboBox) {
+        || !m_orthographicCheckBox || !m_colorVariantComboBox || !m_lightingPresetComboBox) {
         return;
     }
 
@@ -3491,6 +3533,10 @@ void ViewportWidget::updateViewportControls()
     m_navigationOverlayCheckBox->setChecked(m_navigationOverlayEnabled);
     m_navigationOverlayCheckBox->blockSignals(false);
 
+    m_orthographicCheckBox->blockSignals(true);
+    m_orthographicCheckBox->setChecked(m_orthographicProjection);
+    m_orthographicCheckBox->blockSignals(false);
+
     m_colorVariantComboBox->blockSignals(true);
     m_colorVariantComboBox->setCurrentIndex(qBound(0, m_viewportColorVariant, m_colorVariantComboBox->count() - 1));
     m_colorVariantComboBox->blockSignals(false);
@@ -3501,6 +3547,7 @@ void ViewportWidget::updateViewportControls()
     const QSize openGLSize = m_openGLViewportCheckBox->sizeHint();
     const QSize darkSize = m_darkViewportCheckBox->sizeHint();
     const QSize navigationSize = m_navigationOverlayCheckBox->sizeHint();
+    const QSize orthoSize = m_orthographicCheckBox->sizeHint();
     const QSize colorSize = m_colorVariantComboBox->sizeHint();
     const QSize lightingSize = m_lightingPresetComboBox->sizeHint();
     const int margin = 10;
@@ -3513,6 +3560,8 @@ void ViewportWidget::updateViewportControls()
     x += m_darkViewportCheckBox->width() + gap;
     m_navigationOverlayCheckBox->setGeometry(x, y, navigationSize.width() + 10, darkSize.height() + 2);
     x += m_navigationOverlayCheckBox->width() + gap;
+    m_orthographicCheckBox->setGeometry(x, y, orthoSize.width() + 10, darkSize.height() + 2);
+    x += m_orthographicCheckBox->width() + gap;
     m_colorVariantComboBox->setGeometry(x, y, qMax(92, colorSize.width() + 12), darkSize.height() + 2);
     x += m_colorVariantComboBox->width() + gap;
     m_lightingPresetComboBox->setGeometry(x, y, qMax(94, lightingSize.width() + 12), darkSize.height() + 2);
@@ -3520,6 +3569,7 @@ void ViewportWidget::updateViewportControls()
     m_openGLViewportCheckBox->raise();
     m_darkViewportCheckBox->raise();
     m_navigationOverlayCheckBox->raise();
+    m_orthographicCheckBox->raise();
     m_colorVariantComboBox->raise();
     m_lightingPresetComboBox->raise();
 }
@@ -3608,7 +3658,7 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
     const QVector3D origin = selectedTransformOrigin();
     float bestDistance = 9.0f;
     DragMode pickedAxis = NoDrag;
-    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
 
     const QVector<QPair<DragMode, QVector3D>> axes = {
         {AxisXDrag, selectedWorldAxisVector(QVector3D(36.0f, 0.0f, 0.0f))},
@@ -3618,7 +3668,7 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
 
     if (allowMoveAxes) {
         for (const auto &axis : axes) {
-            const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+            const QPointF end = projectWorldPoint(origin + axis.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
             const float distance = distanceToSegment(position, start, end);
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -3635,7 +3685,7 @@ bool ViewportWidget::pickSelectedTransformAxis(const QPoint &position, DragMode 
 
             for (int step = 0; step <= 72; ++step) {
                 const QVector3D worldPoint = rotationRingPoint(origin, ring, 48.0f, step * 5.0f);
-                const QPointF current = projectWorldPoint(worldPoint, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+                const QPointF current = projectWorldPoint(worldPoint, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
                 if (hasPrevious) {
                     const float distance = distanceToSegment(position, previous, current);
                     if (distance < bestDistance) {
@@ -3791,9 +3841,9 @@ QVector3D ViewportWidget::polyhedronSelectionLocalDeltaForMousePosition(const QP
         return QVector3D();
 
     const QVector3D origin = polyhedronSelectionOrigin();
-    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     const QPointF screenEnd = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axisVector * polyhedronSelectionGizmoAxisLength()),
-                                                size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+                                                size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     QVector2D screenAxis(screenEnd - screenOrigin);
     if (screenAxis.lengthSquared() <= 0.0001f)
         return QVector3D();
@@ -3809,7 +3859,7 @@ bool ViewportWidget::pickPolyhedronSelectionAxis(const QPoint &position, DragMod
         return false;
 
     const QVector3D origin = polyhedronSelectionOrigin();
-    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF start = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     float bestDistance = 10.0f;
     DragMode picked = NoDrag;
 
@@ -3826,7 +3876,7 @@ bool ViewportWidget::pickPolyhedronSelectionAxis(const QPoint &position, DragMod
     };
     for (const auto &axis : axes) {
         const QPointF end = projectWorldPoint(origin + polyhedronSelectionWorldAxisVector(axis.second),
-                                              size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+                                              size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
         const float distance = distanceToSegment(position, start, end);
         if (distance < bestDistance) {
             bestDistance = distance;
@@ -3855,7 +3905,7 @@ bool ViewportWidget::hitTestPolyhedronSelection(const QPoint &position) const
 
         if (shape->type == ShapeNode::Point3D) {
             const QPointF screen = projectWorldPoint(transformPointByGroupStack(shape->position, parentGroups),
-                                                     size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+                                                     size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
             if (QVector2D(QPointF(position) - screen).length() <= 10.0f)
                 return true;
             continue;
@@ -3880,7 +3930,7 @@ bool ViewportWidget::hitTestPolyhedronSelection(const QPoint &position) const
         for (int pointIndex : shape->polyhedronFaces.first()) {
             if (pointIndex < 0 || pointIndex >= points.size())
                 continue;
-            polygon << projectWorldPoint(points[pointIndex], size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+            polygon << projectWorldPoint(points[pointIndex], size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
         }
         if (polygon.size() < 2)
             continue;
@@ -3931,13 +3981,14 @@ QVector3D ViewportWidget::dragDeltaForMousePosition(const QPoint &position) cons
         axisVector = QVector3D(0.0f, 0.0f, 1.0f);
 
     const QVector3D origin = selectedTransformOrigin();
-    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+    const QPointF screenOrigin = projectWorldPoint(origin, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
     const QPointF screenEnd = projectWorldPoint(origin + selectedWorldAxisVector(axisVector * 36.0f),
                                                 size(),
                                                 m_cameraYaw,
                                                 m_cameraPitch,
                                                 m_cameraDistance,
-                                                m_cameraTarget).point;
+                                                m_cameraTarget,
+                                                m_orthographicProjection).point;
     QVector2D screenAxis(screenEnd - screenOrigin);
 
     if (screenAxis.lengthSquared() <= 0.0001f)
@@ -4014,7 +4065,8 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
                                                            m_cameraYaw,
                                                            m_cameraPitch,
                                                            m_cameraDistance,
-                                                           m_cameraTarget).point;
+                                                           m_cameraTarget,
+                                                           m_orthographicProjection).point;
             QVector2D radiusVector(QPointF(event->pos()) - screenOrigin);
             m_rotationDragScreenTangent = QVector2D(-radiusVector.y(), radiusVector.x());
 
@@ -4050,8 +4102,8 @@ void ViewportWidget::mousePressEvent(QMouseEvent *event)
                 continue;
 
             for (const auto &edge : meshEdges(item.mesh)) {
-                const QPointF a = projectWorldPoint(edge.first, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
-                const QPointF b = projectWorldPoint(edge.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget).point;
+                const QPointF a = projectWorldPoint(edge.first, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
+                const QPointF b = projectWorldPoint(edge.second, size(), m_cameraYaw, m_cameraPitch, m_cameraDistance, m_cameraTarget, m_orthographicProjection).point;
                 const float distance = distanceToSegment(event->pos(), a, b);
 
                 if (distance < bestDistance) {

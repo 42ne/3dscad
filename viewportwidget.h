@@ -161,6 +161,7 @@ private:
     RenderBackend m_renderBackend = SoftwareRenderBackend;
     bool m_darkViewportTheme = true;
     bool m_navigationOverlayEnabled = true;
+    bool m_orthographicProjection = false;
     int m_viewportColorVariant = 0;
     int m_lightingPreset = 0;
     bool m_hasCustomAppearanceTheme = false;
@@ -216,6 +217,7 @@ private:
     QCheckBox *m_navigationOverlayCheckBox = nullptr;
     QComboBox *m_colorVariantComboBox = nullptr;
     QComboBox *m_lightingPresetComboBox = nullptr;
+    QCheckBox *m_orthographicCheckBox = nullptr;
     QOpenGLShaderProgram *m_glMeshProgram = nullptr;
     QOpenGLShaderProgram *m_glLineProgram = nullptr;
     QOpenGLShaderProgram *m_glFlatProgram = nullptr;
