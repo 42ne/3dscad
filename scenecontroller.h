@@ -131,6 +131,8 @@ signals:
 
 private:
     void pushCommandIfValid(QUndoCommand *command);
+    void setCtrlHighlight(int nodeId, const QString &contextPrefix,
+                          const QString &expression, int start, int replacementSize);
     void selectShapeInternal(int shapeId); // updates scene + m_selectedTreeNodeId, emits selectionChanged
 
     SceneDocument m_scene;

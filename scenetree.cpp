@@ -1,25 +1,9 @@
 #include "scenetree.h"
+#include "scenestringutils.h"
 
 #include <functional>
 
 namespace {
-
-bool isValidIdentifier(const QString &name)
-{
-    if (name.isEmpty())
-        return false;
-
-    const QChar first = name.front();
-    if (!(first == QLatin1Char('_') || first.isLetter()))
-        return false;
-
-    for (const QChar ch : name) {
-        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
-            return false;
-    }
-
-    return true;
-}
 
 bool moduleNameExists(const SceneTree::TreeNode &node, const QString &name, int ignoredNodeId)
 {

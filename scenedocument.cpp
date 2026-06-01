@@ -35,23 +35,6 @@ void collectAllVariableValues(const SceneDocument::TreeNode &node, QHash<QString
         collectAllVariableValues(child, values);
 }
 
-bool isValidIdentifier(const QString &name)
-{
-    if (name.isEmpty())
-        return false;
-
-    const QChar first = name.front();
-    if (!(first == QLatin1Char('_') || first.isLetter()))
-        return false;
-
-    for (const QChar ch : name) {
-        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
-            return false;
-    }
-
-    return true;
-}
-
 QString buildNamedArgumentExpressions(const QHash<QString, QString> &arguments, const QStringList &order)
 {
     QStringList parts;

@@ -33,6 +33,8 @@ SOURCES += \
     openscadparser.cpp \
     scenecommands.cpp \
     scenetreegraphicshelpers.cpp \
+    scenetreecoloreditmode.cpp \
+    scenetreehovermanager.cpp \
     scenetreegraphicswidget.cpp \
     scenetreegraphicswidget_canvasdrag.cpp \
     scenetreeinlinetextinput.cpp \
@@ -71,6 +73,8 @@ HEADERS += \
     openscadparser.h \
     scenecommands.h \
     scenetreegraphicshelpers.h \
+    scenetreecoloreditmode.h \
+    scenetreehovermanager.h \
     scenetreegraphicswidget.h \
     scenetreeinlinetextinput.h \
     scenetreelayout.h \

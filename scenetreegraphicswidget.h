@@ -27,6 +27,8 @@ class QVariantAnimation;
 class GroupThumbnailCache;
 class NodeThumbnailCache;
 class SceneTreeInlineTextInput;
+class SceneTreeColorEditMode;
+class SceneTreeHoverManager;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -50,7 +52,7 @@ public:
 
     // Enable / disable the in-app color-edit paint mode.
     void setColorEditMode(bool enabled);
-    bool colorEditMode() const { return m_colorEditMode; }
+    bool colorEditMode() const;
     void compactRootBlocksAndFit();
     void focusSelectedNodeAnimated();
 
@@ -125,45 +127,20 @@ private:
     using DropTarget = SceneTreeLayout::DropTarget;
     using GroupHitArea = SceneTreeLayout::GroupHitArea;
 
-    // ── Color-edit mode ───────────────────────────────────────────────────────
-    struct ColorZoneHit {
-        QString fieldName;      // "canvas"|"card"|"header"|"input"|"hint"|"toolbar"|"toolbar_controls"
-        QString label;          // human-readable zone name for the hover hint
-        QRectF  rect;           // zone rect in scene coords (or local item rect for hint/toolbar)
-        bool    valid = false;
-        SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-        bool    hasOperation = false;
-        int     nodeId = 0;       // scene node id; 0 = none
-        QString spanText     = {}; // for direct numText/mutedText hits: the span's text content
-        QPointF itemScenePos = {}; // for hint/toolbar hits: scene pos of the ItemIgnoresTransformations panel
-    };
-    struct ColorPropDef {
-        QString id;       // field name in TreeAppearanceTheme / OperationCardPalette
-        QString label;    // shown in hint + dialog title
-        bool isText   = false; // true → blink the highlight
-        bool isGlobal = false; // true = global theme; false = per-op palette
-    };
-    ColorZoneHit colorZoneAt(const QPointF &scenePos) const;
-    QVector<ColorPropDef> propsForHit(const ColorZoneHit &hit) const;
-    QColor  getColorForProp(const ColorPropDef &prop, const ColorZoneHit &hit) const;
-    void    setColorForProp(const ColorPropDef &prop, const ColorZoneHit &hit, const QColor &color);
-    void handleColorEditClick(const QPointF &scenePos);
-    void handleColorEditWheel(const QPointF &scenePos, int angleDelta);
-    void updateColorEditHighlight(const QPointF &scenePos);
+    friend class SceneTreeColorEditMode;
+    friend class SceneTreeHoverManager;
     void clearColorEditHighlight();
+    void updateColorEditHighlight(const QPointF &scenePos);
 
     QRectF drawToolbar();
     void drawThemeSwitcher();
     void drawCanvasBackgroundSwitcher();
-    void drawHoverHintOverlay();
     void clearToolbar();
     void updateToolbarOverlay();
     void handleThemeSwitcherClick(int themeIndex);
     void handleCanvasBackgroundSwitcherClick(int backgroundIndex);
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
-    void clearHoverHighlightOverlay();
-    void updateHoverHighlightOverlay();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
     QRectF drawNode(const SceneDocument::TreeNode &node, const QPointF &topLeft, int depth);
     QRectF drawPrimitive(const SceneDocument::TreeNode &node, const QPointF &topLeft);
@@ -192,11 +169,6 @@ private:
     bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
-    void updateHoverHighlights(const QPointF &scenePosition);
-    void updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled);
-    void updatePolygonPointHover(const QPointF &scenePosition, bool enabled);
-    QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
-    bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
     struct ExpressionEditTarget;
     bool expressionEditTargetAt(const QPointF &scenePosition, ExpressionEditTarget *target) const;
@@ -214,15 +186,6 @@ private:
     bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
     bool moduleCallParamControlAt(const QPointF &scenePosition, int *moduleCallNodeId, int *paramVarNodeId, int *start, int *length) const;
-    void updateControlTooltip(const QPoint &globalPosition, const QPointF &scenePosition, bool controlDown);
-    void updateHoverHint(const QString &key, const QString &text);
-    QString hoverHintTextForPosition(const QPointF &scenePosition, bool controlDown, QString *key) const;
-    void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
-    void updateActiveColorChannelControl(const QPointF &scenePosition, bool enabled);
-    void updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled);
-    void updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled);
-    void updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled);
-    void updateActiveModuleCallParamControl(const QPointF &scenePosition, bool enabled);
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void finishDropPreview();
     void clearDropPreview();
@@ -248,7 +211,6 @@ private:
     QSet<int> m_collapsedGroupIds;
     QVector<QGraphicsItem *> m_treeItems;
     QVector<QGraphicsItem *> m_toolbarItems;
-    QVector<QGraphicsItem *> m_hoverHighlightItems;
     QVector<QGraphicsItem *> m_dropPreviewItems;
     QTimer *m_dropPreviewAnimationTimer = nullptr;
     QVariantAnimation *m_focusAnimation = nullptr;
@@ -343,45 +305,15 @@ private:
     int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
     QSet<int> m_selectedPolyhedronElementNodeIds;
-    int m_hoveredPolyhedronElementNodeId = 0;
     QSet<QString> m_selectedPolygonPointKeys;
-    int m_hoveredPolygonPointNodeId = 0;
-    int m_hoveredPolygonPointIndex = -1;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
-    bool            m_colorEditMode        = false;
-    QGraphicsItem  *m_colorEditHighlight   = nullptr; // owned inverted-fill overlay (fill props)
-    QVector<QGraphicsItem*> m_colorEditBlinkTargets;  // borrowed tree text items (text props)
-    QString         m_colorEditZoneField;
-    int             m_colorEditPropIndex   = 0;
-    ColorZoneHit    m_colorEditCurrentZone;
-    QTimer         *m_colorEditBlinkTimer  = nullptr;
-    bool            m_colorEditBlinkOn     = true;
+    SceneTreeHoverManager *m_hoverManager = nullptr;
+    SceneTreeColorEditMode *m_colorEdit = nullptr;
     QGraphicsItem  *m_colorEditToggleItem  = nullptr; // pointer to the toggle for priority check
-    int m_activeTransformControlNodeId = 0;
-    int m_activeTransformControlAxis = -1;
-    int m_activeTransformControlNumberStart = -1;
-    SceneDocument::TreeNode::Operation m_activeTransformControlOperation = SceneDocument::TreeNode::Union;
-    int m_activeColorNodeId = 0;
-    int m_activeColorChannel = -1;
-    int m_activeShapeParameterNodeId = 0;
-    int m_activeShapeParameter = -1;
-    int m_activeShapeParameterNumberStart = -1;
-    int m_activeVariableNodeId = 0;
-    int m_activeVariableNumberStart = -1;
-    int m_activeForLoopNodeId = 0;
-    int m_activeForLoopNumberStart = -1;
-    int m_activeModuleCallNodeId = 0;
-    int m_activeModuleCallVarNodeId = 0;
-    int m_activeModuleCallNumberStart = -1;
-    QString m_hoverHintKey;
-    QString m_hoverHintText;
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
-    QRectF m_hoveredScrollRect;
-    QRectF m_hoveredRenameRect;
-    QRectF m_hoveredExpressionRect;
     DropTarget m_dropPreviewStartTarget;
     DropTarget m_dropPreviewTarget;
     DropTarget m_dropPreviewCurrentTarget;

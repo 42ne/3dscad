@@ -10,6 +10,8 @@
 #include "scenetreenoderenderer.h"
 #include "scenetreetoolbarrenderer.h"
 #include "scenestringutils.h"
+#include "scenetreecoloreditmode.h"
+#include "scenetreehovermanager.h"
 
 #include <QApplication>
 #include <QColorDialog>
@@ -38,72 +40,16 @@ using namespace SceneTreeGraphics;
 
 namespace {
 
-static bool isPolyhedronEditableNumberCell(PolyhedronTableItem::Cell::Type type)
-{
-    return type == PolyhedronTableItem::Cell::PtX
-           || type == PolyhedronTableItem::Cell::PtY
-           || type == PolyhedronTableItem::Cell::PtZ
-           || type == PolyhedronTableItem::Cell::FaceParticipate;
-}
-
-static bool isPolyhedronButtonCell(PolyhedronTableItem::Cell::Type type)
-{
-    return type == PolyhedronTableItem::Cell::RemovePt
-           || type == PolyhedronTableItem::Cell::RemoveFace
-           || type == PolyhedronTableItem::Cell::AddPt
-           || type == PolyhedronTableItem::Cell::AddFace
-           || type == PolyhedronTableItem::Cell::AutoFace
-           || type == PolyhedronTableItem::Cell::TemplateButton
-           || type == PolyhedronTableItem::Cell::ClearPolyhedron;
-}
-
 static bool isPolyhedronSelectableLabelCell(PolyhedronTableItem::Cell::Type type)
 {
     return type == PolyhedronTableItem::Cell::PtLabel
            || type == PolyhedronTableItem::Cell::FaceLabel;
 }
 
-static bool isPolygonEditableNumberCell(Polygon2DTableItem::Cell::Type type)
-{
-    return type == Polygon2DTableItem::Cell::PtX
-           || type == Polygon2DTableItem::Cell::PtY;
-}
-
-static bool isPolygonButtonCell(Polygon2DTableItem::Cell::Type type)
-{
-    return type == Polygon2DTableItem::Cell::RemovePt
-           || type == Polygon2DTableItem::Cell::AddPt;
-}
-
-static bool isPolygonSelectableLabelCell(Polygon2DTableItem::Cell::Type type)
-{
-    return type == Polygon2DTableItem::Cell::PtLabel;
-}
-
 static QString polygonPointSelectionKey(int nodeId, int pointIndex)
 {
     return QStringLiteral("%1:%2").arg(nodeId).arg(pointIndex);
 }
-
-// ---------------------------------------------------------------------------
-// GridBlinkItem — paints a grid overlay at a fixed spacing with a given color.
-// Used to blink the minor/major grid when that property is selected in color-edit mode.
-// ---------------------------------------------------------------------------
-class GridBlinkItem : public QGraphicsItem
-{
-public:
-    GridBlinkItem(const QRectF &sceneRect, qreal gridSize, const QColor &color)
-        : m_sceneRect(sceneRect), m_gridSize(gridSize), m_color(color) {}
-    QRectF boundingRect() const override { return m_sceneRect; }
-    void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override
-    {
-        drawCanvasGrid(p, m_sceneRect, m_gridSize, m_color, 3);
-    }
-private:
-    QRectF  m_sceneRect;
-    qreal   m_gridSize;
-    QColor  m_color;
-};
 
 // ---------------------------------------------------------------------------
 // ColorEditToggleItem — standalone vertical toggle switch for color-edit mode.
@@ -591,6 +537,12 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         m_zoomIdle = true;
     });
 
+    m_colorEdit = new SceneTreeColorEditMode(this);
+    connect(m_colorEdit, &SceneTreeColorEditMode::inlineThemeEdited,
+            this, &SceneTreeGraphicsWidget::inlineThemeEdited);
+
+    m_hoverManager = new SceneTreeHoverManager(this);
+
     connect(m_zoomAnimTimer, &QTimer::timeout, this, [this]() {
         // ── Physics step: accel → velocity → zoom ──────────────────────────
         constexpr qreal kAccelDecay    = 0.70;
@@ -810,7 +762,7 @@ void SceneTreeGraphicsWidget::refresh()
 
     resetGraphicsScene();
     drawTreeOrPlaceholder();
-    updateHoverHighlightOverlay();
+    m_hoverManager->updateHighlightOverlay();
     updateSceneRect();
     updateToolbarOverlay();
     syncThumbnailCache();
@@ -911,7 +863,7 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     m_treeItems.clear();
     m_renameZones.clear();
     m_toolbarItems.clear();
-    m_hoverHighlightItems.clear();
+    m_hoverManager->m_hoverHighlightItems.clear();
     m_canvasMoveHandles.clear();
     m_treeItemsVisible = true;
 }
@@ -1032,55 +984,7 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
 }
 
-void SceneTreeGraphicsWidget::clearHoverHighlightOverlay()
-{
-    for (QGraphicsItem *item : m_hoverHighlightItems) {
-        if (!item)
-            continue;
-        m_graphicsScene->removeItem(item);
-        delete item;
-    }
-    m_hoverHighlightItems.clear();
-}
 
-void SceneTreeGraphicsWidget::updateHoverHighlightOverlay()
-{
-    if (!m_graphicsScene)
-        return;
-
-    clearHoverHighlightOverlay();
-
-    const bool hasActiveScrollControl = m_activeTransformControlNodeId > 0
-                                        || m_activeColorNodeId > 0
-                                        || m_activeShapeParameterNodeId > 0
-                                        || m_activeVariableNodeId > 0
-                                        || m_activeForLoopNodeId > 0
-                                        || m_activeModuleCallNodeId > 0;
-
-    auto addHoverOverlay = [this](const QRectF &rect,
-                                  const QColor &fill,
-                                  const QColor &border,
-                                  qreal inflate,
-                                  qreal radius) {
-        if (!rect.isValid() || rect.isEmpty())
-            return;
-        QPainterPath path;
-        path.addRoundedRect(rect.adjusted(-inflate, -inflate, inflate, inflate), radius, radius);
-        auto *item = m_graphicsScene->addPath(path, QPen(border, 1.5), QBrush(fill));
-        item->setAcceptedMouseButtons(Qt::NoButton);
-        item->setZValue(180.0);
-        m_hoverHighlightItems.append(item);
-    };
-
-    if (!hasActiveScrollControl) {
-        addHoverOverlay(m_hoveredScrollRect,
-                        QColor(100, 215, 240, 45), QColor(65, 180, 210, 155), 2.5, 5.0);
-    }
-    addHoverOverlay(m_hoveredRenameRect,
-                    QColor(190, 160, 245, 40), QColor(145, 108, 215, 150), 2.0, 4.0);
-    addHoverOverlay(m_hoveredExpressionRect,
-                    QColor(255, 214, 110, 42), QColor(216, 154, 54, 165), 2.0, 4.0);
-}
 
 void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &rect)
 {
@@ -1092,21 +996,21 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
 
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 {
-    if (event->key() == Qt::Key_Escape && m_colorEditMode) {
+    if (event->key() == Qt::Key_Escape && colorEditMode()) {
         setColorEditMode(false);
         event->accept();
         return;
     }
     if (event->key() == Qt::Key_Control) {
         const QPointF scenePosition = mapToScene(m_lastMousePosition);
-        updateControlTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
-        updateActiveTransformControl(scenePosition, true);
-        updateActiveColorChannelControl(scenePosition, true);
-        updateActiveShapeParameterControl(scenePosition, true);
-        updateActiveVariableNumberControl(scenePosition, true);
-        updateActiveForLoopRangeControl(scenePosition, true);
-        updateActiveModuleCallParamControl(scenePosition, true);
-        updateHoverHighlights(scenePosition);
+        m_hoverManager->updateTooltip(mapToGlobal(m_lastMousePosition), scenePosition, true);
+        m_hoverManager->updateActiveTransformControl(scenePosition, true);
+        m_hoverManager->updateActiveColorChannelControl(scenePosition, true);
+        m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
+        m_hoverManager->updateActiveVariableNumberControl(scenePosition, true);
+        m_hoverManager->updateActiveForLoopRangeControl(scenePosition, true);
+        m_hoverManager->updateActiveModuleCallParamControl(scenePosition, true);
+        m_hoverManager->updateHighlights(scenePosition);
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
@@ -1146,7 +1050,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     }
 
     // ── Color-edit mode: intercept left-clicks on card zones ─────────────────
-    if (m_colorEditMode && event->button() == Qt::LeftButton) {
+    if (colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         // Only toolbar items (theme swatches, the "✏ Colors" toggle button) are
         // allowed to handle their own clicks normally.  Everything else — tree
@@ -1162,7 +1066,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         const bool isToolbarControl = (hitZone == QLatin1String("swatch")
                                        || hitZone == QLatin1String("toggle"));
         if (!isToolbarControl) {
-            handleColorEditClick(scenePos);
+            if (m_colorEdit) m_colorEdit->handleClick(scenePos);
             event->accept();
             return;
         }
@@ -1170,7 +1074,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     }
 
     // ── Table labels/buttons ────────────────────────────────
-    if (!m_colorEditMode && event->button() == Qt::LeftButton) {
+    if (!colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         Polygon2DTableItem::Cell polygonCell;
         if (polygon2DTableControlAt(scenePos, &polygonCell)) {
@@ -1288,7 +1192,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     }
 
     // ── Canvas-move drag: check grip strip before anything else ──────────────
-    if (!m_colorEditMode && event->button() == Qt::LeftButton) {
+    if (!colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
         ExpressionEditTarget target;
         if (expressionEditTargetAt(scenePos, &target)) {
@@ -1347,13 +1251,13 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         m_panning = true;
         m_lastPanPoint = event->pos();
         setCursor(Qt::ClosedHandCursor);
-        const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid()
-                             || m_hoveredExpressionRect.isValid();
-        m_hoveredScrollRect = QRectF();
-        m_hoveredRenameRect = QRectF();
-        m_hoveredExpressionRect = QRectF();
+        const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
+                             || m_hoverManager->m_hoveredExpressionRect.isValid();
+        m_hoverManager->m_hoveredScrollRect = QRectF();
+        m_hoverManager->m_hoveredRenameRect = QRectF();
+        m_hoverManager->m_hoveredExpressionRect = QRectF();
         if (changed)
-            updateHoverHighlightOverlay();
+            m_hoverManager->updateHighlightOverlay();
         event->accept();
         return;
     }
@@ -1544,7 +1448,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     // ── Color-edit mode hover ─────────────────────────────────────────────────
-    if (m_colorEditMode) {
+    if (colorEditMode()) {
         updateColorEditHighlight(scenePosition);
         if (!(event->buttons() & Qt::LeftButton))
             QGraphicsView::mouseMoveEvent(event);       // hover events only — block drag propagation
@@ -1553,13 +1457,13 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     // ── Normal flow ──────────────────────────────────────────────────────────
-    updateControlTooltip(event->globalPos(), scenePosition, controlDown);
-    updateActiveTransformControl(scenePosition, controlDown);
-    updateActiveColorChannelControl(scenePosition, controlDown);
-    updateActiveShapeParameterControl(scenePosition, controlDown);
-    updateActiveVariableNumberControl(scenePosition, controlDown);
-    updateActiveForLoopRangeControl(scenePosition, controlDown);
-    updateActiveModuleCallParamControl(scenePosition, controlDown);
+    m_hoverManager->updateTooltip(event->globalPos(), scenePosition, controlDown);
+    m_hoverManager->updateActiveTransformControl(scenePosition, controlDown);
+    m_hoverManager->updateActiveColorChannelControl(scenePosition, controlDown);
+    m_hoverManager->updateActiveShapeParameterControl(scenePosition, controlDown);
+    m_hoverManager->updateActiveVariableNumberControl(scenePosition, controlDown);
+    m_hoverManager->updateActiveForLoopRangeControl(scenePosition, controlDown);
+    m_hoverManager->updateActiveModuleCallParamControl(scenePosition, controlDown);
 
     if (m_panning) {
         const QPoint delta = event->pos() - m_lastPanPoint;
@@ -1571,7 +1475,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    updateHoverHighlights(scenePosition);
+    m_hoverManager->updateHighlights(scenePosition);
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -1659,7 +1563,7 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
         const QPointF scenePos = mapToScene(event->pos());
         int renameNodeId = 0;
         QRectF renameRect;
-        if (hoverRenameZoneAt(scenePos, &renameNodeId, &renameRect)) {
+        if (m_hoverManager->hoverRenameZoneAt(scenePos, &renameNodeId, &renameRect)) {
             const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(renameNodeId) : nullptr;
             if (node) {
                 const bool isModule = node->type == SceneDocument::TreeNode::Group
@@ -1678,19 +1582,19 @@ void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
 {
     QGraphicsView::leaveEvent(event);
     clearColorEditHighlight();
-    const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid()
-                         || m_hoveredExpressionRect.isValid();
-    m_hoveredScrollRect = QRectF();
-    m_hoveredRenameRect = QRectF();
-    m_hoveredExpressionRect = QRectF();
-    updatePolyhedronElementHover(QPointF(), false);
-    updatePolygonPointHover(QPointF(), false);
-    updateHoverHint(QStringLiteral("canvas"),
+    const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
+                         || m_hoverManager->m_hoveredExpressionRect.isValid();
+    m_hoverManager->m_hoveredScrollRect = QRectF();
+    m_hoverManager->m_hoveredRenameRect = QRectF();
+    m_hoverManager->m_hoveredExpressionRect = QRectF();
+    m_hoverManager->updatePolyhedronElementHover(QPointF(), false);
+    m_hoverManager->updatePolygonPointHover(QPointF(), false);
+    m_hoverManager->updateHoverHint(QStringLiteral("canvas"),
                     QStringLiteral("Scene tree canvas\nWheel: zoom tree view\nDrag empty space: pan; drag toolbar icons to create blocks"));
     if (!m_panning)
         setCursor(Qt::OpenHandCursor);
     if (changed && !m_dragActive)
-        updateHoverHighlightOverlay();
+        m_hoverManager->updateHighlightOverlay();
 }
 
 void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
@@ -1698,29 +1602,29 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     QGraphicsView::scrollContentsBy(dx, dy);
     updateInlineInputGeometry();
     // Clear hover state when the canvas scrolls (positions shift under the cursor).
-    const bool changed = m_hoveredScrollRect.isValid() || m_hoveredRenameRect.isValid()
-                         || m_hoveredExpressionRect.isValid();
-    m_hoveredScrollRect = QRectF();
-    m_hoveredRenameRect = QRectF();
-    m_hoveredExpressionRect = QRectF();
-    updatePolyhedronElementHover(QPointF(), false);
-    updatePolygonPointHover(QPointF(), false);
+    const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
+                         || m_hoverManager->m_hoveredExpressionRect.isValid();
+    m_hoverManager->m_hoveredScrollRect = QRectF();
+    m_hoverManager->m_hoveredRenameRect = QRectF();
+    m_hoverManager->m_hoveredExpressionRect = QRectF();
+    m_hoverManager->updatePolyhedronElementHover(QPointF(), false);
+    m_hoverManager->updatePolygonPointHover(QPointF(), false);
     if (changed && !m_dragActive)
-        updateHoverHighlightOverlay();
+        m_hoverManager->updateHighlightOverlay();
     updateToolbarOverlay();
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Control) {
-        updateControlTooltip(mapToGlobal(m_lastMousePosition), mapToScene(m_lastMousePosition), false);
-        updateActiveTransformControl(QPointF(), false);
-        updateActiveColorChannelControl(QPointF(), false);
-        updateActiveShapeParameterControl(QPointF(), false);
-        updateActiveVariableNumberControl(QPointF(), false);
-        updateActiveForLoopRangeControl(QPointF(), false);
-        updateActiveModuleCallParamControl(QPointF(), false);
-        updateHoverHighlights(mapToScene(m_lastMousePosition));
+        m_hoverManager->updateTooltip(mapToGlobal(m_lastMousePosition), mapToScene(m_lastMousePosition), false);
+        m_hoverManager->updateActiveTransformControl(QPointF(), false);
+        m_hoverManager->updateActiveColorChannelControl(QPointF(), false);
+        m_hoverManager->updateActiveShapeParameterControl(QPointF(), false);
+        m_hoverManager->updateActiveVariableNumberControl(QPointF(), false);
+        m_hoverManager->updateActiveForLoopRangeControl(QPointF(), false);
+        m_hoverManager->updateActiveModuleCallParamControl(QPointF(), false);
+        m_hoverManager->updateHighlights(mapToScene(m_lastMousePosition));
         emit ctrlReleased();
     }
 
@@ -1742,9 +1646,9 @@ void SceneTreeGraphicsWidget::showEvent(QShowEvent *event)
 
 void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 {
-    if (m_colorEditMode && event->angleDelta().y() != 0) {
+    if (colorEditMode() && event->angleDelta().y() != 0) {
         const QPointF scenePos = mapToScene(event->position().toPoint());
-        handleColorEditWheel(scenePos, event->angleDelta().y());
+        if (m_colorEdit) m_colorEdit->handleWheel(scenePos, event->angleDelta().y());
         event->accept();
         return;
     }
@@ -1825,10 +1729,10 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
             },
             [this](const QString &toolName, bool hovered) {
                 if (hovered) {
-                    updateHoverHint(QStringLiteral("toolbar:%1").arg(toolName),
+                    m_hoverManager->updateHoverHint(QStringLiteral("toolbar:%1").arg(toolName),
                                     toolbarToolTip(toolName));
-                } else if (m_hoverHintKey == QStringLiteral("toolbar:%1").arg(toolName)) {
-                    updateControlTooltip(mapToGlobal(m_lastMousePosition),
+                } else if (m_hoverManager->hoverHintKey() == QStringLiteral("toolbar:%1").arg(toolName)) {
+                    m_hoverManager->updateTooltip(mapToGlobal(m_lastMousePosition),
                                          mapToScene(m_lastMousePosition),
                                          QApplication::keyboardModifiers() & Qt::ControlModifier);
                 }
@@ -1859,7 +1763,7 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
     drawToolbar();
     drawCanvasBackgroundSwitcher();
     drawThemeSwitcher();
-    drawHoverHintOverlay();
+    m_hoverManager->drawHintOverlay();
 }
 
 void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
@@ -1979,1216 +1883,27 @@ void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
 
 // ── Color-edit paint mode ──────────────────────────────────────────────────────
 
-static QString colorEditOpName(SceneDocument::TreeNode::Operation op);
-
 void SceneTreeGraphicsWidget::setColorEditMode(bool enabled)
 {
-    if (m_colorEditMode == enabled)
-        return;
-    m_colorEditMode = enabled;
-    clearColorEditHighlight();
-    m_colorEditPropIndex = 0;
-    m_colorEditCurrentZone = {};
-    m_colorEditBlinkOn = true;
-
-    if (enabled) {
-        // Create blink timer once; it runs for the whole duration of color-edit mode.
-        if (!m_colorEditBlinkTimer) {
-            m_colorEditBlinkTimer = new QTimer(this);
-            m_colorEditBlinkTimer->setInterval(250);
-            connect(m_colorEditBlinkTimer, &QTimer::timeout, this, [this]() {
-                m_colorEditBlinkOn = !m_colorEditBlinkOn;
-                // Fill overlay (owned)
-                if (m_colorEditHighlight)
-                    m_colorEditHighlight->setVisible(m_colorEditBlinkOn);
-                // Text items (borrowed — just toggle visibility)
-                for (QGraphicsItem *it : m_colorEditBlinkTargets)
-                    if (it && it->scene())
-                        it->setVisible(m_colorEditBlinkOn);
-            });
-        }
-        m_colorEditBlinkTimer->start();
-        setCursor(Qt::PointingHandCursor);
-        updateHoverHint(QStringLiteral("colorEdit:mode"),
-                        QStringLiteral("✏ Color edit\n"
-                                       "Hover a card, then scroll ↕ to cycle properties.\n"
-                                       "Click to pick a color.  Esc to exit."));
-    } else {
-        if (m_colorEditBlinkTimer)
-            m_colorEditBlinkTimer->stop();
-        m_colorEditZoneField.clear();
-        setCursor(Qt::OpenHandCursor);
-        updateHoverHint(QString(), QString());
-    }
-    updateToolbarOverlay();
+    if (!m_colorEdit) return;
+    m_colorEdit->setEnabled(enabled);
     emit colorEditModeChanged(enabled);
 }
 
-SceneTreeGraphicsWidget::ColorZoneHit
-SceneTreeGraphicsWidget::colorZoneAt(const QPointF &scenePos) const
+bool SceneTreeGraphicsWidget::colorEditMode() const
 {
-    // Toolbar/hint panels use ItemIgnoresTransformations. QGraphicsView::itemAt drives
-    // scene-space containment checks, which break at zoom != 1 for IIT items (their
-    // sceneBoundingRect has local-pixel size, not world units). Instead, compute each
-    // item's viewport-space rect directly and find the topmost hit by Z value.
-    const QPointF vpCursor(mapFromScene(scenePos));
-    QGraphicsItem *topToolbarItem = nullptr;
-    qreal topZ = -1.0;
-    for (QGraphicsItem *it : m_toolbarItems) {
-        if (!it->isVisible())
-            continue;
-        const QRectF vpRect = it->boundingRect().translated(mapFromScene(it->pos()));
-        if (vpRect.contains(vpCursor) && it->zValue() > topZ) {
-            topToolbarItem = it;
-            topZ = it->zValue();
-        }
-    }
-    if (topToolbarItem) {
-        const QString zone = topToolbarItem->data(0).toString();
-        if (zone == QLatin1String("glass_hint")) {
-            ColorZoneHit h;
-            h.fieldName    = QStringLiteral("hint");
-            h.label        = QStringLiteral("Hint panel");
-            h.valid        = true;
-            h.rect         = topToolbarItem->boundingRect();
-            h.itemScenePos = topToolbarItem->pos();
-            return h;
-        }
-        if (zone == QLatin1String("glass_toolbar")) {
-            ColorZoneHit h;
-            h.fieldName    = QStringLiteral("toolbar");
-            h.label        = QStringLiteral("Toolbar panel");
-            h.valid        = true;
-            h.rect         = topToolbarItem->boundingRect();
-            h.itemScenePos = topToolbarItem->pos();
-            return h;
-        }
-        // swatch, toggle, shadow, or untagged main toolbar item — no color properties.
-        return {QStringLiteral("toolbar_controls"), QString(), QRectF(), false,
-                SceneDocument::TreeNode::Union, false};
-    }
-
-    // Find the innermost (smallest-area) group hit area containing the position.
-    const GroupHitArea *best = nullptr;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (!area.rect.contains(scenePos))
-            continue;
-        const qreal area2 = area.rect.width() * area.rect.height();
-        if (!best || area2 < best->rect.width() * best->rect.height())
-            best = &area;
-    }
-
-    if (best) {
-        const SceneDocument::TreeNode::Operation op = best->operation;
-        // Children first — variable/param rows and primitive cards.
-        for (const ChildLayout &child : best->children) {
-            if (!child.rect.contains(scenePos))
-                continue;
-            if (m_scene) {
-                const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
-                if (node && node->type == SceneDocument::TreeNode::Variable) {
-                    // Detect precise text zone within the variable/parameter row.
-                    const QFont font = sceneTreeGraphicsFont();
-                    const QFontMetricsF metrics(font);
-                    const qreal nameW = metrics.horizontalAdvance(node->variableName);
-                    const QVector<ExpressionTextSpan> spans =
-                        expressionTextSpans(child.rect, node->variableExpression, metrics, nameW);
-                    for (const ExpressionTextSpan &span : spans) {
-                        if (span.rect.contains(scenePos)) {
-                            const QString fn = span.number
-                                ? QStringLiteral("numText") : QStringLiteral("mutedText");
-                            ColorZoneHit h{fn, span.number
-                                ? QStringLiteral("Number constant") : QStringLiteral("Formula"),
-                                span.rect, true, op, true};
-                            h.nodeId = child.nodeId;
-                            h.spanText = span.text;
-                            return h;
-                        }
-                    }
-                    // "=" label area → numLabelText
-                    const qreal eqLeft = child.rect.left() + 38.0 + nameW + 4.0;
-                    const QRectF eqRect(eqLeft, child.rect.top() + (VariableHeight - 16.0) * 0.5, 12.0, 16.0);
-                    if (eqRect.contains(scenePos)) {
-                        ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Label color"),
-                                        eqRect, true, op, true};
-                        h.nodeId = child.nodeId;
-                        return h;
-                    }
-                    const QString label = node->isParameter
-                        ? QStringLiteral("Parameter row")
-                        : QStringLiteral("Variable row");
-                    return {QStringLiteral("input"), label, child.rect, true, op, true};
-                }
-                if (node && node->type == SceneDocument::TreeNode::Primitive) {
-                    const ShapeNode *shape = m_scene->shapeById(node->shapeId);
-                    if (shape) {
-                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                        const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-                        const int count = controls.size();
-                        for (int i = 0; i < count; ++i) {
-                            const QRectF rowRect = shapeParameterControlRect(child.rect, i, count);
-                            if (!rowRect.contains(scenePos)) continue;
-                            const QRectF labelRect(rowRect.left(), rowRect.top(),
-                                                   PrimitiveParamLabelArea - 2.0, rowRect.height());
-                            if (labelRect.contains(scenePos)) {
-                                ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Param label"),
-                                               child.rect, true, op, true};
-                                h.nodeId = child.nodeId;
-                                return h;
-                            }
-                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea, rowRect.top(),
-                                                   rowRect.width() - PrimitiveParamLabelArea, rowRect.height());
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics)) {
-                                if (!span.rect.contains(scenePos)) continue;
-                                const QString fn = span.number
-                                    ? QStringLiteral("numText") : QStringLiteral("mutedText");
-                                ColorZoneHit h{fn, span.number ? QStringLiteral("Number constant")
-                                                               : QStringLiteral("Formula"),
-                                               span.rect, true, op, true};
-                                h.nodeId = child.nodeId;
-                                h.spanText = span.text;
-                                return h;
-                            }
-                        }
-                    }
-                }
-                if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
-                    const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
-                    if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
-                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                        QVector<ModuleCallParam> params;
-                        const QHash<QString, QString> overrides =
-                            resolveModuleArguments(node->moduleCallArguments, *modGroup);
-                        for (const SceneDocument::TreeNode &pChild : modGroup->children) {
-                            if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
-                                const QString expr = overrides.value(
-                                    pChild.variableName,
-                                    pChild.variableExpression.trimmed().isEmpty()
-                                        ? QString::number(pChild.variableValue)
-                                        : pChild.variableExpression.trimmed());
-                                params.append({pChild.id, pChild.variableName, expr});
-                            }
-                        }
-                        qreal x = child.rect.left() + 46.0
-                                  + metrics.horizontalAdvance(node->moduleName + QStringLiteral("("));
-                        for (int i = 0; i < params.size(); ++i) {
-                            x += metrics.horizontalAdvance(params[i].name + QStringLiteral(" = "));
-                            const QRectF exprRect(x, child.rect.top(),
-                                                   child.rect.right() - x, VariableHeight);
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(exprRect, params[i].expression, metrics)) {
-                                if (!span.rect.contains(scenePos)) continue;
-                                const QString fn = span.number
-                                    ? QStringLiteral("numText") : QStringLiteral("mutedText");
-                                ColorZoneHit h{fn, span.number ? QStringLiteral("Number constant")
-                                                               : QStringLiteral("Formula"),
-                                               span.rect, true, op, true};
-                                h.nodeId = child.nodeId;
-                                h.spanText = span.text;
-                                return h;
-                            }
-                            x += metrics.horizontalAdvance(params[i].expression);
-                            if (i < params.size() - 1)
-                                x += metrics.horizontalAdvance(QStringLiteral(", "));
-                        }
-                    }
-                }
-            }
-            // Primitive and ModuleCall are leaf nodes rendered with global theme colours,
-            // not per-operation palette overrides.  Look up the child type here (second
-            // treeNodeById call is cheap and keeps the earlier if (m_scene) scope clean).
-            bool isLeafCard = false;
-            QString leafLabel = QStringLiteral("Card body");
-            if (m_scene) {
-                const SceneDocument::TreeNode *cn = m_scene->treeNodeById(child.nodeId);
-                if (cn) {
-                    if (cn->type == SceneDocument::TreeNode::Primitive) {
-                        isLeafCard = true;
-                        leafLabel  = QStringLiteral("Primitive card");
-                    } else if (cn->type == SceneDocument::TreeNode::ModuleCall) {
-                        isLeafCard = true;
-                        leafLabel  = QStringLiteral("Module call card");
-                    }
-                }
-            }
-            ColorZoneHit h{QStringLiteral("card"), leafLabel, child.rect,
-                           true, op, !isLeafCard};
-            h.nodeId = child.nodeId;
-            return h;
-        }
-
-        // Module template call — rendered between separator and body, not in children list.
-        if (op == SceneDocument::TreeNode::Module
-            && best->moduleParameterSeparatorY > 0.0 && m_scene)
-        {
-            const SceneDocument::TreeNode *modNode = m_scene->treeNodeById(best->groupId);
-            if (modNode) {
-                QVector<ModuleCallParam> tmplParams;
-                for (const SceneDocument::TreeNode &pc : modNode->children) {
-                    if (pc.type == SceneDocument::TreeNode::Variable && pc.isParameter) {
-                        const QString expr = pc.variableExpression.trimmed().isEmpty()
-                            ? QString::number(pc.variableValue)
-                            : pc.variableExpression.trimmed();
-                        tmplParams.append({pc.id, pc.variableName, expr});
-                    }
-                }
-                const QSizeF tmplSz = moduleCallPreviewSize(modNode->moduleName, tmplParams);
-                const QRectF tmplRect(best->rect.left() + GroupPadding,
-                                      best->moduleParameterSeparatorY
-                                          - ChildGap * 0.5 + 16.0 + ChildGap,
-                                      tmplSz.width(), tmplSz.height());
-                if (tmplRect.contains(scenePos)) {
-                    ColorZoneHit h{QStringLiteral("card"), QStringLiteral("Call template"),
-                                   tmplRect, true, op, false};
-                    h.nodeId = -best->groupId; // negative sentinel: template, not real call node
-                    return h;
-                }
-            }
-        }
-
-        // Header zone: left icon strip for vertical-header ops, top row for horizontal.
-        const QRectF hdr = isVerticalHeaderOperation(op)
-            ? QRectF(best->rect.left(), best->rect.top(),
-                     TransformIconWidth, best->rect.height())
-            : QRectF(best->rect.left(), best->rect.top(),
-                     best->rect.width(), GroupHeaderHeight);
-        if (hdr.contains(scenePos)) {
-            // For-loop header: detect precise text spans (numbers / formulas / label).
-            if (op == SceneDocument::TreeNode::For && m_scene) {
-                const SceneDocument::TreeNode *node = m_scene->treeNodeById(best->groupId);
-                const QString varName     = node ? forLoopVariableName(*node)     : QStringLiteral("i");
-                const QString rangeExpr   = node ? forLoopRangeExpression(*node)  : QStringLiteral("[0 : 1 : 3]");
-                const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                const QVector<ExpressionTextSpan> spans =
-                    forLoopRangeTextSpans(best->rect, varName, rangeExpr, metrics);
-                for (const ExpressionTextSpan &span : spans) {
-                    if (span.rect.contains(scenePos)) {
-                        const QString fn = span.number
-                            ? QStringLiteral("numText") : QStringLiteral("mutedText");
-                        ColorZoneHit h{fn, span.number
-                            ? QStringLiteral("Number constant") : QStringLiteral("Formula"),
-                            span.rect, true, op, true};
-                        h.nodeId = best->groupId;
-                        h.spanText = span.text;
-                        return h;
-                    }
-                }
-                // Prefix "for (x = " → numLabelText
-                const QString prefix = QStringLiteral("for (%1 = ").arg(varName);
-                const qreal textLeft = best->rect.left() + 30.0 + (PrimitiveIconSize - 4.0) + 10.0;
-                const QRectF prefixRect(textLeft, best->rect.top() + 7.0,
-                                        metrics.horizontalAdvance(prefix), 16.0);
-                if (prefixRect.contains(scenePos)) {
-                    ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Loop label"),
-                                    prefixRect, true, op, true};
-                    h.nodeId = best->groupId;
-                    return h;
-                }
-            }
-            ColorZoneHit h{QStringLiteral("header"), QStringLiteral("Card header"), hdr, true, op, true};
-            h.nodeId = best->groupId;
-            return h;
-        }
-
-        // Transform card body: detect axis label / value zones for direct text editing.
-        // Use full-font metrics (same as renderer + transformControlAt) so pill rects match exactly.
-        if (isVerticalHeaderOperation(op) && m_scene) {
-            const QFontMetricsF metrics(sceneTreeGraphicsFont());
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(best->groupId);
-            for (int axis = 0; axis < 3; ++axis) {
-                const QRectF rowRect = transformParameterControlRect(best->rect, axis, TransformHeaderWidth);
-                if (!rowRect.contains(scenePos))
-                    continue;
-                const QRectF labelRect(rowRect.left(), rowRect.top(),
-                                       TransformParamLabelArea - 2.0, rowRect.height());
-                if (labelRect.contains(scenePos)) {
-                    ColorZoneHit h{QStringLiteral("numLabelText"), QStringLiteral("Axis label"),
-                                    best->rect, true, op, true};
-                    h.nodeId = best->groupId;
-                    return h;
-                }
-                if (!node) continue;
-                const QString expr = transformAxisExpression(*node, axis);
-                // Exact number pill hit via same function used by transformControlAt.
-                for (const ExpressionNumberControl &nc :
-                         transformParameterNumberControls(best->rect, axis, expr, metrics)) {
-                    if (nc.rect.contains(scenePos)) {
-                        ColorZoneHit h{QStringLiteral("numText"), QStringLiteral("Number constant"),
-                                        best->rect, true, op, true};
-                        h.nodeId = best->groupId;
-                        return h;
-                    }
-                }
-                // Formula / non-number text spans.
-                const QRectF textRect(rowRect.left() + TransformParamLabelArea, rowRect.top(),
-                                      rowRect.width() - TransformParamLabelArea, rowRect.height());
-                for (const ExpressionTextSpan &span : expressionSpansInTextRect(textRect, expr, metrics)) {
-                    if (!span.number && span.rect.contains(scenePos)) {
-                        ColorZoneHit h{QStringLiteral("mutedText"), QStringLiteral("Formula"),
-                                        best->rect, true, op, true};
-                        h.nodeId = best->groupId;
-                        return h;
-                    }
-                }
-            }
-        }
-
-        // Rest of the group body — also carry the group ID for blink lookups.
-        ColorZoneHit cardHit{QStringLiteral("card"), QStringLiteral("Card body"),
-                              best->rect, true, op, true};
-        cardHit.nodeId = best->groupId;
-        return cardHit;
-    }
-
-    return {QStringLiteral("canvas"), QStringLiteral("Canvas background"), QRectF(), false,
-            SceneDocument::TreeNode::Union, false};
-}
-
-void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
-{
-    clearColorEditHighlight();
-    if (!m_colorEditMode || !m_graphicsScene)
-        return;
-
-    const ColorZoneHit hit = colorZoneAt(scenePos);
-
-    m_colorEditZoneField = hit.fieldName;
-
-    // Reset prop index when hovering a different zone.
-    const bool sameZone = (hit.fieldName   == m_colorEditCurrentZone.fieldName   &&
-                            hit.hasOperation == m_colorEditCurrentZone.hasOperation &&
-                            hit.operation    == m_colorEditCurrentZone.operation);
-    if (!sameZone) {
-        m_colorEditPropIndex   = 0;
-        m_colorEditCurrentZone = hit;
-    }
-
-    const QVector<ColorPropDef> props = propsForHit(hit);
-    const int idx   = props.isEmpty() ? 0 : qBound(0, m_colorEditPropIndex, props.size() - 1);
-    const bool hasProp = !props.isEmpty();
-    const ColorPropDef prop = hasProp ? props.at(idx) : ColorPropDef{};
-
-    if (hasProp && hit.valid && !hit.rect.isNull()) {
-        const QColor cur = getColorForProp(prop, hit);
-        const QColor flash(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(),
-                           prop.isText ? cur.alpha() : 218);
-
-        if (hit.fieldName == QLatin1String("hint")
-            || hit.fieldName == QLatin1String("toolbar"))
-        {
-            // Overlay flash anchored in viewport space (same ItemIgnoresTransformations as the panel).
-            QPainterPath flashPath;
-            flashPath.addRoundedRect(hit.rect, 6.0, 6.0);
-            QPen borderPen(flash, 2.5);
-            borderPen.setCosmetic(true);
-            auto *blink = m_graphicsScene->addPath(flashPath, borderPen,
-                                                   QBrush(QColor(flash.red(), flash.green(),
-                                                                  flash.blue(), 55)));
-            blink->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-            blink->setPos(hit.itemScenePos);
-            blink->setZValue(12000.0);
-            blink->setVisible(m_colorEditBlinkOn);
-            m_colorEditBlinkTargets.append(blink);
-        } else if (prop.isText
-            && prop.id == QLatin1String("text")
-            && (hit.fieldName == QLatin1String("header") || hit.fieldName == QLatin1String("card"))
-            && !isVerticalHeaderOperation(hit.operation))
-        {
-            // Horizontal header text: stamp an inverted-color text item on top of the label.
-            // When hit comes from card body (not header), the header is at the card top.
-            const QFont font = sceneTreeGraphicsFont();
-            const QFontMetricsF metrics(font);
-            const qreal iconSize = (hit.operation == SceneDocument::TreeNode::Module)
-                ? PrimitiveIconSize - 6.0 : PrimitiveIconSize - 4.0;
-            const qreal labelLeft = hit.rect.left() + 30.0 + iconSize + 10.0;
-            const qreal headerTop = hit.rect.top();  // card rect top = header top for horiz-header ops
-            const qreal textTop = headerTop + 7.0 + (16.0 - metrics.height()) * 0.5;
-
-            QString headerLabel = labelForOperation(hit.operation);
-            if (hit.operation == SceneDocument::TreeNode::Module && m_scene && hit.nodeId) {
-                const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
-                if (node && !node->moduleName.trimmed().isEmpty())
-                    headerLabel += QStringLiteral(" ") + node->moduleName.trimmed();
-            }
-            auto *overlay = new QGraphicsSimpleTextItem(headerLabel);
-            overlay->setFont(font);
-            overlay->setPos(QPointF(labelLeft, textTop));
-            overlay->setBrush(QBrush(flash));
-            overlay->setZValue(8801.0);
-            m_graphicsScene->addItem(overlay);
-            overlay->setVisible(m_colorEditBlinkOn);
-            m_colorEditBlinkTargets.append(overlay);
-        } else if ((prop.id == QLatin1String("numLabelText")
-                    || prop.id == QLatin1String("numText")
-                    || prop.id == QLatin1String("mutedText")
-                    || prop.id == QLatin1String("numFill")
-                    || prop.id == QLatin1String("numBorder"))
-                   && hit.hasOperation && isVerticalHeaderOperation(hit.operation)
-                   && hit.rect.height() > 3.0 * VariableHeight)
-        {
-            // Per-axis row blink. Pill rects use the full-size scene font — same as the renderer
-            // and transformControlAt — so overlays are pixel-identical to the rendered pills.
-            const QFont font = sceneTreeGraphicsFont();
-            QFont valueFont = font;
-            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
-            const QFontMetricsF metrics(font);  // full font for pill/span rect computation
-            const QFontMetricsF vfm(valueFont); // value-font metrics for text-item vertical centering
-            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
-            static const QString xyzLabels[3] = {
-                QStringLiteral("X ="), QStringLiteral("Y ="), QStringLiteral("Z =")};
-            static const QString rgbLabels[3] = {
-                QStringLiteral("R ="), QStringLiteral("G ="), QStringLiteral("B =")};
-            const QString *rowLabels = (hit.operation == SceneDocument::TreeNode::Color)
-                                       ? rgbLabels : xyzLabels;
-            const SceneDocument::TreeNode *groupNode = (hit.nodeId && m_scene)
-                ? m_scene->treeNodeById(hit.nodeId) : nullptr;
-            for (int axis = 0; axis < 3; ++axis) {
-                const QRectF rowRect = transformParameterControlRect(hit.rect, axis, TransformHeaderWidth);
-                const QRectF labelRect(rowRect.left(), rowRect.top(),
-                                       TransformParamLabelArea - 2.0, rowRect.height());
-                if (prop.id == QLatin1String("numLabelText")) {
-                    auto *lbl = new QGraphicsSimpleTextItem(rowLabels[axis]);
-                    lbl->setFont(valueFont);
-                    const qreal ty = labelRect.top() + (labelRect.height() - vfm.height()) * 0.5;
-                    lbl->setPos(labelRect.left(), ty);
-                    lbl->setBrush(QBrush(flash));
-                    lbl->setZValue(8801.0);
-                    m_graphicsScene->addItem(lbl);
-                    lbl->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(lbl);
-                } else {
-                    const QString expr = groupNode ? transformAxisExpression(*groupNode, axis) : QString();
-                    const QRectF textRect(rowRect.left() + TransformParamLabelArea, rowRect.top(),
-                                          rowRect.width() - TransformParamLabelArea, rowRect.height());
-                    // numFill/numBorder/numText target number spans; mutedText targets formula spans.
-                    const bool wantNumber = (prop.id != QLatin1String("mutedText"));
-                    for (const ExpressionTextSpan &span :
-                             expressionSpansInTextRect(textRect, expr, metrics)) {
-                        if (span.number != wantNumber) continue;
-                        if (prop.id == QLatin1String("numFill")) {
-                            QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
-                            auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
-                            it->setZValue(8800.0);
-                            it->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(it);
-                        } else if (prop.id == QLatin1String("numBorder")) {
-                            QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
-                            QPen borderPen(flash, 2.0);
-                            borderPen.setCosmetic(true);
-                            auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
-                            it->setZValue(8800.0);
-                            it->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(it);
-                        } else {
-                            // numText / mutedText — blink the text itself in the inverted colour.
-                            auto *lbl = new QGraphicsSimpleTextItem(span.text);
-                            lbl->setFont(valueFont);
-                            const qreal tx = span.number
-                                ? span.rect.left() + (span.rect.width() - vfm.horizontalAdvance(span.text)) * 0.5
-                                : span.rect.left();
-                            const qreal ty = span.rect.top() + (span.rect.height() - vfm.height()) * 0.5;
-                            lbl->setPos(tx, ty);
-                            lbl->setBrush(QBrush(flash));
-                            lbl->setZValue(8801.0);
-                            m_graphicsScene->addItem(lbl);
-                            lbl->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(lbl);
-                        }
-                    }
-                }
-            }
-        } else if ((prop.id == QLatin1String("mutedText") || prop.id == QLatin1String("numText"))
-                   && !hit.spanText.isEmpty())
-        {
-            // Direct span-text hit: blink the actual text in the inverted colour so the
-            // text itself flashes rather than a background box.
-            const QFont font = sceneTreeGraphicsFont();
-            QFont valueFont = font;
-            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
-            const QFontMetricsF vfm(valueFont);
-            auto *lbl = new QGraphicsSimpleTextItem(hit.spanText);
-            lbl->setFont(valueFont);
-            // Mirror the renderer: numbers AlignHCenter, formula AlignLeft — both AlignVCenter.
-            const qreal tx = (prop.id == QLatin1String("numText"))
-                ? hit.rect.left() + (hit.rect.width() - vfm.horizontalAdvance(hit.spanText)) * 0.5
-                : hit.rect.left();
-            const qreal ty = hit.rect.top() + (hit.rect.height() - vfm.height()) * 0.5;
-            lbl->setPos(tx, ty);
-            lbl->setBrush(QBrush(flash));
-            lbl->setZValue(8801.0);
-            m_graphicsScene->addItem(lbl);
-            lbl->setVisible(m_colorEditBlinkOn);
-            m_colorEditBlinkTargets.append(lbl);
-        } else if (hit.fieldName == QLatin1String("card") && !hit.hasOperation
-                   && hit.nodeId && m_scene
-                   && (prop.id == QLatin1String("numLabelText")
-                       || prop.id == QLatin1String("numText")
-                       || prop.id == QLatin1String("mutedText")
-                       || prop.id == QLatin1String("numFill")
-                       || prop.id == QLatin1String("numBorder")))
-        {
-            // Leaf card body (Primitive / ModuleCall): blink the relevant param spans.
-            const QFont font = sceneTreeGraphicsFont();
-            QFont valueFont = font;
-            valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
-            const QFontMetricsF metrics(font);
-            const QFontMetricsF vfm(valueFont);
-            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
-            // numFill / numBorder / numText target number spans; mutedText targets formula spans.
-            const bool wantNumber = (prop.id != QLatin1String("mutedText"));
-
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
-
-            // Helper lambda: add one span overlay (pill fill, pill border, or text item).
-            auto addSpanOverlay = [&](const ExpressionTextSpan &span) {
-                if (span.number != wantNumber) return;
-                if (prop.id == QLatin1String("numFill")) {
-                    QPainterPath path;
-                    path.addRoundedRect(span.rect, r, r);
-                    auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
-                    it->setZValue(8800.0);
-                    it->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(it);
-                } else if (prop.id == QLatin1String("numBorder")) {
-                    QPainterPath path;
-                    path.addRoundedRect(span.rect, r, r);
-                    QPen borderPen(flash, 2.0);
-                    borderPen.setCosmetic(true);
-                    auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
-                    it->setZValue(8800.0);
-                    it->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(it);
-                } else {
-                    auto *lbl = new QGraphicsSimpleTextItem(span.text);
-                    lbl->setFont(valueFont);
-                    const qreal tx = span.number
-                        ? span.rect.left() + (span.rect.width() - vfm.horizontalAdvance(span.text)) * 0.5
-                        : span.rect.left();
-                    lbl->setPos(tx, span.rect.top() + (span.rect.height() - vfm.height()) * 0.5);
-                    lbl->setBrush(QBrush(flash));
-                    lbl->setZValue(8801.0);
-                    m_graphicsScene->addItem(lbl);
-                    lbl->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(lbl);
-                }
-            };
-
-            if (node && node->type == SceneDocument::TreeNode::Primitive) {
-                const ShapeNode *shape = m_scene->shapeById(node->shapeId);
-                if (shape) {
-                    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-                    const int count = controls.size();
-                    for (int i = 0; i < count; ++i) {
-                        const QRectF rowRect = shapeParameterControlRect(hit.rect, i, count);
-                        if (prop.id == QLatin1String("numLabelText")) {
-                            const QRectF labelRect(rowRect.left(), rowRect.top(),
-                                                   PrimitiveParamLabelArea - 2.0, rowRect.height());
-                            auto *lbl = new QGraphicsSimpleTextItem(
-                                controls[i].label + QStringLiteral(" ="));
-                            lbl->setFont(valueFont);
-                            lbl->setPos(labelRect.left(),
-                                        labelRect.top() + (labelRect.height() - vfm.height()) * 0.5);
-                            lbl->setBrush(QBrush(flash));
-                            lbl->setZValue(8801.0);
-                            m_graphicsScene->addItem(lbl);
-                            lbl->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(lbl);
-                        } else {
-                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea,
-                                                  rowRect.top(),
-                                                  rowRect.width() - PrimitiveParamLabelArea,
-                                                  rowRect.height());
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics))
-                                addSpanOverlay(span);
-                        }
-                    }
-                }
-            } else if (node && node->type == SceneDocument::TreeNode::ModuleCall) {
-                const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
-                if (modGroup && modGroup->operation == SceneDocument::TreeNode::Module) {
-                    QVector<ModuleCallParam> params;
-                    const QHash<QString, QString> overrides =
-                        resolveModuleArguments(node->moduleCallArguments, *modGroup);
-                    for (const SceneDocument::TreeNode &pChild : modGroup->children) {
-                        if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
-                            const QString expr = overrides.value(
-                                pChild.variableName,
-                                pChild.variableExpression.trimmed().isEmpty()
-                                    ? QString::number(pChild.variableValue)
-                                    : pChild.variableExpression.trimmed());
-                            params.append({pChild.id, pChild.variableName, expr});
-                        }
-                    }
-                    qreal x = hit.rect.left() + 46.0
-                              + metrics.horizontalAdvance(node->moduleName + QStringLiteral("("));
-                    for (int i = 0; i < params.size(); ++i) {
-                        const QString nameLabel = params[i].name + QStringLiteral(" =");
-                        const qreal nameLabelW  = metrics.horizontalAdvance(nameLabel + QStringLiteral(" "));
-                        if (prop.id == QLatin1String("numLabelText")) {
-                            auto *lbl = new QGraphicsSimpleTextItem(nameLabel);
-                            lbl->setFont(valueFont);
-                            lbl->setPos(x, hit.rect.top() + (VariableHeight - vfm.height()) * 0.5);
-                            lbl->setBrush(QBrush(flash));
-                            lbl->setZValue(8801.0);
-                            m_graphicsScene->addItem(lbl);
-                            lbl->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(lbl);
-                        } else {
-                            const QRectF exprRect(x + nameLabelW, hit.rect.top(),
-                                                  hit.rect.right() - (x + nameLabelW), VariableHeight);
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(exprRect, params[i].expression, metrics))
-                                addSpanOverlay(span);
-                        }
-                        x += nameLabelW;
-                        x += metrics.horizontalAdvance(params[i].expression);
-                        if (i < params.size() - 1)
-                            x += metrics.horizontalAdvance(QStringLiteral(", "));
-                    }
-                }
-            } else if (hit.nodeId < 0) {
-                // Template call: nodeId = -(moduleGroupId) — uses module params directly.
-                const SceneDocument::TreeNode *modNode = m_scene->treeNodeById(-hit.nodeId);
-                if (modNode && modNode->operation == SceneDocument::TreeNode::Module) {
-                    QVector<ModuleCallParam> tmplParams;
-                    for (const SceneDocument::TreeNode &pc : modNode->children) {
-                        if (pc.type == SceneDocument::TreeNode::Variable && pc.isParameter) {
-                            const QString expr = pc.variableExpression.trimmed().isEmpty()
-                                ? QString::number(pc.variableValue)
-                                : pc.variableExpression.trimmed();
-                            tmplParams.append({pc.id, pc.variableName, expr});
-                        }
-                    }
-                    qreal x = hit.rect.left() + 46.0
-                              + metrics.horizontalAdvance(modNode->moduleName + QStringLiteral("("));
-                    for (int i = 0; i < tmplParams.size(); ++i) {
-                        const QString nameLabel = tmplParams[i].name + QStringLiteral(" =");
-                        const qreal nameLabelW  = metrics.horizontalAdvance(nameLabel + QStringLiteral(" "));
-                        if (prop.id == QLatin1String("numLabelText")) {
-                            auto *lbl = new QGraphicsSimpleTextItem(nameLabel);
-                            lbl->setFont(valueFont);
-                            lbl->setPos(x, hit.rect.top() + (VariableHeight - vfm.height()) * 0.5);
-                            lbl->setBrush(QBrush(flash));
-                            lbl->setZValue(8801.0);
-                            m_graphicsScene->addItem(lbl);
-                            lbl->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(lbl);
-                        } else {
-                            const QRectF exprRect(x + nameLabelW, hit.rect.top(),
-                                                  hit.rect.right() - (x + nameLabelW), VariableHeight);
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(exprRect, tmplParams[i].expression, metrics))
-                                addSpanOverlay(span);
-                        }
-                        x += nameLabelW;
-                        x += metrics.horizontalAdvance(tmplParams[i].expression);
-                        if (i < tmplParams.size() - 1)
-                            x += metrics.horizontalAdvance(QStringLiteral(", "));
-                    }
-                }
-            }
-        } else if (hit.fieldName == QLatin1String("input")
-                   && hit.nodeId && m_scene
-                   && (prop.id == QLatin1String("numLabelText")
-                       || prop.id == QLatin1String("numText")
-                       || prop.id == QLatin1String("mutedText")
-                       || prop.id == QLatin1String("numFill")
-                       || prop.id == QLatin1String("numBorder")))
-        {
-            // Variable / parameter row: blink the relevant spans.
-            // Variable rows render with the full scene font (no −2pt reduction).
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(hit.nodeId);
-            if (node && node->type == SceneDocument::TreeNode::Variable) {
-                const QFont font = sceneTreeGraphicsFont();
-                const QFontMetricsF metrics(font);
-                const qreal r    = 3.0 / qMax(0.001, qAbs(transform().m11()));
-                const qreal nameW = metrics.horizontalAdvance(node->variableName);
-
-                if (prop.id == QLatin1String("numLabelText")) {
-                    const qreal eqLeft = hit.rect.left() + 38.0 + nameW + 4.0;
-                    const QRectF eqRect(eqLeft,
-                                        hit.rect.top() + (VariableHeight - 16.0) * 0.5,
-                                        12.0, 16.0);
-                    auto *lbl = new QGraphicsSimpleTextItem(QStringLiteral("="));
-                    lbl->setFont(font);
-                    lbl->setPos(eqRect.left(),
-                                eqRect.top() + (eqRect.height() - metrics.height()) * 0.5);
-                    lbl->setBrush(QBrush(flash));
-                    lbl->setZValue(8801.0);
-                    m_graphicsScene->addItem(lbl);
-                    lbl->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(lbl);
-                } else {
-                    const bool wantNumber = (prop.id != QLatin1String("mutedText"));
-                    for (const ExpressionTextSpan &span :
-                             expressionTextSpans(hit.rect, node->variableExpression, metrics, nameW)) {
-                        if (span.number != wantNumber) continue;
-                        if (prop.id == QLatin1String("numFill")) {
-                            QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
-                            auto *it = m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
-                            it->setZValue(8800.0);
-                            it->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(it);
-                        } else if (prop.id == QLatin1String("numBorder")) {
-                            QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
-                            QPen borderPen(flash, 2.0);
-                            borderPen.setCosmetic(true);
-                            auto *it = m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
-                            it->setZValue(8800.0);
-                            it->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(it);
-                        } else {
-                            auto *lbl = new QGraphicsSimpleTextItem(span.text);
-                            lbl->setFont(font);
-                            const qreal tx = span.number
-                                ? span.rect.left() + (span.rect.width() - metrics.horizontalAdvance(span.text)) * 0.5
-                                : span.rect.left();
-                            lbl->setPos(tx,
-                                        span.rect.top() + (span.rect.height() - metrics.height()) * 0.5);
-                            lbl->setBrush(QBrush(flash));
-                            lbl->setZValue(8801.0);
-                            m_graphicsScene->addItem(lbl);
-                            lbl->setVisible(m_colorEditBlinkOn);
-                            m_colorEditBlinkTargets.append(lbl);
-                        }
-                    }
-                }
-            }
-        } else if (prop.id == QLatin1String("mutedText")
-                   && hit.fieldName == QLatin1String("card")
-                   && hit.hasOperation
-                   && hit.operation == SceneDocument::TreeNode::Module
-                   && hit.nodeId && m_scene)
-        {
-            // Module card body: use the same helper as drawGroup so positions/scales match exactly.
-            const GroupHitArea *area = nullptr;
-            for (const GroupHitArea &a : m_treeLayout.groupHitAreas())
-                if (a.groupId == hit.nodeId) { area = &a; break; }
-
-            if (area && area->moduleParameterSeparatorY > hit.rect.top()) {
-                QVector<QGraphicsItem *> items;
-                drawModuleSectionLabels(hit.rect, area->moduleParameterSeparatorY,
-                                        area->depth, flash, &items);
-                for (QGraphicsItem *it : items) {
-                    it->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(it);
-                }
-            }
-        } else if (prop.id == QLatin1String("mutedText")
-                   && hit.fieldName == QLatin1String("card")
-                   && hit.hasOperation
-                   && hit.operation == SceneDocument::TreeNode::Difference
-                   && hit.nodeId && m_scene)
-        {
-            // Difference card body: blink dashed separator + "base" and "cut" vertical pill rects.
-            const GroupHitArea *area = nullptr;
-            for (const GroupHitArea &a : m_treeLayout.groupHitAreas())
-                if (a.groupId == hit.nodeId) { area = &a; break; }
-
-            if (area && area->cutSeparatorY > hit.rect.top()) {
-                QPainterPath sepPath;
-                sepPath.moveTo(hit.rect.left() + GroupPadding, area->cutSeparatorY);
-                sepPath.lineTo(hit.rect.right() - GroupPadding, area->cutSeparatorY);
-                QPen dashPen(flash, 2.0, Qt::DashLine);
-                dashPen.setCosmetic(true);
-                auto *sepLine = m_graphicsScene->addPath(sepPath, dashPen, Qt::NoBrush);
-                sepLine->setZValue(8801.0);
-                sepLine->setVisible(m_colorEditBlinkOn);
-                m_colorEditBlinkTargets.append(sepLine);
-
-                // "base" pill rect (mirrors renderer's boundedVerticalLabelRect).
-                const qreal labelLeft  = hit.rect.left() + GroupPadding * 0.5;
-                const qreal baseTop    = hit.rect.top() + GroupHeaderHeight + GroupPadding;
-                const qreal baseBottom = area->cutSeparatorY - 4.0;
-                const qreal baseH      = qMin(42.0, baseBottom - baseTop);
-                if (baseH >= 18.0) {
-                    const qreal baseY = baseTop + (baseBottom - baseTop - baseH) * 0.5;
-                    QPainterPath basePath;
-                    basePath.addRoundedRect(QRectF(labelLeft, baseY, 20.0, baseH), 4.0, 4.0);
-                    auto *baseItem = m_graphicsScene->addPath(basePath, Qt::NoPen, QBrush(flash));
-                    baseItem->setZValue(8801.0);
-                    baseItem->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(baseItem);
-                }
-
-                // "cut" pill rect (below separator).
-                const qreal cutTop    = area->cutSeparatorY + 4.0;
-                const qreal cutBottom = hit.rect.bottom() - GroupPadding;
-                const qreal cutH      = qMin(42.0, cutBottom - cutTop);
-                if (cutH >= 18.0) {
-                    const qreal cutY = cutTop + (cutBottom - cutTop - cutH) * 0.5;
-                    QPainterPath cutPath;
-                    cutPath.addRoundedRect(QRectF(labelLeft, cutY, 20.0, cutH), 4.0, 4.0);
-                    auto *cutItem = m_graphicsScene->addPath(cutPath, Qt::NoPen, QBrush(flash));
-                    cutItem->setZValue(8801.0);
-                    cutItem->setVisible(m_colorEditBlinkOn);
-                    m_colorEditBlinkTargets.append(cutItem);
-                }
-            }
-        } else {
-            const qreal r = 3.0 / qMax(0.001, qAbs(transform().m11()));
-            QPainterPath flashPath;
-            QGraphicsPathItem *overlay = nullptr;
-
-            if (prop.id == QLatin1String("border") || prop.id == QLatin1String("numBorder")) {
-                // Outline only — card border / pill border strokes the perimeter.
-                flashPath.addRoundedRect(hit.rect, r, r);
-                QPen borderPen(flash, 3.0);
-                borderPen.setCosmetic(true);
-                overlay = m_graphicsScene->addPath(flashPath, borderPen, Qt::NoBrush);
-            } else {
-                // Card fill and everything else — filled rect over the zone.
-                flashPath.addRoundedRect(hit.rect, r, r);
-                overlay = m_graphicsScene->addPath(flashPath, Qt::NoPen, QBrush(flash));
-            }
-
-            overlay->setZValue(8800.0);
-            overlay->setVisible(m_colorEditBlinkOn);
-            m_colorEditHighlight = overlay;
-        }
-    }
-
-    // Canvas-zone visuals: grid blink or viewport-edge frame.
-    if (hasProp && hit.fieldName == QLatin1String("canvas")) {
-        const QColor cur = getColorForProp(prop, hit);
-        if (cur.isValid()) {
-            const QColor inv(255 - cur.red(), 255 - cur.green(), 255 - cur.blue(), 200);
-            if (prop.id == QLatin1String("minorGrid") || prop.id == QLatin1String("majorGrid")) {
-                const qreal gridSize = (prop.id == QLatin1String("minorGrid")) ? 24.0 : 120.0;
-                const QRectF vis = mapToScene(viewport()->rect()).boundingRect();
-                auto *gi = new GridBlinkItem(vis, gridSize, inv);
-                gi->setZValue(8800.0);
-                m_graphicsScene->addItem(gi);
-                gi->setVisible(m_colorEditBlinkOn);
-                m_colorEditBlinkTargets.append(gi);
-            } else {
-                // Canvas background: thick colored border framing the viewport.
-                const qreal w = viewport() ? viewport()->width()  : 640.0;
-                const qreal h = viewport() ? viewport()->height() : 480.0;
-                constexpr qreal kInset = 4.0;
-                auto *frame = m_graphicsScene->addRect(
-                    QRectF(kInset, kInset, w - kInset * 2, h - kInset * 2),
-                    QPen(inv, 6),
-                    Qt::NoBrush);
-                frame->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-                frame->setPos(mapToScene(QPoint(0, 0)));
-                frame->setZValue(8800.0);
-                frame->setVisible(m_colorEditBlinkOn);
-                m_colorEditBlinkTargets.append(frame);
-            }
-        }
-    }
-
-    // Hint text.
-    if (hasProp) {
-        const QColor cur = getColorForProp(prop, hit);
-        const QString hexStr = cur.isValid()
-            ? (cur.alpha() < 255
-                ? QStringLiteral("#") + QString::number(cur.rgba(), 16).rightJustified(8, QLatin1Char('0')).toUpper()
-                : cur.name().toUpper())
-            : QStringLiteral("—");
-
-        QString zoneLine;
-        if (hit.hasOperation)
-            zoneLine = colorEditOpName(hit.operation) + QStringLiteral("  ") + hit.label;
-        else if (hit.fieldName == QLatin1String("input")
-                 || hit.fieldName == QLatin1String("card")
-                 || hit.fieldName == QLatin1String("hint")
-                 || hit.fieldName == QLatin1String("toolbar"))
-            zoneLine = hit.label;
-        else
-            zoneLine = QStringLiteral("Canvas");
-
-        const QString navLine = props.size() > 1
-            ? QStringLiteral("↕ ") + QString::number(idx + 1) + QStringLiteral("/")
-              + QString::number(props.size()) + QStringLiteral("  ·  click to pick  ·  Esc exit")
-            : QStringLiteral("click to pick  ·  Esc exit");
-
-        updateHoverHint(QStringLiteral("colorEdit:%1").arg(hit.fieldName),
-                        QStringLiteral("✏ ") + zoneLine
-                        + QStringLiteral("\n") + prop.label + QStringLiteral("   ") + hexStr
-                        + QStringLiteral("\n") + navLine);
-    } else {
-        updateHoverHint(QStringLiteral("colorEdit:none"),
-                        QStringLiteral("✏ Color edit mode\n"
-                                       "Hover a card to inspect its colors.\n"
-                                       "Esc — exit color edit mode"));
-    }
+    return m_colorEdit && m_colorEdit->isEnabled();
 }
 
 void SceneTreeGraphicsWidget::clearColorEditHighlight()
 {
-    // Delete owned text overlay items.
-    for (QGraphicsItem *it : m_colorEditBlinkTargets) {
-        if (it && m_graphicsScene) {
-            m_graphicsScene->removeItem(it);
-            delete it;
-        }
-    }
-    m_colorEditBlinkTargets.clear();
-
-    // Delete the owned inverted-fill overlay.
-    if (m_colorEditHighlight && m_graphicsScene) {
-        m_graphicsScene->removeItem(m_colorEditHighlight);
-        delete m_colorEditHighlight;
-        m_colorEditHighlight = nullptr;
-    }
+    if (m_colorEdit) m_colorEdit->clearHighlight();
 }
 
-void SceneTreeGraphicsWidget::handleColorEditClick(const QPointF &scenePos)
+void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
 {
-    const ColorZoneHit hit = colorZoneAt(scenePos);
-    const QVector<ColorPropDef> props = propsForHit(hit);
-    if (props.isEmpty())
-        return;
-
-    const int idx = qBound(0, m_colorEditPropIndex, props.size() - 1);
-    const ColorPropDef &prop = props.at(idx);
-    const QColor current = getColorForProp(prop, hit);
-
-    const QString title = hit.hasOperation
-        ? colorEditOpName(hit.operation) + QStringLiteral(" — ") + prop.label
-        : prop.label;
-
-    const QColor chosen = QColorDialog::getColor(
-        current.isValid() ? current : Qt::white,
-        this, title, QColorDialog::ShowAlphaChannel);
-    if (!chosen.isValid())
-        return;
-
-    setColorForProp(prop, hit, chosen);
-    refresh();
-    updateToolbarOverlay();
-    updateColorEditHighlight(scenePos);
-    emit inlineThemeEdited();
+    if (m_colorEdit) m_colorEdit->updateHighlight(scenePos);
 }
-
-void SceneTreeGraphicsWidget::handleColorEditWheel(const QPointF &scenePos, int angleDelta)
-{
-    const ColorZoneHit hit = colorZoneAt(scenePos);
-    const QVector<ColorPropDef> props = propsForHit(hit);
-    if (props.isEmpty())
-        return;
-
-    // Reset index when the zone changes.
-    const bool sameZone = (hit.fieldName   == m_colorEditCurrentZone.fieldName   &&
-                            hit.hasOperation == m_colorEditCurrentZone.hasOperation &&
-                            hit.operation    == m_colorEditCurrentZone.operation);
-    if (!sameZone) {
-        m_colorEditPropIndex   = 0;
-        m_colorEditCurrentZone = hit;
-    }
-
-    // Scroll up (positive delta) → previous property; scroll down → next.
-    const int dir = angleDelta > 0 ? -1 : 1;
-    m_colorEditPropIndex = (m_colorEditPropIndex + dir + props.size()) % props.size();
-    m_colorEditCurrentZone = hit;
-
-    updateColorEditHighlight(scenePos);
-    updateToolbarOverlay();
-}
-
-// ── Color-edit helpers ────────────────────────────────────────────────────────
-
-static QString colorEditOpName(SceneDocument::TreeNode::Operation op)
-{
-    switch (op) {
-    case SceneDocument::TreeNode::Union:        return QStringLiteral("Union");
-    case SceneDocument::TreeNode::Difference:   return QStringLiteral("Difference");
-    case SceneDocument::TreeNode::Intersection: return QStringLiteral("Intersection");
-    case SceneDocument::TreeNode::Module:       return QStringLiteral("Module");
-    case SceneDocument::TreeNode::Translate:    return QStringLiteral("Translate");
-    case SceneDocument::TreeNode::Rotate:       return QStringLiteral("Rotate");
-    case SceneDocument::TreeNode::Scale:        return QStringLiteral("Scale");
-    case SceneDocument::TreeNode::Mirror:       return QStringLiteral("Mirror");
-    case SceneDocument::TreeNode::Hull:         return QStringLiteral("Hull");
-    case SceneDocument::TreeNode::For:          return QStringLiteral("For");
-    case SceneDocument::TreeNode::Scene:        return QStringLiteral("Scene");
-    case SceneDocument::TreeNode::Minkowski:    return QStringLiteral("Minkowski");
-    case SceneDocument::TreeNode::Polyhedron:   return QStringLiteral("Polyhedron");
-    case SceneDocument::TreeNode::Color:        return QStringLiteral("Color");
-    case SceneDocument::TreeNode::LinearExtrude:return QStringLiteral("Linear extrude");
-    }
-    return QStringLiteral("Group");
-}
-
-QVector<SceneTreeGraphicsWidget::ColorPropDef>
-SceneTreeGraphicsWidget::propsForHit(const ColorZoneHit &hit) const
-{
-    // Direct text zone hits (from precise hover over label/constant/formula).
-    if (hit.fieldName == QLatin1String("numLabelText"))
-        return {{QStringLiteral("numLabelText"), QStringLiteral("Label text color (X=, Y=, Z=)"), true, true}};
-    if (hit.fieldName == QLatin1String("numText"))
-        return {
-            {QStringLiteral("numText"),   QStringLiteral("Number text color"),  true,  true},
-            {QStringLiteral("numFill"),   QStringLiteral("Number pill fill"),   false, true},
-            {QStringLiteral("numBorder"), QStringLiteral("Number pill border"), false, true},
-        };
-    if (hit.fieldName == QLatin1String("mutedText"))
-        return {{QStringLiteral("mutedText"), QStringLiteral("Expression color"), true, true}};
-
-    if (hit.fieldName == QLatin1String("hint"))
-        return {
-            {QStringLiteral("glassTop"),    QStringLiteral("Hint glass (top)"),    false, true},
-            {QStringLiteral("glassBottom"), QStringLiteral("Hint glass (bottom)"), false, true},
-            {QStringLiteral("glassBorder"), QStringLiteral("Hint border"),         false, true},
-            {QStringLiteral("text"),        QStringLiteral("Hint text color"),     true,  true},
-        };
-    if (hit.fieldName == QLatin1String("toolbar"))
-        return {
-            {QStringLiteral("glassBottom"), QStringLiteral("Toolbar glass fill"),   false, true},
-            {QStringLiteral("glassBorder"), QStringLiteral("Toolbar glass border"), false, true},
-        };
-
-    if (hit.fieldName == QLatin1String("header")) {
-        if (hit.hasOperation && isVerticalHeaderOperation(hit.operation))
-            return {{QStringLiteral("header"), QStringLiteral("Header fill"), false, false}};
-        return {
-            {QStringLiteral("header"), QStringLiteral("Header fill"),     false, false},
-            {QStringLiteral("text"),   QStringLiteral("Card text color"), true,  false},
-        };
-    }
-    if (hit.fieldName == QLatin1String("card")) {
-        if (!hit.hasOperation) {
-            // Leaf cards (Primitive, ModuleCall): optional background + text + pill colours.
-            return {
-                {QStringLiteral("leafCard"),     QStringLiteral("Card fill"),            false, true},
-                {QStringLiteral("numLabelText"), QStringLiteral("Param label color"),    true,  true},
-                {QStringLiteral("numText"),      QStringLiteral("Number constant color"),true,  true},
-                {QStringLiteral("mutedText"),    QStringLiteral("Expression color"),     true,  true},
-                {QStringLiteral("numFill"),      QStringLiteral("Number pill fill"),     false, true},
-                {QStringLiteral("numBorder"),    QStringLiteral("Number pill border"),   false, true},
-            };
-        }
-        QVector<ColorPropDef> props = {
-            {QStringLiteral("card"),   QStringLiteral("Card fill"),   false, false},
-            {QStringLiteral("border"), QStringLiteral("Card border"), false, false},
-        };
-        using Op = SceneDocument::TreeNode;
-        if (isVerticalHeaderOperation(hit.operation) || hit.operation == Op::For) {
-            // Transform / for-loop cards: expose per-operation text and pill colours.
-            props << ColorPropDef{QStringLiteral("numLabelText"), QStringLiteral("Label text (X=, Y=)"), true,  true};
-            props << ColorPropDef{QStringLiteral("numText"),     QStringLiteral("Constant values"),      true,  true};
-            props << ColorPropDef{QStringLiteral("mutedText"),   QStringLiteral("Expression color"),     true,  true};
-        } else if (hit.operation != Op::Scene) {
-            // Horizontal-header operations (Module, Union, Difference, Intersection):
-            // expose the header label text and muted labels/separator color.
-            props << ColorPropDef{QStringLiteral("text"),      QStringLiteral("Header text color"),  true, false};
-            props << ColorPropDef{QStringLiteral("mutedText"), QStringLiteral("Label / separator color"), true, true};
-        }
-        return props;
-    }
-    if (hit.fieldName == QLatin1String("input"))
-        return {
-            {QStringLiteral("input"),        QStringLiteral("Row fill"),           false, true},
-            {QStringLiteral("numLabelText"), QStringLiteral("Label color (=)"),    true,  true},
-            {QStringLiteral("numText"),      QStringLiteral("Number constant"),    true,  true},
-            {QStringLiteral("mutedText"),    QStringLiteral("Expression color"),   true,  true},
-            {QStringLiteral("numFill"),      QStringLiteral("Number pill fill"),   false, true},
-            {QStringLiteral("numBorder"),    QStringLiteral("Number pill border"), false, true},
-        };
-    // Canvas / default — only the three properties visible on an empty canvas
-    return {
-        {QStringLiteral("canvas"),    QStringLiteral("Canvas background"), false, true},
-        {QStringLiteral("minorGrid"), QStringLiteral("Minor grid"),        false, true},
-        {QStringLiteral("majorGrid"), QStringLiteral("Major grid"),        false, true},
-    };
-}
-
-QColor SceneTreeGraphicsWidget::getColorForProp(const ColorPropDef &prop,
-                                                 const ColorZoneHit &hit) const
-{
-    const auto pt = static_cast<SceneTreePalette::Theme>(m_treeTheme);
-    if (!prop.isGlobal && hit.hasOperation) {
-        const auto op = hit.operation;
-        const OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
-        const QColor cardFill = pal.card.isValid()
-            ? pal.card : SceneTreePalette::groupFill(op, 0, pt);
-        if (prop.id == QLatin1String("header"))
-            return pal.header.isValid() ? pal.header : SceneTreePalette::groupHeaderColor(op, cardFill, pt);
-        if (prop.id == QLatin1String("text"))
-            return pal.text.isValid() ? pal.text : SceneTreePalette::cardTextPrimary(op, pt);
-        if (prop.id == QLatin1String("card"))
-            return cardFill;
-        if (prop.id == QLatin1String("border"))
-            return pal.border.isValid() ? pal.border : SceneTreePalette::cardBorder(op, cardFill, pt);
-        if (prop.id == QLatin1String("numBorderActive"))
-            return pal.numBorderActive.isValid() ? pal.numBorderActive : SceneTreePalette::cardPillBorderActive(op);
-        if (prop.id == QLatin1String("numFillActive"))
-            return pal.numFillActive.isValid() ? pal.numFillActive : SceneTreePalette::cardPillFillActive(op);
-    }
-    const TreeAppearanceTheme t = SceneTreePalette::customTheme();
-    if (prop.id == QLatin1String("canvas"))          return t.canvas;
-    if (prop.id == QLatin1String("minorGrid"))        return t.minorGrid;
-    if (prop.id == QLatin1String("majorGrid"))        return t.majorGrid;
-    if (prop.id == QLatin1String("text"))             return t.text;
-    if (prop.id == QLatin1String("mutedText"))        return t.mutedText;
-    if (prop.id == QLatin1String("accent"))           return t.accent;
-    if (prop.id == QLatin1String("glassTop"))         return t.glassTop;
-    if (prop.id == QLatin1String("glassBottom"))      return t.glassBottom;
-    if (prop.id == QLatin1String("glassBorder"))      return t.glassBorder;
-    if (prop.id == QLatin1String("card"))             return t.card;
-    if (prop.id == QLatin1String("header"))           return t.header;
-    if (prop.id == QLatin1String("input"))            return t.input;
-    if (prop.id == QLatin1String("numFill"))          return t.numFill;
-    if (prop.id == QLatin1String("numBorder"))        return t.numBorder;
-    if (prop.id == QLatin1String("numText"))          return t.numText;
-    if (prop.id == QLatin1String("numLabelText"))     return t.numLabelText;
-    if (prop.id == QLatin1String("numBorderActive"))  return t.numBorderActive;
-    if (prop.id == QLatin1String("numFillActive"))    return t.numFillActive;
-    if (prop.id == QLatin1String("leafCard"))         return t.leafCard;
-    return QColor();
-}
-
-void SceneTreeGraphicsWidget::setColorForProp(const ColorPropDef &prop,
-                                               const ColorZoneHit &hit,
-                                               const QColor &color)
-{
-    if (!prop.isGlobal && hit.hasOperation) {
-        const auto op = hit.operation;
-        OperationCardPalette pal = SceneTreePalette::operationCardPalette(op);
-        bool applied = false;
-        if (prop.id == QLatin1String("header"))          { pal.header          = color; applied = true; }
-        else if (prop.id == QLatin1String("text"))       { pal.text            = color; applied = true; }
-        else if (prop.id == QLatin1String("card"))       { pal.card            = color; applied = true; }
-        else if (prop.id == QLatin1String("border"))     { pal.border          = color; applied = true; }
-        else if (prop.id == QLatin1String("numBorderActive")) { pal.numBorderActive = color; applied = true; }
-        else if (prop.id == QLatin1String("numFillActive"))   { pal.numFillActive   = color; applied = true; }
-        if (applied) {
-            SceneTreePalette::setOperationCardPalette(op, pal);
-            return;
-        }
-    }
-    TreeAppearanceTheme t = SceneTreePalette::customTheme();
-    if (prop.id == QLatin1String("canvas"))          t.canvas          = color;
-    else if (prop.id == QLatin1String("minorGrid"))  t.minorGrid       = color;
-    else if (prop.id == QLatin1String("majorGrid"))  t.majorGrid       = color;
-    else if (prop.id == QLatin1String("text"))       t.text            = color;
-    else if (prop.id == QLatin1String("mutedText"))  t.mutedText       = color;
-    else if (prop.id == QLatin1String("accent"))     t.accent          = color;
-    else if (prop.id == QLatin1String("glassTop"))   t.glassTop        = color;
-    else if (prop.id == QLatin1String("glassBottom"))t.glassBottom     = color;
-    else if (prop.id == QLatin1String("glassBorder"))t.glassBorder     = color;
-    else if (prop.id == QLatin1String("card"))       t.card            = color;
-    else if (prop.id == QLatin1String("header"))     t.header          = color;
-    else if (prop.id == QLatin1String("input"))      t.input           = color;
-    else if (prop.id == QLatin1String("numFill"))    t.numFill         = color;
-    else if (prop.id == QLatin1String("numBorder"))  t.numBorder       = color;
-    else if (prop.id == QLatin1String("numText"))    t.numText         = color;
-    else if (prop.id == QLatin1String("numLabelText"))t.numLabelText   = color;
-    else if (prop.id == QLatin1String("numBorderActive"))t.numBorderActive = color;
-    else if (prop.id == QLatin1String("numFillActive"))  t.numFillActive   = color;
-    else if (prop.id == QLatin1String("leafCard"))       t.leafCard        = color;
-    SceneTreePalette::setCustomTheme(t);
-}
-
-// ── End of color-edit section ─────────────────────────────────────────────────
 
 void SceneTreeGraphicsWidget::drawThemeSwitcher()
 {
@@ -3322,24 +2037,24 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
 
         // The toggle itself.
         auto *tog = new ColorEditToggleItem(
-            m_colorEditMode,
-            [this] { setColorEditMode(!m_colorEditMode); },
+            colorEditMode(),
+            [this] { setColorEditMode(!colorEditMode()); },
             [this](bool enter) {
                 if (enter) {
-                    const QString stateStr = m_colorEditMode
+                    const QString stateStr = colorEditMode()
                         ? QStringLiteral("ON  — click to exit")
                         : QStringLiteral("OFF — click to enter");
-                    updateHoverHint(QStringLiteral("colorEdit:toggle"),
+                    m_hoverManager->updateHoverHint(QStringLiteral("colorEdit:toggle"),
                                     QStringLiteral("✏ Color edit  ") + stateStr
                                     + QStringLiteral("\nHover blocks to inspect and edit theme colors."));
                 } else {
-                    if (m_colorEditMode)
-                        updateHoverHint(QStringLiteral("colorEdit:mode"),
+                    if (colorEditMode())
+                        m_hoverManager->updateHoverHint(QStringLiteral("colorEdit:mode"),
                                         QStringLiteral("✏ Color edit\n"
                                                        "Hover a card, then scroll ↕ to cycle properties.\n"
                                                        "Click to pick a color.  Esc to exit."));
                     else
-                        updateHoverHint(QString(), QString());
+                        m_hoverManager->updateHoverHint(QString(), QString());
                 }
             });
         tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
@@ -3352,108 +2067,7 @@ void SceneTreeGraphicsWidget::drawThemeSwitcher()
     }
 }
 
-void SceneTreeGraphicsWidget::drawHoverHintOverlay()
-{
-    if (!m_graphicsScene || !viewport())
-        return;
 
-    const QString hint = m_hoverHintText.trimmed().isEmpty()
-                             ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
-                             : m_hoverHintText;
-
-    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
-    const qreal viewportWidth = viewport()->width();
-    const qreal viewportHeight = viewport()->height();
-    const qreal viewportScale = transform().m11();
-    const qreal safeScale = qMax<qreal>(0.001, std::abs(viewportScale));
-
-    const auto scenePoint = [&](qreal x, qreal y) {
-        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
-    };
-
-    constexpr qreal OverlayMargin = 12.0;
-    constexpr qreal ThemePanelWidth = 146.0;
-    constexpr qreal ThemePanelHeight = 26.0;
-    constexpr qreal BackgroundPanelHeight = 26.0;
-    constexpr qreal SwitcherRowGap = 8.0;
-    constexpr qreal Gap = 14.0;
-    constexpr qreal PadH = 12.0;
-    constexpr qreal PadV = 9.0;
-    constexpr qreal BottomGap = 12.0;
-    constexpr qreal LocalOverlayZ = 10020.0;
-
-    qreal panelX = OverlayMargin + ThemePanelWidth + Gap;
-    qreal availableW = viewportWidth - panelX - OverlayMargin;
-    if (availableW < 260.0) {
-        panelX = OverlayMargin;
-        availableW = viewportWidth - OverlayMargin * 2.0;
-    }
-    availableW = qBound<qreal>(220.0, availableW, 640.0);
-
-    QFont font = sceneTreeGraphicsFont();
-    font.setPointSizeF(qMax<qreal>(8.0, font.pointSizeF() - 0.2));
-    const qreal textW = availableW - PadH * 2.0;
-    QTextDocument textMeasure;
-    textMeasure.setDefaultFont(font);
-    textMeasure.setDocumentMargin(0.0);
-    textMeasure.setTextWidth(textW);
-    textMeasure.setPlainText(hint);
-    const qreal maxPanelH = qMax<qreal>(84.0, viewportHeight * 0.38);
-    const qreal panelH = qBound<qreal>(42.0,
-                                       textMeasure.size().height() + PadV * 2.0 + 4.0,
-                                       maxPanelH);
-    qreal panelY = viewportHeight - BottomGap - panelH;
-    if (panelX <= OverlayMargin + 0.5)
-        panelY -= ThemePanelHeight + BackgroundPanelHeight + SwitcherRowGap + Gap;
-
-    const QRectF panelLocal(0.0, 0.0, availableW, panelH);
-    const QPointF panelTopLeft = scenePoint(panelX, qMax<qreal>(OverlayMargin, panelY));
-    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
-    const bool customGlass = SceneTreePalette::hasCustomTheme();
-    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
-
-    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(3.0, 4.0),
-                                            Qt::NoPen,
-                                            QBrush(QColor(0, 0, 0, darkGlass ? 115 : 38)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.72 : 0.42);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_toolbarItems.append(shadow);
-
-    QPainterPath path;
-    path.addRoundedRect(panelLocal, 8.0, 8.0);
-    QLinearGradient glass(QPointF(0.0, 0.0), QPointF(0.0, panelH));
-    glass.setColorAt(0.0, customGlass ? customTheme.glassTop
-                                      : darkGlass ? QColor(24, 34, 50, 218) : QColor(255, 255, 255, 116));
-    glass.setColorAt(1.0, customGlass ? customTheme.glassBottom
-                                      : darkGlass ? QColor(8, 13, 22, 196) : QColor(237, 244, 249, 74));
-    auto *panel = m_graphicsScene->addPath(path,
-                                           QPen(customGlass ? customTheme.glassBorder
-                                                            : darkGlass ? QColor(142, 178, 215, 120)
-                                                                        : QColor(116, 141, 166, 70), 1.0),
-                                           QBrush(glass));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_hint"));
-    m_toolbarItems.append(panel);
-
-    auto *text = m_graphicsScene->addText(hint, font);
-    text->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    text->setAcceptedMouseButtons(Qt::NoButton);
-    text->document()->setDocumentMargin(0.0);
-    text->setTextWidth(textW);
-    text->setDefaultTextColor(customGlass ? customTheme.text
-                                          : darkGlass ? QColor(232, 242, 255) : QColor(39, 51, 66));
-    text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
-    text->setZValue(LocalOverlayZ);
-    text->setData(0, QStringLiteral("glass_hint"));
-    m_toolbarItems.append(text);
-}
 
 void SceneTreeGraphicsWidget::addNodeDragHandle(int nodeId,
                                                 const QString &label,
@@ -3494,8 +2108,8 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               0,   // activeShapeNodeId
                               -1,  // activeShapeParameter
                               -1,  // activeShapeParamNumberStart
-                              m_activeVariableNodeId,
-                              m_activeVariableNumberStart,
+                              m_hoverManager->m_activeVariableNodeId,
+                              m_hoverManager->m_activeVariableNumberStart,
                               0,
                               -1)
             .setTheme(m_treeTheme)
@@ -3533,9 +2147,9 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
                           0,
                           -1,
                           -1,
-                          m_activeShapeParameterNodeId,
-                          m_activeShapeParameter,
-                          m_activeShapeParameterNumberStart,
+                          m_hoverManager->m_activeShapeParameterNodeId,
+                          m_hoverManager->m_activeShapeParameter,
+                          m_hoverManager->m_activeShapeParameterNumberStart,
                           0,
                           -1,
                           0,
@@ -3553,12 +2167,12 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
             if (parts[0].toInt() == node.id)
                 selectedPointIndices.insert(parts[1].toInt());
         }
-        const int hoveredPointIndex = m_hoveredPolygonPointNodeId == node.id
-                                          ? m_hoveredPolygonPointIndex
+        const int hoveredPointIndex = m_hoverManager->m_hoveredPolygonPointNodeId == node.id
+                                          ? m_hoverManager->m_hoveredPolygonPointIndex
                                           : -1;
         auto *tableItem = new Polygon2DTableItem(tableRect, node.id, shape, m_treeTheme,
-                                                 m_activeShapeParameterNodeId,
-                                                 m_activeShapeParameter,
+                                                 m_hoverManager->m_activeShapeParameterNodeId,
+                                                 m_hoverManager->m_activeShapeParameter,
                                                  selectedPointIndices,
                                                  hoveredPointIndex);
         tableItem->setPos(tableRect.topLeft());
@@ -3593,8 +2207,8 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
     const QSizeF size = moduleCallPreviewSize(node.moduleName, params);
     const QRectF rect(topLeft, size);
 
-    const int activeMCVarNodeId = (m_activeModuleCallNodeId == node.id) ? m_activeModuleCallVarNodeId : 0;
-    const int activeMCNumberStart = (m_activeModuleCallNodeId == node.id) ? m_activeModuleCallNumberStart : -1;
+    const int activeMCVarNodeId = (m_hoverManager->m_activeModuleCallNodeId == node.id) ? m_hoverManager->m_activeModuleCallVarNodeId : 0;
+    const int activeMCNumberStart = (m_hoverManager->m_activeModuleCallNodeId == node.id) ? m_hoverManager->m_activeModuleCallNumberStart : -1;
 
     const QImage callThumbnail = m_groupThumbnailCache
         ? m_groupThumbnailCache->thumbnail(node.id)
@@ -3788,15 +2402,15 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                       ? m_groupThumbnailCache->thumbnail(node.id)
                                       : QImage();
 
-    const int activeVerticalNodeId = m_activeColorNodeId > 0
-                                     ? m_activeColorNodeId
-                                     : m_activeTransformControlNodeId;
-    const int activeVerticalAxis = m_activeColorNodeId > 0
-                                   ? m_activeColorChannel
-                                   : m_activeTransformControlAxis;
-    const int activeVerticalNumberStart = m_activeColorNodeId > 0
+    const int activeVerticalNodeId = m_hoverManager->m_activeColorNodeId > 0
+                                     ? m_hoverManager->m_activeColorNodeId
+                                     : m_hoverManager->m_activeTransformControlNodeId;
+    const int activeVerticalAxis = m_hoverManager->m_activeColorNodeId > 0
+                                   ? m_hoverManager->m_activeColorChannel
+                                   : m_hoverManager->m_activeTransformControlAxis;
+    const int activeVerticalNumberStart = m_hoverManager->m_activeColorNodeId > 0
                                           ? 0
-                                          : m_activeTransformControlNumberStart;
+                                          : m_hoverManager->m_activeTransformControlNumberStart;
 
     SceneTreeNodeRenderer(m_graphicsScene,
                           m_selectedTreeNodeId,
@@ -3809,8 +2423,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           -1,
                           0,
                           -1,
-                          m_activeForLoopNodeId,
-                          m_activeForLoopNumberStart)
+                          m_hoverManager->m_activeForLoopNodeId,
+                          m_hoverManager->m_activeForLoopNumberStart)
         .setTheme(m_treeTheme)
         .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail, collapsedGroup);
 
@@ -3823,11 +2437,11 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
             polyhedronTableHeight
         );
         auto *tableItem = new PolyhedronTableItem(tableRect, node.id, m_scene, nullptr, m_treeTheme,
-                                                       m_activeShapeParameterNodeId,
-                                                       m_activeShapeParameter,
-                                                       m_activeShapeParameterNumberStart,
+                                                       m_hoverManager->m_activeShapeParameterNodeId,
+                                                       m_hoverManager->m_activeShapeParameter,
+                                                       m_hoverManager->m_activeShapeParameterNumberStart,
                                                        m_selectedPolyhedronElementNodeIds,
-                                                       m_hoveredPolyhedronElementNodeId);
+                                                       m_hoverManager->m_hoveredPolyhedronElementNodeId);
         m_graphicsScene->addItem(tableItem);
         m_treeItems.append(tableItem);
     }
@@ -4200,7 +2814,7 @@ bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition,
         return false;
 
     emit transformValueAdjusted(groupId, axis, start, length, static_cast<qreal>(wheelSteps));
-    updateActiveTransformControl(scenePosition, true);
+    m_hoverManager->updateActiveTransformControl(scenePosition, true);
     return true;
 }
 
@@ -4215,7 +2829,7 @@ bool SceneTreeGraphicsWidget::handleColorChannelWheel(const QPointF &scenePositi
         return false;
 
     emit colorChannelAdjusted(groupId, channel, static_cast<qreal>(wheelSteps));
-    updateActiveColorChannelControl(scenePosition, true);
+    m_hoverManager->updateActiveColorChannelControl(scenePosition, true);
     return true;
 }
 
@@ -4233,7 +2847,7 @@ bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosi
         return false;
 
     emit shapeParameterAdjusted(nodeId, paramIndex, start, length, static_cast<qreal>(wheelSteps));
-    updateActiveShapeParameterControl(scenePosition, true);
+    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
     Q_UNUSED(shapeId);
     return true;
 }
@@ -4317,7 +2931,7 @@ bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePos
     const int numberLength = expr.size();
 
     emit shapeParameterAdjusted(cell.nodeId, paramIndex, numberStart, numberLength, static_cast<qreal>(wheelSteps));
-    updateActiveShapeParameterControl(scenePosition, true);
+    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
     return true;
 }
 
@@ -4333,7 +2947,7 @@ bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosi
         return false;
 
     emit variableNumberAdjusted(nodeId, start, length, wheelSteps);
-    updateActiveVariableNumberControl(scenePosition, true);
+    m_hoverManager->updateActiveVariableNumberControl(scenePosition, true);
     return true;
 }
 
@@ -4349,7 +2963,7 @@ bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePositi
         return false;
 
     emit forLoopRangeAdjusted(nodeId, start, length, wheelSteps);
-    updateActiveForLoopRangeControl(scenePosition, true);
+    m_hoverManager->updateActiveForLoopRangeControl(scenePosition, true);
     return true;
 }
 
@@ -4368,7 +2982,7 @@ bool SceneTreeGraphicsWidget::handlePolygon2DTableWheel(const QPointF &scenePosi
         return false;
 
     emit polygon2DPointAdjusted(cell.nodeId, cell.index, coord, wheelSteps);
-    updateActiveShapeParameterControl(scenePosition, true);
+    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
     return true;
 }
 
@@ -4676,412 +3290,7 @@ bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &scenePosition
     return false;
 }
 
-void SceneTreeGraphicsWidget::updateControlTooltip(const QPoint &globalPosition,
-                                                   const QPointF &scenePosition,
-                                                   bool controlDown)
-{
-    Q_UNUSED(globalPosition);
-    if (m_dragActive)
-        return;
 
-    QString key;
-    const QString message = hoverHintTextForPosition(scenePosition, controlDown, &key);
-    updateHoverHint(key, message);
-}
-
-void SceneTreeGraphicsWidget::updateHoverHint(const QString &key, const QString &text)
-{
-    if (key == m_hoverHintKey && text == m_hoverHintText)
-        return;
-
-    m_hoverHintKey = key;
-    m_hoverHintText = text;
-    if (m_dragActive)
-        return;
-
-    updateToolbarOverlay();
-}
-
-QString SceneTreeGraphicsWidget::hoverHintTextForPosition(const QPointF &scenePosition,
-                                                          bool controlDown,
-                                                          QString *key) const
-{
-    auto setKey = [key](const QString &value) {
-        if (key)
-            *key = value;
-    };
-
-    int collapseGroupId = 0;
-    if (groupCollapseControlAt(scenePosition, &collapseGroupId)) {
-        const bool collapsed = m_collapsedGroupIds.contains(collapseGroupId);
-        setKey(QStringLiteral("group-collapse:%1:%2").arg(collapseGroupId).arg(collapsed));
-        return collapsed
-            ? QStringLiteral("Group contents hidden\nClick to expand this group")
-            : QStringLiteral("Group contents visible\nClick to collapse this group");
-    }
-
-    ExpressionEditTarget expressionTarget;
-    if (!m_colorEditMode && expressionEditTargetAt(scenePosition, &expressionTarget)) {
-        setKey(QStringLiteral("expression:%1:%2:%3")
-                   .arg(int(expressionTarget.kind))
-                   .arg(expressionTarget.nodeId)
-                   .arg(expressionTarget.secondaryId));
-        if (controlDown) {
-            return QStringLiteral("%1\nMouse wheel: change this value\nClick: edit the full expression")
-                .arg(expressionTarget.label);
-        }
-        if (expressionTarget.kind == ExpressionEditTarget::PolyhedronParticipation) {
-            return QStringLiteral("%1\nClick: type participation position (-1 excludes)\nHold Ctrl + mouse wheel: cycle point participation")
-                .arg(expressionTarget.label);
-        }
-        if (expressionTarget.kind == ExpressionEditTarget::Polygon2DPoint) {
-            return QStringLiteral("%1 coordinate\nClick: edit value\nHold Ctrl + mouse wheel: move this polygon point")
-                .arg(expressionTarget.label);
-        }
-        if (expressionTarget.kind == ExpressionEditTarget::ShapeParameter) {
-            return QStringLiteral("%1\nClick: edit value\nHold Ctrl + mouse wheel: change this value")
-                .arg(expressionTarget.label);
-        }
-        return QStringLiteral("%1 expression\nClick: edit the full value after =\nEnter: apply; Esc: cancel")
-            .arg(expressionTarget.label);
-    }
-
-    int forNodeId = 0;
-    int forNumberStart = -1;
-    int forNumberLength = 0;
-    if (forLoopRangeControlAt(scenePosition, &forNodeId, &forNumberStart, &forNumberLength)) {
-        setKey(QStringLiteral("for:%1:%2:%3").arg(forNodeId).arg(forNumberStart).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("For range number\nMouse wheel: change this range value\nDouble-click module/variable labels to rename")
-            : QStringLiteral("For range number\nHold Ctrl + mouse wheel: change this value\nDrag child blocks into the loop body");
-    }
-
-    int groupId = 0;
-    int axis = -1;
-    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-    int transformNumberStart = -1;
-    int transformNumberLength = 0;
-    if (transformControlAt(scenePosition, &groupId, &operation, &axis, &transformNumberStart, &transformNumberLength)
-        && transformNumberStart >= 0
-        && transformNumberLength > 0) {
-        static const char *AxisNames[] = {"X", "Y", "Z"};
-        const QString axisName = QString::fromLatin1(AxisNames[qBound(0, axis, 2)]);
-        setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("%1 %2 value\nMouse wheel: change value\nDrag selected viewport axes: move/rotate when supported")
-                  .arg(labelForOperation(operation), axisName)
-            : QStringLiteral("%1 %2 value\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group")
-                  .arg(labelForOperation(operation), axisName);
-    }
-
-    int colorGroupId = 0;
-    int colorChannel = -1;
-    if (colorChannelControlAt(scenePosition, &colorGroupId, &colorChannel)) {
-        static const char *ChannelNames[] = {"R", "G", "B"};
-        const QString channelName = QString::fromLatin1(ChannelNames[qBound(0, colorChannel, 2)]);
-        setKey(QStringLiteral("color:%1:%2:%3").arg(colorGroupId).arg(colorChannel).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("Color %1 channel\nMouse wheel: change channel\nShift makes bigger steps").arg(channelName)
-            : QStringLiteral("Color %1 channel\nHold Ctrl + mouse wheel: change channel\nDrop blocks into the color body").arg(channelName);
-    }
-
-    int variableNodeId = 0;
-    int numberStart = -1;
-    int numberLength = 0;
-    if (variableNumberControlAt(scenePosition, &variableNodeId, &numberStart, &numberLength)) {
-        setKey(QStringLiteral("variable:%1:%2:%3").arg(variableNodeId).arg(numberStart).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("Variable value\nMouse wheel: change this number\nDouble-click variable name: rename")
-            : QStringLiteral("Variable value\nHold Ctrl + mouse wheel: change this number\nDrag VAR into module parameters/body");
-    }
-
-    int moduleCallNodeId = 0;
-    int moduleCallVarNodeId = 0;
-    int moduleCallStart = -1;
-    int moduleCallLength = 0;
-    if (moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &moduleCallVarNodeId, &moduleCallStart, &moduleCallLength)) {
-        setKey(QStringLiteral("modulecall:%1:%2:%3").arg(moduleCallNodeId).arg(moduleCallStart).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("Module call argument\nMouse wheel: change this argument\nDrop the call into groups like any block")
-            : QStringLiteral("Module call argument\nHold Ctrl + mouse wheel: change this argument\nDrag module call handles from module blocks");
-    }
-
-    int shapeId = -1;
-    int nodeId = 0;
-    int parameter = -1;
-    int shapeNumberStart = -1;
-    int shapeNumberLength = 0;
-    if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &parameter, &shapeNumberStart, &shapeNumberLength)) {
-        const ShapeNode *shape = m_scene ? m_scene->shapeById(shapeId) : nullptr;
-        const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
-        const QString label = parameter >= 0 && parameter < controls.size() ? controls[parameter].label : QStringLiteral("parameter");
-        setKey(QStringLiteral("shape:%1:%2:%3").arg(nodeId).arg(parameter).arg(controlDown));
-        return controlDown
-            ? QStringLiteral("Shape %1\nMouse wheel: change value\nDrag card: reorder or move into a group").arg(label)
-            : QStringLiteral("Shape %1\nHold Ctrl + mouse wheel: change value\nClick card: select object").arg(label);
-    }
-
-    int renameNodeId = 0;
-    QRectF renameRect;
-    if (hoverRenameZoneAt(scenePosition, &renameNodeId, &renameRect)) {
-        const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(renameNodeId) : nullptr;
-        const bool isModule = node && node->type == SceneDocument::TreeNode::Group
-                              && node->operation == SceneDocument::TreeNode::Module;
-        setKey(QStringLiteral("rename:%1").arg(renameNodeId));
-        return isModule
-            ? QStringLiteral("Module name\nDouble-click: rename module\nModule calls update through the tree")
-            : QStringLiteral("Variable name\nDouble-click: rename variable\nCtrl + wheel works on numeric values");
-    }
-
-    const QRectF scrollRect = hoverScrollZoneRect(scenePosition);
-    if (scrollRect.isValid()) {
-        setKey(QStringLiteral("scrollzone:%1:%2").arg(qRound(scrollRect.x())).arg(qRound(scrollRect.y())));
-        return QStringLiteral("Editable number\nHold Ctrl + mouse wheel: change value\nThe highlighted field shows the active target");
-    }
-
-    {
-        PolyhedronTableItem::Cell cell;
-        if (polyhedronTableControlAt(scenePosition, &cell)) {
-            if (isPolyhedronButtonCell(cell.type)) {
-                setKey(QStringLiteral("poly-button:%1:%2:%3").arg(cell.nodeId).arg(cell.index).arg(int(cell.type)));
-                switch (cell.type) {
-                case PolyhedronTableItem::Cell::AddPt:
-                    return QStringLiteral("Add polyhedron point\nClick: append a new 3D point");
-                case PolyhedronTableItem::Cell::AddFace:
-                    return QStringLiteral("Add polyhedron face\nClick: append a new face row");
-                case PolyhedronTableItem::Cell::AutoFace:
-                    return QStringLiteral("AutoFace\nClick: rebuild faces from points; repeated clicks cycle available variants");
-                case PolyhedronTableItem::Cell::ClearPolyhedron:
-                    return QStringLiteral("Clear polyhedron\nClick: remove all point and face rows");
-                case PolyhedronTableItem::Cell::RemovePt:
-                    return QStringLiteral("Remove point\nClick: delete this polyhedron point");
-                case PolyhedronTableItem::Cell::RemoveFace:
-                    return QStringLiteral("Remove face\nClick: delete this polyhedron face");
-                case PolyhedronTableItem::Cell::TemplateButton:
-                    return QStringLiteral("Polyhedron template\nClick: replace contents with this template");
-                default:
-                    break;
-                }
-            }
-            if (cell.type == PolyhedronTableItem::Cell::PtLabel) {
-                setKey(QStringLiteral("poly-pt-label:%1").arg(cell.nodeId));
-                return QStringLiteral("Polyhedron point label\nClick: highlight this point in viewport; click again to clear\nShift + click: add/remove from selection");
-            }
-            if (cell.type == PolyhedronTableItem::Cell::FaceLabel) {
-                setKey(QStringLiteral("poly-face-label:%1").arg(cell.nodeId));
-                return QStringLiteral("Polyhedron face label\nClick: highlight this face in viewport; click again to clear\nShift + click: add/remove from selection");
-            }
-            if (cell.type != PolyhedronTableItem::Cell::None) {
-                setKey(QStringLiteral("poly-passive:%1:%2").arg(cell.nodeId).arg(int(cell.type)));
-                return QStringLiteral("Polyhedron table\nPoint coordinates and face membership cells are editable; labels select elements");
-            }
-        }
-    }
-
-    {
-        Polygon2DTableItem::Cell cell;
-        if (polygon2DTableControlAt(scenePosition, &cell)) {
-            if (isPolygonButtonCell(cell.type)) {
-                setKey(QStringLiteral("polygon-button:%1:%2:%3").arg(cell.nodeId).arg(cell.index).arg(int(cell.type)));
-                return cell.type == Polygon2DTableItem::Cell::AddPt
-                    ? QStringLiteral("Add polygon point\nClick: append a new 2D point")
-                    : QStringLiteral("Remove polygon point\nClick: delete this 2D point");
-            }
-            if (cell.type == Polygon2DTableItem::Cell::PtLabel) {
-                setKey(QStringLiteral("polygon-point-label:%1:%2").arg(cell.nodeId).arg(cell.index));
-                return QStringLiteral("Polygon point label\nClick: select this point; click again to clear\nShift + click: add/remove from selection");
-            }
-            if (cell.type == Polygon2DTableItem::Cell::HeaderLabel) {
-                setKey(QStringLiteral("polygon-header:%1").arg(cell.nodeId));
-                return QStringLiteral("Polygon point table\nEdit X/Y fields or use Ctrl + wheel over a coordinate\nClick Pt labels to select points");
-            }
-        }
-    }
-
-    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
-        if (handle.gripRect.contains(scenePosition)) {
-            setKey(QStringLiteral("grip:%1").arg(handle.nodeId));
-            return QStringLiteral("Canvas block handle\nDrag: move block on the tree canvas\nSlow drag moves touching blocks; fast drag detaches");
-        }
-    }
-
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        for (const ChildLayout &child : area.children) {
-            if (child.rect.contains(scenePosition)) {
-                setKey(QStringLiteral("node:%1").arg(child.nodeId));
-                return QStringLiteral("Tree block\nClick: select\nDrag: move between groups; Delete removes selected");
-            }
-        }
-    }
-
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.rect.contains(scenePosition)) {
-            setKey(QStringLiteral("group:%1").arg(area.groupId));
-            return QStringLiteral("%1 group\nDrop blocks into gaps to reorder or nest\nRight-click/left-click: select; Delete: remove selected")
-                .arg(labelForOperation(area.operation));
-        }
-    }
-
-    setKey(QStringLiteral("canvas"));
-    return QStringLiteral("Scene tree canvas\nWheel: zoom tree view\nDrag empty space: pan; drag toolbar icons to create blocks");
-}
-
-void SceneTreeGraphicsWidget::updateActiveTransformControl(const QPointF &scenePosition, bool enabled)
-{
-    int groupId = 0;
-    int axis = -1;
-    int numberStart = -1;
-    int numberLength = 0;
-    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-    if (!enabled
-        || !transformControlAt(scenePosition, &groupId, &operation, &axis, &numberStart, &numberLength)
-        || numberStart < 0
-        || numberLength <= 0) {
-        groupId = 0;
-        axis = -1;
-        numberStart = -1;
-        operation = SceneDocument::TreeNode::Union;
-    }
-
-    if (m_activeTransformControlNodeId == groupId
-        && m_activeTransformControlAxis == axis
-        && m_activeTransformControlNumberStart == numberStart
-        && m_activeTransformControlOperation == operation) {
-        return;
-    }
-
-    m_activeTransformControlNodeId = groupId;
-    m_activeTransformControlAxis = axis;
-    m_activeTransformControlNumberStart = numberStart;
-    m_activeTransformControlOperation = operation;
-    if (!m_dragActive)
-        refresh();
-
-    emit transformControlHovered(groupId, operation, axis);
-}
-
-void SceneTreeGraphicsWidget::updateActiveColorChannelControl(const QPointF &scenePosition, bool enabled)
-{
-    int groupId = 0;
-    int channel = -1;
-    if (!enabled || !colorChannelControlAt(scenePosition, &groupId, &channel)) {
-        groupId = 0;
-        channel = -1;
-    }
-
-    if (m_activeColorNodeId == groupId && m_activeColorChannel == channel)
-        return;
-
-    m_activeColorNodeId = groupId;
-    m_activeColorChannel = channel;
-    if (!m_dragActive)
-        refresh();
-}
-
-void SceneTreeGraphicsWidget::updateActiveShapeParameterControl(const QPointF &scenePosition, bool enabled)
-{
-    int shapeId = -1;
-    int nodeId = 0;
-    int paramIndex = -1;
-    int numberStart = -1;
-    int numberLength = 0;
-    if (!enabled) {
-        // all cleared — fall through to update
-    } else if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &paramIndex, &numberStart, &numberLength)) {
-        // regular primitive card pill — already set above
-    } else {
-        // check polyhedron table PtX/PtY/PtZ cells
-        PolyhedronTableItem::Cell cell;
-        if (polyhedronTableControlAt(scenePosition, &cell)) {
-            switch (cell.type) {
-            case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
-            case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
-            case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
-            default: break;
-            }
-            if (paramIndex >= 0) {
-                nodeId = cell.nodeId;
-                numberStart = 0;
-            }
-        }
-        if (paramIndex < 0) {
-            Polygon2DTableItem::Cell polygonCell;
-            if (polygon2DTableControlAt(scenePosition, &polygonCell)) {
-                if (polygonCell.type == Polygon2DTableItem::Cell::PtX)
-                    paramIndex = polygonCell.index * 2;
-                else if (polygonCell.type == Polygon2DTableItem::Cell::PtY)
-                    paramIndex = polygonCell.index * 2 + 1;
-                if (paramIndex >= 0) {
-                    shapeId = polygonCell.nodeId;
-                    nodeId = polygonCell.nodeId;
-                    numberStart = 0;
-                }
-            }
-        }
-    }
-
-    if (m_activeShapeParameterNodeId == nodeId
-        && m_activeShapeParameter == paramIndex
-        && m_activeShapeParameterNumberStart == numberStart) {
-        return;
-    }
-
-    m_activeShapeParameterNodeId = nodeId;
-    m_activeShapeParameter = paramIndex;
-    m_activeShapeParameterNumberStart = numberStart;
-    if (!m_dragActive)
-        refresh();
-
-    emit shapeParameterHovered(shapeId, paramIndex);
-}
-
-void SceneTreeGraphicsWidget::updateActiveVariableNumberControl(const QPointF &scenePosition, bool enabled)
-{
-    int nodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!enabled || !variableNumberControlAt(scenePosition, &nodeId, &start, &length)) {
-        nodeId = 0;
-        start = -1;
-    }
-
-    Q_UNUSED(length);
-
-    if (m_activeVariableNodeId == nodeId
-        && m_activeVariableNumberStart == start) {
-        return;
-    }
-
-    m_activeVariableNodeId = nodeId;
-    m_activeVariableNumberStart = start;
-    if (!m_dragActive)
-        refresh();
-    emit variableNumberHovered(nodeId, start);
-}
-
-void SceneTreeGraphicsWidget::updateActiveForLoopRangeControl(const QPointF &scenePosition, bool enabled)
-{
-    int nodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!enabled || !forLoopRangeControlAt(scenePosition, &nodeId, &start, &length)) {
-        nodeId = 0;
-        start = -1;
-    }
-
-    Q_UNUSED(length);
-
-    if (m_activeForLoopNodeId == nodeId
-        && m_activeForLoopNumberStart == start) {
-        return;
-    }
-
-    m_activeForLoopNodeId = nodeId;
-    m_activeForLoopNumberStart = start;
-    if (!m_dragActive)
-        refresh();
-    emit forLoopRangeHovered(nodeId, start);
-}
 
 bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosition,
                                                         int *moduleCallNodeId,
@@ -5154,365 +3363,16 @@ bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePos
         return false;
 
     emit moduleCallArgumentAdjusted(moduleCallNodeId, paramVarNodeId, start, length, wheelSteps);
-    updateActiveModuleCallParamControl(scenePosition, true);
+    m_hoverManager->updateActiveModuleCallParamControl(scenePosition, true);
     return true;
 }
 
-void SceneTreeGraphicsWidget::updateActiveModuleCallParamControl(const QPointF &scenePosition, bool enabled)
-{
-    int moduleCallNodeId = 0;
-    int varNodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!enabled || !moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &varNodeId, &start, &length)) {
-        moduleCallNodeId = 0;
-        varNodeId = 0;
-        start = -1;
-    }
 
-    Q_UNUSED(length);
-
-    if (m_activeModuleCallNodeId == moduleCallNodeId
-        && m_activeModuleCallVarNodeId == varNodeId
-        && m_activeModuleCallNumberStart == start) {
-        return;
-    }
-
-    m_activeModuleCallNodeId = moduleCallNodeId;
-    m_activeModuleCallVarNodeId = varNodeId;
-    m_activeModuleCallNumberStart = start;
-    if (!m_dragActive)
-        refresh();
-    emit moduleCallParamHovered(moduleCallNodeId, varNodeId, start);
-}
-
-void SceneTreeGraphicsWidget::updateHoverHighlights(const QPointF &scenePosition)
-{
-    if (m_dragActive || m_inlineInputActive)
-        return;
-
-    const bool controlDown = QApplication::keyboardModifiers() & Qt::ControlModifier;
-
-    // --- Scroll zone hover (teal) ---
-    QRectF newScrollRect;
-    if (controlDown) {
-        // When Ctrl is held, active scroll controls have their own highlight; no extra glow.
-        newScrollRect = QRectF();
-    } else {
-        newScrollRect = hoverScrollZoneRect(scenePosition);
-    }
-
-    // --- Rename zone hover (lavender) ---
-    int renameNodeId = 0;
-    QRectF renameRect;
-    hoverRenameZoneAt(scenePosition, &renameNodeId, &renameRect);
-    const QRectF newRenameRect = renameNodeId > 0 ? renameRect : QRectF();
-
-    ExpressionEditTarget expressionTarget;
-    const bool onExpression = !m_colorEditMode && expressionEditTargetAt(scenePosition, &expressionTarget);
-    const QRectF newExpressionRect = onExpression ? expressionTarget.hoverRect : QRectF();
-
-    int collapseGroupId = 0;
-    const bool onCollapseControl = groupCollapseControlAt(scenePosition, &collapseGroupId);
-    bool onCanvasGrip = false;
-    for (const CanvasMoveHandle &handle : m_canvasMoveHandles) {
-        if (handle.gripRect.contains(scenePosition)) {
-            onCanvasGrip = true;
-            break;
-        }
-    }
-    PolyhedronTableItem::Cell polyCell;
-    const bool onPolyhedronCell = polyhedronTableControlAt(scenePosition, &polyCell);
-    const bool onPolyhedronElementLabel = onPolyhedronCell
-        && isPolyhedronSelectableLabelCell(polyCell.type)
-        && polyCell.nodeId > 0;
-    updatePolyhedronElementHover(scenePosition, onPolyhedronElementLabel);
-
-    Polygon2DTableItem::Cell polygonCell;
-    const bool onPolygonCell = polygon2DTableControlAt(scenePosition, &polygonCell);
-    const bool onPolygonPointLabel = onPolygonCell
-        && isPolygonSelectableLabelCell(polygonCell.type)
-        && polygonCell.nodeId > 0
-        && polygonCell.index >= 0;
-    updatePolygonPointHover(scenePosition, onPolygonPointLabel);
-
-    // Update cursor.
-    if (controlDown && newExpressionRect.isValid())
-        setCursor(Qt::SizeVerCursor);
-    else if (controlDown
-             && ((onPolyhedronCell && isPolyhedronEditableNumberCell(polyCell.type))
-                 || (onPolygonCell && isPolygonEditableNumberCell(polygonCell.type))))
-        setCursor(Qt::SizeVerCursor);
-    else if (newExpressionRect.isValid()
-             || newRenameRect.isValid()
-             || (onPolyhedronCell && isPolyhedronEditableNumberCell(polyCell.type))
-             || (onPolygonCell && isPolygonEditableNumberCell(polygonCell.type)))
-        setCursor(Qt::IBeamCursor);
-    else if (newScrollRect.isValid())
-        setCursor(Qt::SizeVerCursor);
-    else if (onCollapseControl
-             || onPolyhedronElementLabel
-             || onPolygonPointLabel
-             || (onPolyhedronCell && isPolyhedronButtonCell(polyCell.type))
-             || (onPolygonCell && isPolygonButtonCell(polygonCell.type)))
-        setCursor(Qt::PointingHandCursor);
-    else if (onCanvasGrip)
-        setCursor(Qt::SizeAllCursor);
-    else if (onPolyhedronCell || onPolygonCell)
-        setCursor(Qt::ArrowCursor);
-    else
-        setCursor(Qt::OpenHandCursor);
-
-    if (newScrollRect == m_hoveredScrollRect
-        && newRenameRect == m_hoveredRenameRect
-        && newExpressionRect == m_hoveredExpressionRect)
-        return;
-
-    m_hoveredScrollRect = newScrollRect;
-    m_hoveredRenameRect = newRenameRect;
-    m_hoveredExpressionRect = newExpressionRect;
-    updateHoverHighlightOverlay();
-    emit hoverScrollZoneChanged(m_hoveredScrollRect);
-}
-
-void SceneTreeGraphicsWidget::updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled)
-{
-    int nodeId = 0;
-    if (enabled) {
-        PolyhedronTableItem::Cell cell;
-        if (polyhedronTableControlAt(scenePosition, &cell)
-            && (cell.type == PolyhedronTableItem::Cell::PtLabel
-                || cell.type == PolyhedronTableItem::Cell::FaceLabel)) {
-            nodeId = cell.nodeId;
-        }
-    }
-
-    if (m_hoveredPolyhedronElementNodeId == nodeId)
-        return;
-
-    m_hoveredPolyhedronElementNodeId = nodeId;
-    if (!m_dragActive)
-        refresh();
-    emit polyhedronElementHoverChanged(nodeId);
-}
-
-void SceneTreeGraphicsWidget::updatePolygonPointHover(const QPointF &scenePosition, bool enabled)
-{
-    int nodeId = 0;
-    int pointIndex = -1;
-    if (enabled) {
-        Polygon2DTableItem::Cell cell;
-        if (polygon2DTableControlAt(scenePosition, &cell)
-            && cell.type == Polygon2DTableItem::Cell::PtLabel
-            && cell.nodeId > 0
-            && cell.index >= 0) {
-            nodeId = cell.nodeId;
-            pointIndex = cell.index;
-        }
-    }
-
-    if (m_hoveredPolygonPointNodeId == nodeId
-        && m_hoveredPolygonPointIndex == pointIndex) {
-        return;
-    }
-
-    m_hoveredPolygonPointNodeId = nodeId;
-    m_hoveredPolygonPointIndex = pointIndex;
-    if (!m_dragActive)
-        refresh();
-}
-
-QRectF SceneTreeGraphicsWidget::hoverScrollZoneRect(const QPointF &scenePosition) const
-{
-    // Check each type of scroll control and return the first rect that contains scenePosition.
-    {
-        int groupId = 0;
-        SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
-        int axis = -1, numStart = -1, numLen = -1;
-        if (transformControlAt(scenePosition, &groupId, &op, &axis, &numStart, &numLen) && numStart >= 0) {
-            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(groupId) : nullptr;
-            if (node) {
-                const QString expr = transformAxisExpression(*node, axis);
-                const qreal hw = transformHeaderWidthForNode(*node);
-                const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                const auto controls = transformParameterNumberControls(
-                    groupRectForNode(groupId), axis, expr, metrics, hw);
-                for (const auto &ctl : controls) {
-                    if (ctl.start == numStart)
-                        return ctl.rect;
-                }
-            }
-        }
-    }
-    {
-        int groupId = 0, channel = -1;
-        if (colorChannelControlAt(scenePosition, &groupId, &channel) && channel >= 0) {
-            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(groupId) : nullptr;
-            if (node) {
-                const QColor color = node->color.isValid() ? node->color : QColor(79, 163, 255);
-                const int channelValues[3] = {color.red(), color.green(), color.blue()};
-                const QString expr = QString::number(channelValues[qBound(0, channel, 2)]);
-                const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                const auto controls = transformParameterNumberControls(
-                    groupRectForNode(groupId), channel, expr, metrics, TransformHeaderWidth);
-                if (!controls.isEmpty())
-                    return controls.first().rect;
-            }
-        }
-    }
-    {
-        int shapeId = 0, nodeId2 = 0, param = -1, numStart = -1, numLen = -1;
-        if (shapeParameterControlAt(scenePosition, &shapeId, &nodeId2, &param, &numStart, &numLen) && numStart >= 0) {
-            const ShapeNode *shape = (m_scene && shapeId > 0) ? m_scene->shapeById(shapeId) : nullptr;
-            if (shape && param >= 0) {
-                // Find the primitive card rect in the layout children.
-                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-                    for (const ChildLayout &child : area.children) {
-                        if (child.nodeId != nodeId2)
-                            continue;
-                        const auto paramControls = shapeParameterControls(*shape);
-                        if (param < paramControls.size()) {
-                            const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                            const auto numCtrls = shapeParameterNumberControls(
-                                child.rect, param, paramControls.size(),
-                                paramControls[param].expression, metrics);
-                            for (const auto &ctl : numCtrls) {
-                                if (ctl.start == numStart)
-                                    return ctl.rect;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    {
-        int nodeId2 = 0, start = -1, length = 0;
-        if (variableNumberControlAt(scenePosition, &nodeId2, &start, &length) && start >= 0) {
-            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId2) : nullptr;
-            if (node) {
-                // Find the variable card rect via the layout children.
-                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-                    for (const ChildLayout &child : area.children) {
-                        if (child.nodeId != nodeId2)
-                            continue;
-                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                        const qreal nameW = metrics.horizontalAdvance(node->variableName);
-                        const auto controls = expressionNumberControls(
-                            child.rect, node->variableExpression, metrics, nameW);
-                        for (const auto &ctl : controls) {
-                            if (ctl.start == start)
-                                return ctl.rect;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    {
-        int nodeId2 = 0, start = -1, length = 0;
-        if (forLoopRangeControlAt(scenePosition, &nodeId2, &start, &length) && start >= 0) {
-            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(nodeId2) : nullptr;
-            if (node) {
-                const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-                    if (area.groupId == nodeId2) {
-                        const QString varName = forLoopVariableName(*node);
-                        const QString rangeExpr = forLoopRangeExpression(*node);
-                        const auto controls = forLoopRangeNumberControls(area.rect, varName, rangeExpr, metrics);
-                        for (const auto &ctl : controls) {
-                            if (ctl.start == start)
-                                return ctl.rect;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    {
-        int moduleCallId = 0, varId = 0, start = -1, length = 0;
-        if (moduleCallParamControlAt(scenePosition, &moduleCallId, &varId, &start, &length) && start >= 0) {
-            const SceneDocument::TreeNode *callNode = m_scene ? m_scene->treeNodeById(moduleCallId) : nullptr;
-            const SceneDocument::TreeNode *moduleNode = (callNode && m_scene)
-                                                            ? m_scene->treeNodeById(callNode->shapeId)
-                                                            : nullptr;
-            if (callNode && moduleNode) {
-                QVector<ModuleCallParam> params;
-                for (const SceneDocument::TreeNode &child : moduleNode->children) {
-                    if (child.type == SceneDocument::TreeNode::Variable && child.isParameter) {
-                        params.append({child.id, child.variableName,
-                                       child.variableExpression.trimmed().isEmpty()
-                                           ? QString::number(child.variableValue)
-                                           : child.variableExpression.trimmed()});
-                    }
-                }
-                // Find the call card rect from treeLayout children.
-                for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-                    for (const ChildLayout &child : area.children) {
-                        if (child.nodeId == moduleCallId) {
-                            const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                            const auto controls = moduleCallParamControls(
-                                child.rect, moduleNode->moduleName, params, metrics);
-                            for (const auto &ctl : controls) {
-                                if (ctl.paramVarNodeId == varId && ctl.numberStart == start)
-                                    return ctl.rect;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // ── Polyhedron table pill (PtX/PtY/PtZ/FaceParticipate) ──
-    {
-        PolyhedronTableItem::Cell cell;
-        if (polyhedronTableControlAt(scenePosition, &cell)) {
-            switch (cell.type) {
-            case PolyhedronTableItem::Cell::PtX:
-            case PolyhedronTableItem::Cell::PtY:
-            case PolyhedronTableItem::Cell::PtZ:
-            case PolyhedronTableItem::Cell::FaceParticipate: {
-                // Find the table item to map the cell rect to scene coords
-                for (QGraphicsItem *item : m_treeItems) {
-                    auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
-                    if (!tableItem) continue;
-                    if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
-                        continue;
-                    return QRectF(tableItem->mapToScene(cell.rect.topLeft()),
-                                  tableItem->mapToScene(cell.rect.bottomRight()));
-                }
-                break;
-            }
-            default:
-                break;
-            }
-        }
-    }
-    return QRectF();
-}
-
-bool SceneTreeGraphicsWidget::hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const
-{
-    for (const RenameZone &zone : m_renameZones) {
-        // Inflate the hit area a little for usability.
-        if (zone.rect.adjusted(-2, -2, 2, 2).contains(scenePosition)) {
-            if (nodeId)   *nodeId   = zone.nodeId;
-            if (zoneRect) *zoneRect = zone.rect;
-            return true;
-        }
-    }
-    if (nodeId)   *nodeId   = 0;
-    if (zoneRect) *zoneRect = QRectF();
-    return false;
-}
 
 bool SceneTreeGraphicsWidget::expressionEditTargetAt(const QPointF &scenePosition,
                                                      ExpressionEditTarget *target) const
 {
-    if (!m_scene || m_colorEditMode)
+    if (!m_scene || colorEditMode())
         return false;
 
     const QFontMetricsF metrics(sceneTreeGraphicsFont());
@@ -5859,7 +3719,7 @@ void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarg
         [this, target](const QString &newExpression) {
             QString error;
             if (!validateInlineExpression(target, newExpression, &error)) {
-                updateHoverHint(QStringLiteral("expression-error:%1:%2")
+                m_hoverManager->updateHoverHint(QStringLiteral("expression-error:%1:%2")
                                     .arg(target.nodeId).arg(target.secondaryId),
                                 QStringLiteral("Expression error\n%1\nEditing stays active").arg(error));
                 return false;
@@ -5867,9 +3727,9 @@ void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarg
 
             m_inlineInputActive = false;
             m_inlineInputSceneRect = QRectF();
-            m_hoveredExpressionRect = QRectF();
+            m_hoverManager->m_hoveredExpressionRect = QRectF();
             if (newExpression == target.expression.trimmed()) {
-                updateHoverHighlightOverlay();
+                m_hoverManager->updateHighlightOverlay();
                 return true;
             }
 
@@ -5902,14 +3762,14 @@ void SceneTreeGraphicsWidget::startInlineExpressionEdit(const ExpressionEditTarg
             case ExpressionEditTarget::None:
                 break;
             }
-            updateHoverHighlightOverlay();
+            m_hoverManager->updateHighlightOverlay();
             return true;
         },
         [this]() {
             m_inlineInputActive = false;
             m_inlineInputSceneRect = QRectF();
-            m_hoveredExpressionRect = QRectF();
-            updateHoverHighlightOverlay();
+            m_hoverManager->m_hoveredExpressionRect = QRectF();
+            m_hoverManager->updateHighlightOverlay();
         });
 }
 

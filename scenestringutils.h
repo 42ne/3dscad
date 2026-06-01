@@ -14,6 +14,24 @@
 #include <QStringList>
 #include <QVector>
 
+// ── Identifier validation ─────────────────────────────────────────────────────
+inline bool isValidIdentifier(const QString &name)
+{
+    if (name.isEmpty())
+        return false;
+
+    const QChar first = name.front();
+    if (!(first == QLatin1Char('_') || first.isLetter()))
+        return false;
+
+    for (const QChar ch : name) {
+        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
+            return false;
+    }
+
+    return true;
+}
+
 // ── Comma-split ───────────────────────────────────────────────────────────────
 // Splits text on commas that are not nested inside () or [].
 // Parts are trimmed; empty parts are skipped.

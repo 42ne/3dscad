@@ -91,6 +91,22 @@ static QString adjustedNumericToken(const QString &expression,
     return replacement;
 }
 
+static QString adjustedNumberReplacement(const QString &expression,
+                                          int start, int length,
+                                          qreal delta, qreal minValue)
+{
+    const QString numberText = expression.mid(start, length);
+    if (numberText.isEmpty()) return QString();
+
+    const int decimalPoint = numberText.indexOf(QLatin1Char('.'));
+    const int precision = decimalPoint >= 0
+                              ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
+    const qreal step = precision > 0 ? 0.1 : 1.0;
+    const bool standalone = isStandaloneNumericToken(expression, start, length);
+    return adjustedNumericToken(expression, start, length,
+                                delta, step, minValue, !standalone);
+}
+
 // ── Convex hull helper ──────────────────────────────────────────────────────
 // Brute-force O(n⁴) convex hull for small point sets (<100 points typical).
 // Returns faces as CCW-ordered vertex indices, oriented outward.
@@ -588,6 +604,22 @@ void SceneController::pushCommandIfValid(QUndoCommand *command)
     // Commands with isValid() == false are discarded to avoid touching the stack.
     // Commands that don't implement isValid() are always pushed.
     m_undoStack->push(command);
+}
+
+void SceneController::setCtrlHighlight(int nodeId, const QString &contextPrefix,
+                                        const QString &expression,
+                                        int start, int replacementSize)
+{
+    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
+        m_ctrlHighlight.active        = true;
+        m_ctrlHighlight.nodeId        = nodeId;
+        m_ctrlHighlight.contextPrefix = contextPrefix;
+        m_ctrlHighlight.expression    = expression;
+        m_ctrlHighlight.numberStart   = start;
+        m_ctrlHighlight.numberLength  = replacementSize;
+    } else {
+        m_ctrlHighlight.active = false;
+    }
 }
 
 void SceneController::selectShapeInternal(int shapeId)
@@ -1432,40 +1464,25 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
     const QString &currentExpr = controls[paramIndex].expression;
     if (numberStart + numberLength > currentExpr.size()) return;
 
-    const QString numberText  = currentExpr.mid(numberStart, numberLength);
-    const int   decimalPoint  = numberText.indexOf(QLatin1Char('.'));
-    const int   precision     = decimalPoint >= 0
-                                    ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
-    const qreal step          = precision > 0 ? 0.1 : 1.0;
-    const bool  standalone    = isStandaloneNumericToken(currentExpr, numberStart, numberLength);
-    const QString replacement = adjustedNumericToken(currentExpr, numberStart, numberLength,
-                                                     delta, step, 0.1, !standalone);
+    const QString replacement = adjustedNumberReplacement(currentExpr, numberStart, numberLength,
+                                                          delta, 0.1);
     if (replacement.isEmpty()) return;
 
     const QString newExpr = currentExpr.left(numberStart)
                             + replacement
                             + currentExpr.mid(numberStart + numberLength);
 
-    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        QString contextPrefix;
-        if (shape->type == ShapeNode::Cylinder) {
-            contextPrefix = (paramIndex == 0) ? QStringLiteral(", r=") : QStringLiteral("h=");
-        } else if (shape->type == ShapeNode::Sphere) {
-            contextPrefix = QStringLiteral("r=");
-        } else {
-            contextPrefix = QStringLiteral("[");
-            for (int i = 0; i < paramIndex && i < controls.size(); ++i)
-                contextPrefix += controls[i].expression + QStringLiteral(", ");
-        }
-        m_ctrlHighlight.active        = true;
-        m_ctrlHighlight.nodeId        = nodeId;
-        m_ctrlHighlight.contextPrefix = contextPrefix;
-        m_ctrlHighlight.expression    = newExpr;
-        m_ctrlHighlight.numberStart   = numberStart;
-        m_ctrlHighlight.numberLength  = int(replacement.size());
+    QString contextPrefix;
+    if (shape->type == ShapeNode::Cylinder) {
+        contextPrefix = (paramIndex == 0) ? QStringLiteral(", r=") : QStringLiteral("h=");
+    } else if (shape->type == ShapeNode::Sphere) {
+        contextPrefix = QStringLiteral("r=");
     } else {
-        m_ctrlHighlight.active = false;
+        contextPrefix = QStringLiteral("[");
+        for (int i = 0; i < paramIndex && i < controls.size(); ++i)
+            contextPrefix += controls[i].expression + QStringLiteral(", ");
     }
+    setCtrlHighlight(nodeId, contextPrefix, newExpr, numberStart, int(replacement.size()));
 
     QHash<QString, qreal> varValues;
     collectVariableValues(m_scene.treeRoot(), &varValues);
@@ -1499,28 +1516,13 @@ void SceneController::handleVariableNumberAdjusted(int nodeId, int start, int le
     QString expression = node->variableExpression;
     if (start + length > expression.size()) return;
 
-    const QString numberText  = expression.mid(start, length);
-    const int   decimalPoint  = numberText.indexOf(QLatin1Char('.'));
-    const int   precision     = decimalPoint >= 0
-                                    ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
-    const qreal step          = precision > 0 ? 0.1 : 1.0;
-    const bool  standalone    = isStandaloneNumericToken(expression, start, length);
-    QString replacement = adjustedNumericToken(expression, start, length,
-                                               delta, step, 0.0, !standalone);
+    const QString replacement = adjustedNumberReplacement(expression, start, length,
+                                                          delta, 0.0);
     if (replacement.isEmpty()) return;
 
     expression.replace(start, length, replacement);
 
-    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active        = true;
-        m_ctrlHighlight.nodeId        = nodeId;
-        m_ctrlHighlight.contextPrefix = QString();
-        m_ctrlHighlight.expression    = expression;
-        m_ctrlHighlight.numberStart   = start;
-        m_ctrlHighlight.numberLength  = int(replacement.size());
-    } else {
-        m_ctrlHighlight.active = false;
-    }
+    setCtrlHighlight(nodeId, QString(), expression, start, int(replacement.size()));
 
     auto *command = new UpdateVariableExpressionCommand(&m_scene, nodeId, expression,
                                                         [this]() { emit sceneChanged(); });
@@ -1706,28 +1708,13 @@ void SceneController::handleModuleCallArgumentAdjusted(int moduleCallId,
 
     if (start + length > expression.size()) return;
 
-    const QString numberText  = expression.mid(start, length);
-    const int   decimalPoint  = numberText.indexOf(QLatin1Char('.'));
-    const int   precision     = decimalPoint >= 0
-                                    ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
-    const qreal step          = precision > 0 ? 0.1 : 1.0;
-    const bool  standalone    = isStandaloneNumericToken(expression, start, length);
-    QString replacement = adjustedNumericToken(expression, start, length,
-                                               delta, step, 0.0, !standalone);
+    const QString replacement = adjustedNumberReplacement(expression, start, length,
+                                                          delta, 0.0);
     if (replacement.isEmpty()) return;
 
     expression.replace(start, length, replacement);
 
-    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active        = true;
-        m_ctrlHighlight.nodeId        = moduleCallId;
-        m_ctrlHighlight.contextPrefix = QString();
-        m_ctrlHighlight.expression    = expression;
-        m_ctrlHighlight.numberStart   = start;
-        m_ctrlHighlight.numberLength  = int(replacement.size());
-    } else {
-        m_ctrlHighlight.active = false;
-    }
+    setCtrlHighlight(moduleCallId, QString(), expression, start, int(replacement.size()));
 
     auto *command = new UpdateModuleCallArgumentCommand(&m_scene,
                                                         moduleCallId,
@@ -1775,28 +1762,13 @@ void SceneController::handleForLoopRangeAdjusted(int nodeId, int start, int leng
     QString expression = SceneTreeGraphics::forLoopRangeExpression(*node);
     if (start + length > expression.size()) return;
 
-    const QString numberText  = expression.mid(start, length);
-    const int   decimalPoint  = numberText.indexOf(QLatin1Char('.'));
-    const int   precision     = decimalPoint >= 0
-                                    ? qMin(3, numberText.size() - decimalPoint - 1) : 0;
-    const qreal step          = precision > 0 ? 0.1 : 1.0;
-    const bool  standalone    = isStandaloneNumericToken(expression, start, length);
-    const QString replacement = adjustedNumericToken(expression, start, length,
-                                                     delta, step, 0.0, !standalone);
+    const QString replacement = adjustedNumberReplacement(expression, start, length,
+                                                          delta, 0.0);
     if (replacement.isEmpty()) return;
 
     expression.replace(start, length, replacement);
 
-    if (QApplication::keyboardModifiers() & Qt::ControlModifier) {
-        m_ctrlHighlight.active        = true;
-        m_ctrlHighlight.nodeId        = nodeId;
-        m_ctrlHighlight.contextPrefix = QString();
-        m_ctrlHighlight.expression    = expression;
-        m_ctrlHighlight.numberStart   = start;
-        m_ctrlHighlight.numberLength  = int(replacement.size());
-    } else {
-        m_ctrlHighlight.active = false;
-    }
+    setCtrlHighlight(nodeId, QString(), expression, start, int(replacement.size()));
 
     auto *command = new UpdateForLoopCommand(&m_scene, nodeId,
                                              SceneTreeGraphics::forLoopVariableName(*node),

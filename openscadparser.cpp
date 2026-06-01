@@ -1,5 +1,6 @@
 #include "openscadparser.h"
 #include "expression.h"
+#include "scenestringutils.h"
 
 #include <QColor>
 #include <QRegularExpression>
@@ -43,23 +44,6 @@ static bool parseReal(const QString &text, qreal *value)
     return true;
 }
 
-static bool isValidIdentifier(const QString &name)
-{
-    if (name.isEmpty())
-        return false;
-
-    const QChar first = name.front();
-    if (!(first == QLatin1Char('_') || first.isLetter()))
-        return false;
-
-    for (const QChar ch : name) {
-        if (!(ch == QLatin1Char('_') || ch.isLetterOrNumber()))
-            return false;
-    }
-
-    return true;
-}
-
 static bool parseVector3Value(const QString &text, QVector3D *vector)
 {
     const QStringList parts = text.split(',');
@@ -75,23 +59,6 @@ static bool parseVector3Value(const QString &text, QVector3D *vector)
 }
 
 // Splits "a+1, b, max(c,d)" on commas at parenthesis/bracket depth 0.
-static QStringList splitAtTopLevelCommas(const QString &text)
-{
-    QStringList result;
-    int depth = 0;
-    int start = 0;
-    for (int i = 0; i < text.size(); ++i) {
-        const QChar c = text[i];
-        if (c == '(' || c == '[') ++depth;
-        else if (c == ')' || c == ']') --depth;
-        else if (c == ',' && depth == 0) {
-            result.append(text.mid(start, i - start));
-            start = i + 1;
-        }
-    }
-    result.append(text.mid(start));
-    return result;
-}
 
 static bool parseVector3WithExpressions(const QString &text, const QHash<QString, qreal> &varValues, QVector3D *vector, QStringList *expressions = nullptr)
 {
