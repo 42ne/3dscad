@@ -1293,6 +1293,10 @@ ViewportWidget::ViewportWidget(QWidget *parent)
 {
     setMinimumSize(500, 400);
     setFocusPolicy(Qt::StrongFocus);
+    setAutoFillBackground(false);
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
+    setAttribute(Qt::WA_NoSystemBackground, true);
+    setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
 
     m_openGLViewportCheckBox = new QCheckBox(QStringLiteral("OpenGL"), this);
     m_darkViewportCheckBox = new QCheckBox(QStringLiteral("Dark"), this);
@@ -1366,8 +1370,8 @@ ViewportWidget::ViewportWidget(QWidget *parent)
         m_lightingPreset = qMax(0, index);
         update();
     });
-    m_selectionShimmerTimer.setInterval(40);
-    m_selectionShimmerTimer.setTimerType(Qt::PreciseTimer);
+    m_selectionShimmerTimer.setInterval(80);
+    m_selectionShimmerTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_selectionShimmerTimer, &QTimer::timeout, this, [this]() {
         m_selectionShimmerPhase += 0.13f;
         if (m_selectionShimmerPhase >= 6.2831853f)

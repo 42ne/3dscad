@@ -99,7 +99,9 @@ public:
                        const ShapeNode *shape,
                        int theme = 0,
                        int activeNodeId = 0,
-                       int activeParamIndex = -1);
+                       int activeParamIndex = -1,
+                       const QSet<int> &selectedPointIndices = {},
+                       int hoveredPointIndex = -1);
 
     QRectF boundingRect() const override { return m_rect; }
     Cell cellAt(const QPointF &pos) const;
@@ -118,6 +120,8 @@ private:
     int m_theme = 0;
     int m_activeNodeId = 0;
     int m_activeParamIndex = -1;
+    QSet<int> m_selectedPointIndices;
+    int m_hoveredPointIndex = -1;
     QVector<Cell> m_cells;
     qreal m_tableWidth = 0;
     qreal m_tableHeight = 0;

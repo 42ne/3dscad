@@ -504,13 +504,17 @@ Polygon2DTableItem::Polygon2DTableItem(const QRectF &rect,
                                        const ShapeNode *shape,
                                        int theme,
                                        int activeNodeId,
-                                       int activeParamIndex)
+                                       int activeParamIndex,
+                                       const QSet<int> &selectedPointIndices,
+                                       int hoveredPointIndex)
     : m_rect(QRectF(QPointF(0.0, 0.0), rect.size()))
     , m_nodeId(nodeId)
     , m_shape(shape ? *shape : ShapeNode())
     , m_theme(theme)
     , m_activeNodeId(activeNodeId)
     , m_activeParamIndex(activeParamIndex)
+    , m_selectedPointIndices(selectedPointIndices)
+    , m_hoveredPointIndex(hoveredPointIndex)
 {
     computeLayout();
 }
@@ -587,7 +591,20 @@ void Polygon2DTableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem
         }
 
         if (cell.type == Cell::PtLabel) {
-            painter->setPen(SceneTreePalette::textMuted(pt));
+            const bool selected = m_selectedPointIndices.contains(cell.index);
+            const bool hovered = cell.index >= 0 && cell.index == m_hoveredPointIndex;
+            if (selected || hovered) {
+                const QRectF halo = cell.rect.adjusted(-2.0, -1.5, 2.0, 1.5);
+                paintRoundedPanel(painter, halo, 4.0,
+                                  QPen(selected ? QColor(255, 210, 90, 210)
+                                                : QColor(255, 220, 120, 130),
+                                       selected ? 1.4 : 1.0),
+                                  QBrush(selected ? QColor(255, 199, 64, 46)
+                                                  : QColor(255, 210, 90, 24)));
+            }
+            painter->setPen(selected ? QColor(255, 232, 150)
+                            : hovered ? QColor(255, 226, 145)
+                                      : SceneTreePalette::textMuted(pt));
             painter->drawText(cell.rect, Qt::AlignRight | Qt::AlignVCenter,
                               QStringLiteral("Pt %1").arg(cell.index));
             continue;

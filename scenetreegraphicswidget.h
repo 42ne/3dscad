@@ -194,6 +194,7 @@ private:
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
     void updateHoverHighlights(const QPointF &scenePosition);
     void updatePolyhedronElementHover(const QPointF &scenePosition, bool enabled);
+    void updatePolygonPointHover(const QPointF &scenePosition, bool enabled);
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
@@ -343,6 +344,9 @@ private:
     int m_selectedTreeNodeId = 0;
     QSet<int> m_selectedPolyhedronElementNodeIds;
     int m_hoveredPolyhedronElementNodeId = 0;
+    QSet<QString> m_selectedPolygonPointKeys;
+    int m_hoveredPolygonPointNodeId = 0;
+    int m_hoveredPolygonPointIndex = -1;
 
     // ── Color-edit paint mode ─────────────────────────────────────────────────
     bool            m_colorEditMode        = false;
