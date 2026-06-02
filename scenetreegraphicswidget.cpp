@@ -17,6 +17,7 @@
 #include "scenetreeoverlaycontroller.h"
 #include "scenetreedroppreviewcontroller.h"
 #include "scenetreehittestmanager.h"
+#include "scenetreewheelhandler.h"
 
 #include <QApplication>
 #include <QColorDialog>
@@ -412,6 +413,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_dropPreview       = new SceneTreeDropPreviewController(this);
     m_hitTest           = new SceneTreeHitTestManager(this);
     m_canvasController  = new SceneTreeCanvasController(this);
+    m_wheelHandler      = new SceneTreeWheelHandler(this);
 
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
     connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
@@ -1283,38 +1285,12 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 
     if ((event->modifiers() & Qt::ControlModifier) && event->angleDelta().y() != 0) {
         const int wheelSteps = event->angleDelta().y() / 120;
-        const QPointF scenePosition = mapToScene(event->position().toPoint());
-        if (wheelSteps != 0 && handleForLoopRangeWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handleModuleCallParamWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handleVariableNumberWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handleShapeParameterWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handlePolygon2DTableWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handleColorChannelWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handleTransformWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
-        }
-        if (wheelSteps != 0 && handlePolyhedronTableWheel(scenePosition, wheelSteps)) {
-            event->accept();
-            return;
+        if (wheelSteps != 0) {
+            const QPointF scenePosition = mapToScene(event->position().toPoint());
+            if (m_wheelHandler->handleCtrlWheel(scenePosition, wheelSteps)) {
+                event->accept();
+                return;
+            }
         }
     }
 
@@ -2064,215 +2040,6 @@ bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &p, int *nId, 
 { return m_hitTest->forLoopRangeControlAt(p, nId, s, l); }
 bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &p, int *mcId, int *pvId, int *s, int *l) const
 { return m_hitTest->moduleCallParamControlAt(p, mcId, pvId, s, l); }
-
-bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int groupId = 0;
-    int axis = -1;
-    int start = -1;
-    int length = 0;
-    SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
-    if (!transformControlAt(scenePosition, &groupId, &operation, &axis, &start, &length))
-        return false;
-    if (start < 0 || length <= 0)
-        return false;
-
-    emit transformValueAdjusted(groupId, axis, start, length, static_cast<qreal>(wheelSteps));
-    m_hoverManager->updateActiveTransformControl(scenePosition, true);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int groupId = 0;
-    int channel = -1;
-    if (!colorChannelControlAt(scenePosition, &groupId, &channel))
-        return false;
-
-    emit colorChannelAdjusted(groupId, channel, static_cast<qreal>(wheelSteps));
-    m_hoverManager->updateActiveColorChannelControl(scenePosition, true);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int shapeId = -1;
-    int nodeId = 0;
-    int paramIndex = -1;
-    int start = -1;
-    int length = 0;
-    if (!shapeParameterControlAt(scenePosition, &shapeId, &nodeId, &paramIndex, &start, &length))
-        return false;
-
-    emit shapeParameterAdjusted(nodeId, paramIndex, start, length, static_cast<qreal>(wheelSteps));
-    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
-    Q_UNUSED(shapeId);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handlePolyhedronTableWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    PolyhedronTableItem::Cell cell;
-    if (!polyhedronTableControlAt(scenePosition, &cell))
-        return false;
-
-    // ── FaceParticipate (custom participation editing) ──
-    if (cell.type == PolyhedronTableItem::Cell::FaceParticipate) {
-        if (!m_scene) return false;
-        const SceneDocument::TreeNode *faceNode = m_scene->treeNodeById(cell.nodeId);
-        if (!faceNode || faceNode->type != SceneDocument::TreeNode::Primitive) return false;
-        const ShapeNode *shape = m_scene->shapeById(faceNode->shapeId);
-        if (!shape || shape->type != ShapeNode::Face3D) return false;
-
-        const QVector<int> face = shape->polyhedronFaces.isEmpty()
-                                      ? QVector<int>()
-                                      : shape->polyhedronFaces.first();
-        const int oldPos = face.indexOf(cell.sub);
-
-        int newPos = oldPos;
-        if (wheelSteps > 0) {
-            // Cycle forward through states: - -> 0 -> 1 -> ... -> -
-            if (oldPos < 0) {
-                newPos = 0;
-            } else if (oldPos >= face.size() - 1) {
-                newPos = -1;
-            } else {
-                newPos = oldPos + 1;
-            }
-        } else {
-            // Cycle backward through states: - -> last -> ... -> 0 -> -
-            if (oldPos < 0) {
-                newPos = face.size();
-            } else if (oldPos == 0) {
-                newPos = -1;
-            } else {
-                newPos = oldPos - 1;
-            }
-        }
-
-        // Find the point nodeId via the table item
-        int ptNodeId = 0;
-        for (QGraphicsItem *item : m_treeItems) {
-            auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
-            if (!tableItem) continue;
-            ptNodeId = tableItem->pointNodeIdForIndex(cell.sub);
-            break;
-        }
-        if (ptNodeId <= 0) return false;
-
-        emit polyhedronFaceParticipationAdjusted(cell.nodeId, ptNodeId, newPos);
-        return true;
-    }
-
-    int paramIndex = -1;
-    switch (cell.type) {
-    case PolyhedronTableItem::Cell::PtX: paramIndex = 0; break;
-    case PolyhedronTableItem::Cell::PtY: paramIndex = 1; break;
-    case PolyhedronTableItem::Cell::PtZ: paramIndex = 2; break;
-    default: return false;
-    }
-
-    // Resolve the shape to get the parameter expression,
-    // so we can emit a valid numberStart/numberLength for the handler.
-    const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(cell.nodeId) : nullptr;
-    if (!node || node->type != SceneDocument::TreeNode::Primitive) return false;
-    const ShapeNode *shape = m_scene->shapeById(node->shapeId);
-    if (!shape) return false;
-
-    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-    if (paramIndex >= controls.size()) return false;
-
-    const QString &expr = controls[paramIndex].expression;
-    // Point3D coords and Face3D indices are always simple numeric expressions,
-    // so the entire expression string is the number to adjust.
-    const int numberStart = 0;
-    const int numberLength = expr.size();
-
-    emit shapeParameterAdjusted(cell.nodeId, paramIndex, numberStart, numberLength, static_cast<qreal>(wheelSteps));
-    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int nodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!variableNumberControlAt(scenePosition, &nodeId, &start, &length))
-        return false;
-
-    emit variableNumberAdjusted(nodeId, start, length, wheelSteps);
-    m_hoverManager->updateActiveVariableNumberControl(scenePosition, true);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int nodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!forLoopRangeControlAt(scenePosition, &nodeId, &start, &length))
-        return false;
-
-    emit forLoopRangeAdjusted(nodeId, start, length, wheelSteps);
-    m_hoverManager->updateActiveForLoopRangeControl(scenePosition, true);
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::handlePolygon2DTableWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    Polygon2DTableItem::Cell cell;
-    if (!polygon2DTableControlAt(scenePosition, &cell))
-        return false;
-
-    int coord = -1;
-    if (cell.type == Polygon2DTableItem::Cell::PtX)
-        coord = 0;
-    else if (cell.type == Polygon2DTableItem::Cell::PtY)
-        coord = 1;
-    if (coord < 0 || cell.index < 0)
-        return false;
-
-    emit polygon2DPointAdjusted(cell.nodeId, cell.index, coord, wheelSteps);
-    m_hoverManager->updateActiveShapeParameterControl(scenePosition, true);
-    return true;
-}
-
-
-
-bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps)
-{
-    if (!m_scene)
-        return false;
-
-    int moduleCallNodeId = 0;
-    int paramVarNodeId = 0;
-    int start = -1;
-    int length = 0;
-    if (!moduleCallParamControlAt(scenePosition, &moduleCallNodeId, &paramVarNodeId, &start, &length))
-        return false;
-
-    emit moduleCallArgumentAdjusted(moduleCallNodeId, paramVarNodeId, start, length, wheelSteps);
-    m_hoverManager->updateActiveModuleCallParamControl(scenePosition, true);
-    return true;
-}
-
-
 
 QRectF SceneTreeGraphicsWidget::debugGroupRect(int groupId) const { return groupRectForNode(groupId); }
 QRectF SceneTreeGraphicsWidget::debugChildRect(int nodeId)  const { return rectForChildNode(nodeId); }

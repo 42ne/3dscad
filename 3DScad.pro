@@ -38,6 +38,7 @@ SOURCES += \
     scenetreeinlineeditor.cpp \
     scenecanvasdraghandler.cpp \
     scenetreecanvascontroller.cpp \
+    scenetreewheelhandler.cpp \
     scenetreegraphicswidget.cpp \
     scenetreeinlinetextinput.cpp \
     scenetreelayout.cpp \
@@ -83,6 +84,7 @@ HEADERS += \
     scenetreeinlineeditor.h \
     scenecanvasdraghandler.h \
     scenetreecanvascontroller.h \
+    scenetreewheelhandler.h \
     scenetreegraphicswidget.h \
     scenetreeinlinetextinput.h \
     scenetreelayout.h \

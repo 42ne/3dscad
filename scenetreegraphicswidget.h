@@ -36,6 +36,7 @@ class SceneTreeHoverManager;
 class SceneTreeInlineEditor;
 class SceneCanvasDragHandler;
 class SceneTreeCanvasController;
+class SceneTreeWheelHandler;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -161,6 +162,7 @@ private:
     friend class SceneTreeDropPreviewController;
     friend class SceneTreeHitTestManager;
     friend class SceneTreeCanvasController;
+    friend class SceneTreeWheelHandler;
     void clearColorEditHighlight();
     void updateColorEditHighlight(const QPointF &scenePos);
 
@@ -189,14 +191,6 @@ private:
     void snapZoom();
     int  toolbarSnapSideForVpPos(QPoint vpPos) const;
     bool isOnToolbarBackground(QPointF vpPos) const;
-    bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handlePolyhedronTableWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handlePolygon2DTableWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handleVariableNumberWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handleForLoopRangeWheel(const QPointF &scenePosition, int wheelSteps);
-    bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
     bool transformControlAt(const QPointF &p, int *gId, SceneDocument::TreeNode::Operation *op, int *ax, int *ns = nullptr, int *nl = nullptr) const;
@@ -270,6 +264,7 @@ private:
     SceneTreeDropPreviewController *m_dropPreview       = nullptr;
     SceneTreeHitTestManager        *m_hitTest           = nullptr;
     SceneTreeCanvasController      *m_canvasController  = nullptr;
+    SceneTreeWheelHandler          *m_wheelHandler      = nullptr;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
     bool m_dragActive = false;
