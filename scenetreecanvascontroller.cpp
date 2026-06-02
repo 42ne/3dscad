@@ -18,7 +18,7 @@ SceneTreeCanvasController::SceneTreeCanvasController(SceneTreeGraphicsWidget *wi
     connect(m_panInertiaTimer, &QTimer::timeout, this, &SceneTreeCanvasController::tickPan);
 
     m_zoomAnimTimer = new QTimer(this);
-    m_zoomAnimTimer->setInterval(24);
+    m_zoomAnimTimer->setInterval(16);
     connect(m_zoomAnimTimer, &QTimer::timeout, this, &SceneTreeCanvasController::tickZoom);
 
     m_zoomIdleTimer = new QTimer(this);
