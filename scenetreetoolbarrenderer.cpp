@@ -48,12 +48,18 @@ QStringList paletteTools()
     };
 }
 
-constexpr qreal OverlayMargin = 12.0;
-constexpr qreal OverlayTopGap = 10.0;
-constexpr qreal OverlayPadding = 8.0;
-constexpr qreal OverlayZ = 10000.0;
+constexpr qreal OverlayMargin   = 12.0;
+constexpr qreal OverlayTopGap   = 10.0;
+constexpr qreal OverlayPadding  = 8.0;
+constexpr qreal OverlayZ        = 10000.0;
 constexpr qreal MinToolbarScale = 0.90;
 constexpr qreal MaxToolbarScale = 1.08;
+
+// Height reserved at the bottom when the toolbar is docked left
+// (theme + bg switchers live at bottom-left).
+constexpr qreal BottomReserveLeft  = 90.0;
+// Height reserved at the bottom for right-docked toolbar (just a small pad).
+constexpr qreal BottomReserveRight = 20.0;
 
 qreal visualScaleForViewportScale(qreal viewportScale)
 {
@@ -90,7 +96,11 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                         ToolHoverChangedCallback onHoverChanged,
                                         const QPointF &viewportTopLeft,
                                         qreal viewportWidth,
-                                        qreal viewportScale)
+                                        qreal viewportHeight,
+                                        qreal viewportScale,
+                                        int toolbarSide,
+                                        QRectF *outPanelVpRect,
+                                        QVector<QRectF> *outToolVpRects)
 {
     const QStringList tools = paletteTools();
     if (tools.isEmpty() || !m_scene)
@@ -100,21 +110,68 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     const qreal toolbarScale = visualScaleForViewportScale(safeViewportScale);
     const qreal toolSide = ToolSize * toolbarScale;
     const qreal gap = ToolGap * toolbarScale;
-    const int columns = columnCountForWidth(viewportWidth, tools.size(), toolbarScale);
-    const int rows = (tools.size() + columns - 1) / columns;
-    const qreal panelWidth = columns * toolSide + (columns - 1) * gap + OverlayPadding * 2.0;
-    const qreal panelHeight = rows * toolSide + (rows - 1) * gap + OverlayPadding * 2.0;
+    const int toolCount = tools.size();
 
-    const auto scenePointFromViewportPixels = [viewportTopLeft, safeViewportScale](qreal x, qreal y) {
+    // ── Layout geometry ──────────────────────────────────────────────────────
+    int columns, rows;
+    qreal panelWidth, panelHeight;
+    qreal panelVpX, panelVpY;
+
+    if (toolbarSide == 0) {
+        // Top: horizontal, full-width row layout
+        columns  = columnCountForWidth(viewportWidth, toolCount, toolbarScale);
+        rows     = (toolCount + columns - 1) / columns;
+        panelWidth  = columns * toolSide + (columns - 1) * gap + OverlayPadding * 2.0;
+        panelHeight = rows    * toolSide + (rows    - 1) * gap + OverlayPadding * 2.0;
+        panelVpX = OverlayMargin;
+        panelVpY = OverlayTopGap;
+    } else {
+        // Left (1) or Right (2): vertical, column-major layout
+        const qreal reserve = (toolbarSide == 1) ? BottomReserveLeft : BottomReserveRight;
+        const qreal maxH    = qMax<qreal>(toolSide + OverlayPadding * 2.0,
+                                          viewportHeight - OverlayTopGap - reserve);
+
+        // Find the minimum number of columns so the panel fits vertically
+        rows    = toolCount;
+        columns = 1;
+        while (columns < toolCount) {
+            const qreal h = rows * toolSide + (rows - 1) * gap + OverlayPadding * 2.0;
+            if (h <= maxH)
+                break;
+            ++columns;
+            rows = (toolCount + columns - 1) / columns;
+        }
+
+        panelWidth  = columns * toolSide + (columns - 1) * gap + OverlayPadding * 2.0;
+        // Extend the glass panel to fill all available vertical space so it
+        // reaches from the top gap down to the bottom switchers.
+        panelHeight = maxH;
+        panelVpX = (toolbarSide == 1)
+            ? OverlayMargin
+            : (viewportWidth - OverlayMargin - panelWidth);
+        panelVpY = OverlayTopGap;
+    }
+
+    const auto scenePointFromViewportPixels = [&](qreal x, qreal y) -> QPointF {
         return viewportTopLeft + QPointF(x / safeViewportScale, y / safeViewportScale);
     };
-    const QPointF panelTopLeft = scenePointFromViewportPixels(OverlayMargin, OverlayTopGap);
-    const QRectF rect(panelTopLeft, QSizeF(panelWidth / safeViewportScale, panelHeight / safeViewportScale));
-    const QRectF panelLocalRect(0.0, 0.0, panelWidth, panelHeight);
-    const bool darkGlass = m_darkGlass;
+
+    const QPointF panelTopLeft  = scenePointFromViewportPixels(panelVpX, panelVpY);
+    const QRectF  rect(panelTopLeft,
+                       QSizeF(panelWidth / safeViewportScale, panelHeight / safeViewportScale));
+    const QRectF  panelLocalRect(0.0, 0.0, panelWidth, panelHeight);
+
+    const bool darkGlass  = m_darkGlass;
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
+    // Output VP rects for drag-zone hit testing
+    if (outPanelVpRect)
+        *outPanelVpRect = QRectF(panelVpX, panelVpY, panelWidth, panelHeight);
+    if (outToolVpRects)
+        outToolVpRects->clear();
+
+    // ── Drop shadow ──────────────────────────────────────────────────────────
     QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(3.0, 4.0),
                                              Qt::NoPen,
                                              QBrush(QColor(0, 0, 0, darkGlass ? 96 : 38)));
@@ -125,6 +182,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     shadow->setOpacity(darkGlass ? 0.70 : 0.42);
     trackToolbarItem(shadow);
 
+    // ── Glass panel ──────────────────────────────────────────────────────────
     QPainterPath panelPath;
     panelPath.addRoundedRect(panelLocalRect, CornerRadius, CornerRadius);
     QGraphicsItem *panel = m_scene->addPath(panelPath,
@@ -140,7 +198,22 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     panel->setZValue(OverlayZ - 1.0);
     trackToolbarItem(panel);
 
-    for (int i = 0; i < tools.size(); ++i) {
+    // ── Tool icons ───────────────────────────────────────────────────────────
+    for (int i = 0; i < toolCount; ++i) {
+        int col, row;
+        if (toolbarSide == 0) {
+            // Horizontal top: row-major (left-to-right, then next row)
+            col = i % columns;
+            row = i / columns;
+        } else {
+            // Vertical side: column-major (top-to-bottom, then next column)
+            col = i / rows;
+            row = i % rows;
+        }
+
+        const qreal toolVpX = panelVpX + OverlayPadding + col * (toolSide + gap);
+        const qreal toolVpY = panelVpY + OverlayPadding + row * (toolSide + gap);
+
         auto *tool = createPaletteToolItem(tools[i],
                                            fillForTool(tools[i]),
                                            m_theme,
@@ -148,15 +221,15 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                            onPreviewFinished,
                                            onDropped,
                                            onHoverChanged);
-        const int column = i % columns;
-        const int row = i / columns;
         tool->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         tool->setScale(toolbarScale);
         tool->setZValue(OverlayZ);
-        tool->setPos(scenePointFromViewportPixels(OverlayMargin + OverlayPadding + column * (toolSide + gap),
-                                                  OverlayTopGap + OverlayPadding + row * (toolSide + gap)));
+        tool->setPos(scenePointFromViewportPixels(toolVpX, toolVpY));
         m_scene->addItem(tool);
         trackToolbarItem(tool);
+
+        if (outToolVpRects)
+            outToolVpRects->append(QRectF(toolVpX, toolVpY, toolSide, toolSide));
     }
 
     return rect;

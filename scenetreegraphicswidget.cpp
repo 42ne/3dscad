@@ -1262,6 +1262,26 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    // ── Toolbar drag: intercept clicks on the panel background ───────────────
+    // itemAt() returns panel even with Qt::NoButton, so we check VP rects
+    // directly — do NOT gate on itemAt == nullptr here.
+    // Tool icon rects are excluded so drag-to-create still works normally.
+    if (event->button() == Qt::LeftButton) {
+        const QPointF vpF(event->pos());
+        if (m_toolbarPanelVpRect.contains(vpF)) {
+            bool onTool = false;
+            for (const QRectF &r : m_toolbarToolVpRects)
+                if (r.contains(vpF)) { onTool = true; break; }
+            if (!onTool) {
+                m_toolbarDragPending = true;
+                m_toolbarDragActive  = false;
+                m_toolbarDragPressVp = event->pos();
+                event->accept();
+                return;
+            }
+        }
+    }
+
     if (event->button() == Qt::LeftButton && itemAt(event->pos()) == nullptr) {
         m_panning = true;
         m_lastPanPoint = event->pos();
@@ -1285,6 +1305,34 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     m_lastMousePosition = event->pos();
     const bool controlDown = event->modifiers() & Qt::ControlModifier;
     const QPointF scenePosition = mapToScene(event->pos());
+
+    // ── Toolbar drag ─────────────────────────────────────────────────────────
+    if (m_toolbarDragPending || m_toolbarDragActive) {
+        if (m_toolbarDragPending) {
+            const int dist = (event->pos() - m_toolbarDragPressVp).manhattanLength();
+            if (dist >= 8) {
+                m_toolbarDragPending = false;
+                m_toolbarDragActive  = true;
+                setCursor(Qt::ClosedHandCursor);
+            }
+        }
+        if (m_toolbarDragActive) {
+            const qreal vx = event->pos().x();
+            const qreal vy = event->pos().y();
+            const qreal vw = viewport() ? viewport()->width()  : 640.0;
+            const qreal vh = viewport() ? viewport()->height() : 480.0;
+            const int targetSide = (vy < vh * 0.25) ? 0 : (vx < vw * 0.5 ? 1 : 2);
+            if (targetSide != m_toolbarSide) {
+                m_toolbarSide = targetSide;
+                updateToolbarOverlay();
+            }
+            setCursor(Qt::ClosedHandCursor);
+            event->accept();
+            return;
+        }
+        event->accept();
+        return;
+    }
 
     // ── Canvas-move drag ─────────────────────────────────────────────────────
     if (m_canvasDragHandler->handleMouseMove(event))
@@ -1338,6 +1386,30 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
 
 void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
 {
+    // ── Toolbar drag release ──────────────────────────────────────────────────
+    if (event->button() == Qt::LeftButton && (m_toolbarDragActive || m_toolbarDragPending)) {
+        if (m_toolbarDragActive) {
+            const qreal vx = event->pos().x();
+            const qreal vy = event->pos().y();
+            const qreal vw = viewport() ? viewport()->width()  : 640.0;
+            const qreal vh = viewport() ? viewport()->height() : 480.0;
+            int newSide;
+            if (vy < vh * 0.25)
+                newSide = 0;  // top (horizontal)
+            else
+                newSide = (vx < vw * 0.5) ? 1 : 2;  // left or right (vertical)
+            if (newSide != m_toolbarSide) {
+                m_toolbarSide = newSide;
+                updateToolbarOverlay();
+            }
+        }
+        m_toolbarDragActive  = false;
+        m_toolbarDragPending = false;
+        setCursor(Qt::OpenHandCursor);
+        event->accept();
+        return;
+    }
+
     // ── Canvas-move drag release ──────────────────────────────────────────────
     if (m_canvasDragHandler->handleMouseRelease(event))
         return;
@@ -1411,13 +1483,33 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     m_hoverManager->updatePolygonPointHover(QPointF(), false);
     if (changed && !m_dragActive)
         m_hoverManager->updateHighlightOverlay();
-    // Defer toolbar reposition: calling it synchronously here risks re-entrant
-    // item access while Qt's hover-event dispatch is still on the call stack.
-    if (!m_toolbarRepositionPending) {
+    // QGraphicsView::scrollContentsBy uses QWidget::scroll() which shifts ALL
+    // viewport pixels — including ItemIgnoresTransformations overlay items.
+    // Repositioning must happen synchronously so that the queued paint event
+    // (from QWidget::scroll) fires AFTER pos() is already corrected, preventing
+    // the one-frame flicker / "dancing" effect.
+    //
+    // repositionToolbarItems() only calls setPos() in the normal path (sizes
+    // match) → safe to call here.  The fallback that calls updateToolbarOverlay()
+    // (item removal) IS re-entrant-unsafe, so we defer only that rare path.
+    if (!m_toolbarItems.isEmpty()
+        && m_toolbarItems.size() == m_toolbarVpOffsets.size()) {
+        const QPointF vtl = mapToScene(QPoint(0, 0));
+        const qreal s = qMax(0.001, std::abs(transform().m11()));
+        for (int i = 0; i < m_toolbarItems.size(); ++i)
+            m_toolbarItems[i]->setPos(vtl + QPointF(m_toolbarVpOffsets[i].x() / s,
+                                                     m_toolbarVpOffsets[i].y() / s));
+        if (viewport())
+            viewport()->update();
+    } else if (!m_toolbarRepositionPending) {
+        // Sizes mismatch (stale state): defer rebuild to avoid re-entrancy in
+        // updateToolbarOverlay → clearToolbar → removeItem during hover dispatch.
         m_toolbarRepositionPending = true;
         QTimer::singleShot(0, this, [this]() {
             m_toolbarRepositionPending = false;
             repositionToolbarItems();
+            if (viewport())
+                viewport()->update();
         });
     }
 }
@@ -1525,9 +1617,11 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 QRectF SceneTreeGraphicsWidget::drawToolbar()
 {
     const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
-    const qreal viewportWidth = viewport() ? viewport()->width() : 640.0;
-    const qreal viewportScale = transform().m11();
+    const qreal viewportWidth  = viewport() ? viewport()->width()  : 640.0;
+    const qreal viewportHeight = viewport() ? viewport()->height() : 480.0;
+    const qreal viewportScale  = transform().m11();
 
+    m_toolbarToolVpRects.clear();
     return SceneTreeToolbarRenderer(m_graphicsScene,
                                     &m_toolbarItems,
                                     m_treeTheme,
@@ -1552,7 +1646,11 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
             },
             viewportTopLeft,
             viewportWidth,
-            viewportScale);
+            viewportHeight,
+            viewportScale,
+            m_toolbarSide,
+            &m_toolbarPanelVpRect,
+            &m_toolbarToolVpRects);
 }
 
 void SceneTreeGraphicsWidget::clearToolbar()
@@ -3395,8 +3493,15 @@ void SceneTreeGraphicsWidget::setTreeItemsVisible(bool visible)
 
 void SceneTreeGraphicsWidget::updateSceneRect()
 {
-    QRectF bounds = m_graphicsScene->itemsBoundingRect()
-                        .adjusted(-CanvasMargin, -CanvasMargin, CanvasMargin, CanvasMargin);
+    // Use only tree items for bounds — toolbar overlay items have
+    // ItemIgnoresTransformations and live in viewport-pixel space, so their
+    // sceneBoundingRect() is misleading and must not affect the scene rect.
+    QRectF bounds;
+    for (QGraphicsItem *item : m_treeItems)
+        if (item)
+            bounds = bounds.united(item->sceneBoundingRect());
+
+    bounds = bounds.adjusted(-CanvasMargin, -CanvasMargin, CanvasMargin, CanvasMargin);
 
     if (bounds.width() < 420.0)
         bounds.setWidth(420.0);

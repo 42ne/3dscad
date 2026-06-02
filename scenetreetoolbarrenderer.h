@@ -24,13 +24,19 @@ public:
                                       int theme = 0,
                                       bool darkGlass = true);
 
+    // toolbarSide: 0 = top (horizontal), 1 = left (vertical), 2 = right (vertical)
+    // outPanelVpRect / outToolVpRects: viewport-pixel rects for drag-zone hit testing
     QRectF render(PreviewMovedCallback onPreviewMoved,
                   PreviewFinishedCallback onPreviewFinished,
                   ToolDroppedCallback onDropped,
                   ToolHoverChangedCallback onHoverChanged,
                   const QPointF &viewportTopLeft,
                   qreal viewportWidth,
-                  qreal viewportScale);
+                  qreal viewportHeight,
+                  qreal viewportScale,
+                  int toolbarSide,
+                  QRectF *outPanelVpRect = nullptr,
+                  QVector<QRectF> *outToolVpRects = nullptr);
 
 private:
     void trackToolbarItem(QGraphicsItem *item) const;

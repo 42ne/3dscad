@@ -300,6 +300,20 @@ private:
     // Viewport-pixel offsets for each toolbar item — used by repositionToolbarItems()
     // to reposition without recreating. Kept in sync with m_toolbarItems by updateToolbarOverlay().
     QVector<QPointF> m_toolbarVpOffsets;
+
+    // ── Toolbar docking & drag ─────────────────────────────────────────────────
+    // Side: 0 = top (horizontal, default), 1 = left (vertical), 2 = right (vertical)
+    int m_toolbarSide = 0;
+
+    // Viewport-pixel rect of the toolbar glass panel and each tool icon.
+    // Rebuilt by drawToolbar(); used for drag-zone hit testing.
+    QRectF          m_toolbarPanelVpRect;
+    QVector<QRectF> m_toolbarToolVpRects;
+
+    // Toolbar drag state (threshold: cursor must move ≥ 8 px before drag activates)
+    bool   m_toolbarDragPending = false;
+    bool   m_toolbarDragActive  = false;
+    QPoint m_toolbarDragPressVp;
 };
 
 #endif
