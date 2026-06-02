@@ -67,11 +67,6 @@ bool isPolygonSelectableLabelCell(Polygon2DTableItem::Cell::Type type)
     return type == Polygon2DTableItem::Cell::PtLabel;
 }
 
-bool usesDarkOverlayGlass(int backgroundTheme)
-{
-    return backgroundTheme == 2 || backgroundTheme == 3 || backgroundTheme == 5 || backgroundTheme == 7;
-}
-
 }
 
 SceneTreeHoverManager::SceneTreeHoverManager(SceneTreeGraphicsWidget *widget)
@@ -149,7 +144,6 @@ void SceneTreeHoverManager::drawHintOverlay()
         return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
     };
 
-    constexpr qreal OverlayMargin = 12.0;
     constexpr qreal ThemePanelWidth = 146.0;
     constexpr qreal ThemePanelHeight = 26.0;
     constexpr qreal BackgroundPanelHeight = 26.0;
@@ -157,8 +151,6 @@ void SceneTreeHoverManager::drawHintOverlay()
     constexpr qreal Gap = 14.0;
     constexpr qreal PadH = 12.0;
     constexpr qreal PadV = 9.0;
-    constexpr qreal BottomGap = 12.0;
-    constexpr qreal LocalOverlayZ = 10020.0;
 
     qreal panelX = OverlayMargin + ThemePanelWidth + Gap;
     qreal availableW = viewportWidth - panelX - OverlayMargin;
@@ -180,7 +172,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     const qreal panelH = qBound<qreal>(42.0,
                                        textMeasure.size().height() + PadV * 2.0 + 4.0,
                                        maxPanelH);
-    qreal panelY = viewportHeight - BottomGap - panelH;
+    qreal panelY = viewportHeight - OverlayBottomGap - panelH;
     if (panelX <= OverlayMargin + 0.5)
         panelY -= ThemePanelHeight + BackgroundPanelHeight + SwitcherRowGap + Gap;
 
@@ -191,7 +183,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     addFlatGlassPanel(m_widget->m_graphicsScene, &m_widget->m_overlay->m_items,
-                      panelLocal, panelTopLeft, LocalOverlayZ,
+                      panelLocal, panelTopLeft, HintOverlayZ,
                       darkGlass, customGlass, customTheme, hintGlassStyle());
 
     auto *text = m_widget->m_graphicsScene->addText(hint, font);
@@ -202,7 +194,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     text->setDefaultTextColor(customGlass ? customTheme.text
                                           : darkGlass ? QColor(232, 242, 255) : QColor(39, 51, 66));
     text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
-    text->setZValue(LocalOverlayZ);
+    text->setZValue(HintOverlayZ);
     text->setData(0, QStringLiteral("glass_hint"));
     m_widget->m_overlay->m_items.append(text);
 }

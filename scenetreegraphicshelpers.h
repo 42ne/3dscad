@@ -56,6 +56,25 @@ extern const QColor CanvasBackground;
 extern const QColor MinorGridColor;
 extern const QColor MajorGridColor;
 
+// ── Canvas background themes ─────────────────────────────────────────────
+constexpr int CanvasBackgroundThemeCount = 6;
+
+struct CanvasBackgroundTheme {
+    QColor background;
+    QColor minorGrid;
+    QColor majorGrid;
+};
+
+CanvasBackgroundTheme  canvasBackgroundTheme(int index);
+CanvasBackgroundTheme  activeCanvasBackgroundTheme(int index);
+bool                   usesDarkOverlayGlass(int backgroundTheme);
+
+// ── Shared overlay panel constants (viewport-space pixels / Z-values) ────
+constexpr qreal OverlayBaseZ     = 10000.0; // Z for toolbar + switcher panels
+constexpr qreal HintOverlayZ     = 10020.0; // Z for hint overlay (above switchers)
+constexpr qreal OverlayMargin    = 12.0;    // side margin from viewport edge
+constexpr qreal OverlayBottomGap = 12.0;    // gap from viewport bottom
+
 QFont sceneTreeGraphicsFont();
 void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width);
 QGraphicsScene *createTreeGraphicsScene(QObject *parent = nullptr);

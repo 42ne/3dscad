@@ -18,46 +18,6 @@
 
 using namespace SceneTreeGraphics;
 
-// ── Local helpers (mirror of the anonymous-namespace helpers in widget .cpp) ──
-// Consolidated in a single place once audit #1 (constants extraction) is done.
-namespace {
-
-constexpr int CanvasBackgroundThemeCount = 6;
-
-struct CanvasBackgroundTheme {
-    QColor background;
-    QColor minorGrid;
-    QColor majorGrid;
-};
-
-CanvasBackgroundTheme canvasBackgroundTheme(int index)
-{
-    static const CanvasBackgroundTheme themes[CanvasBackgroundThemeCount] = {
-        { QColor(31, 41, 55),    QColor(96, 106, 121),   QColor(139, 150, 166) },
-        { QColor(16, 22, 32),    QColor(57, 69, 84),     QColor(92, 108, 128)  },
-        { QColor(50, 51, 56),    QColor(82, 84, 91),     QColor(119, 122, 131) },
-        { QColor(231, 235, 241), QColor(197, 204, 214),  QColor(160, 171, 185) },
-        { QColor(246, 239, 226), QColor(217, 207, 190),  QColor(183, 171, 151) },
-        { QColor(220, 235, 241), QColor(185, 207, 216),  QColor(145, 177, 190) },
-    };
-    return themes[qBound(0, index, CanvasBackgroundThemeCount - 1)];
-}
-
-CanvasBackgroundTheme activeCanvasBackgroundTheme(int index)
-{
-    if (SceneTreePalette::hasCustomTheme()) {
-        const TreeAppearanceTheme theme = SceneTreePalette::customTheme();
-        return {theme.canvas, theme.minorGrid, theme.majorGrid};
-    }
-    return canvasBackgroundTheme(index);
-}
-
-bool usesDarkOverlayGlass(int backgroundTheme)
-{
-    return activeCanvasBackgroundTheme(backgroundTheme).background.lightness() < 128;
-}
-
-} // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -203,26 +163,24 @@ void SceneTreeOverlayController::drawCanvasBackgroundSwitcher()
         return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
     };
 
-    constexpr qreal SwatchR = 7.0;
+    constexpr qreal SwatchR   = 7.0;
     constexpr qreal SwatchGap = 5.0;
-    constexpr qreal PadH = 7.0;
-    constexpr qreal PadV = 6.0;
-    constexpr qreal BottomGap = 12.0;
-    constexpr qreal RowGap = 8.0;
-    constexpr qreal LocalOverlayZ = 10000.0;
+    constexpr qreal PadH      = 7.0;
+    constexpr qreal PadV      = 6.0;
+    constexpr qreal RowGap    = 8.0;
 
     const qreal panelW = CanvasBackgroundThemeCount * (SwatchR * 2.0)
                          + (CanvasBackgroundThemeCount - 1) * SwatchGap + PadH * 2.0;
     const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
     const QRectF panelLocal(0.0, 0.0, panelW, panelH);
-    const QPointF panelTopLeft = scenePoint(12.0, viewportHeight - BottomGap - panelH * 2.0 - RowGap);
+    const QPointF panelTopLeft = scenePoint(OverlayMargin, viewportHeight - OverlayBottomGap - panelH * 2.0 - RowGap);
 
     const bool darkGlass  = usesDarkOverlayGlass(m_widget->m_canvasBackgroundTheme);
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     addFlatGlassPanel(m_widget->m_graphicsScene, &m_items, panelLocal, panelTopLeft,
-                      LocalOverlayZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
+                      OverlayBaseZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
 
     const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
 
@@ -238,7 +196,7 @@ void SceneTreeOverlayController::drawCanvasBackgroundSwitcher()
                 i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
             ring->setPos(panelTopLeft);
-            ring->setZValue(LocalOverlayZ);
+            ring->setZValue(OverlayBaseZ);
             ring->setData(0, QStringLiteral("swatch"));
             m_widget->m_graphicsScene->addItem(ring);
             m_items.append(ring);
@@ -254,7 +212,7 @@ void SceneTreeOverlayController::drawCanvasBackgroundSwitcher()
             i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); }, hoverPen);
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
-        circle->setZValue(LocalOverlayZ + 0.5);
+        circle->setZValue(OverlayBaseZ + 0.5);
         circle->setData(0, QStringLiteral("swatch"));
         m_widget->m_graphicsScene->addItem(circle);
         m_items.append(circle);
@@ -273,26 +231,24 @@ void SceneTreeOverlayController::drawThemeSwitcher()
         return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
     };
 
-    constexpr qreal SwatchR   =  7.0;
-    constexpr qreal SwatchGap =  5.0;
-    constexpr qreal PadH      =  7.0;
-    constexpr qreal PadV      =  6.0;
-    constexpr qreal BottomGap = 12.0;
-    constexpr qreal LocalOverlayZ = 10000.0;
+    constexpr qreal SwatchR   = 7.0;
+    constexpr qreal SwatchGap = 5.0;
+    constexpr qreal PadH      = 7.0;
+    constexpr qreal PadV      = 6.0;
 
     const int n = SceneTreePalette::ThemeCount;
     const qreal panelW = n * (SwatchR * 2.0) + (n - 1) * SwatchGap + PadH * 2.0;
     const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
 
     const QRectF panelLocal(0.0, 0.0, panelW, panelH);
-    const QPointF panelTopLeft = scenePoint(12.0, viewportHeight - BottomGap - panelH);
+    const QPointF panelTopLeft = scenePoint(OverlayMargin, viewportHeight - OverlayBottomGap - panelH);
 
     const bool darkGlass  = usesDarkOverlayGlass(m_widget->m_canvasBackgroundTheme);
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
     addFlatGlassPanel(m_widget->m_graphicsScene, &m_items, panelLocal, panelTopLeft,
-                      LocalOverlayZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
+                      OverlayBaseZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
 
     const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
 
@@ -310,7 +266,7 @@ void SceneTreeOverlayController::drawThemeSwitcher()
                 i, [this](int idx) { handleThemeSwitcherClick(idx); });
             ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
             ring->setPos(panelTopLeft);
-            ring->setZValue(LocalOverlayZ);
+            ring->setZValue(OverlayBaseZ);
             ring->setData(0, QStringLiteral("swatch"));
             m_widget->m_graphicsScene->addItem(ring);
             m_items.append(ring);
@@ -326,7 +282,7 @@ void SceneTreeOverlayController::drawThemeSwitcher()
             i, [this](int idx) { handleThemeSwitcherClick(idx); }, hoverPen);
         circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         circle->setPos(panelTopLeft);
-        circle->setZValue(LocalOverlayZ + 0.5);
+        circle->setZValue(OverlayBaseZ + 0.5);
         circle->setData(0, QStringLiteral("swatch"));
         m_widget->m_graphicsScene->addItem(circle);
         m_items.append(circle);
@@ -338,8 +294,8 @@ void SceneTreeOverlayController::drawThemeSwitcher()
         constexpr qreal TW = ColorEditToggleItem::kW;
         constexpr qreal TH = ColorEditToggleItem::kH;
 
-        const qreal toggleVpX = 12.0 + panelW + ToggleGap;
-        const qreal toggleVpY = viewportHeight - BottomGap - panelH * 0.5 - TH * 0.5;
+        const qreal toggleVpX = OverlayMargin + panelW + ToggleGap;
+        const qreal toggleVpY = viewportHeight - OverlayBottomGap - panelH * 0.5 - TH * 0.5;
         const QPointF toggleTopLeft = scenePoint(toggleVpX, toggleVpY);
 
         QPainterPath shadowPath;
@@ -349,7 +305,7 @@ void SceneTreeOverlayController::drawThemeSwitcher()
         toggleShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         toggleShadow->setAcceptedMouseButtons(Qt::NoButton);
         toggleShadow->setPos(toggleTopLeft);
-        toggleShadow->setZValue(LocalOverlayZ - 2.0);
+        toggleShadow->setZValue(OverlayBaseZ - 2.0);
         toggleShadow->setOpacity(darkGlass ? 0.62 : 0.38);
         toggleShadow->setData(0, QStringLiteral("shadow"));
         m_items.append(toggleShadow);
@@ -379,7 +335,7 @@ void SceneTreeOverlayController::drawThemeSwitcher()
             });
         tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         tog->setPos(toggleTopLeft);
-        tog->setZValue(LocalOverlayZ + 0.5);
+        tog->setZValue(OverlayBaseZ + 0.5);
         tog->setData(0, QStringLiteral("toggle"));
         m_widget->m_graphicsScene->addItem(tog);
         m_items.append(tog);

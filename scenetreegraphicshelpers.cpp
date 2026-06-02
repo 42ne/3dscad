@@ -27,6 +27,33 @@ const QColor MinorGridColor(96, 106, 121);
 const QColor MajorGridColor(139, 150, 166);
 constexpr SceneTreePalette::Theme FixedToolbarTheme = SceneTreePalette::Theme::Ocean;
 
+CanvasBackgroundTheme canvasBackgroundTheme(int index)
+{
+    static const CanvasBackgroundTheme themes[CanvasBackgroundThemeCount] = {
+        { QColor(31, 41, 55),    QColor(96, 106, 121),  QColor(139, 150, 166) },
+        { QColor(16, 22, 32),    QColor(57, 69, 84),    QColor(92, 108, 128)  },
+        { QColor(50, 51, 56),    QColor(82, 84, 91),    QColor(119, 122, 131) },
+        { QColor(231, 235, 241), QColor(197, 204, 214), QColor(160, 171, 185) },
+        { QColor(246, 239, 226), QColor(217, 207, 190), QColor(183, 171, 151) },
+        { QColor(220, 235, 241), QColor(185, 207, 216), QColor(145, 177, 190) },
+    };
+    return themes[qBound(0, index, CanvasBackgroundThemeCount - 1)];
+}
+
+CanvasBackgroundTheme activeCanvasBackgroundTheme(int index)
+{
+    if (SceneTreePalette::hasCustomTheme()) {
+        const TreeAppearanceTheme theme = SceneTreePalette::customTheme();
+        return {theme.canvas, theme.minorGrid, theme.majorGrid};
+    }
+    return canvasBackgroundTheme(index);
+}
+
+bool usesDarkOverlayGlass(int backgroundTheme)
+{
+    return activeCanvasBackgroundTheme(backgroundTheme).background.lightness() < 128;
+}
+
 QString toolbarToolTip(const QString &tool)
 {
     if (tool == QStringLiteral("module")) {

@@ -48,10 +48,8 @@ QStringList paletteTools()
     };
 }
 
-constexpr qreal OverlayMargin   = 12.0;
 constexpr qreal OverlayTopGap   = 10.0;
 constexpr qreal OverlayPadding  = 8.0;
-constexpr qreal OverlayZ        = 10000.0;
 constexpr qreal MinToolbarScale = 0.90;
 constexpr qreal MaxToolbarScale = 1.08;
 
@@ -173,7 +171,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
 
     // ── Drop shadow + glass panel ─────────────────────────────────────────────
     addFlatGlassPanel(m_scene, m_toolbarItems, panelLocalRect, panelTopLeft,
-                      OverlayZ, darkGlass, customGlass, customTheme, toolbarPaletteGlassStyle());
+                      OverlayBaseZ, darkGlass, customGlass, customTheme, toolbarPaletteGlassStyle());
 
     // ── Tool icons ───────────────────────────────────────────────────────────
     for (int i = 0; i < toolCount; ++i) {
@@ -200,7 +198,7 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
                                            onHoverChanged);
         tool->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
         tool->setScale(toolbarScale);
-        tool->setZValue(OverlayZ);
+        tool->setZValue(OverlayBaseZ);
         tool->setPos(scenePointFromViewportPixels(toolVpX, toolVpY));
         m_scene->addItem(tool);
         trackToolbarItem(tool);
