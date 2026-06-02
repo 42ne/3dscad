@@ -528,17 +528,16 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     if (extractCallArgs(line, "sphere", &argsStr) && line.endsWith(';')) {
         // Accept sphere(r=5), sphere(5), sphere(d=10)
         const auto args = parseNamedArgs(argsStr, {"r"});
-        QString radiusStr = args.value("r");
-        if (radiusStr.isEmpty() && args.contains("d"))
-            radiusStr = args["d"] + "/2"; // diameter → radius expression
-        if (radiusStr.isEmpty()) {
+        const bool useDiameter = args.value("r").isEmpty() && args.contains("d");
+        const QString paramStr = useDiameter ? args["d"] : args.value("r");
+        if (paramStr.isEmpty()) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("sphere on line %1: missing radius");
             return false;
         }
-        qreal r = 0.0;
-        QString re;
-        if (!parseParamExpression(radiusStr, state->variableValues, &r, &re)) {
+        qreal val = 0.0;
+        QString valExpr;
+        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("sphere on line %1: could not parse radius");
             return false;
@@ -546,24 +545,24 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Sphere;
         shape->name = QStringLiteral("Sphere %1").arg(shape->id);
-        shape->radius = r;
-        shape->parameterExpressions = QStringList({re});
+        shape->usesDiameter = useDiameter;
+        shape->radius = useDiameter ? static_cast<float>(val / 2.0) : static_cast<float>(val);
+        shape->parameterExpressions = QStringList({valExpr});
         return true;
     }
 
     if (extractCallArgs(line, "circle", &argsStr) && line.endsWith(';')) {
         const auto args = parseNamedArgs(argsStr, {"r"});
-        QString radiusStr = args.value("r");
-        if (radiusStr.isEmpty() && args.contains("d"))
-            radiusStr = args["d"] + "/2";
-        if (radiusStr.isEmpty()) {
+        const bool useDiameter = args.value("r").isEmpty() && args.contains("d");
+        const QString paramStr = useDiameter ? args["d"] : args.value("r");
+        if (paramStr.isEmpty()) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("circle on line %1: missing radius");
             return false;
         }
-        qreal r = 0.0;
-        QString re;
-        if (!parseParamExpression(radiusStr, state->variableValues, &r, &re)) {
+        qreal val = 0.0;
+        QString valExpr;
+        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("circle on line %1: could not parse radius");
             return false;
@@ -571,8 +570,9 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Circle;
         shape->name = QStringLiteral("Circle %1").arg(shape->id);
-        shape->radius = r;
-        shape->parameterExpressions = QStringList({re});
+        shape->usesDiameter = useDiameter;
+        shape->radius = useDiameter ? static_cast<float>(val / 2.0) : static_cast<float>(val);
+        shape->parameterExpressions = QStringList({valExpr});
         return true;
     }
 
@@ -679,50 +679,61 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
             return false;
         }
 
-        if (args.contains("r1") || args.contains("r2")) {
-            // Cone / frustum: cylinder(h=..., r1=..., r2=..., center=true)
-            const QString r1Str = args.value("r1", QStringLiteral("0"));
-            const QString r2Str = args.value("r2", QStringLiteral("0"));
-            qreal r1 = 0.0, r2 = 0.0;
-            QString r1e, r2e;
-            if (!parseParamExpression(r1Str, state->variableValues, &r1, &r1e)
-                || !parseParamExpression(r2Str, state->variableValues, &r2, &r2e)) {
+        // Cone / frustum — r1/r2 or d1/d2
+        const bool hasConeR = args.contains("r1") || args.contains("r2");
+        const bool hasConeD = args.contains("d1") || args.contains("d2");
+        if (hasConeR || hasConeD) {
+            const bool useD1 = !args.contains("r1") && args.contains("d1");
+            const bool useD2 = !args.contains("r2") && args.contains("d2");
+            const QString p1Str = useD1 ? args.value("d1", QStringLiteral("0"))
+                                        : args.value("r1", QStringLiteral("0"));
+            const QString p2Str = useD2 ? args.value("d2", QStringLiteral("0"))
+                                        : args.value("r2", QStringLiteral("0"));
+            qreal v1 = 0.0, v2 = 0.0;
+            QString e1, e2;
+            if (!parseParamExpression(p1Str, state->variableValues, &v1, &e1)
+                || !parseParamExpression(p2Str, state->variableValues, &v2, &e2)) {
                 if (errorMessage)
-                    *errorMessage = QStringLiteral("cylinder on line %1: could not parse r1 or r2");
+                    *errorMessage = QStringLiteral("cylinder on line %1: could not parse r1/d1 or r2/d2");
                 return false;
             }
             shape->id = state->nextShapeId++;
             shape->type = ShapeNode::Cone;
             shape->name = QStringLiteral("Cone %1").arg(shape->id);
             shape->height  = static_cast<float>(h);
-            shape->radius  = static_cast<float>(r1);
-            shape->radius2 = static_cast<float>(r2);
-            // parameterExpressions order: R1=0, R2=1, H=2
-            shape->parameterExpressions = QStringList({r1e, r2e, he});
+            shape->usesD1  = useD1;
+            shape->usesD2  = useD2;
+            shape->radius  = useD1 ? static_cast<float>(v1 / 2.0) : static_cast<float>(v1);
+            shape->radius2 = useD2 ? static_cast<float>(v2 / 2.0) : static_cast<float>(v2);
+            // parameterExpressions order: R1/D1=0, R2/D2=1, H=2
+            shape->parameterExpressions = QStringList({e1, e2, he});
             centerFromArgs(argsStr, &shape->center);
             return true;
         }
 
-        // Regular cylinder: cylinder(h=..., r=..., center=true)
-        if (!args.contains("r")) {
+        // Regular cylinder: cylinder(h=..., r=...) or cylinder(h=..., d=...)
+        const bool useDiameter = !args.contains("r") && args.contains("d");
+        const QString rStr = useDiameter ? args.value("d") : args.value("r");
+        if (rStr.isEmpty()) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("cylinder on line %1: missing r (or r1/r2)");
+                *errorMessage = QStringLiteral("cylinder on line %1: missing r (or d, r1/r2, d1/d2)");
             return false;
         }
-        qreal r = 0.0;
-        QString re;
-        if (!parseParamExpression(args["r"], state->variableValues, &r, &re)) {
+        qreal rVal = 0.0;
+        QString rExpr;
+        if (!parseParamExpression(rStr, state->variableValues, &rVal, &rExpr)) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("cylinder on line %1: could not parse r");
+                *errorMessage = QStringLiteral("cylinder on line %1: could not parse r or d");
             return false;
         }
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Cylinder;
         shape->name = QStringLiteral("Cylinder %1").arg(shape->id);
         shape->height = static_cast<float>(h);
-        shape->radius = static_cast<float>(r);
-        // parameterExpressions order: R=index 0, H=index 1
-        shape->parameterExpressions = QStringList({re, he});
+        shape->usesDiameter = useDiameter;
+        shape->radius = useDiameter ? static_cast<float>(rVal / 2.0) : static_cast<float>(rVal);
+        // parameterExpressions order: R/D=index 0, H=index 1
+        shape->parameterExpressions = QStringList({rExpr, he});
         centerFromArgs(argsStr, &shape->center);
         return true;
     }

@@ -16,21 +16,37 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
         return QString::number(numericValue, 'g');
     };
 
-    if (shape.type == ShapeNode::Sphere || shape.type == ShapeNode::Circle)
+    if (shape.type == ShapeNode::Sphere || shape.type == ShapeNode::Circle) {
+        if (shape.usesDiameter) {
+            const qreal d = shape.radius * 2.0;
+            return {{QStringLiteral("D"), d, expr(0, d)}};
+        }
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)}};
+    }
 
     if (shape.type == ShapeNode::Square)
         return {{QStringLiteral("X"), shape.size.x(), expr(0, shape.size.x())},
                 {QStringLiteral("Y"), shape.size.y(), expr(1, shape.size.y())}};
 
-    if (shape.type == ShapeNode::Cylinder)
+    if (shape.type == ShapeNode::Cylinder) {
+        if (shape.usesDiameter) {
+            const qreal d = shape.radius * 2.0;
+            return {{QStringLiteral("D"), d, expr(0, d)},
+                    {QStringLiteral("H"), shape.height, expr(1, shape.height)}};
+        }
         return {{QStringLiteral("R"), shape.radius, expr(0, shape.radius)},
                 {QStringLiteral("H"), shape.height, expr(1, shape.height)}};
+    }
 
-    if (shape.type == ShapeNode::Cone)
-        return {{QStringLiteral("R1"), shape.radius,  expr(0, shape.radius)},
-                {QStringLiteral("R2"), shape.radius2, expr(1, shape.radius2)},
-                {QStringLiteral("H"),  shape.height,  expr(2, shape.height)}};
+    if (shape.type == ShapeNode::Cone) {
+        const QString r1Label = shape.usesD1 ? QStringLiteral("D1") : QStringLiteral("R1");
+        const QString r2Label = shape.usesD2 ? QStringLiteral("D2") : QStringLiteral("R2");
+        const qreal   r1Val   = shape.usesD1 ? shape.radius  * 2.0 : shape.radius;
+        const qreal   r2Val   = shape.usesD2 ? shape.radius2 * 2.0 : shape.radius2;
+        return {{r1Label, r1Val, expr(0, r1Val)},
+                {r2Label, r2Val, expr(1, r2Val)},
+                {QStringLiteral("H"), shape.height, expr(2, shape.height)}};
+    }
 
     if (shape.type == ShapeNode::Polyhedron || shape.type == ShapeNode::Polygon2D)
         return {};

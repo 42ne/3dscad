@@ -385,12 +385,14 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Sphere) {
-        return QString("sphere(r=%1);\n")
-            .arg(paramExpr(0, shape.radius));
+        if (shape.usesDiameter)
+            return QString("sphere(d=%1);\n").arg(paramExpr(0, shape.radius * 2.0));
+        return QString("sphere(r=%1);\n").arg(paramExpr(0, shape.radius));
     }
     if (shape.type == ShapeNode::Circle) {
-        return QString("circle(r=%1);\n")
-            .arg(paramExpr(0, shape.radius));
+        if (shape.usesDiameter)
+            return QString("circle(d=%1);\n").arg(paramExpr(0, shape.radius * 2.0));
+        return QString("circle(r=%1);\n").arg(paramExpr(0, shape.radius));
     }
     if (shape.type == ShapeNode::Square) {
         return QString("square([%1, %2], center=%3);\n")
@@ -406,18 +408,23 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(ptsList.join(QLatin1Char(',')));
     }
     if (shape.type == ShapeNode::Cylinder) {
-        // parameterExpressions: index 0 = R (radius), index 1 = H (height)
-        return QString("cylinder(h=%1, r=%2, center=%3);\n")
+        // parameterExpressions: index 0 = R or D (radius/diameter), index 1 = H
+        const QString rParam = shape.usesDiameter ? QStringLiteral("d") : QStringLiteral("r");
+        const qreal  rFallback = shape.usesDiameter ? shape.radius * 2.0 : shape.radius;
+        return QString("cylinder(h=%1, %2=%3, center=%4);\n")
             .arg(paramExpr(1, shape.height))
-            .arg(paramExpr(0, shape.radius))
+            .arg(rParam)
+            .arg(paramExpr(0, rFallback))
             .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Cone) {
-        // parameterExpressions: index 0 = R1 (bottom), index 1 = R2 (top), index 2 = H
-        return QString("cylinder(h=%1, r1=%2, r2=%3, center=%4);\n")
+        // parameterExpressions: index 0 = R1/D1, index 1 = R2/D2, index 2 = H
+        const QString p1 = shape.usesD1 ? QStringLiteral("d1") : QStringLiteral("r1");
+        const QString p2 = shape.usesD2 ? QStringLiteral("d2") : QStringLiteral("r2");
+        return QString("cylinder(h=%1, %2=%3, %4=%5, center=%6);\n")
             .arg(paramExpr(2, shape.height))
-            .arg(paramExpr(0, shape.radius))
-            .arg(paramExpr(1, shape.radius2))
+            .arg(p1).arg(paramExpr(0, shape.usesD1 ? shape.radius * 2.0 : shape.radius))
+            .arg(p2).arg(paramExpr(1, shape.usesD2 ? shape.radius2 * 2.0 : shape.radius2))
             .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Point3D) {

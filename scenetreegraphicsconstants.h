@@ -39,13 +39,14 @@ constexpr qreal OverlayBottomGap = 12.0;
 
 } // namespace SceneTreeGraphics
 
-// Center checkbox rect for primitive cards that support center=true.
-// Returns a 14×14 rect positioned at the right edge of the card.
-inline QRectF centerCheckboxRect(const QRectF &cardRect)
+// Center checkbox rect for primitive cards that support center=true/false.
+// Returns a 14×14 rect at the bottom-right corner of the icon card area.
+inline QRectF centerCheckboxRect(const QRectF &primitiveRect)
 {
     constexpr qreal cbSize = 14.0;
-    return QRectF(cardRect.right() - cbSize - 4.0,
-                  cardRect.top() + (cardRect.height() - cbSize) * 0.5,
+    const qreal cardRight = primitiveRect.left() + SceneTreeGraphics::PrimitiveCardWidth;
+    return QRectF(cardRight - cbSize - 2.0,
+                  primitiveRect.bottom() - cbSize - 2.0,
                   cbSize, cbSize);
 }
 

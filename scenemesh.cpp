@@ -131,7 +131,8 @@ static void appendPolygon(QVector<MeshTriangle> *triangles, const QVector<QVecto
 static SceneMesh buildCubeMesh(const ShapeNode &shape)
 {
     const QVector3D half = shape.size * 0.5f;
-    SceneMesh mesh = buildBoxMesh(-half, half);
+    const QVector3D shift = shape.center ? QVector3D(0, 0, 0) : half;
+    SceneMesh mesh = buildBoxMesh(-half + shift, half + shift);
 
     for (MeshTriangle &triangle : mesh.triangles) {
         triangle.a = rotatePoint(triangle.a, shape.rotation) + shape.position;
@@ -226,11 +227,14 @@ static SceneMesh buildCylinderMesh(const ShapeNode &shape)
     QVector<QVector3D> bottom;
     const int sectors = 24;
 
+    const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
+    const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
+
     for (int i = 0; i < sectors; ++i) {
         const float angle = 2.0f * M_PI * i / sectors;
         const QVector3D ringPoint(shape.radius * qCos(angle), shape.radius * qSin(angle), 0);
-        top.append(rotatePoint(ringPoint + QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
-        bottom.append(rotatePoint(ringPoint - QVector3D(0, 0, shape.height * 0.5f), shape.rotation) + shape.position);
+        top.append(rotatePoint(ringPoint + QVector3D(0, 0, zTop),    shape.rotation) + shape.position);
+        bottom.append(rotatePoint(ringPoint + QVector3D(0, 0, zBottom), shape.rotation) + shape.position);
     }
 
     mesh.shadowPoints = bottom + top;
@@ -254,13 +258,16 @@ static SceneMesh buildConeMesh(const ShapeNode &shape)
     QVector<QVector3D> bottom;
     const int sectors = 24;
 
+    const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
+    const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
+
     for (int i = 0; i < sectors; ++i) {
         const float angle = 2.0f * M_PI * i / sectors;
         const float ca = qCos(angle), sa = qSin(angle);
         const QVector3D topPt(shape.radius2 * ca, shape.radius2 * sa, 0);
         const QVector3D botPt(shape.radius  * ca, shape.radius  * sa, 0);
-        top.append(rotatePoint(topPt + QVector3D(0, 0,  shape.height * 0.5f), shape.rotation) + shape.position);
-        bottom.append(rotatePoint(botPt + QVector3D(0, 0, -shape.height * 0.5f), shape.rotation) + shape.position);
+        top.append(rotatePoint(topPt + QVector3D(0, 0, zTop),    shape.rotation) + shape.position);
+        bottom.append(rotatePoint(botPt + QVector3D(0, 0, zBottom), shape.rotation) + shape.position);
     }
 
     mesh.shadowPoints = bottom;
@@ -351,11 +358,13 @@ static SceneMesh buildSquareMesh(const ShapeNode &shape)
 {
     const float hx = shape.size.x() * 0.5f;
     const float hy = shape.size.y() * 0.5f;
+    const float ox = shape.center ? 0.0f : hx;
+    const float oy = shape.center ? 0.0f : hy;
     return buildFlatPolygonMesh({
-        QVector3D(-hx, -hy, 0.0f),
-        QVector3D( hx, -hy, 0.0f),
-        QVector3D( hx,  hy, 0.0f),
-        QVector3D(-hx,  hy, 0.0f)
+        QVector3D(-hx + ox, -hy + oy, 0.0f),
+        QVector3D( hx + ox, -hy + oy, 0.0f),
+        QVector3D( hx + ox,  hy + oy, 0.0f),
+        QVector3D(-hx + ox,  hy + oy, 0.0f)
     }, shape);
 }
 

@@ -49,9 +49,15 @@ struct ShapeNode
     QStringList parameterExpressions;
 
     // center=true/false for Cube, Cylinder, Cone, Square.
-    // Default true matches the toolbar/drag-drop creation behaviour;
+    // Default false matches OpenSCAD behaviour (origin at corner);
     // when parsing existing code the value is set from the actual parameter.
-    bool center = true;
+    bool center = false;
+
+    // Radius parameter notation: false = r= (default), true = d= (diameter).
+    // Set from code when parsing; toolbar-created shapes always use r= notation.
+    bool usesDiameter = false;  // sphere / circle / cylinder: r vs d
+    bool usesD1 = false;        // cone: r1 vs d1
+    bool usesD2 = false;        // cone: r2 vs d2
 
     // Apply a parameter value by index, clamping to the type-appropriate minimum.
     // Pass the raw (pre-clamp) evaluated value; this method owns all clamping logic.
@@ -67,7 +73,10 @@ struct ShapeNode
             break;
         case Sphere:
         case Circle:
-            if (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            if (paramIndex == 0) {
+                const qreal v = usesDiameter ? rawValue / 2.0 : rawValue;
+                radius = static_cast<float>(qMax<qreal>(0.1, v));
+            }
             break;
         case Polyhedron:
         case Polygon2D:
@@ -94,13 +103,19 @@ struct ShapeNode
             break;
         }
         case Cylinder:
-            if      (paramIndex == 0) radius = static_cast<float>(qMax<qreal>(0.1, rawValue));
-            else if (paramIndex == 1) height = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            if (paramIndex == 0) {
+                const qreal v = usesDiameter ? rawValue / 2.0 : rawValue;
+                radius = static_cast<float>(qMax<qreal>(0.1, v));
+            } else if (paramIndex == 1) height = static_cast<float>(qMax<qreal>(0.1, rawValue));
             break;
         case Cone:
-            if      (paramIndex == 0) radius  = static_cast<float>(qMax<qreal>(0.1, rawValue));
-            else if (paramIndex == 1) radius2 = static_cast<float>(qMax<qreal>(0.0, rawValue));
-            else if (paramIndex == 2) height  = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            if (paramIndex == 0) {
+                const qreal v = usesD1 ? rawValue / 2.0 : rawValue;
+                radius = static_cast<float>(qMax<qreal>(0.1, v));
+            } else if (paramIndex == 1) {
+                const qreal v = usesD2 ? rawValue / 2.0 : rawValue;
+                radius2 = static_cast<float>(qMax<qreal>(0.0, v));
+            } else if (paramIndex == 2) height = static_cast<float>(qMax<qreal>(0.1, rawValue));
             break;
         }
     }
@@ -144,6 +159,9 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.height == right.height
            && left.parameterExpressions == right.parameterExpressions
            && left.center == right.center
+           && left.usesDiameter == right.usesDiameter
+           && left.usesD1 == right.usesD1
+           && left.usesD2 == right.usesD2
            && left.polyhedronPoints == right.polyhedronPoints
            && left.polyhedronFaces == right.polyhedronFaces;
 }

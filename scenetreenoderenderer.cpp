@@ -714,6 +714,18 @@ public:
             const QRectF cbRect = ::centerCheckboxRect(m_rect);
             const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
 
+            // "c" label to the left of the checkbox
+            painter->save();
+            QFont cbFont = painter->font();
+            cbFont.setPointSizeF(qMax<qreal>(6.0, cbFont.pointSizeF() - 3.0));
+            painter->setFont(cbFont);
+            painter->setPen(SceneTreePalette::numLabelText(pt));
+            painter->drawText(QRectF(cbRect.left() - 12.0, cbRect.top(),
+                                     12.0, cbRect.height()),
+                              Qt::AlignRight | Qt::AlignVCenter,
+                              QStringLiteral("c"));
+            painter->restore();
+
             // Checkbox square
             painter->setPen(QPen(SceneTreePalette::pillBorder(QColor(255,255,255,48), pt), 1.2));
             painter->setBrush(m_shape.center
