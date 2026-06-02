@@ -1,5 +1,6 @@
 #include "scenetreehovermanager.h"
 #include "scenetreegraphicswidget.h"
+#include "scenetreecanvascontroller.h"
 #include "scenetreeinlineeditor.h"
 #include "scenecanvasdraghandler.h"
 #include "scenetreegraphicshelpers.h"
@@ -221,6 +222,11 @@ void SceneTreeHoverManager::updateHoverHint(const QString &key, const QString &t
     m_hoverHintText = text;
     if (m_widget->m_dragActive)
         return;
+
+    if (m_widget->m_canvasController && m_widget->m_canvasController->isZoomAnimating()) {
+        m_widget->repositionToolbarItemsSync();
+        return;
+    }
 
     m_widget->updateToolbarOverlay();
 }

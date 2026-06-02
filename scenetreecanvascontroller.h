@@ -19,6 +19,7 @@ public:
     void stopPanInertia();
 
     bool    isPanning()     const { return m_panning; }
+    bool    isZoomAnimating() const;
     QPointF panVelocity()   const { return m_panVelocity; }
     qreal   zoomLevel()     const { return m_zoomLevel; }
     void    setZoomLevel(qreal level) { m_zoomLevel = level; }

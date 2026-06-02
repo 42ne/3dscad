@@ -37,6 +37,11 @@ void SceneTreeCanvasController::snapZoom()
     m_zoomIdle     = true;
 }
 
+bool SceneTreeCanvasController::isZoomAnimating() const
+{
+    return m_zoomAnimTimer && m_zoomAnimTimer->isActive();
+}
+
 void SceneTreeCanvasController::stopPanInertia()
 {
     m_panInertiaTimer->stop();
@@ -166,7 +171,7 @@ void SceneTreeCanvasController::tickZoom()
         if (zoomJustStopped)
             m_widget->updateToolbarOverlay();
         else
-            m_widget->repositionToolbarItems();
+            m_widget->repositionToolbarItemsSync();
     }
 }
 
