@@ -14,6 +14,9 @@
 #include "scenetreehovermanager.h"
 #include "scenetreeinlineeditor.h"
 #include "scenecanvasdraghandler.h"
+#include "scenetreeoverlaycontroller.h"
+#include "scenetreedroppreviewcontroller.h"
+#include "scenetreehittestmanager.h"
 
 #include <QApplication>
 #include <QColorDialog>
@@ -52,135 +55,6 @@ static QString polygonPointSelectionKey(int nodeId, int pointIndex)
 {
     return QStringLiteral("%1:%2").arg(nodeId).arg(pointIndex);
 }
-
-// ---------------------------------------------------------------------------
-// ColorEditToggleItem — standalone vertical toggle switch for color-edit mode.
-// Thumb slides to top (ON) or bottom (OFF); track darkens when active.
-// ---------------------------------------------------------------------------
-class ColorEditToggleItem : public QGraphicsItem
-{
-public:
-    static constexpr qreal kW      = 16.0;
-    static constexpr qreal kH      = 28.0;
-    static constexpr qreal kThumbD = 12.0;
-    static constexpr qreal kThumbM = (kW - kThumbD) * 0.5;  // side margin = 2 px
-
-    ColorEditToggleItem(bool on,
-                        std::function<void()> onClick,
-                        std::function<void(bool)> onHover = {})
-        : m_on(on), m_onClick(std::move(onClick)), m_onHover(std::move(onHover))
-    {
-        setAcceptedMouseButtons(Qt::LeftButton);
-        setAcceptHoverEvents(true);
-    }
-
-    QRectF boundingRect() const override
-    { return QRectF(-2.0, -2.0, kW + 4.0, kH + 4.0); }
-
-    void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
-    {
-        painter->setRenderHint(QPainter::Antialiasing, true);
-
-        // Track — dark when ON, muted when OFF
-        const QColor track = m_on ? QColor(22, 22, 22, 225) : QColor(110, 115, 125, 135);
-        QPainterPath trackPath;
-        trackPath.addRoundedRect(QRectF(0, 0, kW, kH), kW * 0.5, kW * 0.5);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(track);
-        painter->drawPath(trackPath);
-
-        // Thumb: top = ON, bottom = OFF
-        const qreal thumbY = m_on ? kThumbM : kH - kThumbM - kThumbD;
-        const QRectF thumbRect(kThumbM, thumbY, kThumbD, kThumbD);
-
-        // Thumb drop shadow
-        painter->setBrush(QColor(0, 0, 0, 45));
-        painter->drawEllipse(thumbRect.translated(0.5, 1.2));
-
-        // Thumb fill
-        painter->setPen(QPen(QColor(140, 140, 140, 55), 0.5));
-        painter->setBrush(Qt::white);
-        painter->drawEllipse(thumbRect);
-    }
-
-protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *e) override
-    {
-        if (e->button() == Qt::LeftButton) { m_onClick(); e->accept(); }
-        else e->ignore();
-    }
-    void hoverEnterEvent(QGraphicsSceneHoverEvent *) override
-    { if (m_onHover) m_onHover(true); }
-    void hoverLeaveEvent(QGraphicsSceneHoverEvent *) override
-    { if (m_onHover) m_onHover(false); }
-
-private:
-    bool m_on;
-    std::function<void()> m_onClick;
-    std::function<void(bool)> m_onHover;
-};
-
-// ---------------------------------------------------------------------------
-// ThemeSwitcherSwatchItem — a single clickable swatch circle in the theme
-// switcher overlay at the bottom of the viewport.
-// ---------------------------------------------------------------------------
-class ThemeSwitcherSwatchItem : public QGraphicsEllipseItem
-{
-public:
-    // hoverPen: pen applied while the cursor is over this item (optional).
-    ThemeSwitcherSwatchItem(const QPointF &center,
-                             qreal radius,
-                             const QPen &pen,
-                             const QBrush &brush,
-                             int themeIndex,
-                             std::function<void(int)> onClick,
-                             const QPen &hoverPen = QPen(Qt::NoPen))
-        : QGraphicsEllipseItem(center.x() - radius, center.y() - radius,
-                                radius * 2.0, radius * 2.0)
-        , m_themeIndex(themeIndex)
-        , m_onClick(std::move(onClick))
-        , m_normalPen(pen)
-        , m_hoverPen(hoverPen)
-    {
-        setPen(pen);
-        setBrush(brush);
-        setAcceptedMouseButtons(Qt::LeftButton);
-        if (m_hoverPen.style() != Qt::NoPen)
-            setAcceptHoverEvents(true);
-    }
-
-protected:
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
-    {
-        if (event->button() == Qt::LeftButton) {
-            if (m_onClick)
-                m_onClick(m_themeIndex);
-            event->accept();
-        } else {
-            event->ignore();
-        }
-    }
-
-    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override
-    {
-        setPen(m_hoverPen);
-        update();
-        event->accept();
-    }
-
-    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override
-    {
-        setPen(m_normalPen);
-        update();
-        event->accept();
-    }
-
-private:
-    int m_themeIndex = 0;
-    std::function<void(int)> m_onClick;
-    QPen m_normalPen;
-    QPen m_hoverPen;
-};
 
 // ---------------------------------------------------------------------------
 
@@ -503,7 +377,6 @@ SceneTreeLayout::DropTarget interpolatedDropTarget(const SceneTreeLayout::DropTa
 SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     : QGraphicsView(parent)
     , m_graphicsScene(createTreeGraphicsScene(this))
-    , m_dropPreviewAnimationTimer(new QTimer(this))
 {
     const QFont treeFont = sceneTreeGraphicsFont();
     setFont(treeFont);
@@ -528,10 +401,6 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
     }
 
-    m_dropPreviewAnimationTimer->setInterval(16);
-    connect(m_dropPreviewAnimationTimer, &QTimer::timeout, this, [this]() {
-        advanceDropPreviewAnimation();
-    });
 
     m_panInertiaTimer = new QTimer(this);
     m_panInertiaTimer->setInterval(16);
@@ -566,6 +435,9 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_hoverManager      = new SceneTreeHoverManager(this);
     m_inlineEditor      = new SceneTreeInlineEditor(this);
     m_canvasDragHandler = new SceneCanvasDragHandler(this);
+    m_overlay           = new SceneTreeOverlayController(this);
+    m_dropPreview       = new SceneTreeDropPreviewController(this);
+    m_hitTest           = new SceneTreeHitTestManager(this);
 
     connect(m_zoomAnimTimer, &QTimer::timeout, this, [this]() {
         // ── Physics step: accel → velocity → zoom ──────────────────────────
@@ -908,7 +780,8 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     m_treeLayout.clear();
     m_treeItems.clear();
     m_renameZones.clear();
-    m_toolbarItems.clear();
+    m_overlay->m_items.clear();
+    m_overlay->m_itemOffsets.clear();
     m_hoverManager->m_hoverHighlightItems.clear();
     m_canvasMoveHandles.clear();
     m_treeItemsVisible = true;
@@ -945,13 +818,13 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
     // Apply the pending toolbar-drop canvas position to the most-recently-inserted
     // child that does not yet have a custom position (typically the last child).
-    if (m_hasPendingInsertPos) {
-        m_hasPendingInsertPos = false;
+    if (m_dropPreview->m_hasPendingInsertPos) {
+        m_dropPreview->m_hasPendingInsertPos = false;
         const auto &children = m_scene->treeRoot().children;
         for (int ci = children.size() - 1; ci >= 0; --ci) {
             const int id = children[ci].id;
             if (!m_nodeCanvasPositions.contains(id)) {
-                m_nodeCanvasPositions[id] = m_pendingInsertCanvasPosition;
+                m_nodeCanvasPositions[id] = m_dropPreview->m_pendingInsertCanvasPosition;
                 break;
             }
         }
@@ -1080,35 +953,14 @@ void SceneTreeGraphicsWidget::snapZoom()
     m_zoomIdle     = true;
 }
 
-int SceneTreeGraphicsWidget::toolbarSnapSideForVpPos(QPoint vpPos) const
-{
-    const qreal vw = viewport() ? viewport()->width()  : 640.0;
-    const qreal vh = viewport() ? viewport()->height() : 480.0;
-    if (vpPos.y() < vh * 0.25)
-        return 0;  // top (horizontal)
-    return (vpPos.x() < vw * 0.5) ? 1 : 2;  // left or right (vertical)
-}
+int  SceneTreeGraphicsWidget::toolbarSnapSideForVpPos(QPoint vpPos) const
+{ return m_overlay->toolbarSnapSideForVpPos(vpPos); }
 
 bool SceneTreeGraphicsWidget::isOnToolbarBackground(QPointF vpPos) const
-{
-    if (!m_toolbarPanelVpRect.contains(vpPos))
-        return false;
-    for (const QRectF &r : m_toolbarToolVpRects)
-        if (r.contains(vpPos))
-            return false;
-    return true;
-}
+{ return m_overlay->isOnToolbarBackground(vpPos); }
 
 void SceneTreeGraphicsWidget::repositionToolbarItemsSync()
-{
-    if (m_toolbarItems.isEmpty() || m_toolbarItems.size() != m_toolbarVpOffsets.size())
-        return;
-    const QPointF vtl = mapToScene(QPoint(0, 0));
-    const qreal s = qMax(0.001, std::abs(transform().m11()));
-    for (int i = 0; i < m_toolbarItems.size(); ++i)
-        m_toolbarItems[i]->setPos(vtl + QPointF(m_toolbarVpOffsets[i].x() / s,
-                                                 m_toolbarVpOffsets[i].y() / s));
-}
+{ m_overlay->repositionToolbarItemsSync(); }
 
 void SceneTreeGraphicsWidget::focusOutEvent(QFocusEvent *event)
 {
@@ -1138,7 +990,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         // an interactive card overlay.
         const QGraphicsItem *hitItem = itemAt(event->pos());
         const bool isToolbarItem = hitItem
-            && m_toolbarItems.contains(const_cast<QGraphicsItem *>(hitItem));
+            && m_overlay->m_items.contains(const_cast<QGraphicsItem *>(hitItem));
         // Swatches and the toggle button handle their own clicks; everything else
         // (card zones, glass panels, empty canvas) routes through handleColorEditClick.
         const QString hitZone = isToolbarItem ? hitItem->data(0).toString() : QString();
@@ -1297,9 +1149,9 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
     // directly — do NOT gate on itemAt == nullptr here.
     if (event->button() == Qt::LeftButton
         && isOnToolbarBackground(QPointF(event->pos()))) {
-        m_toolbarDragPending = true;
-        m_toolbarDragActive  = false;
-        m_toolbarDragPressVp = event->pos();
+        m_overlay->m_dragPending = true;
+        m_overlay->m_dragActive  = false;
+        m_overlay->m_dragPressVp = event->pos();
         event->accept();
         return;
     }
@@ -1329,19 +1181,19 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     const QPointF scenePosition = mapToScene(event->pos());
 
     // ── Toolbar drag ─────────────────────────────────────────────────────────
-    if (m_toolbarDragPending || m_toolbarDragActive) {
-        if (m_toolbarDragPending) {
-            const int dist = (event->pos() - m_toolbarDragPressVp).manhattanLength();
+    if (m_overlay->m_dragPending || m_overlay->m_dragActive) {
+        if (m_overlay->m_dragPending) {
+            const int dist = (event->pos() - m_overlay->m_dragPressVp).manhattanLength();
             if (dist >= 8) {
-                m_toolbarDragPending = false;
-                m_toolbarDragActive  = true;
+                m_overlay->m_dragPending = false;
+                m_overlay->m_dragActive  = true;
                 setCursor(Qt::ClosedHandCursor);
             }
         }
-        if (m_toolbarDragActive) {
+        if (m_overlay->m_dragActive) {
             const int targetSide = toolbarSnapSideForVpPos(event->pos());
-            if (targetSide != m_toolbarSide) {
-                m_toolbarSide = targetSide;
+            if (targetSide != m_overlay->m_side) {
+                m_overlay->m_side = targetSide;
                 updateToolbarOverlay();
             }
             setCursor(Qt::ClosedHandCursor);
@@ -1359,9 +1211,9 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     // ── Toggle overlay — highest priority ────────────────────────────────────
     // Compute the toggle's viewport rect directly (ItemIgnoresTransformations means
     // the item's bounding rect is in viewport pixels, not scene units).
-    if (m_colorEditToggleItem) {
-        const QPointF togVp = mapFromScene(m_colorEditToggleItem->pos());
-        if (m_colorEditToggleItem->boundingRect().translated(togVp)
+    if (m_overlay->m_colorEditToggleItem) {
+        const QPointF togVp = mapFromScene(m_overlay->m_colorEditToggleItem->pos());
+        if (m_overlay->m_colorEditToggleItem->boundingRect().translated(togVp)
                 .contains(QPointF(event->pos()))) {
             clearColorEditHighlight();                  // remove any stale blink overlay
             QGraphicsView::mouseMoveEvent(event);       // deliver hover enter/move to toggle
@@ -1405,16 +1257,17 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
 void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     // ── Toolbar drag release ──────────────────────────────────────────────────
-    if (event->button() == Qt::LeftButton && (m_toolbarDragActive || m_toolbarDragPending)) {
-        if (m_toolbarDragActive) {
+    if (event->button() == Qt::LeftButton
+        && (m_overlay->m_dragActive || m_overlay->m_dragPending)) {
+        if (m_overlay->m_dragActive) {
             const int newSide = toolbarSnapSideForVpPos(event->pos());
-            if (newSide != m_toolbarSide) {
-                m_toolbarSide = newSide;
+            if (newSide != m_overlay->m_side) {
+                m_overlay->m_side = newSide;
                 updateToolbarOverlay();
             }
         }
-        m_toolbarDragActive  = false;
-        m_toolbarDragPending = false;
+        m_overlay->m_dragActive  = false;
+        m_overlay->m_dragPending = false;
         setCursor(Qt::OpenHandCursor);
         event->accept();
         return;
@@ -1500,14 +1353,14 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     // repositionToolbarItemsSync() only calls setPos() — no item removal,
     // safe to call here. The fallback for stale sizes is deferred to avoid
     // re-entrancy in updateToolbarOverlay during hover dispatch.
-    if (m_toolbarItems.size() == m_toolbarVpOffsets.size()) {
+    if (m_overlay->m_items.size() == m_overlay->m_itemOffsets.size()) {
         repositionToolbarItemsSync();
         if (viewport())
             viewport()->update();
-    } else if (!m_toolbarRepositionPending) {
-        m_toolbarRepositionPending = true;
+    } else if (!m_overlay->m_repositionPending) {
+        m_overlay->m_repositionPending = true;
         QTimer::singleShot(0, this, [this]() {
-            m_toolbarRepositionPending = false;
+            m_overlay->m_repositionPending = false;
             repositionToolbarItems();
             if (viewport())
                 viewport()->update();
@@ -1615,224 +1468,12 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
     }
 }
 
-QRectF SceneTreeGraphicsWidget::drawToolbar()
-{
-    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
-    const qreal viewportWidth  = viewport() ? viewport()->width()  : 640.0;
-    const qreal viewportHeight = viewport() ? viewport()->height() : 480.0;
-    const qreal viewportScale  = transform().m11();
-
-    m_toolbarToolVpRects.clear();
-    return SceneTreeToolbarRenderer(m_graphicsScene,
-                                    &m_toolbarItems,
-                                    m_treeTheme,
-                                    usesDarkOverlayGlass(m_canvasBackgroundTheme))
-        .render(
-            [this](const QPointF &position, const QSizeF &previewSize, const QString &previewTool) {
-                showDropPreview(position, previewSize, previewTool);
-            },
-            [this]() { finishDropPreview(); },
-            [this](const QString &toolName, const QPointF &position) {
-                handleToolDrop(toolName, position);
-            },
-            [this](const QString &toolName, bool hovered) {
-                if (hovered) {
-                    m_hoverManager->updateHoverHint(QStringLiteral("toolbar:%1").arg(toolName),
-                                    toolbarToolTip(toolName));
-                } else if (m_hoverManager->hoverHintKey() == QStringLiteral("toolbar:%1").arg(toolName)) {
-                    m_hoverManager->updateTooltip(mapToGlobal(m_lastMousePosition),
-                                         mapToScene(m_lastMousePosition),
-                                         QApplication::keyboardModifiers() & Qt::ControlModifier);
-                }
-            },
-            viewportTopLeft,
-            viewportWidth,
-            viewportHeight,
-            viewportScale,
-            m_toolbarSide,
-            &m_toolbarPanelVpRect,
-            &m_toolbarToolVpRects);
-}
-
-void SceneTreeGraphicsWidget::clearToolbar()
-{
-    m_colorEditToggleItem = nullptr;
-    const QVector<QGraphicsItem *> toDelete = m_toolbarItems;
-    for (QGraphicsItem *item : toDelete) {
-        if (!item)
-            continue;
-        m_graphicsScene->removeItem(item);
-    }
-    m_toolbarItems.clear();
-    m_toolbarVpOffsets.clear();
-    // Defer actual deletion: removeItem() already prevents new events from reaching
-    // these items, but QGraphicsScene's hover-tracking may still hold the raw pointer
-    // until the current event-loop iteration finishes.  Deleting here causes a
-    // use-after-free when scrollContentsBy -> dispatchHoverEvent fires synchronously.
-    QTimer::singleShot(0, this, [toDelete]() { qDeleteAll(toDelete); });
-}
-
 void SceneTreeGraphicsWidget::updateToolbarOverlay()
-{
-    if (!m_graphicsScene)
-        return;
-
-    clearToolbar();
-    drawToolbar();
-    drawCanvasBackgroundSwitcher();
-    drawThemeSwitcher();
-    m_hoverManager->drawHintOverlay();
-
-    // Compute VP-pixel offsets from each item's current scene position so that
-    // repositionToolbarItems() can cheaply update positions without rebuilding.
-    const QPointF vtl = mapToScene(QPoint(0, 0));
-    const qreal s = qMax(0.001, std::abs(transform().m11()));
-    m_toolbarVpOffsets.resize(m_toolbarItems.size());
-    for (int i = 0; i < m_toolbarItems.size(); ++i) {
-        const QPointF delta = m_toolbarItems[i]->pos() - vtl;
-        m_toolbarVpOffsets[i] = QPointF(delta.x() * s, delta.y() * s);
-    }
-}
+{ m_overlay->updateToolbarOverlay(); }
 
 void SceneTreeGraphicsWidget::repositionToolbarItems()
-{
-    if (m_toolbarItems.isEmpty())
-        return;
-    if (m_toolbarItems.size() != m_toolbarVpOffsets.size()) {
-        updateToolbarOverlay();
-        return;
-    }
-    const QPointF vtl = mapToScene(QPoint(0, 0));
-    const qreal s = qMax(0.001, std::abs(transform().m11()));
-    for (int i = 0; i < m_toolbarItems.size(); ++i)
-        m_toolbarItems[i]->setPos(vtl + QPointF(m_toolbarVpOffsets[i].x() / s,
-                                                 m_toolbarVpOffsets[i].y() / s));
-}
+{ m_overlay->repositionToolbarItems(); }
 
-void SceneTreeGraphicsWidget::handleThemeSwitcherClick(int themeIndex)
-{
-    const int clamped = qBound(0, themeIndex, SceneTreePalette::ThemeCount - 1);
-    const bool customWasActive = SceneTreePalette::hasCustomTheme();
-    if (customWasActive) {
-        clearCustomAppearanceTheme();
-        emit builtInAppearanceSelected();
-    }
-    if (m_treeTheme == clamped && !customWasActive)
-        return;
-    setTreeTheme(clamped);
-    emit treeThemeChanged(m_treeTheme);
-}
-
-void SceneTreeGraphicsWidget::handleCanvasBackgroundSwitcherClick(int backgroundIndex)
-{
-    const int clamped = qBound(0, backgroundIndex, CanvasBackgroundThemeCount - 1);
-    const bool customWasActive = SceneTreePalette::hasCustomTheme();
-    if (customWasActive) {
-        clearCustomAppearanceTheme();
-        emit builtInAppearanceSelected();
-    }
-    if (m_canvasBackgroundTheme == clamped && !customWasActive)
-        return;
-    setCanvasBackgroundTheme(clamped);
-    emit canvasBackgroundThemeChanged(m_canvasBackgroundTheme);
-}
-
-void SceneTreeGraphicsWidget::drawCanvasBackgroundSwitcher()
-{
-    if (!m_graphicsScene || !viewport())
-        return;
-
-    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
-    const qreal viewportHeight = viewport()->height();
-    const qreal safeScale = qMax<qreal>(0.001, std::abs(transform().m11()));
-    const auto scenePoint = [&](qreal x, qreal y) {
-        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
-    };
-
-    constexpr qreal SwatchR = 7.0;
-    constexpr qreal SwatchGap = 5.0;
-    constexpr qreal PadH = 7.0;
-    constexpr qreal PadV = 6.0;
-    constexpr qreal BottomGap = 12.0;
-    constexpr qreal RowGap = 8.0;
-    constexpr qreal LocalOverlayZ = 10000.0;
-    const qreal panelW = CanvasBackgroundThemeCount * (SwatchR * 2.0)
-                         + (CanvasBackgroundThemeCount - 1) * SwatchGap + PadH * 2.0;
-    const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
-    const QRectF panelLocal(0.0, 0.0, panelW, panelH);
-    const QPointF panelTopLeft = scenePoint(12.0,
-                                            viewportHeight - BottomGap - panelH * 2.0 - RowGap);
-    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
-    const bool customGlass = SceneTreePalette::hasCustomTheme();
-    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
-
-    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
-                                             Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_toolbarItems.append(shadow);
-
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
-    auto *panel = m_graphicsScene->addPath(panelPath,
-                                           QPen(customGlass ? customTheme.glassBorder
-                                                            : darkGlass ? QColor(148, 163, 184, 82)
-                                                                        : QColor(118, 136, 156, 58), 1.0),
-                                           QBrush(customGlass ? customTheme.glassBottom
-                                                              : darkGlass ? QColor(10, 16, 24, 178)
-                                                                          : QColor(250, 253, 255, 88)));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_toolbar"));
-    m_toolbarItems.append(panel);
-
-    // Active ring: high-contrast vs. the glass panel to make the selection clear.
-    const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
-
-    for (int i = 0; i < CanvasBackgroundThemeCount; ++i) {
-        const bool active = i == m_canvasBackgroundTheme;
-        const QColor swatch = canvasBackgroundTheme(i).background;
-        const QPointF center(PadH + i * (SwatchR * 2.0 + SwatchGap) + SwatchR,
-                             PadV + SwatchR);
-        if (active) {
-            auto *ring = new ThemeSwitcherSwatchItem(
-                center, SwatchR + 2.8,
-                QPen(ringColor, 1.6), Qt::NoBrush,
-                i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); });
-            ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-            ring->setPos(panelTopLeft);
-            ring->setZValue(LocalOverlayZ);
-            ring->setData(0, QStringLiteral("swatch"));
-            m_graphicsScene->addItem(ring);
-            m_toolbarItems.append(ring);
-        }
-        // Border and hover adapt to each swatch's own lightness: dark swatch → lighter ring,
-        // light swatch → darker ring. Stays in the same tonal family, never jarring.
-        const bool swatchDark  = swatch.lightness() < 128;
-        const QColor borderCol = swatchDark ? swatch.lighter(145) : swatch.darker(118);
-        const QColor hoverCol  = swatchDark ? swatch.lighter(170) : swatch.darker(135);
-        const QPen normalPen = active ? QPen(Qt::NoPen) : QPen(borderCol, 1.0);
-        const QPen hoverPen  = active ? QPen(Qt::NoPen) : QPen(hoverCol,  2.0);
-        auto *circle = new ThemeSwitcherSwatchItem(
-            center, SwatchR,
-            normalPen, QBrush(swatch),
-            i, [this](int idx) { handleCanvasBackgroundSwitcherClick(idx); },
-            hoverPen);
-        circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        circle->setPos(panelTopLeft);
-        circle->setZValue(LocalOverlayZ + 0.5);
-        circle->setData(0, QStringLiteral("swatch"));
-        m_graphicsScene->addItem(circle);
-        m_toolbarItems.append(circle);
-    }
-}
 
 // ── Color-edit paint mode ──────────────────────────────────────────────────────
 
@@ -1858,173 +1499,6 @@ void SceneTreeGraphicsWidget::updateColorEditHighlight(const QPointF &scenePos)
     if (m_colorEdit) m_colorEdit->updateHighlight(scenePos);
 }
 
-void SceneTreeGraphicsWidget::drawThemeSwitcher()
-{
-    if (!m_graphicsScene || !viewport())
-        return;
-
-    const QPointF viewportTopLeft = mapToScene(QPoint(0, 0));
-    const qreal viewportHeight = viewport()->height();
-    const qreal viewportScale  = transform().m11();
-    const qreal safeScale = qMax<qreal>(0.001, std::abs(viewportScale));
-
-    const auto scenePoint = [&](qreal x, qreal y) {
-        return viewportTopLeft + QPointF(x / safeScale, y / safeScale);
-    };
-
-    // Geometry constants (all in logical viewport pixels before scale application).
-    constexpr qreal SwatchR     =  7.0;   // circle radius
-    constexpr qreal SwatchGap   =  5.0;   // gap between circles
-    constexpr qreal PadH        =  7.0;   // panel left/right padding
-    constexpr qreal PadV        =  6.0;   // panel top/bottom padding
-    constexpr qreal BottomGap   = 12.0;   // distance from bottom viewport edge
-
-    // Use the same OverlayZ as the toolbar (defined in scenetreetoolbarrenderer.cpp).
-    // We replicate the constant here to keep the file self-contained.
-    constexpr qreal LocalOverlayZ = 10000.0;
-
-    const int n = SceneTreePalette::ThemeCount;
-    const qreal panelW = n * (SwatchR * 2.0) + (n - 1) * SwatchGap + PadH * 2.0; // = 123
-    const qreal panelH = SwatchR * 2.0 + PadV * 2.0;
-
-    const QRectF panelLocal(0.0, 0.0, panelW, panelH);
-    const QPointF panelTopLeft = scenePoint(12.0,                           // OverlayMargin
-                                             viewportHeight - BottomGap - panelH);
-    const bool darkGlass = usesDarkOverlayGlass(m_canvasBackgroundTheme);
-    const bool customGlass = SceneTreePalette::hasCustomTheme();
-    const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
-
-    // Drop shadow.
-    auto *shadow = m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
-                                             Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_toolbarItems.append(shadow);
-
-    // Glass panel background — same style as toolbar.
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
-    auto *panel = m_graphicsScene->addPath(panelPath,
-                                            QPen(customGlass ? customTheme.glassBorder
-                                                             : darkGlass ? QColor(148, 163, 184, 82)
-                                                                         : QColor(118, 136, 156, 58), 1.0),
-                                            QBrush(customGlass ? customTheme.glassBottom
-                                                               : darkGlass ? QColor(10, 16, 24, 178)
-                                                                           : QColor(250, 253, 255, 88)));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_toolbar"));
-    m_toolbarItems.append(panel);
-
-    // Active ring: high-contrast vs. glass panel for clear selection indication.
-    const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
-
-    // One swatch circle per theme.
-    for (int i = 0; i < n; ++i) {
-        const auto  th      = static_cast<SceneTreePalette::Theme>(i);
-        const bool  active  = (i == m_treeTheme);
-        const QColor swatch = SceneTreePalette::swatchColor(th);
-        const qreal cx = PadH + i * (SwatchR * 2.0 + SwatchGap) + SwatchR;
-        const qreal cy = PadV + SwatchR;
-
-        // Active ring (drawn first, below the fill circle).
-        if (active) {
-            const qreal ringR = SwatchR + 2.8;
-            auto *ring = new ThemeSwitcherSwatchItem(
-                QPointF(cx, cy), ringR,
-                QPen(ringColor, 1.6),
-                Qt::NoBrush,
-                i, [this](int idx) { handleThemeSwitcherClick(idx); });
-            ring->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-            ring->setPos(panelTopLeft);
-            ring->setZValue(LocalOverlayZ);
-            ring->setData(0, QStringLiteral("swatch"));
-            m_graphicsScene->addItem(ring);
-            m_toolbarItems.append(ring);
-        }
-
-        // Border and hover adapt to each swatch's own lightness.
-        const bool swatchDark  = swatch.lightness() < 128;
-        const QColor borderCol = swatchDark ? swatch.lighter(145) : swatch.darker(118);
-        const QColor hoverCol  = swatchDark ? swatch.lighter(170) : swatch.darker(135);
-        const QPen normalPen = active ? QPen(Qt::NoPen) : QPen(borderCol, 1.0);
-        const QPen hoverPen  = active ? QPen(Qt::NoPen) : QPen(hoverCol,  2.0);
-        auto *circle = new ThemeSwitcherSwatchItem(
-            QPointF(cx, cy), SwatchR,
-            normalPen,
-            QBrush(swatch),
-            i, [this](int idx) { handleThemeSwitcherClick(idx); },
-            hoverPen);
-        circle->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        circle->setPos(panelTopLeft);
-        circle->setZValue(LocalOverlayZ + 0.5);
-        circle->setData(0, QStringLiteral("swatch"));
-        m_graphicsScene->addItem(circle);
-        m_toolbarItems.append(circle);
-    }
-
-    // ── Standalone vertical toggle for color-edit mode ───────────────────────
-    {
-        constexpr qreal ToggleGap = 7.0;   // gap from swatch panel right edge
-        constexpr qreal TW = ColorEditToggleItem::kW;
-        constexpr qreal TH = ColorEditToggleItem::kH;
-
-        // Centre the toggle vertically with the swatch panel.
-        const qreal toggleVpX = 12.0 + panelW + ToggleGap;
-        const qreal toggleVpY = viewportHeight - BottomGap - panelH * 0.5 - TH * 0.5;
-        const QPointF toggleTopLeft = scenePoint(toggleVpX, toggleVpY);
-
-        // Drop shadow (rounded pill, offset slightly).
-        QPainterPath shadowPath;
-        shadowPath.addRoundedRect(QRectF(1.5, 2.5, TW, TH), TW * 0.5, TW * 0.5);
-        auto *toggleShadow = m_graphicsScene->addPath(shadowPath,
-            Qt::NoPen, QBrush(QColor(0, 0, 0, darkGlass ? 85 : 28)));
-        toggleShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        toggleShadow->setAcceptedMouseButtons(Qt::NoButton);
-        toggleShadow->setPos(toggleTopLeft);
-        toggleShadow->setZValue(LocalOverlayZ - 2.0);
-        toggleShadow->setOpacity(darkGlass ? 0.62 : 0.38);
-        toggleShadow->setData(0, QStringLiteral("shadow"));
-        m_toolbarItems.append(toggleShadow);
-
-        // The toggle itself.
-        auto *tog = new ColorEditToggleItem(
-            colorEditMode(),
-            [this] { setColorEditMode(!colorEditMode()); },
-            [this](bool enter) {
-                if (enter) {
-                    const QString stateStr = colorEditMode()
-                        ? QStringLiteral("ON  — click to exit")
-                        : QStringLiteral("OFF — click to enter");
-                    m_hoverManager->updateHoverHint(QStringLiteral("colorEdit:toggle"),
-                                    QStringLiteral("✏ Color edit  ") + stateStr
-                                    + QStringLiteral("\nHover blocks to inspect and edit theme colors."));
-                } else {
-                    if (colorEditMode())
-                        m_hoverManager->updateHoverHint(QStringLiteral("colorEdit:mode"),
-                                        QStringLiteral("✏ Color edit\n"
-                                                       "Hover a card, then scroll ↕ to cycle properties.\n"
-                                                       "Click to pick a color.  Esc to exit."));
-                    else
-                        m_hoverManager->updateHoverHint(QString(), QString());
-                }
-            });
-        tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-        tog->setPos(toggleTopLeft);
-        tog->setZValue(LocalOverlayZ + 0.5);
-        tog->setData(0, QStringLiteral("toggle"));
-        m_graphicsScene->addItem(tog);
-        m_toolbarItems.append(tog);
-        m_colorEditToggleItem = tog;
-    }
-}
 
 
 
@@ -2462,6 +1936,84 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     return rect;
 }
 
+SceneTreeGraphicsWidget::DropTarget
+SceneTreeGraphicsWidget::dropTargetForToolAt(const QPointF &scenePosition,
+                                             const QSizeF &previewSize,
+                                             const QString &previewTool,
+                                             int movingNodeId,
+                                             bool allowFreeFloatingInsertion) const
+{
+    const QSizeF eff = previewSize.isValid() ? previewSize : defaultPreviewSize();
+    if (isRootOnlyTreeTool(previewTool)) {
+        const QPointF candidateTL = scenePosition - QPointF(eff.width() * 0.5, eff.height() * 0.5);
+        QPointF snappedTL;
+        const bool magnetic = m_canvasDragHandler->applyMagneticSnap(candidateTL, eff, 0, &snappedTL);
+        const QPointF finalTL = magnetic ? snappedTL : candidateTL;
+        DropTarget t; t.zoneRect = QRectF(finalTL, eff);
+        if (allowFreeFloatingInsertion) { t.placeholderRect = t.zoneRect; t.hasTarget = true; }
+        return t;
+    }
+    DropTarget target = m_treeLayout.dropTargetAt(scenePosition, eff, movingNodeId,
+                                                  isVariableToolName(previewTool));
+    if (!target.zoneRect.isValid())
+        target = freeFloatingDropTarget(scenePosition, eff, allowFreeFloatingInsertion);
+    if (target.hasTarget && m_scene) {
+        const int rootId = m_scene->treeRoot().id;
+        if (target.parentGroupId == rootId) {
+            bool rootEligible = false;
+            if (movingNodeId > 0) {
+                const SceneDocument::TreeNode *n = m_scene->treeNodeById(movingNodeId);
+                rootEligible = n && n->type == SceneDocument::TreeNode::Group
+                    && (n->operation == SceneDocument::TreeNode::Module
+                     || n->operation == SceneDocument::TreeNode::Scene);
+            }
+            if (!rootEligible) {
+                DropTarget no; no.sourceGroupRect = target.sourceGroupRect;
+                no.sourceGroupOperation = target.sourceGroupOperation;
+                no.sourceCutSeparatorY = target.sourceCutSeparatorY;
+                no.sourceChildren = target.sourceChildren;
+                no.sourceRect = target.sourceRect;
+                no.zoneRect = target.zoneRect;
+                return no;
+            }
+        }
+    }
+    if (isVariableToolName(previewTool) && m_scene) {
+        const int rootId = m_scene->treeRoot().id;
+        const SceneDocument::TreeNode *tn = m_scene->treeNodeById(target.parentGroupId);
+        const bool isModule = tn && tn->type == SceneDocument::TreeNode::Group
+            && tn->operation == SceneDocument::TreeNode::Module;
+        const bool isScene = tn && tn->type == SceneDocument::TreeNode::Group
+            && tn->operation == SceneDocument::TreeNode::Scene;
+        if (target.parentGroupId > 0 && target.parentGroupId != rootId && !isModule && !isScene) {
+            DropTarget no; no.sourceGroupRect = target.sourceGroupRect;
+            no.sourceGroupOperation = target.sourceGroupOperation;
+            no.sourceCutSeparatorY = target.sourceCutSeparatorY;
+            no.sourceChildren = target.sourceChildren;
+            no.sourceRect = target.sourceRect;
+            return no;
+        }
+    }
+    if (previewTool == QStringLiteral("call") && m_scene) {
+        const SceneDocument::TreeNode *tn = m_scene->treeNodeById(target.parentGroupId);
+        if (!tn || tn->type != SceneDocument::TreeNode::Group) return DropTarget();
+        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+            if (area.groupId != target.parentGroupId || area.operation != SceneDocument::TreeNode::Module) continue;
+            if (scenePosition.y() < area.moduleParameterSeparatorY) return DropTarget();
+            target.insertIndex = qMax(target.insertIndex, area.moduleParameterCount);
+            break;
+        }
+    }
+    if (movingNodeId > 0 && m_scene) {
+        const SceneDocument::TreeNode *mn = m_scene->treeNodeById(movingNodeId);
+        if (mn && mn->type == SceneDocument::TreeNode::ModuleCall) {
+            const SceneDocument::TreeNode *tn = m_scene->treeNodeById(target.parentGroupId);
+            if (!tn || tn->type != SceneDocument::TreeNode::Group) return DropTarget();
+        }
+    }
+    return target;
+}
+
 void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPointF &scenePosition)
 {
     const DropTarget target = dropTargetForToolAt(scenePosition,
@@ -2477,11 +2029,11 @@ void SceneTreeGraphicsWidget::handleToolDrop(const QString &toolName, const QPoi
     // For root-level tools (modules) store the snapped canvas position so that
     // drawTreeOrPlaceholder() can place the newly-created block there.
     if (isRootOnlyTreeTool(toolName) && target.zoneRect.isValid()) {
-        m_pendingInsertCanvasPosition = target.zoneRect.topLeft();
-        m_hasPendingInsertPos = true;
+        m_dropPreview->m_pendingInsertCanvasPosition = target.zoneRect.topLeft();
+        m_dropPreview->m_hasPendingInsertPos = true;
     }
 
-    scheduleDropCommit([this, toolName, target]() {
+    m_dropPreview->scheduleCommit([this, toolName, target]() {
         emit toolDropped(toolName,
                          target.parentGroupId,
                          target.insertIndex,
@@ -2523,7 +2075,7 @@ void SceneTreeGraphicsWidget::handleModuleCallTemplateDrop(int moduleGroupId, co
         return;
     }
 
-    scheduleDropCommit([this, moduleGroupId, target]() {
+    m_dropPreview->scheduleCommit([this, moduleGroupId, target]() {
         emit moduleCallDropped(moduleGroupId,
                                target.parentGroupId,
                                target.insertIndex);
@@ -2541,123 +2093,6 @@ QString SceneTreeGraphicsWidget::previewToolForNode(const SceneDocument::TreeNod
 
     const ShapeNode *shape = m_scene ? m_scene->shapeById(node.shapeId) : nullptr;
     return toolNameForPrimitiveType(shape ? shape->type : ShapeNode::Cube);
-}
-
-SceneTreeGraphicsWidget::DropTarget SceneTreeGraphicsWidget::dropTargetForToolAt(const QPointF &scenePosition,
-                                                                                 const QSizeF &previewSize,
-                                                                                 const QString &previewTool,
-                                                                                 int movingNodeId,
-                                                                                 bool allowFreeFloatingInsertion) const
-{
-    const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
-    if (isRootOnlyTreeTool(previewTool)) {
-        // Compute candidate top-left (centered on cursor), then apply magnetic snap
-        // so the drop preview snaps to nearby blocks just like canvas-move drag does.
-        const QPointF candidateTL = scenePosition - QPointF(effectivePreviewSize.width() * 0.5,
-                                                             effectivePreviewSize.height() * 0.5);
-        QPointF snappedTL;
-        const bool magnetic = m_canvasDragHandler->applyMagneticSnap(candidateTL, effectivePreviewSize, 0, &snappedTL);
-        const QPointF finalTL = magnetic ? snappedTL : candidateTL;
-        DropTarget target;
-        target.zoneRect = QRectF(finalTL, effectivePreviewSize);
-        if (allowFreeFloatingInsertion) {
-            target.placeholderRect = target.zoneRect;
-            target.hasTarget = true;
-        }
-        return target;
-    }
-
-    DropTarget target = m_treeLayout.dropTargetAt(scenePosition,
-                                                  effectivePreviewSize,
-                                                  movingNodeId,
-                                                  isVariableToolName(previewTool));
-    if (!target.zoneRect.isValid())
-        target = freeFloatingDropTarget(scenePosition, effectivePreviewSize, allowFreeFloatingInsertion);
-
-    // ── Root-level guard ──────────────────────────────────────────────────────
-    // Only Module and Scene groups may live as direct children of the invisible
-    // root node.  All other drops that land at root level are silently rejected:
-    // the node shows the "no valid slot" animation but is not moved or deleted.
-    // (Module tool drops are handled by the isRootOnlyTreeTool branch above and
-    //  never reach this point, so we need not special-case them here.)
-    if (target.hasTarget && m_scene) {
-        const int rootId = m_scene->treeRoot().id;
-        if (target.parentGroupId == rootId) {
-            bool rootEligible = false;
-            if (movingNodeId > 0) {
-                const SceneDocument::TreeNode *n = m_scene->treeNodeById(movingNodeId);
-                rootEligible = n
-                    && n->type == SceneDocument::TreeNode::Group
-                    && (n->operation == SceneDocument::TreeNode::Module
-                     || n->operation == SceneDocument::TreeNode::Scene);
-            }
-            if (!rootEligible) {
-                // Preserve source fields so the drop-preview animation can still
-                // show the source group collapsing back smoothly.
-                DropTarget noTarget;
-                noTarget.sourceGroupRect      = target.sourceGroupRect;
-                noTarget.sourceGroupOperation = target.sourceGroupOperation;
-                noTarget.sourceCutSeparatorY  = target.sourceCutSeparatorY;
-                noTarget.sourceChildren       = target.sourceChildren;
-                noTarget.sourceRect           = target.sourceRect;
-                noTarget.zoneRect             = target.zoneRect;
-                return noTarget;
-            }
-        }
-    }
-
-    if (isVariableToolName(previewTool) && m_scene) {
-        const int rootId = m_scene->treeRoot().id;
-        const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
-        const bool targetIsModule = targetNode
-                                    && targetNode->type == SceneDocument::TreeNode::Group
-                                    && targetNode->operation == SceneDocument::TreeNode::Module;
-        const bool targetIsScene = targetNode
-                                   && targetNode->type == SceneDocument::TreeNode::Group
-                                   && targetNode->operation == SceneDocument::TreeNode::Scene;
-        if (target.parentGroupId > 0 && target.parentGroupId != rootId && !targetIsModule && !targetIsScene) {
-            // Reject the drop target but preserve source preview data so the
-            // animation can smoothly show the source group collapsing rather
-            // than freezing on a phantom union rectangle.
-            DropTarget noTarget;
-            noTarget.sourceGroupRect    = target.sourceGroupRect;
-            noTarget.sourceGroupOperation = target.sourceGroupOperation;
-            noTarget.sourceCutSeparatorY = target.sourceCutSeparatorY;
-            noTarget.sourceChildren     = target.sourceChildren;
-            noTarget.sourceRect         = target.sourceRect;
-            return noTarget;
-        }
-    }
-
-    if (previewTool == QStringLiteral("call") && m_scene) {
-        const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
-        if (!targetNode || targetNode->type != SceneDocument::TreeNode::Group)
-            return DropTarget();
-
-        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-            if (area.groupId != target.parentGroupId
-                || area.operation != SceneDocument::TreeNode::Module) {
-                continue;
-            }
-
-            if (scenePosition.y() < area.moduleParameterSeparatorY)
-                return DropTarget();
-
-            target.insertIndex = qMax(target.insertIndex, area.moduleParameterCount);
-            break;
-        }
-    }
-
-    if (movingNodeId > 0 && m_scene) {
-        const SceneDocument::TreeNode *movingNode = m_scene->treeNodeById(movingNodeId);
-        if (movingNode && movingNode->type == SceneDocument::TreeNode::ModuleCall) {
-            const SceneDocument::TreeNode *targetNode = m_scene->treeNodeById(target.parentGroupId);
-            if (!targetNode || targetNode->type != SceneDocument::TreeNode::Group)
-                return DropTarget();
-        }
-    }
-
-    return target;
 }
 
 void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scenePosition)
@@ -2735,13 +2170,13 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
             return;
         }
 
-        scheduleDropCommit([this, nodeId]() {
+        m_dropPreview->scheduleCommit([this, nodeId]() {
             emit treeNodeDeleteRequested(nodeId);
         });
         return;
     }
 
-    scheduleDropCommit([this, nodeId, target]() {
+    m_dropPreview->scheduleCommit([this, nodeId, target]() {
         emit treeNodeDropped(nodeId,
                              target.parentGroupId,
                              target.insertIndex,
@@ -2756,6 +2191,26 @@ void SceneTreeGraphicsWidget::handleTreeNodeSelected(int nodeId)
     refresh();
     emit treeNodeSelected(nodeId);
 }
+
+// ── Hit-test wrappers (delegate to SceneTreeHitTestManager) ──────────────────
+bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &p, int *gId, SceneDocument::TreeNode::Operation *op, int *ax, int *ns, int *nl) const
+{ return m_hitTest->transformControlAt(p, gId, op, ax, ns, nl); }
+bool SceneTreeGraphicsWidget::colorChannelControlAt(const QPointF &p, int *gId, int *ch) const
+{ return m_hitTest->colorChannelControlAt(p, gId, ch); }
+bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &p, int *sId, int *nId, int *param, int *ns, int *nl) const
+{ return m_hitTest->shapeParameterControlAt(p, sId, nId, param, ns, nl); }
+bool SceneTreeGraphicsWidget::polyhedronTableControlAt(const QPointF &p, PolyhedronTableItem::Cell *cell) const
+{ return m_hitTest->polyhedronTableControlAt(p, cell); }
+int  SceneTreeGraphicsWidget::polyhedronGroupIdForCell(const QPointF &p) const
+{ return m_hitTest->polyhedronGroupIdForCell(p); }
+bool SceneTreeGraphicsWidget::polygon2DTableControlAt(const QPointF &p, Polygon2DTableItem::Cell *cell) const
+{ return m_hitTest->polygon2DTableControlAt(p, cell); }
+bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &p, int *nId, int *s, int *l) const
+{ return m_hitTest->variableNumberControlAt(p, nId, s, l); }
+bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &p, int *nId, int *s, int *l) const
+{ return m_hitTest->forLoopRangeControlAt(p, nId, s, l); }
+bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &p, int *mcId, int *pvId, int *s, int *l) const
+{ return m_hitTest->moduleCallParamControlAt(p, mcId, pvId, s, l); }
 
 bool SceneTreeGraphicsWidget::handleTransformWheel(const QPointF &scenePosition, int wheelSteps)
 {
@@ -2945,369 +2400,7 @@ bool SceneTreeGraphicsWidget::handlePolygon2DTableWheel(const QPointF &scenePosi
     return true;
 }
 
-bool SceneTreeGraphicsWidget::colorChannelControlAt(const QPointF &scenePosition,
-                                                    int *groupId,
-                                                    int *channel) const
-{
-    const GroupHitArea *bestArea = nullptr;
-    int bestChannel = -1;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.collapsed || area.operation != SceneDocument::TreeNode::Color || !area.rect.contains(scenePosition))
-            continue;
 
-        int hitChannel = -1;
-        for (int i = 0; i < 3; ++i) {
-            if (transformParameterControlRect(area.rect, i, TransformHeaderWidth).contains(scenePosition)) {
-                hitChannel = i;
-                break;
-            }
-        }
-        if (hitChannel < 0)
-            continue;
-
-        if (!bestArea || area.depth > bestArea->depth) {
-            bestArea = &area;
-            bestChannel = hitChannel;
-        }
-    }
-
-    if (!bestArea)
-        return false;
-
-    if (groupId) *groupId = bestArea->groupId;
-    if (channel) *channel = bestChannel;
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::transformControlAt(const QPointF &scenePosition,
-                                                 int *groupId,
-                                                 SceneDocument::TreeNode::Operation *operation,
-                                                 int *axisOut,
-                                                 int *numberStart,
-                                                 int *numberLength) const
-{
-    const GroupHitArea *bestArea = nullptr;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.collapsed)
-            continue;
-        if (area.operation != SceneDocument::TreeNode::Translate
-            && area.operation != SceneDocument::TreeNode::Rotate
-            && area.operation != SceneDocument::TreeNode::Scale
-            && area.operation != SceneDocument::TreeNode::Mirror) {
-            continue;
-        }
-
-        if (!area.rect.contains(scenePosition))
-            continue;
-
-        if (!bestArea || area.depth > bestArea->depth)
-            bestArea = &area;
-    }
-
-    if (!bestArea)
-        return false;
-
-    qreal headerWidth = TransformHeaderWidth;
-    if (!bestArea->children.isEmpty()) {
-        headerWidth = qMax<qreal>(TransformHeaderWidth,
-                                  bestArea->children.first().rect.left() - bestArea->rect.left() - GroupPadding);
-    }
-
-    // Find which axis row the mouse is over
-    int hitAxis = -1;
-    for (int i = 0; i < 3; ++i) {
-        if (transformParameterControlRect(bestArea->rect, i, headerWidth).contains(scenePosition)) {
-            hitAxis = i;
-            break;
-        }
-    }
-
-    if (hitAxis < 0)
-        return false;
-
-    // Two-level: find which number span within the expression
-    if (m_scene && (numberStart || numberLength)) {
-        const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestArea->groupId);
-        if (node) {
-            const QString expr = transformAxisExpression(*node, hitAxis);
-            const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
-            const QVector<ExpressionNumberControl> numControls =
-                transformParameterNumberControls(bestArea->rect, hitAxis, expr, hitMetrics, headerWidth);
-            for (const ExpressionNumberControl &nc : numControls) {
-                if (nc.rect.contains(scenePosition)) {
-                    if (numberStart)  *numberStart  = nc.start;
-                    if (numberLength) *numberLength = nc.length;
-                    break;
-                }
-            }
-        }
-    }
-
-    if (groupId)    *groupId    = bestArea->groupId;
-    if (operation)  *operation  = bestArea->operation;
-    if (axisOut)    *axisOut    = hitAxis;
-    return true;
-}
-
-bool SceneTreeGraphicsWidget::shapeParameterControlAt(const QPointF &scenePosition,
-                                                      int *shapeId,
-                                                      int *nodeId,
-                                                      int *parameter,
-                                                      int *numberStart,
-                                                      int *numberLength) const
-{
-    if (!m_scene)
-        return false;
-
-    const SceneDocument::TreeNode *bestNode = nullptr;
-    QRectF bestRect;
-    int bestDepth = -1;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        for (const ChildLayout &child : area.children) {
-            if (!child.rect.contains(scenePosition))
-                continue;
-
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
-            if (!node || node->type != SceneDocument::TreeNode::Primitive)
-                continue;
-
-            if (area.depth > bestDepth) {
-                bestNode = node;
-                bestRect = child.rect;
-                bestDepth = area.depth;
-            }
-        }
-    }
-
-    if (!bestNode)
-        return false;
-
-    const ShapeNode *shape = m_scene->shapeById(bestNode->shapeId);
-    if (!shape)
-        return false;
-
-    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
-    const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
-    for (int i = 0; i < controls.size(); ++i) {
-        if (!shapeParameterControlRect(bestRect, i, controls.size()).contains(scenePosition))
-            continue;
-
-        const QVector<ExpressionNumberControl> numControls =
-            shapeParameterNumberControls(bestRect, i, controls.size(), controls[i].expression, hitMetrics);
-        for (const ExpressionNumberControl &nc : numControls) {
-            if (!nc.rect.contains(scenePosition))
-                continue;
-
-            if (shapeId)    *shapeId    = bestNode->shapeId;
-            if (nodeId)     *nodeId     = bestNode->id;
-            if (parameter)  *parameter  = i;
-            if (numberStart)  *numberStart  = nc.start;
-            if (numberLength) *numberLength = nc.length;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool SceneTreeGraphicsWidget::polyhedronTableControlAt(const QPointF &scenePosition,
-                                                       PolyhedronTableItem::Cell *cell) const
-{
-    if (!cell) return false;
-    // Iterate all tree items looking for a PolyhedronTableItem under the cursor
-    for (QGraphicsItem *item : m_treeItems) {
-        auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
-        if (!tableItem) continue;
-        if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
-            continue;
-        *cell = tableItem->cellAt(tableItem->mapFromScene(scenePosition));
-        return cell->type != PolyhedronTableItem::Cell::None;
-    }
-    return false;
-}
-
-int SceneTreeGraphicsWidget::polyhedronGroupIdForCell(const QPointF &scenePosition) const
-{
-    for (QGraphicsItem *item : m_treeItems) {
-        auto *tableItem = dynamic_cast<PolyhedronTableItem *>(item);
-        if (!tableItem) continue;
-        if (!tableItem->boundingRect().contains(tableItem->mapFromScene(scenePosition)))
-            continue;
-        return tableItem->groupNodeId();
-    }
-    return 0;
-}
-
-bool SceneTreeGraphicsWidget::polygon2DTableControlAt(const QPointF &scenePosition,
-                                                      Polygon2DTableItem::Cell *cell) const
-{
-    if (!cell) return false;
-    for (QGraphicsItem *item : m_treeItems) {
-        auto *tableItem = dynamic_cast<Polygon2DTableItem *>(item);
-        if (!tableItem) continue;
-        const QPointF local = tableItem->mapFromScene(scenePosition);
-        if (!tableItem->boundingRect().contains(local))
-            continue;
-        *cell = tableItem->cellAt(local);
-        return cell->type != Polygon2DTableItem::Cell::None;
-    }
-    return false;
-}
-
-bool SceneTreeGraphicsWidget::variableNumberControlAt(const QPointF &scenePosition,
-                                                      int *nodeId,
-                                                      int *start,
-                                                      int *length) const
-{
-    if (!m_scene)
-        return false;
-
-    const SceneDocument::TreeNode *bestNode = nullptr;
-    QRectF bestRect;
-    int bestDepth = -1;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        for (const ChildLayout &child : area.children) {
-            if (!child.rect.contains(scenePosition))
-                continue;
-
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
-            if (!node || node->type != SceneDocument::TreeNode::Variable)
-                continue;
-
-            if (area.depth > bestDepth) {
-                bestNode = node;
-                bestRect = child.rect;
-                bestDepth = area.depth;
-            }
-        }
-    }
-
-    if (!bestNode)
-        return false;
-
-    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
-    const qreal hitNameW = hitMetrics.horizontalAdvance(bestNode->variableName);
-    const QVector<ExpressionNumberControl> controls = expressionNumberControls(bestRect, bestNode->variableExpression, hitMetrics, hitNameW);
-    for (const ExpressionNumberControl &control : controls) {
-        if (!control.rect.contains(scenePosition))
-            continue;
-
-        if (nodeId)
-            *nodeId = bestNode->id;
-        if (start)
-            *start = control.start;
-        if (length)
-            *length = control.length;
-        return true;
-    }
-
-    return false;
-}
-
-bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &scenePosition,
-                                                    int *nodeId,
-                                                    int *start,
-                                                    int *length) const
-{
-    if (!m_scene)
-        return false;
-
-    const GroupHitArea *bestArea = nullptr;
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        if (area.collapsed || area.operation != SceneDocument::TreeNode::For || !area.rect.contains(scenePosition))
-            continue;
-
-        if (!bestArea || area.depth > bestArea->depth)
-            bestArea = &area;
-    }
-
-    if (!bestArea)
-        return false;
-
-    const SceneDocument::TreeNode *node = m_scene->treeNodeById(bestArea->groupId);
-    if (!node || node->type != SceneDocument::TreeNode::Group || node->operation != SceneDocument::TreeNode::For)
-        return false;
-
-    const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
-    const QString variableName = forLoopVariableName(*node);
-    const QString rangeExpression = forLoopRangeExpression(*node);
-    const QVector<ExpressionNumberControl> controls =
-        forLoopRangeNumberControls(bestArea->rect, variableName, rangeExpression, hitMetrics);
-    for (const ExpressionNumberControl &control : controls) {
-        if (!control.rect.contains(scenePosition))
-            continue;
-
-        if (nodeId)
-            *nodeId = node->id;
-        if (start)
-            *start = control.start;
-        if (length)
-            *length = control.length;
-        return true;
-    }
-
-    return false;
-}
-
-
-
-bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &scenePosition,
-                                                        int *moduleCallNodeId,
-                                                        int *paramVarNodeId,
-                                                        int *start,
-                                                        int *length) const
-{
-    if (!m_scene)
-        return false;
-
-    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-        for (const ChildLayout &child : area.children) {
-            if (!child.rect.contains(scenePosition))
-                continue;
-
-            const SceneDocument::TreeNode *node = m_scene->treeNodeById(child.nodeId);
-            if (!node || node->type != SceneDocument::TreeNode::ModuleCall)
-                continue;
-
-            const SceneDocument::TreeNode *modGroup = m_scene->treeNodeById(node->shapeId);
-            if (!modGroup || modGroup->operation != SceneDocument::TreeNode::Module)
-                continue;
-
-            QVector<ModuleCallParam> params;
-            const QHash<QString, QString> overrides = resolveModuleArguments(node->moduleCallArguments, *modGroup);
-            for (const SceneDocument::TreeNode &pChild : modGroup->children) {
-                if (pChild.type == SceneDocument::TreeNode::Variable && pChild.isParameter) {
-                    const QString expr = overrides.value(pChild.variableName,
-                                                         pChild.variableExpression.trimmed().isEmpty()
-                                                             ? QString::number(pChild.variableValue)
-                                                             : pChild.variableExpression.trimmed());
-                    params.append({pChild.id, pChild.variableName, expr});
-                }
-            }
-
-            if (params.isEmpty())
-                continue;
-
-            const QFontMetricsF hitMetrics(sceneTreeGraphicsFont());
-            const QVector<ModuleCallParamControl> controls =
-                moduleCallParamControls(child.rect, node->moduleName, params, hitMetrics);
-            for (const ModuleCallParamControl &ctrl : controls) {
-                if (!ctrl.rect.contains(scenePosition))
-                    continue;
-                if (moduleCallNodeId)
-                    *moduleCallNodeId = node->id;
-                if (paramVarNodeId)
-                    *paramVarNodeId = ctrl.paramVarNodeId;
-                if (start)
-                    *start = ctrl.numberStart;
-                if (length)
-                    *length = ctrl.numberLength;
-                return true;
-            }
-        }
-    }
-    return false;
-}
 
 bool SceneTreeGraphicsWidget::handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps)
 {
@@ -3351,134 +2444,15 @@ QRectF SceneTreeGraphicsWidget::rectForChildNode(int nodeId) const
     return QRectF();
 }
 
-void SceneTreeGraphicsWidget::showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId)
-{
-    m_dragActive = true;
-    if (m_thumbnailCache)
-        m_thumbnailCache->setSuspended(true);
-    if (m_groupThumbnailCache)
-        m_groupThumbnailCache->setSuspended(true);
-
-    const QSizeF effectivePreviewSize = previewSize.isValid() ? previewSize : defaultPreviewSize();
-    const DropTarget target = dropTargetForToolAt(scenePosition,
-                                                  effectivePreviewSize,
-                                                  previewTool,
-                                                  movingNodeId,
-                                                  movingNodeId <= 0);
-
-    emit dropPreviewChanged(previewTool, movingNodeId, target, scenePosition);
-
-    startDropPreviewAnimation(target, previewTool, movingNodeId, LiveDropPreviewDurationMs);
-}
+void SceneTreeGraphicsWidget::showDropPreview(const QPointF &p, const QSizeF &sz,
+                                              const QString &tool, int nodeId)
+{ m_dropPreview->show(p, sz, tool, nodeId); }
 
 void SceneTreeGraphicsWidget::finishDropPreview()
-{
-    if (!m_dropPreviewActive) {
-        clearDropPreview();
-        return;
-    }
-
-    m_dropPreviewFinishing = true;
-    startDropPreviewAnimation(m_dropPreviewTarget,
-                              m_dropPreviewTool,
-                              m_dropPreviewMovingNodeId,
-                              ReleaseDropPreviewDurationMs);
-}
+{ m_dropPreview->finish(); }
 
 void SceneTreeGraphicsWidget::clearDropPreview()
-{
-    if (m_dropPreviewAnimationTimer)
-        m_dropPreviewAnimationTimer->stop();
-    m_dragActive = false;
-    m_dropPreviewActive = false;
-    m_dropPreviewFinishing = false;
-    m_dropPreviewProgress = 0.0;
-    m_dropPreviewStartTarget = DropTarget();
-    m_dropPreviewTarget = DropTarget();
-    m_dropPreviewCurrentTarget = DropTarget();
-    m_dropPreviewTool.clear();
-    m_dropPreviewMovingNodeId = 0;
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
-    setTreeItemsVisible(true);
-    if (m_thumbnailCache)
-        m_thumbnailCache->setSuspended(false);
-    if (m_groupThumbnailCache)
-        m_groupThumbnailCache->setSuspended(false);
-}
-
-void SceneTreeGraphicsWidget::startDropPreviewAnimation(const DropTarget &target,
-                                                        const QString &previewTool,
-                                                        int movingNodeId,
-                                                        qreal durationMs)
-{
-    const bool samePreviewKind = m_dropPreviewActive
-                                 && m_dropPreviewTool == previewTool
-                                 && m_dropPreviewMovingNodeId == movingNodeId;
-    if (samePreviewKind && dropTargetNear(target, m_dropPreviewTarget))
-        return;
-
-    m_dropPreviewStartTarget = samePreviewKind
-                                   ? m_dropPreviewCurrentTarget
-                                   : collapsedDropTarget(target);
-    m_dropPreviewTarget = target;
-    m_dropPreviewTool = previewTool;
-    m_dropPreviewMovingNodeId = movingNodeId;
-    m_dropPreviewDurationMs = qMax<qreal>(1.0, durationMs);
-    m_dropPreviewProgress = 0.0;
-    m_dropPreviewActive = true;
-
-    if (!samePreviewKind)
-        renderDropPreviewFrame(m_dropPreviewStartTarget);
-    if (m_dropPreviewAnimationTimer)
-        m_dropPreviewAnimationTimer->start();
-}
-
-void SceneTreeGraphicsWidget::advanceDropPreviewAnimation()
-{
-    if (!m_dropPreviewActive)
-        return;
-
-    m_dropPreviewProgress = qMin<qreal>(1.0, m_dropPreviewProgress + 16.0 / m_dropPreviewDurationMs);
-    const DropTarget frame = interpolatedDropTarget(m_dropPreviewStartTarget,
-                                                    m_dropPreviewTarget,
-                                                    m_dropPreviewProgress);
-    renderDropPreviewFrame(frame);
-
-    if (m_dropPreviewProgress >= 1.0 && m_dropPreviewAnimationTimer)
-        m_dropPreviewAnimationTimer->stop();
-}
-
-void SceneTreeGraphicsWidget::renderDropPreviewFrame(const DropTarget &target)
-{
-    m_dropPreviewCurrentTarget = target;
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme).clear();
-    setTreeItemsVisible(true);
-
-    SceneTreePreviewRenderer(m_graphicsScene, &m_dropPreviewItems, m_scene, &m_treeLayout, m_treeTheme)
-        .render(target, m_dropPreviewTool, m_dropPreviewMovingNodeId);
-}
-
-void SceneTreeGraphicsWidget::scheduleDropCommit(std::function<void()> action)
-{
-    if (!action)
-        return;
-
-    if (!m_dropPreviewFinishing) {
-        clearDropPreview();
-        action();
-        return;
-    }
-
-    // Defer the actual scene mutation until the current mouse-release handler
-    // returns, so the QGraphicsItem that emitted the drop is not deleted while
-    // still executing.  Do not wait for the release preview animation here:
-    // keeping a transient preview alive during refresh/toolbar rebuilds can
-    // leave the tree canvas stuck in drag state.
-    QTimer::singleShot(0, this, [this, action = std::move(action)]() mutable {
-        clearDropPreview();
-        action();
-    });
-}
+{ m_dropPreview->clear(); }
 
 void SceneTreeGraphicsWidget::setTreeItemsVisible(bool visible)
 {

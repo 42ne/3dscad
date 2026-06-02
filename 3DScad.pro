@@ -44,6 +44,9 @@ SOURCES += \
     scenetreepalette.cpp \
     scenetreepreviewrenderer.cpp \
     scenetreetoolbarrenderer.cpp \
+    scenetreeoverlaycontroller.cpp \
+    scenetreedroppreviewcontroller.cpp \
+    scenetreehittestmanager.cpp \
     scenetree.cpp \
     scenemesh.cpp \
     scenedocument.cpp \
@@ -85,6 +88,10 @@ HEADERS += \
     scenetreepalette.h \
     scenetreepreviewrenderer.h \
     scenetreetoolbarrenderer.h \
+    scenetreeoverlaycontroller.h \
+    scenetreedroppreviewcontroller.h \
+    scenetreehittestmanager.h \
+    scenetreeoverlaygraphicsitems.h \
     scenetree.h \
     scenemesh.h \
     scenedocument.h \

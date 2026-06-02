@@ -200,7 +200,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     shadow->setZValue(LocalOverlayZ - 2.0);
     shadow->setOpacity(darkGlass ? 0.72 : 0.42);
     shadow->setData(0, QStringLiteral("shadow"));
-    m_widget->m_toolbarItems.append(shadow);
+    m_widget->m_overlay->m_items.append(shadow);
 
     QPainterPath path;
     path.addRoundedRect(panelLocal, 8.0, 8.0);
@@ -219,7 +219,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     panel->setPos(panelTopLeft);
     panel->setZValue(LocalOverlayZ - 1.0);
     panel->setData(0, QStringLiteral("glass_hint"));
-    m_widget->m_toolbarItems.append(panel);
+    m_widget->m_overlay->m_items.append(panel);
 
     auto *text = m_widget->m_graphicsScene->addText(hint, font);
     text->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
@@ -231,7 +231,7 @@ void SceneTreeHoverManager::drawHintOverlay()
     text->setPos(scenePoint(panelX + PadH, qMax<qreal>(OverlayMargin, panelY) + PadV));
     text->setZValue(LocalOverlayZ);
     text->setData(0, QStringLiteral("glass_hint"));
-    m_widget->m_toolbarItems.append(text);
+    m_widget->m_overlay->m_items.append(text);
 }
 
 void SceneTreeHoverManager::updateTooltip(const QPoint &globalPosition,

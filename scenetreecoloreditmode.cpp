@@ -113,7 +113,7 @@ SceneTreeColorEditMode::zoneAt(const QPointF &scenePos) const
     const QPointF vpCursor(m_widget->mapFromScene(scenePos));
     QGraphicsItem *topToolbarItem = nullptr;
     qreal topZ = -1.0;
-    for (QGraphicsItem *it : m_widget->m_toolbarItems) {
+    for (QGraphicsItem *it : m_widget->m_overlay->m_items) {
         if (!it->isVisible())
             continue;
         const QRectF vpRect = it->boundingRect().translated(m_widget->mapFromScene(it->pos()));

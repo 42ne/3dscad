@@ -5,6 +5,9 @@
 #include "scenetreelayout.h"
 #include "scenetreenoderenderer.h"
 #include "scenetreepalette.h"
+#include "scenetreeoverlaycontroller.h"
+#include "scenetreedroppreviewcontroller.h"
+#include "scenetreehittestmanager.h"
 
 #include <QGraphicsPathItem>
 #include <QGraphicsView>
@@ -152,17 +155,15 @@ private:
     friend class SceneTreeHoverManager;
     friend class SceneTreeInlineEditor;
     friend class SceneCanvasDragHandler;
+    friend class SceneTreeOverlayController;
+    friend class SceneTreeDropPreviewController;
+    friend class SceneTreeHitTestManager;
     void clearColorEditHighlight();
     void updateColorEditHighlight(const QPointF &scenePos);
 
-    QRectF drawToolbar();
-    void drawThemeSwitcher();
-    void drawCanvasBackgroundSwitcher();
-    void clearToolbar();
     void updateToolbarOverlay();
     void repositionToolbarItems();
-    void handleThemeSwitcherClick(int themeIndex);
-    void handleCanvasBackgroundSwitcherClick(int backgroundIndex);
+    void repositionToolbarItemsSync();
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
@@ -183,13 +184,8 @@ private:
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     void snapZoom();
-    // Returns the snap side (0=top, 1=left, 2=right) for a viewport-pixel point.
     int  toolbarSnapSideForVpPos(QPoint vpPos) const;
-    // Returns true if vpPos is over the toolbar glass panel but NOT over a tool icon.
     bool isOnToolbarBackground(QPointF vpPos) const;
-    // Reposition toolbar items synchronously without the updateToolbarOverlay()
-    // fallback — safe to call from scrollContentsBy (no item removal).
-    void repositionToolbarItemsSync();
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
@@ -200,15 +196,15 @@ private:
     bool handleModuleCallParamWheel(const QPointF &scenePosition, int wheelSteps);
     QRectF groupRectForNode(int groupId) const;
     QRectF rectForChildNode(int nodeId) const;
-    bool transformControlAt(const QPointF &scenePosition, int *groupId, SceneDocument::TreeNode::Operation *operation, int *axis, int *numberStart = nullptr, int *numberLength = nullptr) const;
-    bool colorChannelControlAt(const QPointF &scenePosition, int *groupId, int *channel) const;
-    bool shapeParameterControlAt(const QPointF &scenePosition, int *shapeId, int *nodeId, int *parameter, int *numberStart, int *numberLength) const;
-    bool polyhedronTableControlAt(const QPointF &scenePosition, PolyhedronTableItem::Cell *cell) const;
-    int polyhedronGroupIdForCell(const QPointF &scenePosition) const;
-    bool polygon2DTableControlAt(const QPointF &scenePosition, Polygon2DTableItem::Cell *cell) const;
-    bool variableNumberControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
-    bool forLoopRangeControlAt(const QPointF &scenePosition, int *nodeId, int *start, int *length) const;
-    bool moduleCallParamControlAt(const QPointF &scenePosition, int *moduleCallNodeId, int *paramVarNodeId, int *start, int *length) const;
+    bool transformControlAt(const QPointF &p, int *gId, SceneDocument::TreeNode::Operation *op, int *ax, int *ns = nullptr, int *nl = nullptr) const;
+    bool colorChannelControlAt(const QPointF &p, int *gId, int *ch) const;
+    bool shapeParameterControlAt(const QPointF &p, int *sId, int *nId, int *param, int *ns, int *nl) const;
+    bool polyhedronTableControlAt(const QPointF &p, PolyhedronTableItem::Cell *cell) const;
+    int  polyhedronGroupIdForCell(const QPointF &p) const;
+    bool polygon2DTableControlAt(const QPointF &p, Polygon2DTableItem::Cell *cell) const;
+    bool variableNumberControlAt(const QPointF &p, int *nId, int *s, int *l) const;
+    bool forLoopRangeControlAt(const QPointF &p, int *nId, int *s, int *l) const;
+    bool moduleCallParamControlAt(const QPointF &p, int *mcId, int *pvId, int *s, int *l) const;
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void finishDropPreview();
     void clearDropPreview();
@@ -233,9 +229,6 @@ private:
     SceneTreeLayout m_treeLayout;
     QSet<int> m_collapsedGroupIds;
     QVector<QGraphicsItem *> m_treeItems;
-    QVector<QGraphicsItem *> m_toolbarItems;
-    QVector<QGraphicsItem *> m_dropPreviewItems;
-    QTimer *m_dropPreviewAnimationTimer = nullptr;
     QVariantAnimation *m_focusAnimation = nullptr;
 
     // ── Canvas-move drag ───────────────────────────────────────────────────────
@@ -249,10 +242,6 @@ private:
     QHash<int, QPointF>       m_nodeCanvasPositions; // custom top-lefts; absent → auto
 
     static constexpr qreal kGripStripH = 20.0;
-
-    // Pending canvas position for the next toolbar-drop insertion.
-    bool    m_hasPendingInsertPos         = false;
-    QPointF m_pendingInsertCanvasPosition;
 
     // ── Rename zones ──────────────────────────────────────────────────────────
     struct RenameZone {
@@ -269,22 +258,17 @@ private:
     QSet<int> m_selectedPolyhedronElementNodeIds;
     QSet<QString> m_selectedPolygonPointKeys;
 
-    // ── Color-edit paint mode ─────────────────────────────────────────────────
-    SceneTreeHoverManager  *m_hoverManager      = nullptr;
-    SceneTreeInlineEditor  *m_inlineEditor      = nullptr;
-    SceneCanvasDragHandler *m_canvasDragHandler = nullptr;
-    SceneTreeColorEditMode *m_colorEdit         = nullptr;
-    QGraphicsItem  *m_colorEditToggleItem  = nullptr; // pointer to the toggle for priority check
+    // ── Subsystem controllers ─────────────────────────────────────────────────
+    SceneTreeHoverManager         *m_hoverManager      = nullptr;
+    SceneTreeInlineEditor         *m_inlineEditor      = nullptr;
+    SceneCanvasDragHandler        *m_canvasDragHandler = nullptr;
+    SceneTreeColorEditMode        *m_colorEdit         = nullptr;
+    SceneTreeOverlayController    *m_overlay           = nullptr;
+    SceneTreeDropPreviewController *m_dropPreview      = nullptr;
+    SceneTreeHitTestManager        *m_hitTest          = nullptr;
     QPoint m_lastPanPoint;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
-    DropTarget m_dropPreviewStartTarget;
-    DropTarget m_dropPreviewTarget;
-    DropTarget m_dropPreviewCurrentTarget;
-    QString m_dropPreviewTool;
-    int m_dropPreviewMovingNodeId = 0;
-    qreal m_dropPreviewProgress = 0.0;
-    qreal m_dropPreviewDurationMs = 180.0;
     bool m_panning = false;
     QPointF m_panVelocity;
     QTimer *m_panInertiaTimer = nullptr;
@@ -299,28 +283,7 @@ private:
     QTimer *m_zoomIdleTimer  = nullptr;
     QPointF m_zoomAnchorScene;
     bool m_dragActive = false;
-    bool m_dropPreviewActive = false;
-    bool m_dropPreviewFinishing = false;
     bool m_treeItemsVisible = true;
-    bool m_toolbarRepositionPending = false;
-
-    // Viewport-pixel offsets for each toolbar item — used by repositionToolbarItems()
-    // to reposition without recreating. Kept in sync with m_toolbarItems by updateToolbarOverlay().
-    QVector<QPointF> m_toolbarVpOffsets;
-
-    // ── Toolbar docking & drag ─────────────────────────────────────────────────
-    // Side: 0 = top (horizontal, default), 1 = left (vertical), 2 = right (vertical)
-    int m_toolbarSide = 0;
-
-    // Viewport-pixel rect of the toolbar glass panel and each tool icon.
-    // Rebuilt by drawToolbar(); used for drag-zone hit testing.
-    QRectF          m_toolbarPanelVpRect;
-    QVector<QRectF> m_toolbarToolVpRects;
-
-    // Toolbar drag state (threshold: cursor must move ≥ 8 px before drag activates)
-    bool   m_toolbarDragPending = false;
-    bool   m_toolbarDragActive  = false;
-    QPoint m_toolbarDragPressVp;
 };
 
 #endif
