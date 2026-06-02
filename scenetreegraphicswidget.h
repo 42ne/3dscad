@@ -295,6 +295,7 @@ private:
     bool m_dropPreviewActive = false;
     bool m_dropPreviewFinishing = false;
     bool m_treeItemsVisible = true;
+    bool m_toolbarRepositionPending = false;
 
     // Viewport-pixel offsets for each toolbar item — used by repositionToolbarItems()
     // to reposition without recreating. Kept in sync with m_toolbarItems by updateToolbarOverlay().

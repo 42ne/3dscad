@@ -592,9 +592,21 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
             m_zoomVelocity *= kVelFriction;                  // 0.94
         }
 
-        // ── Apply zoom with stable anchor ───────────────────────────────────
+        // ── Apply zoom with stable anchor (clamped to safe range) ──────────
+        // kMinZoom guards against scene-scale ~0 which causes GDI font-engine
+        // failures (GetGlyphOutline error 1003) when toolbar text items are
+        // rebuilt at an extreme inverse transform.
+        constexpr qreal kMinZoom = 0.05;
+        constexpr qreal kMaxZoom = 8.0;
+        const qreal currentScale = transform().m11();
+        const qreal clampedStep  = qBound(kMinZoom / currentScale, step,
+                                          kMaxZoom / currentScale);
+        if (qAbs(clampedStep - step) > 1e-9) {
+            m_zoomVelocity = 0.0;
+            m_zoomAccel    = 0.0;
+        }
         QPointF anchorVp = mapFromScene(m_zoomAnchorScene);
-        scale(step, step);
+        scale(clampedStep, clampedStep);
         QPointF anchorVpAfter = mapFromScene(m_zoomAnchorScene);
         QPointF vpDelta = anchorVpAfter - anchorVp;
         horizontalScrollBar()->setValue(
@@ -619,10 +631,9 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
         }
 
         // ── Reposition UI when zoom actually changed noticeably ──────────
-        // During animation: cheap reposition only (scrollContentsBy from the
-        // scroll bar adjustments above usually covers this, but reposition here
-        // too in case the anchor scroll delta was zero).
-        // After stop: one full rebuild so toolbarScale-dependent layout is correct.
+        // During animation: cheap reposition only — avoids addText() calls
+        // (drawHintOverlay) at extreme scene scales that trigger GDI failures.
+        // After stop: full rebuild at a stable, clamped scale.
         if (qAbs(newLevel - m_zoomLevel) > 0.001) {
             m_zoomLevel = newLevel;
             m_inlineEditor->updateInlineInputGeometry();
@@ -1400,7 +1411,15 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
     m_hoverManager->updatePolygonPointHover(QPointF(), false);
     if (changed && !m_dragActive)
         m_hoverManager->updateHighlightOverlay();
-    repositionToolbarItems();
+    // Defer toolbar reposition: calling it synchronously here risks re-entrant
+    // item access while Qt's hover-event dispatch is still on the call stack.
+    if (!m_toolbarRepositionPending) {
+        m_toolbarRepositionPending = true;
+        QTimer::singleShot(0, this, [this]() {
+            m_toolbarRepositionPending = false;
+            repositionToolbarItems();
+        });
+    }
 }
 
 void SceneTreeGraphicsWidget::keyReleaseEvent(QKeyEvent *event)
@@ -1539,14 +1558,19 @@ QRectF SceneTreeGraphicsWidget::drawToolbar()
 void SceneTreeGraphicsWidget::clearToolbar()
 {
     m_colorEditToggleItem = nullptr;
-    for (QGraphicsItem *item : m_toolbarItems) {
+    const QVector<QGraphicsItem *> toDelete = m_toolbarItems;
+    for (QGraphicsItem *item : toDelete) {
         if (!item)
             continue;
         m_graphicsScene->removeItem(item);
-        delete item;
     }
     m_toolbarItems.clear();
     m_toolbarVpOffsets.clear();
+    // Defer actual deletion: removeItem() already prevents new events from reaching
+    // these items, but QGraphicsScene's hover-tracking may still hold the raw pointer
+    // until the current event-loop iteration finishes.  Deleting here causes a
+    // use-after-free when scrollContentsBy -> dispatchHoverEvent fires synchronously.
+    QTimer::singleShot(0, this, [toDelete]() { qDeleteAll(toDelete); });
 }
 
 void SceneTreeGraphicsWidget::updateToolbarOverlay()
