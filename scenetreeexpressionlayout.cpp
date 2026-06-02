@@ -1,4 +1,6 @@
-#include "scenetreegraphicshelpers.h"
+#include "scenetreecanvasgraphics.h"
+#include "scenetreeexpressionlayout.h"
+#include "scenetreetoolmetadata.h"
 
 #include <QFontMetricsF>
 #include <QtGlobal>

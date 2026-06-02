@@ -1,4 +1,4 @@
-#include "scenetreegraphicshelpers.h"
+#include "scenetreecanvasgraphics.h"
 #include "scenetreepalette.h"
 
 #include <QApplication>

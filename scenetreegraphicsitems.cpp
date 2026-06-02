@@ -1,4 +1,7 @@
-#include "scenetreegraphicshelpers.h"
+#include "scenetreegraphicsitems.h"
+#include "scenetreeiconpainter.h"
+#include "scenetreepreviewgeometry.h"
+#include "scenetreetoolmetadata.h"
 #include "scenetreepalette.h"
 
 #include <QBrush>

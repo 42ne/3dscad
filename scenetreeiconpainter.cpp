@@ -1,7 +1,8 @@
-#include "scenetreegraphicshelpers.h"
+#include "scenetreeiconpainter.h"
 
 #include <QLinearGradient>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPen>
 #include <QPolygonF>
 #include <cmath>

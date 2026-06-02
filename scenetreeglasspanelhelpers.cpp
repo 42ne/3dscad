@@ -1,4 +1,4 @@
-#include "scenetreegraphicshelpers.h"
+#include "scenetreeglasspanelhelpers.h"
 
 #include <QBrush>
 #include <QGraphicsItem>

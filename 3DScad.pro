@@ -84,7 +84,15 @@ HEADERS += \
     openscadgenerator.h \
     openscadparser.h \
     scenecommands.h \
+    scenetreecanvasgraphics.h \
+    scenetreeexpressionlayout.h \
+    scenetreeglasspanelhelpers.h \
+    scenetreegraphicsconstants.h \
     scenetreegraphicshelpers.h \
+    scenetreegraphicsitems.h \
+    scenetreeiconpainter.h \
+    scenetreepreviewgeometry.h \
+    scenetreetoolmetadata.h \
     scenetreecoloreditmode.h \
     scenetreehovermanager.h \
     scenetreeinlineeditor.h \
