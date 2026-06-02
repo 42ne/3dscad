@@ -10,10 +10,12 @@
 #include "scenetreenoderenderer.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QFont>
 #include <QFontMetricsF>
 #include <QGraphicsScene>
 #include <QGraphicsItem>
+#include <QGraphicsTextItem>
 #include <QPainterPath>
 #include <QTextDocument>
 #include <QPen>
@@ -131,9 +133,11 @@ void SceneTreeHoverManager::drawHintOverlay()
     if (!m_widget->m_graphicsScene || !m_widget->viewport())
         return;
 
-    const QString hint = m_hoverHintText.trimmed().isEmpty()
-                             ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
-                             : m_hoverHintText;
+    m_hintTextItem.clear();
+    const QString baseHint = m_hoverHintText.trimmed().isEmpty()
+                                 ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
+                                 : m_hoverHintText;
+    const QString hint = hintOverlayText(baseHint);
 
     const QPointF viewportTopLeft = m_widget->mapToScene(QPoint(0, 0));
     const qreal viewportWidth = m_widget->viewport()->width();
@@ -149,11 +153,14 @@ void SceneTreeHoverManager::drawHintOverlay()
     constexpr qreal ThemePanelHeight = 26.0;
     constexpr qreal BackgroundPanelHeight = 26.0;
     constexpr qreal SwitcherRowGap = 8.0;
+    constexpr qreal ToggleWidth = 16.0;
+    constexpr qreal ToggleGap = 7.0;
     constexpr qreal Gap = 14.0;
     constexpr qreal PadH = 12.0;
     constexpr qreal PadV = 9.0;
 
-    qreal panelX = OverlayMargin + ThemePanelWidth + Gap;
+    const qreal bottomControlsWidth = ThemePanelWidth + ToggleGap + ToggleWidth + ToggleGap + ToggleWidth;
+    qreal panelX = OverlayMargin + bottomControlsWidth + Gap;
     qreal availableW = viewportWidth - panelX - OverlayMargin;
     if (availableW < 260.0) {
         panelX = OverlayMargin;
@@ -198,6 +205,40 @@ void SceneTreeHoverManager::drawHintOverlay()
     text->setZValue(HintOverlayZ);
     text->setData(0, QStringLiteral("glass_hint"));
     m_widget->m_overlay->m_items.append(text);
+    m_hintTextItem = text;
+}
+
+QString SceneTreeHoverManager::hintOverlayText(const QString &baseHint) const
+{
+    if (!m_widget->m_canvasController || !m_widget->m_canvasController->isZoomAnimating())
+        return baseHint;
+
+    const qreal fps = m_widget->averageViewportFps();
+    const QString fpsText = fps > 0.0 ? QString::number(fps, 'f', 1) : QStringLiteral("--");
+    return baseHint + QStringLiteral("\nAverage FPS: ") + fpsText
+           + QStringLiteral("  |  Zoom cache: ")
+           + (m_widget->treeZoomSnapshotCacheEnabled()
+                  ? QStringLiteral("ON")
+                  : QStringLiteral("OFF"));
+}
+
+void SceneTreeHoverManager::updateZoomFpsHintThrottled(bool force)
+{
+    if (!m_widget->m_canvasController || !m_widget->m_canvasController->isZoomAnimating())
+        return;
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (!force && nowMs - m_lastZoomFpsHintMs < 250)
+        return;
+    m_lastZoomFpsHintMs = nowMs;
+
+    if (!m_hintTextItem)
+        return;
+
+    const QString baseHint = m_hoverHintText.trimmed().isEmpty()
+                                 ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
+                                 : m_hoverHintText;
+    m_hintTextItem->setPlainText(hintOverlayText(baseHint));
 }
 
 void SceneTreeHoverManager::updateTooltip(const QPoint &globalPosition,

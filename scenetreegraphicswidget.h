@@ -11,6 +11,7 @@
 #include "scenetreecanvascontroller.h"
 #include "scenetreeinlineeditor.h"
 
+#include <QElapsedTimer>
 #include <QGraphicsPathItem>
 #include <QGraphicsView>
 #include <QHash>
@@ -22,6 +23,7 @@
 class QEvent;
 class QGraphicsScene;
 class QGraphicsItem;
+class QGraphicsPixmapItem;
 class QKeyEvent;
 class QMouseEvent;
 class QPainter;
@@ -62,6 +64,9 @@ public:
     // Enable / disable the in-app color-edit paint mode.
     void setColorEditMode(bool enabled);
     bool colorEditMode() const;
+    void setTreeZoomSnapshotCacheEnabled(bool enabled);
+    bool treeZoomSnapshotCacheEnabled() const { return m_treeZoomSnapshotEnabled; }
+    qreal averageViewportFps() const;
     void compactRootBlocksAndFit();
     void focusSelectedNodeAnimated();
 
@@ -153,6 +158,8 @@ private:
     void updateToolbarOverlay();
     void repositionToolbarItems();
     void repositionToolbarItemsSync();
+    void beginTreeZoomSnapshot();
+    void endTreeZoomSnapshot();
     void resetGraphicsScene();
     void drawTreeOrPlaceholder();
     void addNodeDragHandle(int nodeId, const QString &label, const QRectF &handleRect, const QRectF &sourceRect, const QSizeF &previewSize);
@@ -251,8 +258,13 @@ private:
     SceneTreeWheelHandler          *m_wheelHandler      = nullptr;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
+    QGraphicsPixmapItem *m_treeZoomSnapshotItem = nullptr;
+    QElapsedTimer m_fpsTimer;
+    qint64 m_lastFpsSampleNs = 0;
+    qreal m_averageFrameMs = 0.0;
     bool m_dragActive = false;
     bool m_treeItemsVisible = true;
+    bool m_treeZoomSnapshotEnabled = true;
 };
 
 #endif

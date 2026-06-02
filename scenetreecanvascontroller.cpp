@@ -1,5 +1,6 @@
 #include "scenetreecanvascontroller.h"
 #include "scenetreegraphicswidget.h"
+#include "scenetreehovermanager.h"
 #include "scenetreeinlineeditor.h"
 
 #include <QGraphicsItem>
@@ -35,6 +36,7 @@ void SceneTreeCanvasController::snapZoom()
     m_zoomAccel    = 0.0;
     m_zoomVelocity = 0.0;
     m_zoomIdle     = true;
+    m_widget->endTreeZoomSnapshot();
 }
 
 bool SceneTreeCanvasController::isZoomAnimating() const
@@ -90,11 +92,13 @@ void SceneTreeCanvasController::handleWheelZoom(QWheelEvent *event)
     m_zoomIdleTimer->start();  // restart — will set idle after 80ms
 
     if (!m_zoomAnimTimer->isActive()) {
+        m_widget->beginTreeZoomSnapshot();
         for (QGraphicsItem *item : m_widget->m_treeItems)
             item->setCacheMode(QGraphicsItem::ItemCoordinateCache);
         m_widget->setRenderHint(QPainter::Antialiasing, false);
         m_widget->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
         m_zoomAnimTimer->start();
+        m_widget->m_hoverManager->updateZoomFpsHintThrottled(true);
     }
     event->accept();
 }
@@ -156,6 +160,7 @@ void SceneTreeCanvasController::tickZoom()
         m_zoomAccel    = 0.0;
         for (QGraphicsItem *item : m_widget->m_treeItems)
             item->setCacheMode(QGraphicsItem::NoCache);
+        m_widget->endTreeZoomSnapshot();
         m_widget->setRenderHint(QPainter::Antialiasing, true);
         m_widget->setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
         m_widget->viewport()->update();
@@ -170,8 +175,10 @@ void SceneTreeCanvasController::tickZoom()
         m_widget->m_inlineEditor->updateInlineInputGeometry();
         if (zoomJustStopped)
             m_widget->updateToolbarOverlay();
-        else
+        else {
             m_widget->repositionToolbarItemsSync();
+            m_widget->m_hoverManager->updateZoomFpsHintThrottled();
+        }
     }
 }
 

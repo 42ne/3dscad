@@ -25,6 +25,7 @@
 #include <QEasingCurve>
 #include <QFontMetricsF>
 #include <QGraphicsEllipseItem>
+#include <QGraphicsPixmapItem>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSimpleTextItem>
@@ -402,6 +403,7 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     clearDropPreview();
     // Remove color-edit overlays before clear() deletes them under us.
     clearColorEditHighlight();
+    m_treeZoomSnapshotItem = nullptr;
     m_graphicsScene->clear();
     m_canvasDragHandler->clearAfterSceneClear();
     m_treeLayout.clear();
@@ -534,6 +536,22 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
 
 void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &rect)
 {
+    if (!m_fpsTimer.isValid()) {
+        m_fpsTimer.start();
+        m_lastFpsSampleNs = m_fpsTimer.nsecsElapsed();
+    } else {
+        const qint64 nowNs = m_fpsTimer.nsecsElapsed();
+        const qint64 deltaNs = nowNs - m_lastFpsSampleNs;
+        m_lastFpsSampleNs = nowNs;
+        if (deltaNs > 0) {
+            const qreal frameMs = qreal(deltaNs) / 1000000.0;
+            if (frameMs < 1000.0)
+                m_averageFrameMs = m_averageFrameMs <= 0.0
+                    ? frameMs
+                    : m_averageFrameMs * 0.9 + frameMs * 0.1;
+        }
+    }
+
     const CanvasBackgroundTheme background = activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
     painter->fillRect(rect, background.background);
     const qreal scale = qMax(0.001, std::abs(transform().m11()));
@@ -1032,6 +1050,92 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
 void SceneTreeGraphicsWidget::repositionToolbarItems()
 { m_overlay->repositionToolbarItems(); }
 
+void SceneTreeGraphicsWidget::beginTreeZoomSnapshot()
+{
+    if (!m_treeZoomSnapshotEnabled || m_treeZoomSnapshotItem || !m_graphicsScene || m_treeItems.isEmpty())
+        return;
+
+    QRectF bounds;
+    qreal maxTreeZ = 0.0;
+    for (QGraphicsItem *item : m_treeItems) {
+        if (!item || !item->isVisible())
+            continue;
+        bounds = bounds.united(item->sceneBoundingRect());
+        maxTreeZ = qMax(maxTreeZ, item->zValue());
+    }
+    if (!bounds.isValid() || bounds.isEmpty())
+        return;
+
+    bounds = bounds.adjusted(-2.0, -2.0, 2.0, 2.0);
+
+    qreal renderScale = qBound<qreal>(0.5, std::abs(transform().m11()), 2.0);
+    QSize pixelSize(int(std::ceil(bounds.width() * renderScale)),
+                    int(std::ceil(bounds.height() * renderScale)));
+    if (pixelSize.width() <= 0 || pixelSize.height() <= 0)
+        return;
+
+    constexpr qint64 MaxSnapshotPixels = 12 * 1024 * 1024;
+    const qint64 pixels = qint64(pixelSize.width()) * qint64(pixelSize.height());
+    if (pixels > MaxSnapshotPixels) {
+        const qreal downscale = std::sqrt(qreal(MaxSnapshotPixels) / qreal(pixels));
+        renderScale *= downscale;
+        pixelSize = QSize(qMax(1, int(std::ceil(bounds.width() * renderScale))),
+                          qMax(1, int(std::ceil(bounds.height() * renderScale))));
+    }
+
+    QPixmap snapshot(pixelSize);
+    snapshot.fill(Qt::transparent);
+
+    QSet<QGraphicsItem *> treeSet;
+    for (QGraphicsItem *item : m_treeItems)
+        if (item)
+            treeSet.insert(item);
+
+    QVector<QGraphicsItem *> hiddenItems;
+    const QList<QGraphicsItem *> allItems = m_graphicsScene->items();
+    for (QGraphicsItem *item : allItems) {
+        if (!item || treeSet.contains(item) || !item->isVisible())
+            continue;
+        hiddenItems.append(item);
+        item->setVisible(false);
+    }
+
+    QPainter painter(&snapshot);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    m_graphicsScene->render(&painter,
+                            QRectF(QPointF(0.0, 0.0), QSizeF(pixelSize)),
+                            bounds,
+                            Qt::IgnoreAspectRatio);
+    painter.end();
+
+    for (QGraphicsItem *item : hiddenItems)
+        if (item)
+            item->setVisible(true);
+
+    auto *snapshotItem = new QGraphicsPixmapItem(snapshot);
+    snapshotItem->setPos(bounds.topLeft());
+    snapshotItem->setScale(1.0 / renderScale);
+    snapshotItem->setZValue(maxTreeZ + 10.0);
+    snapshotItem->setAcceptedMouseButtons(Qt::NoButton);
+    snapshotItem->setAcceptHoverEvents(false);
+    m_graphicsScene->addItem(snapshotItem);
+    m_treeZoomSnapshotItem = snapshotItem;
+
+    setTreeItemsVisible(false);
+}
+
+void SceneTreeGraphicsWidget::endTreeZoomSnapshot()
+{
+    setTreeItemsVisible(true);
+    if (!m_treeZoomSnapshotItem)
+        return;
+
+    m_graphicsScene->removeItem(m_treeZoomSnapshotItem);
+    delete m_treeZoomSnapshotItem;
+    m_treeZoomSnapshotItem = nullptr;
+}
+
 
 // ── Color-edit paint mode ──────────────────────────────────────────────────────
 
@@ -1045,6 +1149,25 @@ void SceneTreeGraphicsWidget::setColorEditMode(bool enabled)
 bool SceneTreeGraphicsWidget::colorEditMode() const
 {
     return m_colorEdit && m_colorEdit->isEnabled();
+}
+
+void SceneTreeGraphicsWidget::setTreeZoomSnapshotCacheEnabled(bool enabled)
+{
+    if (m_treeZoomSnapshotEnabled == enabled)
+        return;
+
+    m_treeZoomSnapshotEnabled = enabled;
+    if (!enabled)
+        endTreeZoomSnapshot();
+
+    QTimer::singleShot(0, this, [this]() {
+        updateToolbarOverlay();
+    });
+}
+
+qreal SceneTreeGraphicsWidget::averageViewportFps() const
+{
+    return m_averageFrameMs > 0.0 ? 1000.0 / m_averageFrameMs : 0.0;
 }
 
 void SceneTreeGraphicsWidget::clearColorEditHighlight()

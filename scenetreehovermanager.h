@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QPoint>
 #include <QPointF>
+#include <QPointer>
 #include <QRectF>
 #include <QString>
 #include <QVector>
@@ -12,6 +13,7 @@
 #include "scenetreegraphicswidget.h"
 
 class QGraphicsItem;
+class QGraphicsTextItem;
 
 class SceneTreeHoverManager : public QObject
 {
@@ -27,6 +29,7 @@ public:
     void clearHighlightOverlay();
     void updateHighlightOverlay();
     void drawHintOverlay();
+    void updateZoomFpsHintThrottled(bool force = false);
     void updateHoverHint(const QString &key, const QString &text);
     const QString &hoverHintKey() const { return m_hoverHintKey; }
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
@@ -43,6 +46,7 @@ private:
     void updatePolygonPointHover(const QPointF &scenePosition, bool enabled);
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     QString hoverHintTextForPosition(const QPointF &scenePosition, bool controlDown, QString *key) const;
+    QString hintOverlayText(const QString &baseHint) const;
 
     SceneTreeGraphicsWidget *m_widget;
 
@@ -68,6 +72,8 @@ private:
     int m_activeModuleCallNumberStart = -1;
     QString m_hoverHintKey;
     QString m_hoverHintText;
+    QPointer<QGraphicsTextItem> m_hintTextItem;
+    qint64 m_lastZoomFpsHintMs = 0;
     QRectF m_hoveredScrollRect;
     QRectF m_hoveredRenameRect;
     QRectF m_hoveredExpressionRect;

@@ -141,6 +141,7 @@ QRectF SceneTreeOverlayController::drawToolbar()
 void SceneTreeOverlayController::clearToolbar()
 {
     m_colorEditToggleItem = nullptr;
+    m_zoomCacheToggleItem = nullptr;
     const QVector<QGraphicsItem *> toDelete = m_items;
     for (QGraphicsItem *item : toDelete) {
         if (!item) continue;
@@ -342,6 +343,59 @@ void SceneTreeOverlayController::drawThemeSwitcher()
         m_widget->m_graphicsScene->addItem(tog);
         m_items.append(tog);
         m_colorEditToggleItem = tog;
+    }
+
+    // Zoom snapshot cache toggle.
+    {
+        constexpr qreal ToggleGap = 7.0;
+        constexpr qreal TW = ColorEditToggleItem::kW;
+        constexpr qreal TH = ColorEditToggleItem::kH;
+
+        const qreal toggleVpX = OverlayMargin + panelW + ToggleGap + TW + ToggleGap;
+        const qreal toggleVpY = viewportHeight - OverlayBottomGap - panelH * 0.5 - TH * 0.5;
+        const QPointF toggleTopLeft = scenePoint(toggleVpX, toggleVpY);
+
+        QPainterPath shadowPath;
+        shadowPath.addRoundedRect(QRectF(1.5, 2.5, TW, TH), TW * 0.5, TW * 0.5);
+        auto *toggleShadow = m_widget->m_graphicsScene->addPath(shadowPath,
+            Qt::NoPen, QBrush(QColor(0, 0, 0, darkGlass ? 85 : 28)));
+        toggleShadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        toggleShadow->setAcceptedMouseButtons(Qt::NoButton);
+        toggleShadow->setPos(toggleTopLeft);
+        toggleShadow->setZValue(OverlayBaseZ - 2.0);
+        toggleShadow->setOpacity(darkGlass ? 0.62 : 0.38);
+        toggleShadow->setData(0, QStringLiteral("shadow"));
+        m_items.append(toggleShadow);
+
+        auto *tog = new ColorEditToggleItem(
+            m_widget->treeZoomSnapshotCacheEnabled(),
+            [this] {
+                m_widget->setTreeZoomSnapshotCacheEnabled(
+                    !m_widget->treeZoomSnapshotCacheEnabled());
+            },
+            [this](bool enter) {
+                if (enter) {
+                    const QString stateStr = m_widget->treeZoomSnapshotCacheEnabled()
+                        ? QStringLiteral("ON - click to disable")
+                        : QStringLiteral("OFF - click to enable");
+                    const qreal fps = m_widget->averageViewportFps();
+                    m_widget->m_hoverManager->updateHoverHint(
+                        QStringLiteral("zoomCache:toggle"),
+                        QStringLiteral("Zoom bitmap cache  ") + stateStr
+                        + QStringLiteral("\nAverage FPS: ")
+                        + (fps > 0.0 ? QString::number(fps, 'f', 1) : QStringLiteral("--"))
+                        + QStringLiteral("\nCompare zoom smoothness with this switch."));
+                } else {
+                    m_widget->m_hoverManager->updateHoverHint(QString(), QString());
+                }
+            });
+        tog->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+        tog->setPos(toggleTopLeft);
+        tog->setZValue(OverlayBaseZ + 0.5);
+        tog->setData(0, QStringLiteral("toggle"));
+        m_widget->m_graphicsScene->addItem(tog);
+        m_items.append(tog);
+        m_zoomCacheToggleItem = tog;
     }
 }
 

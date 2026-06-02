@@ -74,6 +74,7 @@ private:
 
     // Pointer to the color-edit toggle item so the widget can detect hover priority
     QGraphicsItem *m_colorEditToggleItem = nullptr;
+    QGraphicsItem *m_zoomCacheToggleItem = nullptr;
 };
 
 #endif // SCENETREEOVERLAYCONTROLLER_H
