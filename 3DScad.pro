@@ -32,7 +32,13 @@ SOURCES += \
     openscadgenerator.cpp \
     openscadparser.cpp \
     scenecommands.cpp \
-    scenetreegraphicshelpers.cpp \
+    scenetreecanvasgraphics.cpp \
+    scenetreeexpressionlayout.cpp \
+    scenetreeglasspanelhelpers.cpp \
+    scenetreegraphicsitems.cpp \
+    scenetreeiconpainter.cpp \
+    scenetreepreviewgeometry.cpp \
+    scenetreetoolmetadata.cpp \
     scenetreecoloreditmode.cpp \
     scenetreehovermanager.cpp \
     scenetreeinlineeditor.cpp \
