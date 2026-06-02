@@ -457,18 +457,9 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
     }
 
     // ── Toolbar drag zone (viewport-pixel hit test) ───────────────────────────
-    {
-        const QPoint vpPos = m_widget->mapFromScene(scenePosition);
-        const QPointF vpPosF(vpPos);
-        if (m_widget->m_toolbarPanelVpRect.contains(vpPosF)) {
-            bool onTool = false;
-            for (const QRectF &r : m_widget->m_toolbarToolVpRects)
-                if (r.contains(vpPosF)) { onTool = true; break; }
-            if (!onTool) {
-                setKey(QStringLiteral("toolbar-drag"));
-                return QStringLiteral("Toolbar\nDrag to dock left, right, or top");
-            }
-        }
+    if (m_widget->isOnToolbarBackground(QPointF(m_widget->mapFromScene(scenePosition)))) {
+        setKey(QStringLiteral("toolbar-drag"));
+        return QStringLiteral("Toolbar\nDrag to dock left, right, or top");
     }
 
     for (const SceneTreeGraphicsWidget::CanvasMoveHandle &handle : m_widget->m_canvasMoveHandles) {
@@ -758,14 +749,8 @@ void SceneTreeHoverManager::updateHighlights(const QPointF &scenePosition)
     else if (onPolyhedronCell || onPolygonCell)
         m_widget->setCursor(Qt::ArrowCursor);
     else {
-        // Toolbar drag zone: empty panel background (not over a tool icon)
-        const QPoint vpPos = m_widget->mapFromScene(scenePosition);
-        const QPointF vpPosF(vpPos);
-        bool onToolbarBg = m_widget->m_toolbarPanelVpRect.contains(vpPosF);
-        if (onToolbarBg) {
-            for (const QRectF &r : m_widget->m_toolbarToolVpRects)
-                if (r.contains(vpPosF)) { onToolbarBg = false; break; }
-        }
+        const bool onToolbarBg = m_widget->isOnToolbarBackground(
+            QPointF(m_widget->mapFromScene(scenePosition)));
         m_widget->setCursor(onToolbarBg ? Qt::SizeAllCursor : Qt::OpenHandCursor);
     }
 

@@ -183,6 +183,13 @@ private:
     void handleTreeNodeDrop(int nodeId, const QPointF &scenePosition);
     void handleTreeNodeSelected(int nodeId);
     void snapZoom();
+    // Returns the snap side (0=top, 1=left, 2=right) for a viewport-pixel point.
+    int  toolbarSnapSideForVpPos(QPoint vpPos) const;
+    // Returns true if vpPos is over the toolbar glass panel but NOT over a tool icon.
+    bool isOnToolbarBackground(QPointF vpPos) const;
+    // Reposition toolbar items synchronously without the updateToolbarOverlay()
+    // fallback — safe to call from scrollContentsBy (no item removal).
+    void repositionToolbarItemsSync();
     bool handleTransformWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleColorChannelWheel(const QPointF &scenePosition, int wheelSteps);
     bool handleShapeParameterWheel(const QPointF &scenePosition, int wheelSteps);
