@@ -171,32 +171,9 @@ QRectF SceneTreeToolbarRenderer::render(PreviewMovedCallback onPreviewMoved,
     if (outToolVpRects)
         outToolVpRects->clear();
 
-    // ── Drop shadow ──────────────────────────────────────────────────────────
-    QGraphicsItem *shadow = m_scene->addRect(panelLocalRect.translated(3.0, 4.0),
-                                             Qt::NoPen,
-                                             QBrush(QColor(0, 0, 0, darkGlass ? 96 : 38)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(OverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.70 : 0.42);
-    trackToolbarItem(shadow);
-
-    // ── Glass panel ──────────────────────────────────────────────────────────
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panelLocalRect, CornerRadius, CornerRadius);
-    QGraphicsItem *panel = m_scene->addPath(panelPath,
-                                            QPen(customGlass ? customTheme.glassBorder
-                                                             : darkGlass ? QColor(148, 163, 184, 82)
-                                                                         : QColor(118, 136, 156, 58), 1.0),
-                                            QBrush(customGlass ? customTheme.glassBottom
-                                                               : darkGlass ? QColor(10, 16, 24, 178)
-                                                                           : QColor(250, 253, 255, 88)));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(OverlayZ - 1.0);
-    trackToolbarItem(panel);
+    // ── Drop shadow + glass panel ─────────────────────────────────────────────
+    addFlatGlassPanel(m_scene, m_toolbarItems, panelLocalRect, panelTopLeft,
+                      OverlayZ, darkGlass, customGlass, customTheme, toolbarPaletteGlassStyle());
 
     // ── Tool icons ───────────────────────────────────────────────────────────
     for (int i = 0; i < toolCount; ++i) {

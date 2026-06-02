@@ -221,31 +221,8 @@ void SceneTreeOverlayController::drawCanvasBackgroundSwitcher()
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
-    auto *shadow = m_widget->m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
-                                         Qt::NoPen, QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_items.append(shadow);
-
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
-    auto *panel = m_widget->m_graphicsScene->addPath(panelPath,
-                      QPen(customGlass ? customTheme.glassBorder
-                                       : darkGlass ? QColor(148, 163, 184, 82)
-                                                   : QColor(118, 136, 156, 58), 1.0),
-                      QBrush(customGlass ? customTheme.glassBottom
-                                        : darkGlass ? QColor(10, 16, 24, 178)
-                                                    : QColor(250, 253, 255, 88)));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_toolbar"));
-    m_items.append(panel);
+    addFlatGlassPanel(m_widget->m_graphicsScene, &m_items, panelLocal, panelTopLeft,
+                      LocalOverlayZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
 
     const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
 
@@ -314,31 +291,8 @@ void SceneTreeOverlayController::drawThemeSwitcher()
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
-    auto *shadow = m_widget->m_graphicsScene->addRect(panelLocal.translated(2.0, 3.0),
-                                         Qt::NoPen, QBrush(QColor(0, 0, 0, darkGlass ? 90 : 32)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.65 : 0.40);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_items.append(shadow);
-
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panelLocal, CornerRadius, CornerRadius);
-    auto *panel = m_widget->m_graphicsScene->addPath(panelPath,
-                      QPen(customGlass ? customTheme.glassBorder
-                                       : darkGlass ? QColor(148, 163, 184, 82)
-                                                   : QColor(118, 136, 156, 58), 1.0),
-                      QBrush(customGlass ? customTheme.glassBottom
-                                        : darkGlass ? QColor(10, 16, 24, 178)
-                                                    : QColor(250, 253, 255, 88)));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_toolbar"));
-    m_items.append(panel);
+    addFlatGlassPanel(m_widget->m_graphicsScene, &m_items, panelLocal, panelTopLeft,
+                      LocalOverlayZ, darkGlass, customGlass, customTheme, switcherGlassStyle());
 
     const QColor ringColor = darkGlass ? QColor(255, 255, 255, 210) : QColor(40, 50, 65, 200);
 

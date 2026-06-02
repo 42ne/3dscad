@@ -8,6 +8,7 @@
 #include "scenetreeoverlaycontroller.h"
 #include "scenetreedroppreviewcontroller.h"
 #include "scenetreehittestmanager.h"
+#include "scenetreecanvascontroller.h"
 
 #include <QGraphicsPathItem>
 #include <QGraphicsView>
@@ -34,6 +35,7 @@ class SceneTreeColorEditMode;
 class SceneTreeHoverManager;
 class SceneTreeInlineEditor;
 class SceneCanvasDragHandler;
+class SceneTreeCanvasController;
 
 class SceneTreeGraphicsWidget : public QGraphicsView
 {
@@ -158,6 +160,7 @@ private:
     friend class SceneTreeOverlayController;
     friend class SceneTreeDropPreviewController;
     friend class SceneTreeHitTestManager;
+    friend class SceneTreeCanvasController;
     void clearColorEditHighlight();
     void updateColorEditHighlight(const QPointF &scenePos);
 
@@ -259,29 +262,16 @@ private:
     QSet<QString> m_selectedPolygonPointKeys;
 
     // ── Subsystem controllers ─────────────────────────────────────────────────
-    SceneTreeHoverManager         *m_hoverManager      = nullptr;
-    SceneTreeInlineEditor         *m_inlineEditor      = nullptr;
-    SceneCanvasDragHandler        *m_canvasDragHandler = nullptr;
-    SceneTreeColorEditMode        *m_colorEdit         = nullptr;
-    SceneTreeOverlayController    *m_overlay           = nullptr;
-    SceneTreeDropPreviewController *m_dropPreview      = nullptr;
-    SceneTreeHitTestManager        *m_hitTest          = nullptr;
-    QPoint m_lastPanPoint;
+    SceneTreeHoverManager          *m_hoverManager      = nullptr;
+    SceneTreeInlineEditor          *m_inlineEditor      = nullptr;
+    SceneCanvasDragHandler         *m_canvasDragHandler = nullptr;
+    SceneTreeColorEditMode         *m_colorEdit         = nullptr;
+    SceneTreeOverlayController     *m_overlay           = nullptr;
+    SceneTreeDropPreviewController *m_dropPreview       = nullptr;
+    SceneTreeHitTestManager        *m_hitTest           = nullptr;
+    SceneTreeCanvasController      *m_canvasController  = nullptr;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
-    bool m_panning = false;
-    QPointF m_panVelocity;
-    QTimer *m_panInertiaTimer = nullptr;
-    // ── Acceleration-based zoom ────────────────────────────────────────────────
-    //   wheel → m_zoomAccel → m_zoomVelocity → scale(1+v)
-    //   longer scroll = more accel = faster zoom
-    qreal   m_zoomAccel      = 0.0;
-    qreal   m_zoomVelocity   = 0.0;
-    qreal   m_zoomLevel      = 1.0;
-    bool    m_zoomIdle        = true;
-    QTimer *m_zoomAnimTimer  = nullptr;
-    QTimer *m_zoomIdleTimer  = nullptr;
-    QPointF m_zoomAnchorScene;
     bool m_dragActive = false;
     bool m_treeItemsVisible = true;
 };

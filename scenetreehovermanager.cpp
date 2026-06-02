@@ -15,7 +15,6 @@
 #include <QGraphicsItem>
 #include <QPainterPath>
 #include <QTextDocument>
-#include <QLinearGradient>
 #include <QPen>
 #include <QBrush>
 #include <QColor>
@@ -191,35 +190,9 @@ void SceneTreeHoverManager::drawHintOverlay()
     const bool customGlass = SceneTreePalette::hasCustomTheme();
     const TreeAppearanceTheme customTheme = SceneTreePalette::customTheme();
 
-    auto *shadow = m_widget->m_graphicsScene->addRect(panelLocal.translated(3.0, 4.0),
-                                            Qt::NoPen,
-                                            QBrush(QColor(0, 0, 0, darkGlass ? 115 : 38)));
-    shadow->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    shadow->setAcceptedMouseButtons(Qt::NoButton);
-    shadow->setPos(panelTopLeft);
-    shadow->setZValue(LocalOverlayZ - 2.0);
-    shadow->setOpacity(darkGlass ? 0.72 : 0.42);
-    shadow->setData(0, QStringLiteral("shadow"));
-    m_widget->m_overlay->m_items.append(shadow);
-
-    QPainterPath path;
-    path.addRoundedRect(panelLocal, 8.0, 8.0);
-    QLinearGradient glass(QPointF(0.0, 0.0), QPointF(0.0, panelH));
-    glass.setColorAt(0.0, customGlass ? customTheme.glassTop
-                                      : darkGlass ? QColor(24, 34, 50, 218) : QColor(255, 255, 255, 116));
-    glass.setColorAt(1.0, customGlass ? customTheme.glassBottom
-                                      : darkGlass ? QColor(8, 13, 22, 196) : QColor(237, 244, 249, 74));
-    auto *panel = m_widget->m_graphicsScene->addPath(path,
-                                           QPen(customGlass ? customTheme.glassBorder
-                                                            : darkGlass ? QColor(142, 178, 215, 120)
-                                                                        : QColor(116, 141, 166, 70), 1.0),
-                                           QBrush(glass));
-    panel->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
-    panel->setAcceptedMouseButtons(Qt::NoButton);
-    panel->setPos(panelTopLeft);
-    panel->setZValue(LocalOverlayZ - 1.0);
-    panel->setData(0, QStringLiteral("glass_hint"));
-    m_widget->m_overlay->m_items.append(panel);
+    addFlatGlassPanel(m_widget->m_graphicsScene, &m_widget->m_overlay->m_items,
+                      panelLocal, panelTopLeft, LocalOverlayZ,
+                      darkGlass, customGlass, customTheme, hintGlassStyle());
 
     auto *text = m_widget->m_graphicsScene->addText(hint, font);
     text->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);

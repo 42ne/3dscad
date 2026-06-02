@@ -3,6 +3,7 @@
 
 #include "scenedocument.h"
 #include "shapenode.h"
+#include "appearancethemes.h"
 
 #include <QColor>
 #include <QFont>
@@ -164,6 +165,63 @@ QGraphicsItem *createTreeNodeDragHandleItem(int nodeId, const QString &label, co
 QGraphicsItem *createTreeNodeSelectionItem(int nodeId, const QRectF &rect, qreal zValue, std::function<void(int)> onSelected);
 QString toolbarToolTip(const QString &tool);
 QGraphicsItem *createPaletteToolItem(const QString &label, const QColor &fill, int theme, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(const QString &, const QPointF &)> onDropped, std::function<void(const QString &, bool)> onHoverChanged = {});
+
+// ── Glass overlay panel helpers ───────────────────────────────────────────────
+// Used by toolbar renderer, bg/theme switchers, and hint overlay to draw the
+// standard drop-shadow + rounded-glass-panel pairs.
+
+// Parameters that vary per usage site (shadow blur/opacity, data tags).
+struct GlassPanelStyle {
+    QPointF shadowOffset       = {2.0, 3.0};
+    int     shadowAlphaDark    = 90;   // QColor alpha, dark background
+    int     shadowAlphaLight   = 32;   // QColor alpha, light background
+    qreal   shadowOpacityDark  = 0.65;
+    qreal   shadowOpacityLight = 0.40;
+    QString shadowTag;   // setData(0, ...) — empty means skip
+    QString panelTag;    // setData(0, ...) — empty means skip
+    qreal   cornerRadius   = CornerRadius; // rounded-rect radius for the glass panel
+    bool    gradientGlass  = false;        // true → vertical gradient instead of flat brush
+};
+
+// Preset for bg/theme-switcher panels (offset 2,3; tag "glass_toolbar")
+inline GlassPanelStyle switcherGlassStyle(const QString &panelTag = QStringLiteral("glass_toolbar"))
+{ return {{2.0, 3.0}, 90, 32, 0.65, 0.40, QStringLiteral("shadow"), panelTag}; }
+
+// Preset for the toolbar palette panel (offset 3,4; no data tags)
+inline GlassPanelStyle toolbarPaletteGlassStyle()
+{ return {{3.0, 4.0}, 96, 38, 0.70, 0.42, {}, {}}; }
+
+// Preset for the hint overlay panel (gradient glass, corner radius 8)
+inline GlassPanelStyle hintGlassStyle()
+{
+    GlassPanelStyle s;
+    s.shadowOffset      = {3.0, 4.0};
+    s.shadowAlphaDark   = 115;
+    s.shadowAlphaLight  = 38;
+    s.shadowOpacityDark = 0.72;
+    s.shadowOpacityLight = 0.42;
+    s.shadowTag         = QStringLiteral("shadow");
+    s.panelTag          = QStringLiteral("glass_hint");
+    s.cornerRadius      = 8.0;
+    s.gradientGlass     = true;
+    return s;
+}
+
+// Standard glass pen/brush used by toolbar, switchers (NOT the hint gradient).
+QPen   standardGlassPen  (bool darkGlass, bool hasCustom, const TreeAppearanceTheme &theme);
+QBrush standardGlassBrush(bool darkGlass, bool hasCustom, const TreeAppearanceTheme &theme);
+
+// Appends drop-shadow + rounded-glass-panel overlay items to *items.
+// Both items get ItemIgnoresTransformations + NoButton + topLeft pos.
+void addFlatGlassPanel(QGraphicsScene *scene,
+                       QVector<QGraphicsItem *> *items,
+                       const QRectF &localRect,
+                       const QPointF &topLeft,
+                       qreal baseZ,
+                       bool darkGlass,
+                       bool hasCustom,
+                       const TreeAppearanceTheme &customTheme,
+                       const GlassPanelStyle &style = {});
 
 } // namespace SceneTreeGraphics
 
