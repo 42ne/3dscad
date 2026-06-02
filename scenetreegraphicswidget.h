@@ -9,6 +9,7 @@
 #include "scenetreedroppreviewcontroller.h"
 #include "scenetreehittestmanager.h"
 #include "scenetreecanvascontroller.h"
+#include "scenetreeinlineeditor.h"
 
 #include <QGraphicsPathItem>
 #include <QGraphicsView>
@@ -68,24 +69,7 @@ public:
     QRectF debugGroupRect(int groupId) const;
     QRectF debugChildRect(int nodeId) const;
 
-    struct ExpressionEditTarget {
-        enum Kind {
-            None,
-            Transform,
-            ShapeParameter,
-            Variable,
-            ModuleCallArgument,
-            PolyhedronParticipation,
-            Polygon2DPoint
-        };
-        Kind kind = None;
-        QRectF hoverRect;
-        QRectF editRect;
-        QString label;
-        QString expression;
-        int nodeId = 0;
-        int secondaryId = 0;
-    };
+    using ExpressionEditTarget = ::ExpressionEditTarget;
 
 signals:
     void toolDropped(const QString &toolName, int parentGroupId, int insertIndex, bool isParameterZone);

@@ -59,9 +59,6 @@ static QString polygonPointSelectionKey(int nodeId, int pointIndex)
 
 // ---------------------------------------------------------------------------
 
-constexpr qreal LiveDropPreviewDurationMs = 210.0;
-constexpr qreal ReleaseDropPreviewDurationMs = 95.0;
-constexpr qreal DropPreviewRectTolerance = 0.5;
 constexpr int CanvasBackgroundThemeCount = 6;
 
 struct CanvasBackgroundTheme {
@@ -92,24 +89,6 @@ CanvasBackgroundTheme activeCanvasBackgroundTheme(int index)
     return canvasBackgroundTheme(index);
 }
 
-bool usesDarkOverlayGlass(int backgroundTheme)
-{
-    return activeCanvasBackgroundTheme(backgroundTheme).background.lightness() < 128;
-}
-
-void collectVariableValues(const SceneDocument::TreeNode &node, QHash<QString, qreal> *values, int excludedNodeId = 0)
-{
-    if (!values)
-        return;
-    if (node.type == SceneDocument::TreeNode::Variable) {
-        if (node.id != excludedNodeId)
-            (*values)[node.variableName] = node.variableValue;
-        return;
-    }
-    for (const SceneDocument::TreeNode &child : node.children)
-        collectVariableValues(child, values, excludedNodeId);
-}
-
 bool isRootOnlyTreeTool(const QString &tool)
 {
     return tool == QStringLiteral("module");
@@ -131,131 +110,6 @@ SceneTreeLayout::DropTarget freeFloatingDropTarget(const QPointF &scenePosition,
 }
 
 
-qreal easeOutCubic(qreal value)
-{
-    const qreal t = qBound<qreal>(0.0, value, 1.0);
-    const qreal inverse = 1.0 - t;
-    return 1.0 - inverse * inverse * inverse;
-}
-
-qreal lerp(qreal from, qreal to, qreal progress)
-{
-    return from + (to - from) * progress;
-}
-
-QRectF interpolatedRect(const QRectF &from, const QRectF &to, qreal progress)
-{
-    if (!from.isValid())
-        return to;
-    if (!to.isValid())
-        return from;
-
-    return QRectF(lerp(from.left(), to.left(), progress),
-                  lerp(from.top(), to.top(), progress),
-                  lerp(from.width(), to.width(), progress),
-                  lerp(from.height(), to.height(), progress));
-}
-
-bool rectNear(const QRectF &left, const QRectF &right)
-{
-    if (left.isValid() != right.isValid())
-        return false;
-    if (!left.isValid())
-        return true;
-
-    return qAbs(left.left() - right.left()) <= DropPreviewRectTolerance
-           && qAbs(left.top() - right.top()) <= DropPreviewRectTolerance
-           && qAbs(left.width() - right.width()) <= DropPreviewRectTolerance
-           && qAbs(left.height() - right.height()) <= DropPreviewRectTolerance;
-}
-
-bool childListNear(const QVector<SceneTreeLayout::ChildLayout> &left,
-                   const QVector<SceneTreeLayout::ChildLayout> &right)
-{
-    if (left.size() != right.size())
-        return false;
-
-    for (int i = 0; i < left.size(); ++i) {
-        if (left[i].nodeId != right[i].nodeId
-            || left[i].tool != right[i].tool
-            || !rectNear(left[i].rect, right[i].rect)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool groupPreviewListNear(const QVector<SceneTreeLayout::GroupPreview> &left,
-                          const QVector<SceneTreeLayout::GroupPreview> &right)
-{
-    if (left.size() != right.size())
-        return false;
-
-    for (int i = 0; i < left.size(); ++i) {
-        if (left[i].operation != right[i].operation
-            || !rectNear(left[i].rect, right[i].rect)
-            || !childListNear(left[i].children, right[i].children)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool dropTargetNear(const SceneTreeLayout::DropTarget &left,
-                    const SceneTreeLayout::DropTarget &right)
-{
-    return left.hasTarget == right.hasTarget
-           && left.parentGroupId == right.parentGroupId
-           && left.insertIndex == right.insertIndex
-           && left.moduleParameterZone == right.moduleParameterZone
-           && left.previewGroupOperation == right.previewGroupOperation
-           && rectNear(left.zoneRect, right.zoneRect)
-           && rectNear(left.sourceRect, right.sourceRect)
-           && rectNear(left.sourceGroupRect, right.sourceGroupRect)
-           && rectNear(left.placeholderRect, right.placeholderRect)
-           && rectNear(left.slotMarkerRect, right.slotMarkerRect)
-           && rectNear(left.previewGroupRect, right.previewGroupRect)
-           && childListNear(left.sourceChildren, right.sourceChildren)
-           && childListNear(left.previewChildren, right.previewChildren)
-           && groupPreviewListNear(left.expandedGroups, right.expandedGroups);
-}
-
-QRectF previewContentBounds(const QVector<SceneTreeLayout::ChildLayout> &children,
-                            const QRectF &placeholderRect)
-{
-    QRectF bounds = placeholderRect;
-    bool hasBounds = bounds.isValid();
-
-    for (const SceneTreeLayout::ChildLayout &child : children) {
-        if (!child.rect.isValid())
-            continue;
-        bounds = hasBounds ? bounds.united(child.rect) : child.rect;
-        hasBounds = true;
-    }
-
-    return hasBounds ? bounds : QRectF();
-}
-
-QRectF groupRectForPreviewContent(QRectF groupRect,
-                                  SceneDocument::TreeNode::Operation operation,
-                                  const QVector<SceneTreeLayout::ChildLayout> &children,
-                                  const QRectF &placeholderRect)
-{
-    if (!groupRect.isValid())
-        return groupRect;
-
-    const QRectF content = previewContentBounds(children, placeholderRect);
-    const qreal headerHeight = isVerticalHeaderOperation(operation) ? 0.0 : GroupHeaderHeight;
-    const qreal minBottom = groupRect.top() + headerHeight + GroupPadding * 2.0 + PrimitiveHeight;
-    const qreal contentBottom = content.isValid() ? content.bottom() + GroupPadding : minBottom;
-    groupRect.setBottom(qMax(minBottom, contentBottom));
-    if (content.isValid())
-        groupRect.setRight(qMax(groupRect.right(), content.right() + GroupPadding));
-    return groupRect;
-}
-
 qreal horizontalHeaderMinWidth(const SceneDocument::TreeNode &node)
 {
     if (isVerticalHeaderOperation(node.operation)
@@ -275,101 +129,6 @@ qreal horizontalHeaderMinWidth(const SceneDocument::TreeNode &node)
     const qreal chevronAndRightPadding = node.operation == SceneDocument::TreeNode::Scene ? 10.0 : 28.0;
     return qMax(minimumWidthForOperation(node.operation),
                 gripAndIconWidth + metrics.horizontalAdvance(label) + chevronAndRightPadding);
-}
-
-SceneTreeLayout::ChildLayout interpolatedChild(const SceneTreeLayout::ChildLayout &from,
-                                               const SceneTreeLayout::ChildLayout &to,
-                                               qreal progress)
-{
-    SceneTreeLayout::ChildLayout child = to;
-    child.rect = interpolatedRect(from.rect, to.rect, progress);
-    return child;
-}
-
-QVector<SceneTreeLayout::ChildLayout> interpolatedChildren(const QVector<SceneTreeLayout::ChildLayout> &from,
-                                                          const QVector<SceneTreeLayout::ChildLayout> &to,
-                                                          qreal progress)
-{
-    if (from.size() != to.size())
-        return to;
-
-    QVector<SceneTreeLayout::ChildLayout> children;
-    children.reserve(to.size());
-    for (int i = 0; i < to.size(); ++i)
-        children.append(interpolatedChild(from[i], to[i], progress));
-    return children;
-}
-
-SceneTreeLayout::DropTarget collapsedDropTarget(SceneTreeLayout::DropTarget target)
-{
-    if (!target.hasTarget || !target.placeholderRect.isValid())
-        return target;
-
-    const qreal slotY = target.slotMarkerRect.isValid()
-                            ? target.slotMarkerRect.center().y()
-                            : target.placeholderRect.center().y();
-    const qreal shift = target.placeholderRect.height() + ChildGap;
-    target.placeholderRect = QRectF(target.placeholderRect.left(),
-                                    slotY,
-                                    target.placeholderRect.width(),
-                                    1.0);
-    target.slotMarkerRect = target.placeholderRect;
-
-    for (int i = qMax(0, target.insertIndex); i < target.previewChildren.size(); ++i)
-        target.previewChildren[i].rect.translate(0.0, -shift);
-
-    for (SceneTreeLayout::GroupPreview &group : target.expandedGroups) {
-        for (SceneTreeLayout::ChildLayout &child : group.children) {
-            if (child.rect.top() >= slotY)
-                child.rect.translate(0.0, -shift);
-        }
-        group.rect = groupRectForPreviewContent(group.rect,
-                                                group.operation,
-                                                group.children,
-                                                target.placeholderRect);
-    }
-
-    target.previewGroupRect = groupRectForPreviewContent(target.previewGroupRect,
-                                                         target.previewGroupOperation,
-                                                         target.previewChildren,
-                                                         target.placeholderRect);
-    return target;
-}
-
-SceneTreeLayout::GroupPreview interpolatedGroupPreview(const SceneTreeLayout::GroupPreview &from,
-                                                       const SceneTreeLayout::GroupPreview &to,
-                                                       qreal progress)
-{
-    SceneTreeLayout::GroupPreview group = to;
-    group.rect = interpolatedRect(from.rect, to.rect, progress);
-    group.children = interpolatedChildren(from.children, to.children, progress);
-    return group;
-}
-
-SceneTreeLayout::DropTarget interpolatedDropTarget(const SceneTreeLayout::DropTarget &from,
-                                                   const SceneTreeLayout::DropTarget &to,
-                                                   qreal rawProgress)
-{
-    const qreal progress = easeOutCubic(rawProgress);
-    SceneTreeLayout::DropTarget target = to;
-    target.zoneRect = interpolatedRect(from.zoneRect, to.zoneRect, progress);
-    target.sourceRect = interpolatedRect(from.sourceRect, to.sourceRect, progress);
-    target.sourceGroupRect = interpolatedRect(from.sourceGroupRect, to.sourceGroupRect, progress);
-    target.placeholderRect = interpolatedRect(from.placeholderRect, to.placeholderRect, progress);
-    target.slotMarkerRect = interpolatedRect(from.slotMarkerRect, to.slotMarkerRect, progress);
-    target.previewGroupRect = interpolatedRect(from.previewGroupRect, to.previewGroupRect, progress);
-    target.sourceCutSeparatorY = lerp(from.sourceCutSeparatorY, to.sourceCutSeparatorY, progress);
-    target.previewCutSeparatorY = lerp(from.previewCutSeparatorY, to.previewCutSeparatorY, progress);
-    target.sourceChildren = interpolatedChildren(from.sourceChildren, to.sourceChildren, progress);
-    target.previewChildren = interpolatedChildren(from.previewChildren, to.previewChildren, progress);
-
-    if (from.expandedGroups.size() == to.expandedGroups.size()) {
-        target.expandedGroups.clear();
-        for (int i = 0; i < to.expandedGroups.size(); ++i)
-            target.expandedGroups.append(interpolatedGroupPreview(from.expandedGroups[i], to.expandedGroups[i], progress));
-    }
-
-    return target;
 }
 
 } // namespace
