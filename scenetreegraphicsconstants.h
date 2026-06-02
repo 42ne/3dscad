@@ -2,6 +2,7 @@
 #define SCENETREEGRAPHICSCONSTANTS_H
 
 #include <QColor>
+#include <QRectF>
 
 namespace SceneTreeGraphics {
 
@@ -37,5 +38,23 @@ constexpr qreal OverlayMargin    = 12.0;
 constexpr qreal OverlayBottomGap = 12.0;
 
 } // namespace SceneTreeGraphics
+
+// Center checkbox rect for primitive cards that support center=true.
+// Returns a 14×14 rect positioned at the right edge of the card.
+inline QRectF centerCheckboxRect(const QRectF &cardRect)
+{
+    constexpr qreal cbSize = 14.0;
+    return QRectF(cardRect.right() - cbSize - 4.0,
+                  cardRect.top() + (cardRect.height() - cbSize) * 0.5,
+                  cbSize, cbSize);
+}
+
+inline bool shapeSupportsCenter(int shapeType)
+{
+    return shapeType == 0  // Cube
+        || shapeType == 2  // Cylinder
+        || shapeType == 3  // Cone
+        || shapeType == 5; // Square
+}
 
 #endif

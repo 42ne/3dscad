@@ -1637,6 +1637,23 @@ void SceneController::handleShapeParameterExpressionEdited(int nodeId,
     emit ctrlHighlightChanged();
 }
 
+void SceneController::handleShapeCenterToggled(int nodeId, int shapeId, bool center)
+{
+    Q_UNUSED(nodeId);
+    if (shapeId <= 0) return;
+
+    const ShapeNode *shape = m_scene.shapeById(shapeId);
+    if (!shape) return;
+
+    ShapeNode updatedShape = *shape;
+    updatedShape.center = center;
+
+    auto *command = new UpdateShapeCommand(&m_scene, *shape, updatedShape,
+                                           [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+}
+
 static ShapeNode *polygon2DShapeForNode(SceneDocument *scene, int nodeId)
 {
     if (!scene || nodeId <= 0)

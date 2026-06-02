@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Manifold Builder</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #4a90d9; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #4a90d9; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #4a90d9; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #f5f8fc; }
+tr:hover { background: #eaf1f9; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-tool { display: inline-block; background: #8e44ad; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1><span class="tag-tool">TOOL</span> Manifold Builder</h1>
+
+<p><code>tools/manifoldbuilder</code> is a small Qt Widgets utility for building the optional
+Manifold CSG backend used by the main editor.</p>
+<p>It is intentionally a GUI wrapper around <code>scripts/build-manifold.ps1</code>, so the
+actual build logic stays in one script and can still be run from PowerShell.</p>
+
+<h2>Building the Tool</h2>
+<p>Open <code>tools/manifoldbuilder/manifoldbuilder.pro</code> in Qt Creator and build it
+with a Qt MinGW kit. A Debug build is fine.</p>
+<p>From a Qt-enabled shell:</p>
+<pre><code>qmake tools\manifoldbuilder\manifoldbuilder.pro -o tools\manifoldbuilder\Makefile
+mingw32-make -C tools\manifoldbuilder</code></pre>
+
+<h2>Using the Tool</h2>
+<p>Launch <code>ManifoldBuilder.exe</code>.</p>
+<table>
+<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>Repo root</td><td>Repository folder containing <code>3DScad.pro</code> and <code>scripts/build-manifold.ps1</code>.</td></tr>
+<tr><td>Qt root</td><td>Qt installation root, e.g. <code>E:\Qt</code> or <code>C:\Qt</code>.</td></tr>
+<tr><td>Architecture</td><td>Selects <code>build/manifold-build-32</code> or <code>build/manifold-build-64</code>. Match this to the Qt kit used for the main app.</td></tr>
+<tr><td>CMake generator</td><td>Currently defaults to <code>MinGW Makefiles</code>, matching the script.</td></tr>
+<tr><td>Clean build directory</td><td>Deletes only <code>build/manifold-build-&lt;arch&gt;</code> before running the script. The downloaded <code>build/manifold-src</code> checkout is kept.</td></tr>
+</tbody>
+</table>
+<p>Click <strong>Build Manifold</strong>. The log panel streams the PowerShell output.</p>
+<p>When successful, the output library is:</p>
+<pre><code>build/manifold-build-64/src/libmanifold.a</code></pre>
+<p>After that, rerun <code>qmake</code> for <code>3DScad.pro</code> so the main project sees the local
+library and defines <code>HAVE_MANIFOLD_CSG</code>.</p>
+
+<h2>Notes</h2>
+<ul>
+<li>The first build may clone Manifold from GitHub, so it needs network access.</li>
+<li>Qt MinGW GCC 8 may need the fallback patch in <code>src/parallel.h</code>; the existing PowerShell script applies that patch automatically.</li>
+<li>Build artifacts stay under <code>build/</code> and are intentionally not committed.</li>
+</ul>
+
+</body>
+</html>

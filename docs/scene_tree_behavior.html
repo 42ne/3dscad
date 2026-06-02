@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Scene Tree Behavior</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #4a90d9; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #4a90d9; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #4a90d9; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #f5f8fc; }
+tr:hover { background: #eaf1f9; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+blockquote { border-left: 3px solid #e67e22; margin: 1em 0; padding: .5em 1em; background: #fef9f0; border-radius: 0 4px 4px 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+.tag-todo { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+.tag-note { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Current Scene Tree Behavior</h1>
+<p><em>Status as of: 2026-05-25.</em></p>
+<p>This document records the expected behavior of the graphical scene tree in the
+current implementation. It is intended as a reference specification for
+regression checks after changes to drag/drop, modules, variables, the code
+editor, or canvas layout.</p>
+<p>The syntax accepted by <code>Apply code</code> is documented separately in
+<a href="openscad_subset.html">openscad_subset.html</a>.</p>
+
+<h2>1. Tree Model</h2>
+<p>The model has an invisible internal root container. It is not emitted as an
+OpenSCAD block and stores the top-level cards on the canvas:</p>
+<ul>
+<li>the permanent <code>scene</code> block;</li>
+<li>separate <code>module</code> declarations.</li>
+</ul>
+<p><code>scene</code> contains the actual top-level scene. It cannot be deleted, even when
+empty. It may contain global variables, geometry, groups, and module calls.</p>
+<p><code>module</code> is a reusable declaration. It does not add geometry to the viewport
+by itself; a module call node (<code>CALL</code>) is required.</p>
+<p>Tree node types:</p>
+<ul>
+<li>primitive: a geometry shape;</li>
+<li>group: a container or operation;</li>
+<li>variable: a variable or a module parameter;</li>
+<li>module call: a call to a specific module declaration.</li>
+</ul>
+
+<h2>2. Palette Blocks</h2>
+<p>The toolbar can create the following blocks:</p>
+<table>
+<thead><tr><th>Category</th><th>Blocks</th></tr></thead>
+<tbody>
+<tr><td>Primitives</td><td><code>cube</code>, <code>sphere</code>, <code>cylinder</code>, <code>cone</code></td></tr>
+<tr><td>Boolean</td><td><code>union</code>, <code>difference</code>, <code>intersection</code></td></tr>
+<tr><td>Transform / display</td><td><code>translate</code>, <code>rotate</code>, <code>scale</code>, <code>mirror</code>, <code>color</code></td></tr>
+<tr><td>Geometry operations</td><td><code>hull</code>, <code>minkowski</code></td></tr>
+<tr><td>Structure</td><td><code>module</code>, <code>var</code>, <code>for</code></td></tr>
+</tbody>
+</table>
+<p>Containers can hold primitives, other containers, and module calls when the
+drop lands in a valid inner zone.</p>
+<p>Boolean block behavior:</p>
+<ul>
+<li>in <code>difference</code>, the first child is the base body and all later children are cuts;</li>
+<li>in <code>intersection</code>, all children participate in the intersection;</li>
+<li><code>union</code> groups objects without special child zones.</li>
+</ul>
+
+<h2>3. Levels And Nesting Rules</h2>
+<p><strong>Top-level rules:</strong></p>
+<ul>
+<li>a <code>module</code> declaration may exist only alongside <code>scene</code> on the root canvas;</li>
+<li>ordinary groups and primitives added at scene level are placed in <code>scene</code>;</li>
+<li>ordinary nodes cannot be moved directly into the hidden root.</li>
+</ul>
+<p><strong>Move rules:</strong></p>
+<ul>
+<li>a node can be reordered inside its container;</li>
+<li>a node can be nested in a valid group container;</li>
+<li>a node cannot be dropped into itself or one of its descendants;</li>
+<li>reparenting a transform/group preserves its world offset;</li>
+<li>empty non-permanent groups are pruned after removal or movement.</li>
+</ul>
+<p><strong>Deletion rules:</strong></p>
+<ul>
+<li><code>Delete</code> or <code>Backspace</code> deletes the selected node;</li>
+<li>deleting a primitive removes the corresponding shape;</li>
+<li>deleting an ordinary group promotes its children into the group's position;</li>
+<li>deleting a <code>module</code> removes the declaration and all of its <code>CALL</code> nodes;</li>
+<li>the <code>scene</code> block and internal root cannot be deleted;</li>
+<li>dragging an existing non-module node into truly empty canvas space is also treated as deletion; dropping over a root block without a valid slot is cancelled without deleting the node.</li>
+</ul>
+
+<h2>4. Variables And Modules</h2>
+<p><code>VAR</code> has only two valid locations:</p>
+<ul>
+<li>inside <code>scene</code>: a global variable emitted at top level;</li>
+<li>directly inside <code>module</code>: either a parameter or a local variable.</li>
+</ul>
+<p>Variables must not be accepted inside <code>union</code>, <code>difference</code>, <code>translate</code>,
+<code>for</code>, or other ordinary containers.</p>
+<p>A <code>module</code> card has two drop zones for <code>VAR</code>:</p>
+<ul>
+<li>parameter lane: the node is displayed as <code>PAR</code> and included in the signature <code>module name(par = value)</code>;</li>
+<li>body lane: the node is displayed as <code>VAR</code> and emitted as an assignment inside the module body.</li>
+</ul>
+<p>Dragging a variable between those zones changes its role. For automatically
+generated names, the editor attempts to preserve the numeric suffix:</p>
+<ul>
+<li><code>varN</code> becomes <code>parN</code> when moved into parameters;</li>
+<li><code>parN</code> becomes <code>varN</code> when moved into the body or scene;</li>
+<li>manually chosen names are not automatically renamed.</li>
+</ul>
+<p>Variable names must be valid identifiers and unique across the whole tree. Module names must also be valid and unique among modules.</p>
+
+<h2>5. Module Calls</h2>
+<p>Each <code>module</code> card contains a template <code>CALL</code> card. It is a handle used to
+create a call and is not emitted as code itself.</p>
+<p>Dragging <code>CALL</code> into a valid container creates a real module call node. It can
+be placed:</p>
+<ul>
+<li>in <code>scene</code>;</li>
+<li>inside boolean, transform, geometry, and <code>for</code> containers;</li>
+<li>inside another module body.</li>
+</ul>
+<p><code>CALL</code> must not be placed in a module parameter lane. Call parameters are
+displayed from the declaration parameters and emitted as named arguments.
+Renaming a module synchronizes its associated calls.</p>
+
+<h2>6. Canvas Layout And Root Block Dragging</h2>
+<p>The positions of <code>scene</code> and <code>module</code> cards on the canvas are UI layout, not
+OpenSCAD structure. Dragging a root card by its grip strip does not change its
+nesting.</p>
+<p><strong>Current root-drag behavior:</strong></p>
+<ul>
+<li>drag begins after at least <code>6 px</code> of movement;</li>
+<li>root blocks touching edge-to-edge (within about <code>1.5 px</code>) form a connected cluster;</li>
+<li>during a slow drag, that cluster moves together;</li>
+<li>when movement speed exceeds <code>16 px/event</code>, the grabbed block detaches and the rest of the cluster freezes at its current position.</li>
+</ul>
+<p><strong>Magnetic snap for root blocks:</strong></p>
+<ul>
+<li>snap radius is <code>80 px</code>;</li>
+<li>a block snaps to a valid non-overlapping position beside a stationary neighbor;</li>
+<li>while a connected cluster is moving slowly, all members of that cluster are excluded as snap targets;</li>
+<li>therefore, a moving cluster can snap only to an external root block;</li>
+<li>if the moving cluster contains every root block, it has no valid snap target;</li>
+<li>after a fast detach, the frozen blocks are external neighbors for the remaining dragged block.</li>
+</ul>
+<p>Adding a new root block from the toolbar uses normal magnetic snap to existing root blocks.</p>
+
+<h2>7. Editing Parameters In The Tree</h2>
+<p>Selecting a node in the tree synchronizes the viewport and highlights the
+corresponding part of generated code.</p>
+<p><strong>Supported inline actions:</strong></p>
+<ul>
+<li>double-clicking a module or variable name opens inline rename;</li>
+<li><code>Ctrl</code> + mouse wheel over a number edits that numeric token in a primitive parameter, transform, variable, <code>for</code> range, or <code>CALL</code> argument;</li>
+<li>for <code>color</code>, <code>Ctrl</code> + mouse wheel edits RGB channels;</li>
+<li>the active numeric token is also highlighted in the code editor.</li>
+</ul>
+<p>Numeric values may be part of an expression. During an adjustment the expression text is preserved, and the viewport reevaluates supported dependent parameters and transform values.</p>
+
+<h2>8. Code Editor Roundtrip</h2>
+<p>Tree changes regenerate code into the editor. The generator emits content in this order:</p>
+<ol>
+<li>global variables from <code>scene</code>;</li>
+<li><code>module</code> declarations;</li>
+<li>top-level geometry and groups from <code>scene</code>;</li>
+<li>top-level <code>CALL</code> nodes from <code>scene</code>.</li>
+</ol>
+<p>Module-local variables and nested <code>CALL</code> nodes are emitted at their actual location in the relevant container body.</p>
+<p><code>Apply code</code> rebuilds the tree from the supported OpenSCAD subset. Important expectations:</p>
+<ul>
+<li>a valid variable inside a module body appears as <code>VAR</code>, not as an error;</li>
+<li>a module signature parameter appears as <code>PAR</code> in the parameter lane;</li>
+<li>a variable in <code>scene</code> appears as a global <code>VAR</code>;</li>
+<li>valid <code>for</code> + transform + module call structures are rebuilt in the tree;</li>
+<li>on parse error, the message includes a line number, and the text editor shows line numbers and moves to the affected line.</li>
+</ul>
+<p>Exact restrictions on hand-written code and expressions are documented in <a href="openscad_subset.html">openscad_subset.html</a>.</p>
+
+<h2>9. Undo, Redo, And Viewport Updates</h2>
+<p>Structural tree changes, parameter edits, renames, <code>Apply code</code>, deletion, and
+block creation are performed through undo/redo commands.</p>
+<p>During live geometry dragging or rotation, the viewport updates immediately;
+the final change is committed to the undo stack when the drag finishes.
+For a transform value defined by an expression, a viewport gizmo gesture
+converts only axes actually changed by that gesture to numeric values; the
+expressions for unaffected axes are preserved.</p>
+<p>Root card canvas positions are visual state of the graphics widget and are not part of OpenSCAD code.</p>
+
+<h2>10. Minimum Regression Checklist</h2>
+<p>After changes to the tree, manually verify:</p>
+<ol>
+<li>Add a <code>module</code>, put a <code>VAR</code> in its parameter lane, another <code>VAR</code> in its body, and add a primitive. Code must contain a signature parameter and a local variable in the body.</li>
+<li>In code, add a local <code>VAR</code> directly in a module body and reference it in an expression of a nested transform. After <code>Apply code</code>, the tree must show the correct structure without a parse error.</li>
+<li>Drag a module <code>CALL</code> into <code>scene</code> and into a nested transform. The viewport and code must represent real calls.</li>
+<li>Touch all root cards edge-to-edge on the canvas and slowly drag one of them. The cluster must move together without snapping to itself.</li>
+<li>Add a separate root block and slowly bring the cluster near it. Snap must occur only against that external block.</li>
+<li>Quickly drag a block out of a connected cluster. After the detach threshold, only the selected block must keep moving.</li>
+<li>Reorder a child inside <code>difference</code>. The first slot must remain the base and later slots must remain cuts.</li>
+<li>Attempt to drag <code>VAR</code> into an ordinary group or transform zone. Such a drop must not create invalid nesting.</li>
+<li>Select a node and press <code>Delete</code>, then <code>Undo</code>. Structure and code must be restored correctly.</li>
+</ol>
+
+<h2>11. Color Edit Mode</h2>
+<p>Color edit mode lets the user visually inspect and change any color in the scene
+tree theme without opening a settings panel. All changes are applied instantly
+to an in-memory custom theme and can be saved.</p>
+
+<h3>Entering and exiting</h3>
+<ul>
+<li>Click the <strong>✏ Colors</strong> toggle button in the toolbar overlay.</li>
+<li>Exit by clicking the toggle again, or press <strong>Esc</strong>.</li>
+<li>While active, drag-and-drop of toolbar items and canvas block moves are disabled; only color selection gestures work.</li>
+</ul>
+
+<h3>Zone detection</h3>
+<p>Moving the mouse over the canvas highlights the current <em>color zone</em> — the
+smallest rectangle that contains the cursor.</p>
+<table>
+<thead><tr><th>Zone</th><th>Properties</th></tr></thead>
+<tbody>
+<tr><td>Card header (group, module, for-loop, boolean)</td><td>Header fill, text color</td></tr>
+<tr><td>Card body of a group operation</td><td>Card fill, card border, axis label color, number color, expression color</td></tr>
+<tr><td>Primitive / Module call card body</td><td>Card fill, param label color, number constant color, expression color, number pill fill, number pill border</td></tr>
+<tr><td>Variable / parameter row</td><td>Row fill, label color, number color, expression color, number pill fill, number pill border</td></tr>
+<tr><td>Empty canvas</td><td>Canvas background, minor grid, major grid</td></tr>
+</tbody>
+</table>
+
+<h3>Scrolling and picking</h3>
+<ul>
+<li><strong>Scroll wheel</strong> over a zone cycles through its color properties (hint: <code>↕ N/M</code>).</li>
+<li>The current property and its hex value are displayed in the hint text.</li>
+<li><strong>Left-click</strong> opens the system color picker for the highlighted property.</li>
+<li>After picking a color, the scene updates immediately and the highlight refreshes.</li>
+</ul>
+
+<h3>Scope of changes</h3>
+<p>Properties marked <em>global</em> (most text and pill colors) update the shared custom
+theme and affect all cards of every type.</p>
+<p>Properties marked <em>per-operation</em> (card fill, header fill, card border) update
+only the palette entry for the specific operation type. When no custom entry
+exists, the change is derived from the active built-in theme.</p>
+<p>Leaf cards (Primitive, Module Call) always write global properties.</p>
+
+<h3>Theme persistence</h3>
+<p>The custom theme is serialized to a <code>.theme</code> file and loaded automatically on
+next launch. Clearing the custom theme restores the current built-in preset.</p>
+
+<h3>Current limitations</h3>
+<ul>
+<li>The dashed separator line and the <strong>base</strong> / <strong>cut</strong> vertical pill labels
+inside <code>difference</code> cards use internally derived colors that are not yet
+exposed as editable properties.</li>
+<li>The Difference separator and base/cut accent colors change automatically when
+the card body fill is edited.</li>
+</ul>
+
+</body>
+</html>

@@ -21,6 +21,7 @@ struct ParserState
     int errorLine = -1;
     int nextShapeId = 1;
     int nextTreeNodeId = 1;
+    bool insideModuleBody = false;
     QHash<QString, qreal>    variableValues;
     QHash<QString, QVector3D> vectorVariableValues; // e.g. body_size = [28, 28, 4]
     QVector<ShapeNode> shapes;
@@ -270,20 +271,42 @@ static bool parseOperationLine(const QString &line,
                                QStringList *expressions = nullptr,
                                QString *loopVariable = nullptr,
                                QString *loopRangeExpression = nullptr,
-                               QColor *color = nullptr)
+                               QColor *color = nullptr,
+                               QStringList *forExtraPairs = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression intersectionRegex("^intersection\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression hullRegex("^hull\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression minkowskiRegex("^minkowski\\s*\\(\\s*\\)\\s*\\{\\s*$");
-    static const QRegularExpression translateRegex("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
-    static const QRegularExpression rotateRegex("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
-    static const QRegularExpression scaleRegex("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
-    static const QRegularExpression mirrorRegex("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
-    static const QRegularExpression forRegex("^for\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(\\[[^\\]]+\\])\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression translateRegex("^translate\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression rotateRegex("^rotate\\s*\\((?:a\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression scaleRegex("^scale\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression mirrorRegex("^mirror\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression forRegex("^for\\s*\\((.+?)\\)\\s*\\{\\s*$");
+    static const QRegularExpression intersectionForRegex("^intersection_for\\s*\\((.+?)\\)\\s*\\{\\s*$");
     static const QRegularExpression colorRegex("^color\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression linearExtrudeRegex("^linear_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
+
+    // intersection_for → intersection() { for() { ... } }
+    {
+        QRegularExpressionMatch im = intersectionForRegex.match(line);
+        if (im.hasMatch()) {
+            *operation = SceneDocument::TreeNode::Intersection;
+            if (loopVariable || loopRangeExpression || forExtraPairs) {
+                const QStringList pairs = splitAtTopLevelCommas(im.captured(1));
+                const QString first = pairs.value(0).trimmed();
+                const int eq = first.indexOf('=');
+                if (eq > 0) {
+                    if (loopVariable) *loopVariable = first.left(eq).trimmed();
+                    if (loopRangeExpression) *loopRangeExpression = first.mid(eq + 1).trimmed();
+                }
+                if (forExtraPairs && pairs.size() > 1)
+                    *forExtraPairs = pairs.mid(1);
+            }
+            return true;
+        }
+    }
 
     if (unionRegex.match(line).hasMatch()) {
         *operation = SceneDocument::TreeNode::Union;
@@ -319,8 +342,17 @@ static bool parseOperationLine(const QString &line,
     QRegularExpressionMatch forMatch = forRegex.match(line);
     if (forMatch.hasMatch()) {
         *operation = SceneDocument::TreeNode::For;
-        if (loopVariable)     *loopVariable = forMatch.captured(1);
-        if (loopRangeExpression) *loopRangeExpression = forMatch.captured(2).trimmed();
+        if (loopVariable || loopRangeExpression || forExtraPairs) {
+            const QStringList pairs = splitAtTopLevelCommas(forMatch.captured(1));
+            const QString first = pairs.value(0).trimmed();
+            const int eq = first.indexOf('=');
+            if (eq > 0) {
+                if (loopVariable)     *loopVariable     = first.left(eq).trimmed();
+                if (loopRangeExpression) *loopRangeExpression = first.mid(eq + 1).trimmed();
+            }
+            if (forExtraPairs && pairs.size() > 1)
+                *forExtraPairs = pairs.mid(1);
+        }
         return true;
     }
 
@@ -409,6 +441,20 @@ static bool parseParamExpression(const QString &text, const QHash<QString, qreal
     return true;
 }
 
+static bool centerFromArgs(const QString &argsStr, bool *centerOut)
+{
+    // Extract center=true/false from named arguments.
+    static const QRegularExpression centerRe("\\bcenter\\s*=\\s*(true|false)\\b");
+    QRegularExpressionMatch m = centerRe.match(argsStr);
+    if (m.hasMatch()) {
+        *centerOut = (m.captured(1) == QLatin1String("true"));
+        return true;
+    }
+    // No center parameter found — default to false (per OpenSCAD spec)
+    *centerOut = false;
+    return false;
+}
+
 // Returns true and fills shape if this line is a cube/sphere/cylinder call (flexible args).
 // Returns false if the line is not a primitive call at all.
 // Sets *errorMessage and returns false if the line IS a primitive call but has invalid args.
@@ -419,50 +465,63 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
 
     // ── Cube ────────────────────────────────────────────────────────────────
     if (extractCallArgs(line, "cube", &argsStr) && line.endsWith(';')) {
-        // Accept cube([x, y, z]) and cube([x, y, z], center=...)
+        // Accept cube([x, y, z]), cube([x, y, z], center=...), cube(N), cube(N, center=...)
+        const QStringList allArgs = splitAtTopLevelCommas(argsStr);
+        const QString firstArg = allArgs.value(0).trimmed();
         static const QRegularExpression vecRe("^\\[([^\\]]+)\\]");
         QRegularExpressionMatch m = vecRe.match(argsStr);
-        QString vecInner;
         if (m.hasMatch()) {
-            vecInner = m.captured(1);
-        } else {
-            // Might be a vector variable: cube(body_size, center=true)
-            const QString firstArg = splitAtTopLevelCommas(argsStr).value(0).trimmed();
-            if (state->vectorVariableValues.contains(firstArg)) {
-                const QVector3D v = state->vectorVariableValues[firstArg];
-                shape->id = state->nextShapeId++;
-                shape->type = ShapeNode::Cube;
-                shape->name = QStringLiteral("Cube %1").arg(shape->id);
-                shape->size = v;
-                shape->parameterExpressions = QStringList({
-                    QString::number(v.x()), QString::number(v.y()), QString::number(v.z())});
-                return true;
+            const QString vecInner = m.captured(1);
+            const QStringList parts = splitAtTopLevelCommas(vecInner);
+            if (parts.size() != 3) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("cube on line %1: expected 3 components");
+                return false;
             }
-            if (errorMessage)
-                *errorMessage = QStringLiteral("cube on line %1: expected [x, y, z]");
-            return false;
+            qreal x = 0.0, y = 0.0, z = 0.0;
+            QString xe, ye, ze;
+            if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
+                || !parseParamExpression(parts[1], state->variableValues, &y, &ye)
+                || !parseParamExpression(parts[2], state->variableValues, &z, &ze)) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("cube on line %1: could not parse dimensions");
+                return false;
+            }
+            shape->id = state->nextShapeId++;
+            shape->type = ShapeNode::Cube;
+            shape->name = QStringLiteral("Cube %1").arg(shape->id);
+            shape->size = QVector3D(x, y, z);
+            shape->parameterExpressions = QStringList({xe, ye, ze});
+            centerFromArgs(argsStr, &shape->center);
+            return true;
         }
-        const QStringList parts = splitAtTopLevelCommas(vecInner);
-        if (parts.size() != 3) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("cube on line %1: expected 3 components");
-            return false;
+        // Vector variable: cube(body_size, center=true)
+        if (state->vectorVariableValues.contains(firstArg)) {
+            const QVector3D v = state->vectorVariableValues[firstArg];
+            shape->id = state->nextShapeId++;
+            shape->type = ShapeNode::Cube;
+            shape->name = QStringLiteral("Cube %1").arg(shape->id);
+            shape->size = v;
+            shape->parameterExpressions = QStringList({
+                QString::number(v.x()), QString::number(v.y()), QString::number(v.z())});
+            centerFromArgs(argsStr, &shape->center);
+            return true;
         }
-        qreal x = 0.0, y = 0.0, z = 0.0;
-        QString xe, ye, ze;
-        if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
-            || !parseParamExpression(parts[1], state->variableValues, &y, &ye)
-            || !parseParamExpression(parts[2], state->variableValues, &z, &ze)) {
-            if (errorMessage)
-                *errorMessage = QStringLiteral("cube on line %1: could not parse dimensions");
-            return false;
+        // Single scalar: cube(10) → 10×10×10
+        qreal scalar = 0.0;
+        QString scalarExpr;
+        if (parseParamExpression(firstArg, state->variableValues, &scalar, &scalarExpr)) {
+            shape->id = state->nextShapeId++;
+            shape->type = ShapeNode::Cube;
+            shape->name = QStringLiteral("Cube %1").arg(shape->id);
+            shape->size = QVector3D(scalar, scalar, scalar);
+            shape->parameterExpressions = QStringList({scalarExpr, scalarExpr, scalarExpr});
+            centerFromArgs(argsStr, &shape->center);
+            return true;
         }
-        shape->id = state->nextShapeId++;
-        shape->type = ShapeNode::Cube;
-        shape->name = QStringLiteral("Cube %1").arg(shape->id);
-        shape->size = QVector3D(x, y, z);
-        shape->parameterExpressions = QStringList({xe, ye, ze});
-        return true;
+        if (errorMessage)
+            *errorMessage = QStringLiteral("cube on line %1: expected [x, y, z], size variable, or number");
+        return false;
     }
 
     // ── Sphere ──────────────────────────────────────────────────────────────
@@ -546,6 +605,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         shape->name = QStringLiteral("Square %1").arg(shape->id);
         shape->size = QVector3D(x, y, 0.1f);
         shape->parameterExpressions = QStringList({xe, ye});
+        centerFromArgs(argsStr, &shape->center);
         return true;
     }
 
@@ -639,6 +699,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
             shape->radius2 = static_cast<float>(r2);
             // parameterExpressions order: R1=0, R2=1, H=2
             shape->parameterExpressions = QStringList({r1e, r2e, he});
+            centerFromArgs(argsStr, &shape->center);
             return true;
         }
 
@@ -662,6 +723,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         shape->radius = static_cast<float>(r);
         // parameterExpressions order: R=index 0, H=index 1
         shape->parameterExpressions = QStringList({re, he});
+        centerFromArgs(argsStr, &shape->center);
         return true;
     }
 
@@ -787,10 +849,10 @@ static bool parseBraceFreeOperationLine(const QString &line,
                                         const QHash<QString, qreal> &varValues,
                                         QStringList *expressions)
 {
-    static const QRegularExpression translateRe("^translate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
-    static const QRegularExpression rotateRe("^rotate\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
-    static const QRegularExpression scaleRe("^scale\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
-    static const QRegularExpression mirrorRe("^mirror\\s*\\(\\s*\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression translateRe("^translate\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression rotateRe("^rotate\\s*\\((?:a\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression scaleRe("^scale\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    static const QRegularExpression mirrorRe("^mirror\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
 
     QRegularExpressionMatch m = translateRe.match(line);
     if (m.hasMatch()) {
@@ -821,7 +883,7 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "minkowski", "for", "color", "linear_extrude",
+        "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "if", "else", "color", "linear_extrude",
         "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
@@ -868,10 +930,46 @@ static bool parseBlock(ParserState *state,
 {
     while (state->index < state->lines.size()) {
         const ParsedLine current = state->lines[state->index++];
-        const QString &line = current.text;
+        QString line = current.text;
+
+        // OpenSCAD * modifier → skip disabled statement entirely
+        if (!line.isEmpty() && line[0] == QLatin1Char('*')) {
+            if (line.trimmed().endsWith(QLatin1Char('{'))) {
+                SceneDocument::TreeNode _dummy;
+                _dummy.type = SceneDocument::TreeNode::Group;
+                _dummy.operation = SceneDocument::TreeNode::Union;
+                parseBlock(state, &_dummy, true, nullptr);
+            }
+            continue;
+        }
+
+        // Strip OpenSCAD debug modifiers (#, %, !)
+        while (!line.isEmpty() && (line[0] == QLatin1Char('#') || line[0] == QLatin1Char('%') || line[0] == QLatin1Char('!')))
+            line = line.mid(1).trimmed();
 
         if (line == QStringLiteral("}"))
             return stopAtBrace;
+
+        // ── Multi-line module call accumulator ────────────────────────────
+        // If a line starts with identifier+( but doesn't end with ; or {,
+        // accumulate subsequent lines until ); is found.
+        {
+            static const QRegularExpression mlRe("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(");
+            if (line.contains(mlRe)
+                && !line.trimmed().endsWith(QLatin1Char(';'))
+                && !line.trimmed().endsWith(QLatin1Char('{'))) {
+                QString accLine = line;
+                while (state->index < state->lines.size()) {
+                    const ParsedLine &next = state->lines[state->index];
+                    ++state->index;
+                    accLine += next.text;
+                    if (next.text.indexOf(QStringLiteral(");")) >= 0) {
+                        line = accLine.trimmed();
+                        break;
+                    }
+                }
+            }
+        }
 
         QString callName, callArgs;
         if (parseModuleCallLine(line, &callName, &callArgs)) {
@@ -924,14 +1022,107 @@ static bool parseBlock(ParserState *state,
             return false;
         }
 
+        // ── let (x = expr) { ... } ── scoped variables, no tree node ──────
+        {
+            static const QRegularExpression letRe("^let\\s*\\((.+)\\)\\s*\\{\\s*$");
+            QRegularExpressionMatch lm = letRe.match(line);
+            if (lm.hasMatch()) {
+                const QStringList pairs = splitAtTopLevelCommas(lm.captured(1));
+                QVector<QPair<QString, qreal>> letScope;
+                for (const QString &pair : pairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    const QString var = pair.left(eq).trimmed();
+                    const QString expr = pair.mid(eq + 1).trimmed();
+                    qreal val = 0.0;
+                    if (ExpressionSyntax::evaluate(expr, state->variableValues, &val)) {
+                        const bool hadPrev = state->variableValues.contains(var);
+                        letScope.append({var, hadPrev ? state->variableValues[var] : qQNaN()});
+                        state->variableValues[var] = val;
+                    }
+                }
+                const bool ok = parseBlock(state, parent, true, errorMessage);
+                for (int li = letScope.size() - 1; li >= 0; --li) {
+                    const auto &ls = letScope[li];
+                    if (std::isnan(ls.second))
+                        state->variableValues.remove(ls.first);
+                    else
+                        state->variableValues[ls.first] = ls.second;
+                }
+                if (!ok) return false;
+                continue;
+            }
+        }
+
+        // ── if (cond) { ... } else { ... } ── parse-time evaluation ──────
+        {
+            static const QRegularExpression ifRe("^if\\s*\\((.+)\\)\\s*\\{\\s*$");
+            static const QRegularExpression elseRe("^else\\s*\\{\\s*$");
+            static const QRegularExpression elseIfRe("^else\\s+if\\s*\\((.+)\\)\\s*\\{\\s*$");
+            QRegularExpressionMatch im = ifRe.match(line);
+            if (im.hasMatch()) {
+                qreal condVal = 0.0;
+                bool condTrue = state->insideModuleBody
+                    || (ExpressionSyntax::evaluate(im.captured(1), state->variableValues, &condVal) && (condVal != 0.0));
+
+                auto skipBlock = [state](QString *errMsg) -> bool {
+                    SceneDocument::TreeNode _d;
+                    _d.type = SceneDocument::TreeNode::Group;
+                    _d.operation = SceneDocument::TreeNode::Union;
+                    return parseBlock(state, &_d, true, errMsg);
+                };
+
+                if (condTrue) {
+                    if (!parseBlock(state, parent, true, errorMessage))
+                        return false;
+                } else {
+                    if (!skipBlock(nullptr))
+                        return false;
+                }
+
+                // Check for else / else-if chain
+                while (state->index < state->lines.size()) {
+                    const QString next = state->lines[state->index].text;
+                    QRegularExpressionMatch eif = elseIfRe.match(next);
+                    if (eif.hasMatch()) {
+                        ++state->index;
+                        qreal eifVal = 0.0;
+                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state->variableValues, &eifVal) && (eifVal != 0.0);
+                        if (!condTrue && eifTrue) {
+                            if (!parseBlock(state, parent, true, errorMessage))
+                                return false;
+                            condTrue = true; // prevents further else branches
+                        } else {
+                            if (!skipBlock(nullptr))
+                                return false;
+                        }
+                        continue;
+                    }
+                    if (elseRe.match(next).hasMatch()) {
+                        ++state->index;
+                        if (!condTrue) {
+                            if (!parseBlock(state, parent, true, errorMessage))
+                                return false;
+                        } else {
+                            if (!skipBlock(nullptr))
+                                return false;
+                        }
+                    }
+                    break;
+                }
+                continue;
+            }
+        }
+
         // ── Group / transform / for ───────────────────────────────────────
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         QVector3D transformVector;
         QStringList transformExpressions;
         QString loopVariable, loopRangeExpression;
+        QStringList forExtraPairs;
         QColor operationColor;
         if (parseOperationLine(line, &operation, &transformVector, state->variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -957,20 +1148,65 @@ static bool parseBlock(ParserState *state,
                 group.transformExpressions = transformExpressions;
 
             parent->children.append(group);
-            SceneDocument::TreeNode &child = parent->children.last();
-            const bool scopedLoop = (operation == SceneDocument::TreeNode::For);
-            const QString scopedVar = child.loopVariable;
-            const bool hadPrev = scopedLoop && state->variableValues.contains(scopedVar);
-            const qreal prevVal = hadPrev ? state->variableValues.value(scopedVar) : 0.0;
-            if (scopedLoop)
-                state->variableValues[scopedVar] = 0.0;
+            SceneDocument::TreeNode *bodyParent = &parent->children.last();
 
-            const bool ok = parseBlock(state, &child, true, errorMessage);
+            // ── Build nested For chain for multi-variable for or intersection_for ──
+            struct VarScope { QString name; bool hadPrev; qreal prevVal; };
+            QVector<VarScope> loopScopes;
 
-            if (scopedLoop) {
-                if (hadPrev) state->variableValues[scopedVar] = prevVal;
-                else         state->variableValues.remove(scopedVar);
+            if (operation == SceneDocument::TreeNode::For) {
+                for (const QString &pair : forExtraPairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    SceneDocument::TreeNode subFor = makeGroupNode(SceneDocument::TreeNode::For, state);
+                    subFor.loopVariable = pair.left(eq).trimmed();
+                    subFor.loopRangeExpression = pair.mid(eq + 1).trimmed();
+                    bodyParent->children.append(subFor);
+                    bodyParent = &bodyParent->children.last();
+                }
             }
+
+            if (operation == SceneDocument::TreeNode::Intersection && !loopVariable.isEmpty()) {
+                SceneDocument::TreeNode subFor = makeGroupNode(SceneDocument::TreeNode::For, state);
+                subFor.loopVariable = loopVariable;
+                subFor.loopRangeExpression = loopRangeExpression;
+                bodyParent->children.append(subFor);
+                bodyParent = &bodyParent->children.last();
+                for (const QString &pair : forExtraPairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    SceneDocument::TreeNode extraFor = makeGroupNode(SceneDocument::TreeNode::For, state);
+                    extraFor.loopVariable = pair.left(eq).trimmed();
+                    extraFor.loopRangeExpression = pair.mid(eq + 1).trimmed();
+                    bodyParent->children.append(extraFor);
+                    bodyParent = &bodyParent->children.last();
+                }
+            }
+
+            // ── Push for-loop variable scopes ──
+            bool isForLike = (operation == SceneDocument::TreeNode::For || operation == SceneDocument::TreeNode::Intersection);
+            if (isForLike) {
+                SceneDocument::TreeNode *walk = &parent->children.last();
+                while (walk) {
+                    if (walk->operation == SceneDocument::TreeNode::For && !walk->loopVariable.isEmpty()) {
+                        const bool hp = state->variableValues.contains(walk->loopVariable);
+                        loopScopes.append({walk->loopVariable, hp, hp ? state->variableValues[walk->loopVariable] : 0.0});
+                        state->variableValues[walk->loopVariable] = 0.0;
+                    }
+                    if (walk == bodyParent) break;
+                    walk = walk->children.isEmpty() ? nullptr : &walk->children.last();
+                }
+            }
+
+            const bool ok = parseBlock(state, bodyParent, true, errorMessage);
+
+            // ── Pop for-loop variable scopes ──
+            for (int si = loopScopes.size() - 1; si >= 0; --si) {
+                const VarScope &vs = loopScopes[si];
+                if (vs.hadPrev) state->variableValues[vs.name] = vs.prevVal;
+                else            state->variableValues.remove(vs.name);
+            }
+
             if (!ok)
                 return false;
             continue;
@@ -1269,13 +1505,51 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
     while (state.index < state.lines.size()) {
         const ParsedLine current = state.lines[state.index];
-        const QString &line = current.text;
+        QString line = current.text;
+
+        // OpenSCAD * modifier → skip disabled statement entirely
+        if (!line.isEmpty() && line[0] == QLatin1Char('*')) {
+            ++state.index;
+            if (line.trimmed().endsWith(QLatin1Char('{'))) {
+                SceneDocument::TreeNode _dummy;
+                _dummy.type = SceneDocument::TreeNode::Group;
+                _dummy.operation = SceneDocument::TreeNode::Union;
+                parseBlock(&state, &_dummy, true, nullptr);
+            }
+            continue;
+        }
+
+        // Strip OpenSCAD debug modifiers (#, %, !)
+        while (!line.isEmpty() && (line[0] == QLatin1Char('#') || line[0] == QLatin1Char('%') || line[0] == QLatin1Char('!')))
+            line = line.mid(1).trimmed();
 
         // Collect top-level module call statements — they become ModuleCall nodes in Scene.
+        // ── Multi-line module call accumulator ────────────────────────────
+        bool callWasAccumulated = false;
+        {
+            static const QRegularExpression mlRe("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(");
+            if (line.contains(mlRe)
+                && !line.trimmed().endsWith(QLatin1Char(';'))
+                && !line.trimmed().endsWith(QLatin1Char('{'))) {
+                QString accLine = line;
+                while (state.index < state.lines.size()) {
+                    const ParsedLine &next = state.lines[state.index];
+                    ++state.index;
+                    accLine += next.text;
+                    if (next.text.indexOf(QStringLiteral(");")) >= 0) {
+                        line = accLine.trimmed();
+                        callWasAccumulated = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         QString callName, callArgs;
         if (parseModuleCallLine(line, &callName, &callArgs)) {
             moduleCalls.append({callName, callArgs});
-            ++state.index;
+            if (!callWasAccumulated)
+                ++state.index;
             continue;
         }
 
@@ -1310,11 +1584,14 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 return false;
             }
 
+            state.insideModuleBody = true;
             if (!parseBlock(&state, &moduleNode, true, errorMessage)) {
                 if (errorLine) *errorLine = state.errorLine;
                 state.variableValues = outerVariables;
+                state.insideModuleBody = false;
                 return false;
             }
+            state.insideModuleBody = false;
 
             state.variableValues = outerVariables;
             root.children.append(moduleNode);
@@ -1361,14 +1638,122 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             return false;
         }
 
+        // ── let (x = expr) { ... } at top scope ──────────────────────────
+        {
+            static const QRegularExpression letRe("^let\\s*\\((.+)\\)\\s*\\{\\s*$");
+            QRegularExpressionMatch lm = letRe.match(line);
+            if (lm.hasMatch()) {
+                ++state.index;
+                const QStringList pairs = splitAtTopLevelCommas(lm.captured(1));
+                QVector<QPair<QString, qreal>> letScope;
+                for (const QString &pair : pairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    const QString var = pair.left(eq).trimmed();
+                    const QString expr = pair.mid(eq + 1).trimmed();
+                    qreal val = 0.0;
+                    if (ExpressionSyntax::evaluate(expr, state.variableValues, &val)) {
+                        const bool hadPrev = state.variableValues.contains(var);
+                        letScope.append({var, hadPrev ? state.variableValues[var] : qQNaN()});
+                        state.variableValues[var] = val;
+                    }
+                }
+                if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
+                    for (int li = letScope.size() - 1; li >= 0; --li) {
+                        const auto &ls = letScope[li];
+                        if (std::isnan(ls.second))
+                            state.variableValues.remove(ls.first);
+                        else
+                            state.variableValues[ls.first] = ls.second;
+                    }
+                    if (errorLine) *errorLine = state.errorLine;
+                    return false;
+                }
+                for (int li = letScope.size() - 1; li >= 0; --li) {
+                    const auto &ls = letScope[li];
+                    if (std::isnan(ls.second))
+                        state.variableValues.remove(ls.first);
+                    else
+                        state.variableValues[ls.first] = ls.second;
+                }
+                continue;
+            }
+        }
+
+        // ── if (cond) { ... } else { ... } at top scope ──────────────────
+        {
+            static const QRegularExpression ifRe("^if\\s*\\((.+)\\)\\s*\\{\\s*$");
+            static const QRegularExpression elseRe("^else\\s*\\{\\s*$");
+            static const QRegularExpression elseIfRe("^else\\s+if\\s*\\((.+)\\)\\s*\\{\\s*$");
+            QRegularExpressionMatch im = ifRe.match(line);
+            if (im.hasMatch()) {
+                ++state.index;
+                qreal condVal = 0.0;
+                bool condTrue = ExpressionSyntax::evaluate(im.captured(1), state.variableValues, &condVal) && (condVal != 0.0);
+
+                auto skipBlock = [&state](QString *errMsg) -> bool {
+                    SceneDocument::TreeNode _d;
+                    _d.type = SceneDocument::TreeNode::Group;
+                    _d.operation = SceneDocument::TreeNode::Union;
+                    return parseBlock(&state, &_d, true, errMsg);
+                };
+
+                if (condTrue) {
+                    if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
+                        if (errorLine) *errorLine = state.errorLine;
+                        return false;
+                    }
+                } else {
+                    if (!skipBlock(nullptr))
+                        return false;
+                }
+
+                while (state.index < state.lines.size()) {
+                    const QString next = state.lines[state.index].text;
+                    QRegularExpressionMatch eif = elseIfRe.match(next);
+                    if (eif.hasMatch()) {
+                        ++state.index;
+                        qreal eifVal = 0.0;
+                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state.variableValues, &eifVal) && (eifVal != 0.0);
+                        if (!condTrue && eifTrue) {
+                            if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
+                                if (errorLine) *errorLine = state.errorLine;
+                                return false;
+                            }
+                            condTrue = true;
+                        } else {
+                            if (!skipBlock(nullptr))
+                                return false;
+                        }
+                        continue;
+                    }
+                    if (elseRe.match(next).hasMatch()) {
+                        ++state.index;
+                        if (!condTrue) {
+                            if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
+                                if (errorLine) *errorLine = state.errorLine;
+                                return false;
+                            }
+                        } else {
+                            if (!skipBlock(nullptr))
+                                return false;
+                        }
+                    }
+                    break;
+                }
+                continue;
+            }
+        }
+
         // Direct top-level group / transform / for (no module wrapper).
         SceneDocument::TreeNode::Operation operation = SceneDocument::TreeNode::Union;
         QVector3D transformVector;
         QStringList transformExpressions;
         QString loopVariable, loopRangeExpression;
+        QStringList forExtraPairs;
         QColor operationColor;
         if (parseOperationLine(line, &operation, &transformVector, state.variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs)) {
             ++state.index;
             SceneDocument::TreeNode group = makeGroupNode(operation, &state);
             if (operation == SceneDocument::TreeNode::Translate)
@@ -1394,22 +1779,65 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 || operation == SceneDocument::TreeNode::LinearExtrude)
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
-            SceneDocument::TreeNode &child = sceneNode.children.last();
-            const bool scopedLoop = operation == SceneDocument::TreeNode::For;
-            const QString scopedVar = child.loopVariable;
-            const bool hadPreviousValue = scopedLoop && state.variableValues.contains(scopedVar);
-            const qreal previousValue = hadPreviousValue ? state.variableValues.value(scopedVar) : 0.0;
-            if (scopedLoop)
-                state.variableValues[scopedVar] = 0.0;
+            SceneDocument::TreeNode *bodyParent = &sceneNode.children.last();
 
-            const bool parsedBody = parseBlock(&state, &child, true, errorMessage);
+            // ── Build nested For chain for multi-variable for or intersection_for ──
+            struct VarScope { QString name; bool hadPrev; qreal prevVal; };
+            QVector<VarScope> loopScopes;
 
-            if (scopedLoop) {
-                if (hadPreviousValue)
-                    state.variableValues[scopedVar] = previousValue;
-                else
-                    state.variableValues.remove(scopedVar);
+            if (operation == SceneDocument::TreeNode::For) {
+                for (const QString &pair : forExtraPairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    SceneDocument::TreeNode subFor = makeGroupNode(SceneDocument::TreeNode::For, &state);
+                    subFor.loopVariable = pair.left(eq).trimmed();
+                    subFor.loopRangeExpression = pair.mid(eq + 1).trimmed();
+                    bodyParent->children.append(subFor);
+                    bodyParent = &bodyParent->children.last();
+                }
             }
+
+            if (operation == SceneDocument::TreeNode::Intersection && !loopVariable.isEmpty()) {
+                SceneDocument::TreeNode subFor = makeGroupNode(SceneDocument::TreeNode::For, &state);
+                subFor.loopVariable = loopVariable;
+                subFor.loopRangeExpression = loopRangeExpression;
+                bodyParent->children.append(subFor);
+                bodyParent = &bodyParent->children.last();
+                for (const QString &pair : forExtraPairs) {
+                    const int eq = pair.indexOf('=');
+                    if (eq <= 0) continue;
+                    SceneDocument::TreeNode extraFor = makeGroupNode(SceneDocument::TreeNode::For, &state);
+                    extraFor.loopVariable = pair.left(eq).trimmed();
+                    extraFor.loopRangeExpression = pair.mid(eq + 1).trimmed();
+                    bodyParent->children.append(extraFor);
+                    bodyParent = &bodyParent->children.last();
+                }
+            }
+
+            // ── Push for-loop variable scopes ──
+            bool isForLike = (operation == SceneDocument::TreeNode::For || operation == SceneDocument::TreeNode::Intersection);
+            if (isForLike) {
+                SceneDocument::TreeNode *walk = &sceneNode.children.last();
+                while (walk) {
+                    if (walk->operation == SceneDocument::TreeNode::For && !walk->loopVariable.isEmpty()) {
+                        const bool hp = state.variableValues.contains(walk->loopVariable);
+                        loopScopes.append({walk->loopVariable, hp, hp ? state.variableValues[walk->loopVariable] : 0.0});
+                        state.variableValues[walk->loopVariable] = 0.0;
+                    }
+                    if (walk == bodyParent) break;
+                    walk = walk->children.isEmpty() ? nullptr : &walk->children.last();
+                }
+            }
+
+            const bool parsedBody = parseBlock(&state, bodyParent, true, errorMessage);
+
+            // ── Pop for-loop variable scopes ──
+            for (int si = loopScopes.size() - 1; si >= 0; --si) {
+                const auto &vs = loopScopes[si];
+                if (vs.hadPrev) state.variableValues[vs.name] = vs.prevVal;
+                else            state.variableValues.remove(vs.name);
+            }
+
             if (!parsedBody) {
                 if (errorLine) *errorLine = state.errorLine;
                 return false;

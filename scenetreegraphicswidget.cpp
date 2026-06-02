@@ -758,6 +758,26 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         }
     }
 
+    // ── Center checkbox ───────────────────────────────────
+    if (!colorEditMode() && event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+            for (const ChildLayout &child : area.children) {
+                if (!child.rect.contains(scenePos)) continue;
+                const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(child.nodeId) : nullptr;
+                if (!node || node->type != SceneDocument::TreeNode::Primitive) continue;
+                const ShapeNode *shape = m_scene ? m_scene->shapeById(node->shapeId) : nullptr;
+                if (!shape || !shapeSupportsCenter(static_cast<int>(shape->type))) continue;
+                const QRectF cbRect = centerCheckboxRect(child.rect);
+                if (cbRect.contains(scenePos)) {
+                    emit shapeCenterToggled(node->id, node->shapeId, !shape->center);
+                    event->accept();
+                    return;
+                }
+            }
+        }
+    }
+
     // ── Canvas-move drag: check grip strip before anything else ──────────────
     if (!colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());

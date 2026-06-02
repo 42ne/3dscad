@@ -664,6 +664,12 @@ public:
 
     QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
 
+    // Rect of the center checkbox in scene coordinates (empty if N/A for this type).
+    QRectF centerCheckRect() const
+    {
+        return ::centerCheckboxRect(m_rect);
+    }
+
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
         painter->setRenderHint(QPainter::Antialiasing, true);
@@ -698,6 +704,35 @@ public:
         }
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
+
+        // ── Center checkbox ──────────────────────────────────────────────
+        const bool supportsCenter = (m_shape.type == ShapeNode::Cube
+                                     || m_shape.type == ShapeNode::Cylinder
+                                     || m_shape.type == ShapeNode::Cone
+                                     || m_shape.type == ShapeNode::Square);
+        if (supportsCenter) {
+            const QRectF cbRect = ::centerCheckboxRect(m_rect);
+            const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
+
+            // Checkbox square
+            painter->setPen(QPen(SceneTreePalette::pillBorder(QColor(255,255,255,48), pt), 1.2));
+            painter->setBrush(m_shape.center
+                ? SceneTreePalette::pillFillActive().lighter(130)
+                : SceneTreePalette::pillFill(pt));
+            painter->drawRoundedRect(cbRect.adjusted(0.5, 0.5, -0.5, -0.5), 3.0, 3.0);
+
+            if (m_shape.center) {
+                // Draw checkmark
+                painter->setPen(QPen(SceneTreePalette::numText(pt), 2.0, Qt::SolidLine, Qt::RoundCap));
+                const qreal cx = cbRect.center().x();
+                const qreal cy = cbRect.center().y();
+                QPainterPath check;
+                check.moveTo(cx - 3.5, cy);
+                check.lineTo(cx - 1.0, cy + 3.0);
+                check.lineTo(cx + 4.0, cy - 2.5);
+                painter->drawPath(check);
+            }
+        }
 
         // Parameters outside the card border — same style as transform card rows.
         const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);

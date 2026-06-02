@@ -89,6 +89,7 @@ signals:
     void shapeParameterAdjusted(int nodeId, int paramIndex, int numberStart, int numberLength, qreal delta);
     void shapeParameterExpressionEdited(int nodeId, int paramIndex, const QString &expression);
     void shapeParameterHovered(int shapeId, int parameter);
+    void shapeCenterToggled(int nodeId, int shapeId, bool center);
     void variableNumberHovered(int nodeId, int start);
     void forLoopRangeHovered(int nodeId, int start);
     void moduleCallParamHovered(int moduleCallNodeId, int paramVarNodeId, int start);

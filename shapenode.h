@@ -48,6 +48,11 @@ struct ShapeNode
     // Empty list = plain numeric mode (use size/radius/height directly).
     QStringList parameterExpressions;
 
+    // center=true/false for Cube, Cylinder, Cone, Square.
+    // Default true matches the toolbar/drag-drop creation behaviour;
+    // when parsing existing code the value is set from the actual parameter.
+    bool center = true;
+
     // Apply a parameter value by index, clamping to the type-appropriate minimum.
     // Pass the raw (pre-clamp) evaluated value; this method owns all clamping logic.
     // Cone R2 (index 1) may be 0.0 for a true pointed apex; every other param >= 0.1.
@@ -138,6 +143,7 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.radius2 == right.radius2
            && left.height == right.height
            && left.parameterExpressions == right.parameterExpressions
+           && left.center == right.center
            && left.polyhedronPoints == right.polyhedronPoints
            && left.polyhedronFaces == right.polyhedronFaces;
 }

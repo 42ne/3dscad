@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SFX Builder — Portable Executable Tool</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #8e44ad; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #8e44ad; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #8e44ad; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #f8f4fc; }
+tr:hover { background: #f0eaf8; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.4; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-tool { display: inline-block; background: #8e44ad; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+.tag-note { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
+.tag-symptom { background: #e74c3c; color: white; border-radius: 2px; padding: 1px 4px; font-size: 12px; }
+.tag-fix { background: #27ae60; color: white; border-radius: 2px; padding: 1px 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1><span class="tag-tool">TOOL</span> SFX Builder — Portable Executable Tool</h1>
+
+<p><code>tools/sfxbuilder</code> is a small Qt GUI utility that packages a compiled Windows
+executable into a single self-extracting portable <code>.exe</code> that requires no
+installer. It automates the three steps needed for a portable Windows release:</p>
+<ol>
+<li>Run <code>windeployqt</code> to collect all Qt DLLs and plugins.</li>
+<li>Copy the MinGW runtime DLLs that <code>windeployqt</code> intentionally leaves out.</li>
+<li>Pack everything with 7-Zip's SFX module so the result is one double-clickable
+file that extracts and launches the app from a temp folder.</li>
+</ol>
+
+<hr>
+
+<h2>Prerequisites</h2>
+<table>
+<thead><tr><th>Requirement</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Qt 5.15.x (MinGW 32 or 64-bit)</td><td>Same kit used to compile the main app. <code>windeployqt.exe</code> must be in the Qt bin dir.</td></tr>
+<tr><td>7-Zip installed</td><td>Default paths <code>C:\Program Files\7-Zip</code> and <code>C:\Program Files (x86)\7-Zip</code> are auto-detected. The console <code>7z.exe</code> <strong>and</strong> <code>7z.sfx</code> (LZMA2 GUI SFX) must both be present.</td></tr>
+<tr><td>The compiled <code>.exe</code></td><td>A Release build is strongly recommended; Debug builds include debug DLLs that inflate the package size significantly.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>Building sfxbuilder</h2>
+<p>Open <code>tools/sfxbuilder/sfxbuilder.pro</code> in Qt Creator and build with the same
+MinGW kit used for the main application. A Debug build is fine for the tool
+itself.</p>
+
+<hr>
+
+<h2>Using the Tool</h2>
+<p>Launch <code>sfxbuilder.exe</code>. All fields are auto-detected where possible.</p>
+
+<h3>Fields</h3>
+<table>
+<thead><tr><th>Field</th><th>What to enter</th></tr></thead>
+<tbody>
+<tr><td><strong>Source EXE</strong></td><td>The compiled application executable, e.g. <code>build/release/3DScad.exe</code>. Choosing a file here auto-fills <em>Output folder</em> and searches parent directories for <code>docs/sample_codes</code>.</td></tr>
+<tr><td><strong>Output folder</strong></td><td>Directory where the finished <code>&lt;AppName&gt;_portable.exe</code> will be written. Defaults to a <code>dist/</code> subfolder next to the source exe.</td></tr>
+<tr><td><strong>Qt bin dir</strong></td><td>Qt MinGW bin directory, e.g. <code>C:\Qt\5.15.2\mingw81_64\bin</code>. Auto-filled from the Qt installation sfxbuilder itself was built with.</td></tr>
+<tr><td><strong>7-Zip dir</strong></td><td>Directory containing <code>7z.exe</code> and <code>7z.sfx</code>. Auto-detected from the standard 7-Zip install locations.</td></tr>
+<tr><td><strong>Extra folder</strong> <em>(optional)</em></td><td>Any additional directory to bundle alongside the app, e.g. the <code>docs/sample_codes</code> folder. When Source EXE is chosen, sfxbuilder checks parent directories and fills this in automatically if <code>docs/sample_codes</code> exists.</td></tr>
+<tr><td><strong>Bundle path</strong> <em>(optional)</em></td><td>Relative path inside the bundle where the extra folder will appear, e.g. <code>docs/sample_codes</code>. Defaults to the folder name if left blank.</td></tr>
+</tbody>
+</table>
+
+<h3>Steps</h3>
+<ol>
+<li>Fill in <strong>Source EXE</strong> first — most other fields auto-populate.</li>
+<li>Verify <strong>Qt bin dir</strong> and <strong>7-Zip dir</strong> are correct.</li>
+<li>Optionally set an <strong>Extra folder</strong> (e.g. sample SCAD files) and its <strong>Bundle path</strong>.</li>
+<li>Click <strong>Build SFX</strong>.</li>
+</ol>
+<p>The log panel shows each step. When the build succeeds a dialog shows the path
+to the finished portable <code>.exe</code>.</p>
+
+<hr>
+
+<h2>What Happens Internally</h2>
+<pre><code>Source EXE
+  └─► copy to _stage/
+        └─► windeployqt          (Qt DLLs, plugins, platforms, …)
+              └─► copy MinGW runtime DLLs from Qt bin dir:
+                    libgcc_s_seh-1.dll   (64-bit) / libgcc_s_dw2-1.dll (32-bit)
+                    libstdc++-6.dll
+                    libwinpthread-1.dll
+                      └─► copy Extra folder  (optional)
+                            └─► 7z a -mx=9  _tmp.7z  _stage/*
+                                  └─► cat 7z.sfx + sfx-config + _tmp.7z  →  AppName_portable.exe
+_stage/ and _tmp.7z cleaned up</code></pre>
+<p>The SFX config embedded between the 7z.sfx stub and the archive sets:</p>
+<pre><code>;!@Install@!UTF-8!
+Title="AppName Portable"
+RunProgram="AppName.exe"
+;!@InstallEnd@!</code></pre>
+<p>The 7z.sfx module extracts the archive to a temp folder and launches
+<code>RunProgram</code> automatically. No registry writes, no installer.</p>
+
+<hr>
+
+<h2>MinGW Runtime DLLs</h2>
+<p><code>windeployqt</code> copies Qt-owned DLLs but deliberately skips the MinGW GCC
+runtime. Without these files the app fails immediately with
+<em>"libgcc_s_seh-1.dll was not found"</em> on machines that do not have MinGW
+installed.</p>
+<p>sfxbuilder copies them from the <strong>same Qt bin dir</strong> that contains
+<code>windeployqt.exe</code>, because the MinGW toolchain ships them there alongside the
+Qt libraries. If a file is absent (e.g. the 32-bit variant on a 64-bit kit)
+it is silently skipped.</p>
+
+<hr>
+
+<h2>Troubleshooting</h2>
+<table>
+<thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td><span class="tag-symptom">"libgcc_s_seh-1.dll was not found"</span> at launch</td><td>MinGW DLL missing from package</td><td>Rebuild with sfxbuilder version that copies MinGW DLLs; check log for "Copying MinGW runtime DLLs" step.</td></tr>
+<tr><td><span class="tag-symptom">"windeployqt failed"</span></td><td>Wrong Qt bin dir or Release/Debug mismatch</td><td>Point Qt bin dir at the MinGW bin that matches the exe's kit.</td></tr>
+<tr><td><span class="tag-symptom">"7z.sfx not found"</span></td><td>7-Zip installed but <code>7z.sfx</code> absent</td><td>Install the full 7-Zip package, not just the standalone <code>7z.exe</code> download.</td></tr>
+<tr><td><span class="tag-symptom">Package works on dev machine but fails elsewhere</span></td><td>Missing VC++ redist or System DLL</td><td>The app must be built with MinGW, not MSVC. MinGW DLLs are self-contained; MSVC DLLs require a separate redistributable.</td></tr>
+<tr><td><span class="tag-symptom">Large portable exe (&gt; 50 MB)</span></td><td>Debug build included</td><td>Rebuild the main app as Release before packaging.</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

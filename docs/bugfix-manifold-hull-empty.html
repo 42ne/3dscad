@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Bug Report: Hull завжди повертав порожній результат</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #e74c3c; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #e74c3c; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #e74c3c; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #fdf5f5; }
+tr:hover { background: #fce8e8; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.4; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+blockquote { border-left: 3px solid #e67e22; margin: 1em 0; padding: .5em 1em; background: #fef9f0; border-radius: 0 4px 4px 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-critical { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-fixed { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-bad { background: #e74c3c; color: white; border-radius: 2px; padding: 1px 4px; font-size: 12px; }
+.tag-good { background: #27ae60; color: white; border-radius: 2px; padding: 1px 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Bug Report: Hull завжди повертав порожній результат</h1>
+
+<table>
+<tr><td><strong>Компонент</strong></td><td>Manifold 3.4.1 — <code>src/parallel.h</code></td></tr>
+<tr><td><strong>Дата виявлення</strong></td><td>2026-05-24</td></tr>
+<tr><td><strong>Severity</strong></td><td><span class="tag-critical">Critical</span> — Hull не працював взагалі</td></tr>
+<tr><td><strong>Статус</strong></td><td><span class="tag-fixed">✅ Виправлено</span></td></tr>
+</table>
+
+<hr>
+
+<h2>Симптом</h2>
+<p>Вузол <code>hull()</code> у дереві сцени давав порожній вьюпорт. Всі три перевантажені
+варіанти <code>Manifold::Hull()</code> завжди повертали порожній меш:</p>
+<pre><code>Manifold::Hull(vector&lt;vec3&gt;)      → <span class="tag-bad">IsEmpty=1, NumVert=0, NumTri=0</span>
+Manifold::Hull()                  → <span class="tag-bad">IsEmpty=1</span>
+Manifold::Hull(vector&lt;Manifold&gt;)  → <span class="tag-bad">IsEmpty=1</span></code></pre>
+<p>Навіть для тривіального тетраедра з 4 точок результат був порожнім.</p>
+
+<hr>
+
+<h2>Першопричина</h2>
+<p>Баг у послідовній реалізації <code>exclusive_scan</code> у файлі
+<code>build/manifold-src/src/parallel.h</code> (рядок ≈ 636):</p>
+<pre><code>// <span class="tag-bad">БУЛО (баг):</span>
+T sum = init;
+for (; first != last; ++first, ++d_first) {
+    *d_first = sum;        // ← спочатку ЗАПИСУЄ в буфер
+    sum = f(sum, *first);  // ← потім ЧИТАЄ з того ж буфера — вже зіпсовані дані!
+}</code></pre>
+<p>У <code>quickhull.cpp::buildMesh()</code> функція викликається так:</p>
+<pre><code>exclusive_scan(TransformIterator(counts.begin(), saturate),
+               TransformIterator(counts.end(), saturate),
+               counts.begin(), 0);  // ← вхід і вихід — той самий масив</code></pre>
+<p>Вхідний ітератор (<code>TransformIterator</code>) і вихідний (<code>counts.begin()</code>) вказують на
+<strong>той самий масив</strong>. Через аліасинг:</p>
+<ol>
+<li>Крок 1: <code>counts[0] = 0</code> (init) → запис</li>
+<li>Крок 2: читає <code>counts[0]</code> через трансформ-ітератор → отримує <code>0</code> (вже зіпсований!)</li>
+<li>Усі наступні кроки дають <code>0</code></li>
+</ol>
+<p>Підсумок: <code>counts.back() = 0</code> → вершин після компакції 0 → порожній меш.</p>
+
+<hr>
+
+<h2>Виправлення</h2>
+<p><strong>Файл:</strong> <code>build/manifold-src/src/parallel.h</code><br>
+<strong>Патч:</strong> <code>manifold-hull-fix.patch</code></p>
+<pre><code>// <span class="tag-good">СТАЛО (виправлено):</span>
+T sum = init;
+for (; first != last; ++first, ++d_first) {
+    auto cur = *first;  // читаємо ДО запису — фікс аліасингу
+    *d_first = sum;
+    sum = f(sum, cur);
+}</code></pre>
+
+<hr>
+
+<h2>Супутні зміни коду (manifoldcsg.cpp)</h2>
+<table>
+<thead><tr><th>Що змінено</th><th>Чому</th></tr></thead>
+<tbody>
+<tr><td>Hull використовує <code>Manifold::Hull(vector&lt;Manifold&gt;)</code> замість ручного витягу вершин</td><td>Простіше, той самий результат</td></tr>
+<tr><td>Додано <code>applyNodeTransform()</code> до результату Hull</td><td>Був відсутній — баг</td></tr>
+<tr><td>Видалено діагностичний блок і <code>#include &lt;QDebug&gt;</code></td><td>Прибирання після debugging</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>Відтворення (до виправлення)</h2>
+<pre><code>std::vector&lt;manifold::vec3&gt; tetra = {{0,0,0},{1,0,0},{0,1,0},{0,0,1}};
+Manifold h = Manifold::Hull(tetra);
+// h.IsEmpty() == true  ← завжди, незалежно від вхідних даних</code></pre>
+
+<h2>Результат після виправлення</h2>
+<pre><code>tetra_hull.IsEmpty=0  NumVert=4  NumTri=4   <span class="tag-good">✓</span>
+cubePoints_hull.IsEmpty=0  NumVert=8  NumTri=12  <span class="tag-good">✓</span>
+hull(cyl+cube).IsEmpty=0  NumVert=72  NumTri=140  <span class="tag-good">✓</span></code></pre>
+
+</body>
+</html>

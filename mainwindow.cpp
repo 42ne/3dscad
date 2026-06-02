@@ -286,6 +286,8 @@ void MainWindow::buildUi()
             this, [this](int shapeId, int parameter) {
                 if (m_viewport) m_viewport->setTreeShapeParameterPreview(shapeId, parameter);
             });
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::shapeCenterToggled,
+            m_controller, &SceneController::handleShapeCenterToggled);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableNumberAdjusted,
             m_controller, &SceneController::handleVariableNumberAdjusted);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::variableExpressionEdited,

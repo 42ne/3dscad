@@ -101,6 +101,7 @@ public:
                                        int numberStart, int numberLength,
                                        qreal delta);
     void handleShapeParameterExpressionEdited(int nodeId, int paramIndex, const QString &expression);
+    void handleShapeCenterToggled(int nodeId, int shapeId, bool center);
     void handleVariableNumberAdjusted(int nodeId, int start, int length, qreal delta);
     void handleVariableExpressionEdited(int nodeId, const QString &expression);
     void handleModuleCallArgumentAdjusted(int moduleCallId, int parameterVariableId,

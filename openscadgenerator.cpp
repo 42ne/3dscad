@@ -373,12 +373,16 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             return shape.parameterExpressions[idx];
         return QString::number(numericValue, 'g');
     };
+    auto centerStr = [](bool center) -> QString {
+        return center ? QStringLiteral("true") : QStringLiteral("false");
+    };
 
     if (shape.type == ShapeNode::Cube) {
-        return QString("cube([%1, %2, %3], center=true);\n")
+        return QString("cube([%1, %2, %3], center=%4);\n")
             .arg(paramExpr(0, shape.size.x()))
             .arg(paramExpr(1, shape.size.y()))
-            .arg(paramExpr(2, shape.size.z()));
+            .arg(paramExpr(2, shape.size.z()))
+            .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Sphere) {
         return QString("sphere(r=%1);\n")
@@ -389,9 +393,10 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(paramExpr(0, shape.radius));
     }
     if (shape.type == ShapeNode::Square) {
-        return QString("square([%1, %2], center=true);\n")
+        return QString("square([%1, %2], center=%3);\n")
             .arg(paramExpr(0, shape.size.x()))
-            .arg(paramExpr(1, shape.size.y()));
+            .arg(paramExpr(1, shape.size.y()))
+            .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Polygon2D) {
         QStringList ptsList;
@@ -402,16 +407,18 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
     }
     if (shape.type == ShapeNode::Cylinder) {
         // parameterExpressions: index 0 = R (radius), index 1 = H (height)
-        return QString("cylinder(h=%1, r=%2, center=true);\n")
+        return QString("cylinder(h=%1, r=%2, center=%3);\n")
             .arg(paramExpr(1, shape.height))
-            .arg(paramExpr(0, shape.radius));
+            .arg(paramExpr(0, shape.radius))
+            .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Cone) {
         // parameterExpressions: index 0 = R1 (bottom), index 1 = R2 (top), index 2 = H
-        return QString("cylinder(h=%1, r1=%2, r2=%3, center=true);\n")
+        return QString("cylinder(h=%1, r1=%2, r2=%3, center=%4);\n")
             .arg(paramExpr(2, shape.height))
             .arg(paramExpr(0, shape.radius))
-            .arg(paramExpr(1, shape.radius2));
+            .arg(paramExpr(1, shape.radius2))
+            .arg(centerStr(shape.center));
     }
     if (shape.type == ShapeNode::Point3D) {
         // Single point: output as comment (data used by parent Polyhedron group)

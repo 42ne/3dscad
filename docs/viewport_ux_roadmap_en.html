@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D Viewport UX Improvement Roadmap</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #2c3e50; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #f5f5f5; }
+tr:hover { background: #e8ecf0; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-critical { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-high { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-medium { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-low { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-notstarted { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-partial { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>3D Viewport UX Improvement Roadmap</h1>
+<p><em>Status as of: 2026-06-02.</em></p>
+<p>Planned usability enhancements for <code>ViewportWidget</code> (the 3D preview/render panel).</p>
+
+<hr>
+
+<h2>Already Implemented</h2>
+<table>
+<thead><tr><th>Feature</th><th>Details</th></tr></thead>
+<tbody>
+<tr><td><strong>Camera orbit</strong></td><td>Left-button drag; yaw/pitch with 0.45×/0.35× sensitivity</td></tr>
+<tr><td><strong>Camera pan</strong></td><td>Right-button drag; world-space delta scaled by <code>distance/420</code></td></tr>
+<tr><td><strong>Camera zoom</strong></td><td>Mouse wheel; nonlinear sensitivity; distance clamped to [2, 8000]</td></tr>
+<tr><td><strong>Perspective / Orthographic</strong></td><td>Toggle via "Ortho" checkbox in viewport</td></tr>
+<tr><td><strong>Dual render backend</strong></td><td>Software (QPainter) and OpenGL (GL shader); toggleable</td></tr>
+<tr><td><strong>Dark / Light theme</strong></td><td>Toggle via "Dark" checkbox</td></tr>
+<tr><td><strong>Color variants</strong></td><td>5 presets: Neutral, Mint, Clay, Steel, Amber</td></tr>
+<tr><td><strong>Lighting presets</strong></td><td>4 presets: Studio, Soft, Side, Contrast</td></tr>
+<tr><td><strong>Custom appearance themes</strong></td><td>Load/save via <code>ViewportAppearanceTheme</code></td></tr>
+<tr><td><strong>Selection (single)</strong></td><td>Shape index and group ID; viewport → tree sync</td></tr>
+<tr><td><strong>Polyhedron element selection</strong></td><td>Face/point sub-element picking + move tool</td></tr>
+<tr><td><strong>Selection breadcrumb bar</strong></td><td>Clickable tree-path chips below info panel</td></tr>
+<tr><td><strong>Glass info panel</strong></td><td>Top-left overlay with help text, CSG status, renderer name</td></tr>
+<tr><td><strong>Axis gizmo (compass)</strong></td><td>Top-right 76×76 panel; X/Y/Z axes depth-sorted</td></tr>
+<tr><td><strong>Transform axes / rotation rings</strong></td><td>On-selection gizmo for Translate/Rotate groups</td></tr>
+<tr><td><strong>Shape parameter preview</strong></td><td>Dimension arrows with +/- labels and value during parameter edit</td></tr>
+<tr><td><strong>Contact shadows</strong></td><td>Planar Z-up shadow; both SW and GL backends</td></tr>
+<tr><td><strong>Grid</strong></td><td>Minor lines ±120 every 20; X/Y/Z axis lines with labels</td></tr>
+<tr><td><strong>Async CSG computation</strong></td><td><code>QtConcurrent::run()</code> with deferred recomputation during drag</td></tr>
+<tr><td><strong>Selection shimmer</strong></td><td>Animated glow on selected objects (OpenGL only)</td></tr>
+<tr><td><strong>Viewport control bar</strong></td><td>Checkboxes and combos at y=70 (OpenGL, Dark, Nav UI, Ortho, Color, Lighting)</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="tag-critical">🔴 Critical</span></h2>
+
+<h3>1. Frame selection / Zoom-to-fit</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>setSelectedIndex</code> / <code>setSelectedGroupId</code></td></tr>
+<tr><td><strong>Description</strong></td><td>No automatic centering on the selected object. Camera always initializes at (0,0,0) target. Add <code>frameSelection()</code> that computes AABB of selected shape/group and adjusts camera distance + target. Bind to toolbar button and F key.</td></tr>
+</table>
+
+<h3>2. Viewport keyboard shortcuts</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>keyPressEvent</code> (not overridden)</td></tr>
+<tr><td><strong>Description</strong></td><td>Override <code>keyPressEvent</code>: F (frame selection), R (reset view), Ctrl+0 (zoom reset), 1-6 (preset views), W (wireframe toggle), G (grid toggle), B (backend toggle), V (ortho toggle).</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-high">🟡 High Priority</span></h2>
+
+<h3>3. 3D ray-cast picking in OpenGL mode</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>mousePressEvent</code> / <code>paintGL</code>, <code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Pick buffer only from software renderer. Implement <code>glReadPixels</code>-based picking: render shape IDs as colors to offscreen FBO, map pixel to shape index.</td></tr>
+</table>
+
+<h3>4. Camera preset views</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportcamera.h</code> / <code>viewportwidget.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Add preset buttons: Front, Top, Right, Back, Bottom, Left. Each sets fixed yaw/pitch. Small popup toolbar or radial menu.</td></tr>
+</table>
+
+<h3>5. Scale gizmo</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportaxisgizmo.h</code> / <code>viewportaxisgizmo.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>When a <code>Scale</code> group is selected, draw scale gizmo (three axis handles + uniform center cube). Detect operation type in <code>pickSelectedTransformAxis()</code>.</td></tr>
+</table>
+
+<h3>6. Multi-select in viewport</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.h</code> — scalar <code>m_selectedIndex</code> / <code>m_selectedGroupId</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Replace with <code>QSet&lt;int&gt;</code>. Ctrl+click toggle, Shift+click range.</td></tr>
+</table>
+
+<h3>7. Wireframe rendering mode</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportglrenderer.cpp</code> / <code>viewportsoftwarerenderer.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Toggle renders mesh edges instead of (or overlaid on) solid faces. GL: <code>glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)</code>. SW: draw un-filled triangles.</td></tr>
+</table>
+
+<h3>8. Viewport context menu</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>contextMenuEvent</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Right-click currently only pans. Add: Frame Selection, Reset View, Preset Views submenu, Wireframe, Fullscreen, Copy Screenshot.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-medium">🟠 Medium Priority</span></h2>
+
+<h3>9. Gizmo snapping</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportaxisgizmo.cpp</code> — drag delta computation</td></tr>
+<tr><td><strong>Description</strong></td><td>Snap toggle: translate deltas snap to 5 mm grid, rotate deltas to 15° increments.</td></tr>
+</table>
+
+<h3>10. Touch / gesture support</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>touchEvent</code> / <code>gestureEvent</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Pinch-to-zoom, two-finger orbit, single-finger pan via <code>QTouchEvent</code>.</td></tr>
+</table>
+
+<h3>11. Viewport screenshot export</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>exportScreenshot()</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Ctrl+E or toolbar button: save viewport as PNG via <code>grabFramebuffer()</code>. Resolution multiplier (1×, 2×, 4×).</td></tr>
+</table>
+
+<h3>12. Selection box / lasso</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — mouse events</td></tr>
+<tr><td><strong>Description</strong></td><td>Shift+drag: rubber-band rectangle, select all shapes whose projected AABB intersects. Ctrl+Shift+drag: freehand lasso.</td></tr>
+</table>
+
+<h3>13. Fullscreen toggle</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> / <code>mainwindow.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Hide chrome, expand viewport to fill screen. F11 or overlay button.</td></tr>
+</table>
+
+<h3>14. Camera animation / smoothing</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportcamera.cpp</code> / <code>viewportwidget.cpp</code> — new timer</td></tr>
+<tr><td><strong>Description</strong></td><td>Animate camera transitions (frame, presets, reset) with easing ~300 ms.</td></tr>
+</table>
+
+<h3>15. Viewport overlay as proper toolbar</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>updateViewportControls</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Replace absolute-positioned controls with a proper layout toolbar.</td></tr>
+</table>
+
+<h3>16. Frustum culling</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportglrenderer.cpp</code> — <code>renderPreview()</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Compute frustum planes, skip meshes whose bounding sphere is outside.</td></tr>
+</table>
+
+<h3>17. X-Ray / see-through mode</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportglrenderer.cpp</code> — new shader / render pass</td></tr>
+<tr><td><strong>Description</strong></td><td>Toggle renders all objects semi-transparent (alpha=0.3).</td></tr>
+</table>
+
+<h3>18. Grid snapping toggle</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — new checkbox</td></tr>
+<tr><td><strong>Description</strong></td><td>Add explicit "Snap" checkbox; show snap indicators on grid.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-low">🟢 Low Priority</span></h2>
+
+<h3>19. MSAA / anti-aliasing control</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>initializeGL</code> / <code>QSurfaceFormat</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Setting for 2×, 4×, 8× MSAA or off.</td></tr>
+</table>
+
+<h3>20. Measurement / distance tool</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td>New tool overlay</td></tr>
+<tr><td><strong>Description</strong></td><td>Click-to-place markers, display distance between two 3D points.</td></tr>
+</table>
+
+<h3>21. SSAO</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportglrenderer.cpp</code> — new shader</td></tr>
+<tr><td><strong>Description</strong></td><td>Post-processing SSAO pass. Toggleable.</td></tr>
+</table>
+
+<h3>22. LOD / mesh decimation</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>scenemesh.cpp</code> / <code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Lower-detail versions of primitives based on camera distance.</td></tr>
+</table>
+
+<h3>23. VR / stereoscopic rendering</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td>New render path</td></tr>
+<tr><td><strong>Description</strong></td><td>Side-by-side stereo for VR or anaglyph.</td></tr>
+</table>
+
+<h3>24. Face/edge/vertex snapping</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportaxisgizmo.cpp</code> — drag delta</td></tr>
+<tr><td><strong>Description</strong></td><td>Snap gizmo to face centers, edge midpoints, vertex positions of other meshes.</td></tr>
+</table>
+
+<h3>25. Camera zoom limits indicator</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — <code>wheelEvent</code></td></tr>
+<tr><td><strong>Description</strong></td><td>Visual indicator or subtle shake when zoom hits [2, 8000] clamp.</td></tr>
+</table>
+
+<h3>26. Middle-button orbit option</h3>
+<table>
+<tr><td><strong>Status</strong></td><td><span class="tag-notstarted">❌ Not started</span></td></tr>
+<tr><td><strong>File</strong></td><td><code>viewportwidget.cpp</code> — mouse events</td></tr>
+<tr><td><strong>Description</strong></td><td>Setting to swap left/middle button roles for orbit vs pan.</td></tr>
+</table>
+
+<hr>
+
+<h2>Implementation Order (Suggested)</h2>
+<ol>
+<li><strong>Frame selection / Zoom-to-fit (#1)</strong> — trivial, unlocks everyday workflow</li>
+<li><strong>Viewport keyboard shortcuts (#2)</strong> — needed for power users</li>
+<li><strong>Ray-cast picking in GL mode (#3)</strong> — correctness fix for OpenGL backend</li>
+<li><strong>Camera preset views (#4)</strong> — low code risk</li>
+<li><strong>Scale gizmo (#5)</strong> — fills a gap in the existing gizmo system</li>
+<li><strong>Wireframe mode (#7)</strong> — simple visual toggle</li>
+<li><strong>Camera animation (#14)</strong> — polish for #1, #4, and camera reset</li>
+<li><strong>Context menu (#8)</strong> — common expectation</li>
+<li><strong>Fullscreen (#13)</strong> — small code change, big impact</li>
+<li><strong>Screenshot export (#11)</strong> — low effort, useful for sharing</li>
+<li><strong>Multi-select (#6)</strong> — needed for bulk operations</li>
+<li><strong>Gizmo snapping (#9)</strong> — precise positioning</li>
+<li><strong>Viewport overlay toolbar (#15)</strong> — maintainability</li>
+<li><strong>Touch/gesture (#10)</strong> — tablet/laptop users</li>
+<li><strong>X-Ray mode (#17)</strong> — visual debugging</li>
+<li><strong>Selection box/lasso (#12)</strong> — bulk selection</li>
+<li><strong>Frustum culling (#16)</strong> — performance for large scenes</li>
+<li><strong>Grid snap toggle (#18)</strong> — usability</li>
+<li><strong>Measurement tool (#20)</strong> — utility</li>
+<li><strong>MSAA control (#19)</strong> — visual quality</li>
+<li><strong>Middle-button orbit (#26)</strong> — user preference</li>
+<li><strong>Face/edge/vertex snapping (#24)</strong> — advanced precision</li>
+<li><strong>SSAO (#21)</strong> — visual polish</li>
+<li><strong>Zoom limits indicator (#25)</strong> — minor feedback</li>
+<li><strong>LOD (#22)</strong> — performance for large scenes</li>
+<li><strong>VR (#23)</strong> — novelty</li>
+</ol>
+
+</body>
+</html>

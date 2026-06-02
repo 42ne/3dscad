@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>3D Viewport UX Improvement Roadmap</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #2c3e50; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+tr:nth-child(even) { background: #f5f5f5; }
+tr:hover { background: #e8ecf0; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-critical { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-high { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-medium { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-low { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-notstarted { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-partial { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>3D Viewport — Roadmap покращення UX</h1>
+<p><em>Статус: 2026-06-02.</em></p>
+<p>Заплановані покращення юзабіліті для <code>ViewportWidget</code> (панель 3D прев'ю/рендеру).</p>
+
+<hr>
+
+<h2>Вже реалізовано</h2>
+<table>
+<thead><tr><th>Функція</th><th>Деталі</th></tr></thead>
+<tbody>
+<tr><td><strong>Орбіта камери</strong></td><td>Ліва кнопка миші; yaw/pitch з чутливістю 0.45×/0.35×</td></tr>
+<tr><td><strong>Панорамування</strong></td><td>Права кнопка; world-space дельта, масштабована <code>distance/420</code></td></tr>
+<tr><td><strong>Зум</strong></td><td>Колесо миші; нелінійна чутливість; діапазон [2, 8000]</td></tr>
+<tr><td><strong>Перспектива / Ортографія</strong></td><td>Перемикач "Ortho"</td></tr>
+<tr><td><strong>Два рендер-бекенди</strong></td><td>Програмний (QPainter) і OpenGL (шейдери); перемикач</td></tr>
+<tr><td><strong>Темна / Світла тема</strong></td><td>Перемикач "Dark"</td></tr>
+<tr><td><strong>Варіанти кольорів</strong></td><td>5 пресетів: Neutral, Mint, Clay, Steel, Amber</td></tr>
+<tr><td><strong>Пресети освітлення</strong></td><td>4 пресети: Studio, Soft, Side, Contrast</td></tr>
+<tr><td><strong>Користувацькі теми</strong></td><td>Збереження/завантаження через <code>ViewportAppearanceTheme</code></td></tr>
+<tr><td><strong>Виділення (одинарне)</strong></td><td>За індексом фігури та ID групи; синхронізація viewport → дерево</td></tr>
+<tr><td><strong>Виділення елементів поліедра</strong></td><td>Вибір граней/точок + інструмент переміщення</td></tr>
+<tr><td><strong>Breadcrumb панель</strong></td><td>Клікабельні chips шляху до вибраного вузла</td></tr>
+<tr><td><strong>Інформаційна панель</strong></td><td>Зверху-зліва: підказка, статус CSG, назва рендеру</td></tr>
+<tr><td><strong>Осі-гізмо (компас)</strong></td><td>Панель 76×76 зверху-справа; осі X/Y/Z відсортовані за глибиною</td></tr>
+<tr><td><strong>Осі трансформації / кільця обертання</strong></td><td>Гізмо для Translate/Rotate груп</td></tr>
+<tr><td><strong>Прев'ю параметрів форми</strong></td><td>Стрілки розмірів з підписами +/- та значенням</td></tr>
+<tr><td><strong>Контактні тіні</strong></td><td>Площинна тінь по Z; обидва бекенди</td></tr>
+<tr><td><strong>Сітка</strong></td><td>Лінії ±120 кожні 20; осі X/Y/Z з підписами</td></tr>
+<tr><td><strong>Асинхронний CSG</strong></td><td><code>QtConcurrent::run()</code> з відкладеним перерахунком під час drag</td></tr>
+<tr><td><strong>Shimmer виділення</strong></td><td>Анімоване сяйво на вибраному об'єкті (OpenGL)</td></tr>
+<tr><td><strong>Панель керування</strong></td><td>Чекбокси та комбобокси на y=70 (OpenGL, Dark, Nav UI, Ortho, Color, Lighting)</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="tag-critical">🔴 Критичні</span></h2>
+
+<h3>1. Frame selection / Zoom-to-fit</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>setSelectedIndex</code> / <code>setSelectedGroupId</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Немає центрування на вибраному об'єкті. Додати <code>frameSelection()</code> — AABB вибраної фігури + підлаштування камери. Клавіша F.</td></tr>
+</table>
+
+<h3>2. Гарячі клавіші в'юпорту</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>keyPressEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>F (frame), R (скинути вигляд), 1-6 (пресети), W (wireframe), G (сітка), B (бекенд), V (ортогональна).</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-high">🟡 Високий пріоритет</span></h2>
+
+<h3>3. Ray-cast picking в OpenGL</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code>, <code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Реалізувати <code>glReadPixels</code>-picking: ID фігур кольорами в offscreen FBO, мапити на індекс.</td></tr>
+</table>
+
+<h3>4. Пресетні вигляди камери</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportcamera.h</code> / <code>viewportwidget.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Front, Top, Right, Back, Bottom, Left. Фіксований yaw/pitch.</td></tr>
+</table>
+
+<h3>5. Scale гізмо</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportaxisgizmo.h</code> / <code>.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Три осьові ручки + центральний кубик для Scale груп.</td></tr>
+</table>
+
+<h3>6. Мультивибір у в'юпорті</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.h</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Замінити скалярні поля на <code>QSet&lt;int&gt;</code>. Ctrl+клік, Shift+клік.</td></tr>
+</table>
+
+<h3>7. Wireframe режим</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportglrenderer.cpp</code> / <code>viewportsoftwarerenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Перемикач: ребра замість граней. GL: <code>glPolygonMode</code>. SW: без заливки.</td></tr>
+</table>
+
+<h3>8. Контекстне меню</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>contextMenuEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Frame Selection, Reset View, Preset Views, Wireframe, Fullscreen, Screenshot.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-medium">🟠 Середній пріоритет</span></h2>
+
+<h3>9. Snap для гізмо</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportaxisgizmo.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Translate — 5 мм сітка, rotate — 15° крок.</td></tr>
+</table>
+
+<h3>10. Підтримка touch / жестів</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>touchEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Pinch-to-zoom, two-finger orbit, single-finger pan.</td></tr>
+</table>
+
+<h3>11. Експорт скріншоту</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>exportScreenshot()</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Ctrl+E: зберегти viewport як PNG. Множник роздільної здатності 1×–4×.</td></tr>
+</table>
+
+<h3>12. Рамка / lasso виділення</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — mouse events</td></tr>
+<tr><td><strong>Опис</strong></td><td>Shift+drag: rubber-band. Ctrl+Shift+drag: lasso.</td></tr>
+</table>
+
+<h3>13. Повноекранний режим</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> / <code>mainwindow.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>F11: сховати інтерфейс, в'юпорт на весь екран.</td></tr>
+</table>
+
+<h3>14. Анімація камери</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportcamera.cpp</code> — новий таймер</td></tr>
+<tr><td><strong>Опис</strong></td><td>Плавні переходи з easing за ~300 мс.</td></tr>
+</table>
+
+<h3>15. Overlay як справжній тулбар</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>updateViewportControls</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Замінити абсолютне позиціонування на layout.</td></tr>
+</table>
+
+<h3>16. Frustum culling</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Пропускати меші поза frustum — продуктивність.</td></tr>
+</table>
+
+<h3>17. X-Ray / напівпрозорий режим</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Усі об'єкти з alpha=0.3.</td></tr>
+</table>
+
+<h3>18. Перемикач snap до сітки</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — новий чекбокс</td></tr>
+<tr><td><strong>Опис</strong></td><td>"Snap" чекбокс + індикатори на сітці.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-low">🟢 Низький пріоритет</span></h2>
+
+<h3>19. MSAA / антиаліасинг</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>initializeGL</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>2×, 4×, 8× MSAA або off.</td></tr>
+</table>
+
+<h3>20. Інструмент вимірювання</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td>Новий overlay</td></tr>
+<tr><td><strong>Опис</strong></td><td>Маркери + відстань між 3D точками.</td></tr>
+</table>
+
+<h3>21. SSAO</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportglrenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Пост-процесинг ambient occlusion.</td></tr>
+</table>
+
+<h3>22. LOD / decimation</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenemesh.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Спрощені версії примітивів для далеких об'єктів.</td></tr>
+</table>
+
+<h3>23. VR / стерео</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td>Новий шлях рендеру</td></tr>
+<tr><td><strong>Опис</strong></td><td>Side-by-side стерео або анагліф.</td></tr>
+</table>
+
+<h3>24. Snap до граней/ребер/вершин</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportaxisgizmo.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Прив'язка до центрів граней, середин ребер, вершин.</td></tr>
+</table>
+
+<h3>25. Індикатор меж зуму</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — <code>wheelEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Індикатор при досягненні [2, 8000].</td></tr>
+</table>
+
+<h3>26. Орбіта середньою кнопкою</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">❌ Не розпочато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>viewportwidget.cpp</code> — mouse events</td></tr>
+<tr><td><strong>Опис</strong></td><td>Перемикач: середня кнопка = орбіта, ліва = панорама.</td></tr>
+</table>
+
+<hr>
+
+<h2>Запропонований порядок реалізації</h2>
+<ol>
+<li><strong>Frame selection (#1)</strong> — тривіально, основа роботи</li>
+<li><strong>Гарячі клавіші (#2)</strong> — для power users</li>
+<li><strong>Ray-cast picking (#3)</strong> — виправлення OpenGL</li>
+<li><strong>Пресетні вигляди (#4)</strong> — низький ризик</li>
+<li><strong>Scale гізмо (#5)</strong> — заповнює прогалину</li>
+<li><strong>Wireframe (#7)</strong> — простий перемикач</li>
+<li><strong>Анімація камери (#14)</strong> — полірування</li>
+<li><strong>Контекстне меню (#8)</strong> — очікування користувачів</li>
+<li><strong>Повноекранний режим (#13)</strong> — мала зміна, великий ефект</li>
+<li><strong>Скріншот (#11)</strong> — мало зусиль</li>
+<li><strong>Мультивибір (#6)</strong> — масові операції</li>
+<li><strong>Snap гізмо (#9)</strong> — точне позиціонування</li>
+<li><strong>Overlay тулбар (#15)</strong> — підтримуваність</li>
+<li><strong>Touch/жести (#10)</strong> — планшети</li>
+<li><strong>X-Ray (#17)</strong> — візуальне налагодження</li>
+<li><strong>Рамка виділення (#12)</strong> — масовий вибір</li>
+<li><strong>Frustum culling (#16)</strong> — продуктивність</li>
+<li><strong>Snap до сітки (#18)</strong> — зручність</li>
+<li><strong>Вимірювання (#20)</strong> — утиліта</li>
+<li><strong>MSAA (#19)</strong> — якість</li>
+<li><strong>Орбіта середньою (#26)</strong> — вподобання</li>
+<li><strong>Snap геометрія (#24)</strong> — точність</li>
+<li><strong>SSAO (#21)</strong> — полірування</li>
+<li><strong>Індикатор зуму (#25)</strong> — зворотній зв'язок</li>
+<li><strong>LOD (#22)</strong> — продуктивність</li>
+<li><strong>VR (#23)</strong> — новинка</li>
+</ol>
+
+</body>
+</html>

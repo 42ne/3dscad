@@ -50,6 +50,31 @@ intersection() {
 For `difference()`, the first child is the base and all following children are
 cuts. For `intersection()`, all children are masks.
 
+Other block groups:
+
+```openscad
+hull() {
+    sphere(r=10);
+    translate([20, 0, 0]) sphere(r=6);
+}
+
+minkowski() {
+    cube([20, 20, 20], center=true);
+    sphere(r=3);
+}
+
+color("red") {
+    sphere(r=10);
+}
+
+linear_extrude(height = 15) {
+    circle(r=8);
+}
+```
+
+Note: `linear_extrude` currently supports only the `height` parameter. It does
+not support `twist`, `slices`, `scale`, or `center`.
+
 Transform groups:
 
 ```openscad
@@ -62,6 +87,10 @@ rotate([0, 0, 45]) {
 }
 
 scale([1, 2, 1]) {
+    sphere(r=8);
+}
+
+mirror([1, 0, 0]) {
     sphere(r=8);
 }
 ```
@@ -82,6 +111,35 @@ rotate([0, 0, 45 * 2]) {
 }
 ```
 
+Named argument syntax is also accepted for transforms:
+```openscad
+translate(v=[x, y, z]) { ... }
+rotate(a=[x, y, z]) { ... }
+scale(v=[x, y, z]) { ... }
+mirror(v=[x, y, z]) { ... }
+```
+
+### Debug Modifiers
+
+The OpenSCAD debug modifiers `#`, `%`, `!`, `*` are accepted as line prefixes:
+- `#` — highlight (shown in editor as a marker)
+- `%` — transparent
+- `!` — show only this
+- `*` — disable the entire statement (children are skipped during parsing)
+
+Examples:
+```openscad
+%translate([10, 0, 0]) {
+    cube([5, 5, 5], center=true);
+}
+
+*cylinder(h=20, r=3, center=true);
+```
+
+> **Note:** `render()` (convexity) is recognized and accepted, but its
+> flattening behavior is identical to any other unknown block — the children
+> are imported transparently.
+
 Brace-free single-child shorthand is also accepted (OpenSCAD style):
 
 ```openscad
@@ -91,6 +149,9 @@ translate([10, 0, 0])
 rotate([0, 0, 90])
 translate([20, 0, 0])
     sphere(r=5);
+
+mirror([1, 0, 0])
+    cube([10, 20, 30], center=true);
 ```
 
 For loops:
@@ -106,6 +167,56 @@ for (i = [0 : 2 : 10]) {
     cube([4, 4, 4], center=true);
 }
 ```
+
+**Multi-variable for** (creates nested iteration):
+```openscad
+for (i = [0 : 3], j = [0 : 2]) {
+    translate([i * 10, j * 10, 0]) {
+        sphere(r=2);
+    }
+}
+```
+
+**`intersection_for`** — syntactic sugar for `intersection() { for () { ... } }`:
+```openscad
+intersection_for (k = [0 : 3]) {
+    translate([k * 15, 0, 0]) {
+        sphere(r=8);
+    }
+}
+```
+
+**`let` — scoped variable bindings:**
+```openscad
+let (r = x * 2, h = r * 3) {
+    cylinder(h=h, r=r, center=true);
+}
+```
+
+**`if`/`else` — parse-time conditional branching:**
+```openscad
+if (x > 5) {
+    sphere(r=5);
+} else {
+    cube(10);
+}
+```
+
+`else if` chains are also supported:
+```openscad
+if (x > 10) {
+    sphere(r=5);
+} else if (x > 5) {
+    cube(8);
+} else {
+    cylinder(h=10, r=3);
+}
+```
+
+> **Note:** `if`/`else` is evaluated at parse time. Inside module bodies, the
+> condition is ignored and the `if`-branch is **always** parsed into the tree
+> (because module parameters only have their default values available at parse
+> time). At the top level (`scene` scope), the condition is evaluated normally.
 
 ## Supported Primitives
 
@@ -136,6 +247,7 @@ Additional accepted forms for each primitive:
 - `cube([x, y, z])` — `center=true` is optional; ignored by the parser
 - `cube(body_size)` or `cube(body_size, center=true)` — where `body_size` is a
   previously-declared vector variable (`body_size = [28, 28, 4];`)
+- `cube(n)` with a single scalar numeric argument — creates an `n × n × n` cube
 
 **Sphere:**
 - `sphere(r=12)` — named argument
@@ -163,11 +275,20 @@ face values are editable through the polyhedron table.
 
 Supported expression syntax:
 
-- decimal numbers (including negative via unary minus)
+- decimal numbers (including negative via unary minus, scientific notation like `1e5`)
 - identifiers referencing previously-declared variables
-- binary `+`, `-`, `*`, `/`
-- unary `+` and `-`
+- binary `+`, `-`, `*`, `/`, `%` (modulo via `std::fmod`)
+- unary `+`, `-`, `!` (logical not)
+- comparison: `==`, `!=`, `<`, `>`, `<=`, `>=` (result is `1.0` or `0.0`)
+- logical: `&&`, `||`
+- ternary conditional: `condition ? true_value : false_value`
 - parentheses for grouping
+- math function calls (case-insensitive):
+  - trigonometry: `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)`, `atan2(y, x)` — all in **degrees**
+  - numeric: `abs(x)`, `ceil(x)`, `floor(x)`, `round(x)`, `sign(x)`, `sqrt(x)`
+  - power/exponential: `pow(x, y)`, `exp(x)`, `log(x)` (natural log), `ln(x)` (alias for `log`)
+  - aggregation: `min(a, b, ...)`, `max(a, b, ...)` — accept one or more arguments
+- constants (case-insensitive): `PI` (π), `true` (1.0), `false` (0.0)
 
 Examples:
 
@@ -177,6 +298,18 @@ outer_r = 20 + wall * 2;
 
 module peg(r = outer_r / 2) {
     cylinder(h=30, r=r, center=true);
+}
+
+translate([sin(angle) * radius, cos(angle) * radius, 0]) {
+    sphere(r=wall + abs(sin(angle * 3)) * 2);
+}
+
+// Comparisons and ternary
+r = x > 0 ? x * 2 : wall;
+if (r > 10) {
+    sphere(r=r);
+} else {
+    cube(r);
 }
 ```
 
@@ -189,6 +322,12 @@ b = a * 2;
 
 translate([a + 3, 0, b / 4]) {
     cube([a, b, a + b], center=true);
+}
+
+for (i = [0 : pow(count, 2) - 1]) {
+    translate([sin(i * 360 / count) * PI * 10, 0, 0]) {
+        sphere(r=min(3, max(1, i * 0.5)));
+    }
 }
 ```
 
@@ -241,9 +380,9 @@ has no explicit call, it remains a reusable definition only.
 
 ## Unknown And Unsupported Syntax
 
-Unknown single-line statements are silently skipped. Unknown blocks (e.g.
-`color(...) { ... }`) are transparently flattened — their primitive children
-are imported as if the wrapper was not present.
+Unknown single-line statements are silently skipped. Unknown blocks are
+transparently flattened — their primitive children are imported as if the
+wrapper was not present.
 
 Known keywords with unrecognised argument syntax (e.g. `cube` with a bad arg
 count, or `translate` without a valid vector) produce a hard error.
@@ -255,15 +394,17 @@ These constructs are outside the current round-trippable subset:
 - `use` and `include`
 - nested module declarations
 - function declarations
-- `let`, `assign`, `if`, and `else`
 - list comprehensions and general vector/list expressions
 - `children()`
 - `$fn`, `$fa`, `$fs`, and other special variables
 - positional module arguments in the visual editor workflow
 - `offset`, `projection`
-- `linear_extrude`, `rotate_extrude`
 - `import`, `surface`, `text`
+- `resize()`, `rotate_extrude`
+- `render()`
 - arbitrary named arguments on primitives beyond the generated forms
+- block comments `/* ... */` (single-line `//` only)
+- `if` inside modules always takes the true branch (parse-time limitation — module parameter values are only known at call time)
 
 For reliable tree reconstruction, keep generated block structure and one
 statement/block header per line.
