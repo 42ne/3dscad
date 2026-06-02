@@ -84,7 +84,7 @@ protected:
     {
         QGraphicsScene::drawBackground(painter, rect);
         drawCanvasGrid(painter, rect, 24.0, MinorGridColor, 1);
-        drawCanvasGrid(painter, rect, 96.0, MajorGridColor, 1);
+        drawCanvasGrid(painter, rect, 120.0, MajorGridColor, 1);
     }
 };
 

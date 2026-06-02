@@ -9,6 +9,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QElapsedTimer>
+#include <QRegularExpression>
 #include <QSet>
 #include <QUndoStack>
 
@@ -47,14 +48,73 @@ static void collectVariableValues(const SceneDocument::TreeNode &node, QHash<QSt
         collectVariableValues(child, values);
 }
 
+static QString formatNumber(qreal val)
+{
+    QString s = QString::number(val, 'f', 3);
+    if (s.contains(QLatin1Char('.'))) {
+        while (s.endsWith(QLatin1Char('0')))
+            s.chop(1);
+        if (s.endsWith(QLatin1Char('.')))
+            s.chop(1);
+    }
+    if (s == QStringLiteral("-0"))
+        s = QStringLiteral("0");
+    return s;
+}
+
+static QString offsetExpression(const QString &expression, qreal delta)
+{
+    if (expression.isEmpty())
+        return {};
+
+    const QString trimmed = expression.trimmed();
+
+    bool isPlainNumber = false;
+    qreal numVal = trimmed.toDouble(&isPlainNumber);
+    if (isPlainNumber) {
+        qreal newVal = numVal + delta;
+        return formatNumber(newVal);
+    }
+
+    static const QRegularExpression trailingConst(
+        QStringLiteral(R"(^(.*?)([+-]\s*\d+(?:\.\d+)?)\s*$)"));
+
+    QRegularExpressionMatch m = trailingConst.match(trimmed);
+    if (m.hasMatch()) {
+        QString prefix = m.capturedView(1).trimmed().toString();
+        QString constStr = m.capturedView(2).toString();
+        qreal constVal = constStr.remove(QLatin1Char(' ')).toDouble();
+        qreal newConst = constVal + delta;
+
+        const QString formatted = formatNumber(newConst);
+        if (prefix.isEmpty())
+            return formatted;
+        if (newConst >= 0.0)
+            return prefix + QStringLiteral(" + ") + formatted;
+        else
+            return prefix + QStringLiteral(" - ") + formatNumber(-newConst);
+    }
+
+    if (delta >= 0.0)
+        return trimmed + QStringLiteral(" + ") + formatNumber(delta);
+    else
+        return trimmed + QStringLiteral(" - ") + formatNumber(-delta);
+}
+
 static QStringList dragExpressionsWithChangedComponentsCleared(const QStringList &startExpressions,
                                                                 const QVector3D &delta)
 {
     QStringList expressions = startExpressions;
     const float components[] = { delta.x(), delta.y(), delta.z() };
     for (int axis = 0; axis < 3 && axis < expressions.size(); ++axis) {
-        if (!qFuzzyIsNull(components[axis]))
+        if (qFuzzyIsNull(components[axis]))
+            continue;
+        if (startExpressions[axis].isEmpty()) {
             expressions[axis].clear();
+        } else {
+            expressions[axis] = offsetExpression(startExpressions[axis],
+                                                  static_cast<qreal>(components[axis]));
+        }
     }
     return expressions;
 }
