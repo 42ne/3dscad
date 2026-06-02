@@ -1,9 +1,11 @@
 #include "scenetreeoverlaycontroller.h"
+#include "scenetreecanvasgraphics.h"
+#include "scenetreeglasspanelhelpers.h"
 #include "scenetreegraphicswidget.h"
 #include "scenetreehovermanager.h"
-#include "scenetreegraphicshelpers.h"
 #include "scenetreepalette.h"
 #include "scenetreetoolbarrenderer.h"
+#include "scenetreetoolmetadata.h"
 
 #include <QApplication>
 #include <QBrush>

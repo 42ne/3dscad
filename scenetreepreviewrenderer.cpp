@@ -1,5 +1,8 @@
 #include "scenetreepreviewrenderer.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreecanvasgraphics.h"
+#include "scenetreegraphicsitems.h"
+#include "scenetreepreviewgeometry.h"
+#include "scenetreetoolmetadata.h"
 #include "scenetreenoderenderer.h"
 
 #include <QGraphicsSimpleTextItem>

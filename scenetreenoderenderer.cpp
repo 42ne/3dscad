@@ -1,5 +1,10 @@
 #include "scenetreenoderenderer.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreecanvasgraphics.h"
+#include "scenetreeexpressionlayout.h"
+#include "scenetreegraphicsconstants.h"
+#include "scenetreegraphicsitems.h"
+#include "scenetreeiconpainter.h"
+#include "scenetreetoolmetadata.h"
 #include "scenetreepalette.h"
 
 #include <QBrush>

@@ -1,6 +1,8 @@
 #include "scenetreehittestmanager.h"
+#include "scenetreecanvasgraphics.h"
 #include "scenetreegraphicswidget.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreeexpressionlayout.h"
+#include "scenetreepreviewgeometry.h"
 #include "scenestringutils.h"
 
 #include <QFontMetricsF>

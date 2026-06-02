@@ -2,7 +2,7 @@
 #define SCENETREENODERENDERER_H
 
 #include "scenedocument.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreepreviewgeometry.h"
 #include "shapenode.h"
 
 #include <QGraphicsItem>

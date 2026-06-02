@@ -1,5 +1,7 @@
 #include "scenetreetoolbarrenderer.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreeglasspanelhelpers.h"
+#include "scenetreegraphicsitems.h"
+#include "scenetreetoolmetadata.h"
 #include "scenetreepalette.h"
 
 #include <QBrush>

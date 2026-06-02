@@ -1,5 +1,6 @@
 #include "scenetreelayout.h"
-#include "scenetreegraphicshelpers.h"
+#include "scenetreepreviewgeometry.h"
+#include "scenetreetoolmetadata.h"
 
 #include <QtGlobal>
 #include <algorithm>
