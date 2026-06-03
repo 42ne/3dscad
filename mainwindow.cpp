@@ -134,10 +134,15 @@ void MainWindow::buildUi()
     m_titleBar->setTheme(activeTheme);
 
     QMenuBar *appMenuBar = menuBar();
-    auto *fileMenu     = appMenuBar->addMenu("File");
-    auto *examplesMenu = fileMenu->addMenu("Open Example");
-    m_exampleBrowser   = new ExampleBrowserMenu(examplesMenu, this);
+    auto *fileMenu        = appMenuBar->addMenu("File");
+    auto *examplesMenu    = fileMenu->addMenu("Samples");
+    m_exampleBrowser      = new ExampleBrowserMenu(examplesMenu, "sample_codes", this);
     connect(m_exampleBrowser, &ExampleBrowserMenu::exampleSelected,
+            this, &MainWindow::loadExample);
+
+    auto *tutorialsMenu       = fileMenu->addMenu("Tutorials");
+    m_exampleBrowserTutorials = new ExampleBrowserMenu(tutorialsMenu, "sample_codes_tutorials", this);
+    connect(m_exampleBrowserTutorials, &ExampleBrowserMenu::exampleSelected,
             this, &MainWindow::loadExample);
 
     auto *editMenu = appMenuBar->addMenu("Edit");

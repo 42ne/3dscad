@@ -13,13 +13,16 @@ class ExamplePreviewPopup;
 // Populates an "Open Example" QMenu with .scad files found next to the binary,
 // shows an async thumbnail preview on hover, and emits exampleSelected()
 // when the user clicks an entry.
+//
+// subdirName: directory name under docs/ to scan (default: "sample_codes").
 class ExampleBrowserMenu : public QObject
 {
     Q_OBJECT
 
 public:
-    // Populates `menu` immediately; `parent` is used for lifetime management.
-    explicit ExampleBrowserMenu(QMenu *menu, QObject *parent = nullptr);
+    explicit ExampleBrowserMenu(QMenu *menu,
+                                const QString &subdirName = QStringLiteral("sample_codes"),
+                                QObject *parent = nullptr);
 
 signals:
     void exampleSelected(const QString &filePath);
@@ -30,7 +33,7 @@ private slots:
 
 private:
     void hidePreview();
-    static QString examplesPath();
+    static QString examplesPath(const QString &subdirName = QStringLiteral("sample_codes"));
 
     ExamplePreviewPopup    *m_preview          = nullptr;
     QTimer                 *m_hoverTimer       = nullptr;

@@ -66,7 +66,8 @@ private:
     QMenu            *m_savedTreeThemeMenu = nullptr;
     QMenu            *m_savedViewportThemeMenu = nullptr;
 
-    ExampleBrowserMenu      *m_exampleBrowser    = nullptr;
+    ExampleBrowserMenu      *m_exampleBrowser          = nullptr;
+    ExampleBrowserMenu      *m_exampleBrowserTutorials = nullptr;
     ViewportWidget          *m_viewport          = nullptr;
     SceneTreeGraphicsWidget *m_sceneTreeGraphics  = nullptr;
     CodeEditorPanel         *m_codeEditorPanel    = nullptr;

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Codebase Refactoring Roadmap</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #2c3e50; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f5f5f5; }
+tr:hover { background: #e8ecf0; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.tag-notstarted { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.tag-partial { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.phase-label { display: inline-block; background: #2c3e50; color: white; border-radius: 3px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+.result-box { background: #eafaf1; border-left: 4px solid #27ae60; padding: 10px 14px; margin: 1em 0; border-radius: 3px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Codebase Refactoring Roadmap</h1>
+<p><em>Status as of: 2026-06-03.</em></p>
+<p>Ongoing decomposition of the <code>ViewportWidget</code> and <code>SceneTreeGraphicsWidget</code> god-classes into
+focused subsystem controllers, plus utility consolidation and correctness fixes.</p>
+
+<hr>
+
+<h2><span class="phase-label">Phase 1</span> Viewport Extractions</h2>
+
+<table>
+<thead><tr><th>Subsystem</th><th>New class / file</th><th>Lines</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Software renderer</td><td><code>ViewportSoftwareRenderer</code> (<code>viewportsoftwarerenderer.h/.cpp</code>)</td><td>~297</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>OpenGL renderer</td><td><code>ViewportGLRenderer</code> (<code>viewportglrenderer.h/.cpp</code>)</td><td>~606</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Axis gizmo</td><td><code>ViewportAxisGizmo</code> (<code>viewportaxisgizmo.h/.cpp</code>)</td><td>~468</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Transform / shape overlay preview</td><td><code>ViewportOverlayPreview</code> (<code>viewportoverlaypreview.h/.cpp</code>)</td><td>~202</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Camera model</td><td><code>ViewportCamera</code> (<code>viewportcamera.h/.cpp</code>)</td><td>~44</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Named constants</td><td><code>ViewportConstants</code> (<code>viewportconstants.h</code>)</td><td>~26</td><td><span class="tag-done">✅ Done</span></td></tr>
+</tbody>
+</table>
+<div class="result-box"><strong>Result:</strong> <code>ViewportWidget</code> reduced from ~3 700 lines to ~1 042 lines (−72%).</div>
+
+<hr>
+
+<h2><span class="phase-label">Phase 2</span> Utility Deduplication</h2>
+
+<table>
+<thead><tr><th>Item</th><th>Before</th><th>After</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>isValidIdentifier</code></td><td>3 copies scattered across files</td><td>Inline in <code>scenestringutils.h</code></td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td><code>splitAtTopLevelCommas</code></td><td>Duplicated in <code>openscadparser.cpp</code></td><td>Removed; canonical copy remains</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Number-adjustment preamble</td><td>4 identical preambles in <code>SceneController</code></td><td><code>adjustedNumberReplacement</code> helper + <code>setCtrlHighlight</code> method</td><td><span class="tag-done">✅ Done</span></td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="phase-label">Phase 3</span> Scene Tree God-Class Decomposition</h2>
+
+<p><code>SceneTreeGraphicsWidget</code> started at ~6 195 lines. Each subsystem below was extracted as a
+friend class following the same pattern established in Phase 1.</p>
+
+<h3>3.1 — Extracted subsystems</h3>
+
+<table>
+<thead><tr><th>Subsystem</th><th>File</th><th>Lines</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Color-edit mode</td><td><code>scenetreecoloreditmode.h/.cpp</code></td><td>~1 135</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Wheel handler (Ctrl+scroll 8 cases)</td><td><code>scenetreewheelhandler.h/.cpp</code></td><td>~183</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Hover manager (tooltips, highlights)</td><td><code>scenetreehovermanager.h/.cpp</code></td><td>~1 192</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Hit-test manager (all <code>*ControlAt</code> fns)</td><td><code>scenetreehittestmanager.h/.cpp</code></td><td>~278</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Inline editor (expression inline edit)</td><td><code>scenetreeinlineeditor.h/.cpp</code></td><td>~157</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Canvas controller (pan / zoom)</td><td><code>scenetreecanvascontroller.h/.cpp</code></td><td>~174</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Drop preview controller</td><td><code>scenetreedroppreviewcontroller.h/.cpp</code></td><td>~267</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Overlay controller (glass panels)</td><td><code>scenetreeoverlaycontroller.h/.cpp</code></td><td>~381</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Toolbar renderer</td><td><code>scenetreetoolbarrenderer.h/.cpp</code></td><td>~192</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Expression layout</td><td><code>scenetreeexpressionlayout.h/.cpp</code></td><td>~440</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Node renderer</td><td><code>scenetreenoderenderer.h/.cpp</code></td><td>~1 605</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Icon painter</td><td><code>scenetreetoolbarrenderer.h/.cpp</code></td><td>~392</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Preview geometry</td><td><code>scenetreepreviewgeometry.h/.cpp</code></td><td>~227</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Preview renderer</td><td><code>scenetreepreviewrenderer.h/.cpp</code></td><td>~395</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Canvas drag handler</td><td><code>scenetreegraphicswidget_canvasdrag.cpp</code></td><td>~299</td><td><span class="tag-done">✅ Done</span></td></tr>
+</tbody>
+</table>
+
+<h3>3.2 — Constant and type consolidation</h3>
+
+<table>
+<thead><tr><th>Item</th><th>Details</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>CanvasBackgroundTheme</code> struct + helpers</td><td>Unified from 2 anonymous-namespace duplicates into <code>SceneTreeGraphics</code> namespace in <code>scenetreegraphicsconstants.h</code></td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Overlay Z / margin constants</td><td><code>OverlayBaseZ</code>, <code>HintOverlayZ</code>, <code>OverlayMargin</code>, <code>OverlayBottomGap</code> centralized; replaced per-file literals in 3 files</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td><code>ExpressionEditTarget</code> struct</td><td>Moved from <code>SceneTreeGraphicsWidget</code> inner class to global scope in <code>scenetreeinlineeditor.h</code>; widget uses <code>using</code> alias</td><td><span class="tag-done">✅ Done</span></td></tr>
+<tr><td>Dead code removal from <code>widget.cpp</code></td><td>~15 unused functions + 3 constants removed (drop preview math, color lerp, interpolated rects, etc.)</td><td><span class="tag-done">✅ Done</span></td></tr>
+</tbody>
+</table>
+
+<div class="result-box"><strong>Result:</strong> <code>SceneTreeGraphicsWidget</code> reduced from ~6 195 lines to ~1 812 lines (−71%).</div>
+
+<h3>3.3 — Remaining</h3>
+
+<table>
+<thead><tr><th>Task</th><th>Target file</th><th>Approx. lines</th><th>Status</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>Split <code>SceneTreeNodeRenderer</code></strong></td>
+  <td><code>scenetreenoderenderer.cpp</code> → painting utils, layout math, expression render, preview sizing</td>
+  <td>~1 605</td>
+  <td><span class="tag-notstarted">❌ Not started</span></td>
+</tr>
+<tr>
+  <td><strong>Split <code>SceneTreeHoverManager</code></strong></td>
+  <td><code>scenetreehovermanager.cpp</code> grew from ~450 to ~1 192 lines after hint overlay additions — candidate for <code>SceneTreeHintOverlay</code> extraction</td>
+  <td>~1 192</td>
+  <td><span class="tag-notstarted">❌ Not started</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="phase-label">Phase 4</span> Correctness Fixes (tied to refactoring work)</h2>
+
+<p>These bugs were exposed during the god-class decomposition work and fixed in the same session.</p>
+
+<table>
+<thead><tr><th>Bug</th><th>Root cause</th><th>Fix location</th><th>Status</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>$fn=</code> disappears on Apply Code</td>
+  <td>Parser regex <code>[A-Za-z_]</code> rejected <code>$</code> prefix</td>
+  <td><code>openscadparser.cpp</code> — changed to <code>\$?[A-Za-z_]</code></td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+<tr>
+  <td><code>$fn</code> not affecting viewport geometry</td>
+  <td><code>buildCsgPreview(scene)</code> fell through to <code>buildCsgPreview(shapes)</code> with no <code>fn</code> parameter</td>
+  <td><code>csgevaluator.cpp</code> — threaded <code>fn</code> through entire flat-shapes path</td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+<tr>
+  <td><code>center</code> checkbox ignored in Manifold CSG</td>
+  <td><code>Manifold::Cube/Cylinder</code> hardcoded <code>center=true</code></td>
+  <td><code>manifoldcsg.cpp</code> — changed to <code>shape.center</code></td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+<tr>
+  <td><code>center</code> checkbox ignored in box intersection tests</td>
+  <td><code>containsPoint</code> for Cube/Square/Cylinder/Cone did not offset by half-size when <code>center=true</code></td>
+  <td><code>csgevaluator.cpp</code> — fixed boundary tests</td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+<tr>
+  <td>Viewport not updating after center toggle</td>
+  <td><code>refreshSceneViews()</code> did not call <code>invalidateCsgPreview()</code></td>
+  <td><code>mainwindow.cpp</code> — added missing call</td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+<tr>
+  <td>GL VBO not refreshing after center toggle</td>
+  <td><code>shapeFingerprint</code> missing <code>shape.center</code>, <code>shape.radius2</code>, polyhedron data → same <code>meshKey</code> → VBO upload skipped</td>
+  <td><code>viewporthelpers.cpp</code> — extended <code>shapeFingerprint</code></td>
+  <td><span class="tag-done">✅ Fixed</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>File Size Overview (current)</h2>
+
+<h3>Scene tree subsystem</h3>
+<table>
+<thead><tr><th>File</th><th>Lines</th></tr></thead>
+<tbody>
+<tr><td><code>scenetreegraphicswidget.cpp</code></td><td>1 812</td></tr>
+<tr><td><code>scenetreenoderenderer.cpp</code></td><td>1 605</td></tr>
+<tr><td><code>scenetreehovermanager.cpp</code></td><td>1 192</td></tr>
+<tr><td><code>scenetreecoloreditmode.cpp</code></td><td>1 135</td></tr>
+<tr><td><code>scenetreelayout.cpp</code></td><td>503</td></tr>
+<tr><td><code>scenetreeexpressionlayout.cpp</code></td><td>440</td></tr>
+<tr><td><code>scenetreepreviewrenderer.cpp</code></td><td>395</td></tr>
+<tr><td><code>scenetreetoolbarrenderer.cpp</code> (icon painter)</td><td>392</td></tr>
+<tr><td><code>scenetreeoverlaycontroller.cpp</code></td><td>381</td></tr>
+<tr><td><code>scenetreeiconpainter.cpp</code></td><td>392</td></tr>
+<tr><td><code>scenetreepreviewgeometry.cpp</code></td><td>227</td></tr>
+<tr><td><code>scenetree.cpp</code></td><td>615</td></tr>
+<tr><td><code>scenetreepalette.cpp</code></td><td>290</td></tr>
+<tr><td><code>scenetreegraphicswidget_canvasdrag.cpp</code></td><td>299</td></tr>
+<tr><td><code>scenetreehittestmanager.cpp</code></td><td>278</td></tr>
+<tr><td><code>scenetreedroppreviewcontroller.cpp</code></td><td>267</td></tr>
+<tr><td><code>scenetreeinlinetextinput.cpp</code></td><td>281</td></tr>
+<tr><td><code>scenetreetoolmetadata.cpp</code></td><td>245</td></tr>
+<tr><td><code>scenetreecanvascontroller.cpp</code></td><td>174</td></tr>
+<tr><td><code>scenetreetoolbarrenderer.cpp</code></td><td>192</td></tr>
+<tr><td><code>scenetreewheelhandler.cpp</code></td><td>183</td></tr>
+<tr><td><code>scenetreeinlineeditor.cpp</code></td><td>157</td></tr>
+<tr><td><code>scenetreecanvasgraphics.cpp</code></td><td>105</td></tr>
+<tr><td><code>scenetreeglasspanelhelpers.cpp</code></td><td>68</td></tr>
+</tbody>
+</table>
+
+<h3>Viewport subsystem</h3>
+<table>
+<thead><tr><th>File</th><th>Lines</th></tr></thead>
+<tbody>
+<tr><td><code>viewporthelpers.cpp</code></td><td>1 082</td></tr>
+<tr><td><code>viewportwidget.cpp</code></td><td>1 042</td></tr>
+<tr><td><code>viewportglrenderer.cpp</code></td><td>606</td></tr>
+<tr><td><code>viewportaxisgizmo.cpp</code></td><td>468</td></tr>
+<tr><td><code>viewportsoftwarerenderer.cpp</code></td><td>297</td></tr>
+<tr><td><code>viewportoverlaypreview.cpp</code></td><td>202</td></tr>
+<tr><td><code>viewportcamera.cpp</code></td><td>23</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>Suggested Next Steps</h2>
+<ol>
+<li><strong>Split <code>SceneTreeNodeRenderer</code></strong> — at 1 605 lines it is the largest remaining single-purpose file. Candidate split: primitive drawing helpers, group frame drawing, expression widget rendering, preview sizing calculations.</li>
+<li><strong>Split <code>SceneTreeHoverManager</code></strong> — grew from ~450 to ~1 192 lines after hint overlay additions. Could extract hint overlay rendering into a separate <code>SceneTreeHintOverlay</code> class.</li>
+<li><strong>Split <code>viewporthelpers.cpp</code></strong> — 1 082 lines; contains mesh building, shape fingerprinting, interaction mesh logic, and string utilities — candidate for 2–3 files.</li>
+</ol>
+
+</body>
+</html>

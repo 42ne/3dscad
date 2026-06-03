@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Дорожня карта рефакторингу коду</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #2c3e50; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f5f5f5; }
+tr:hover { background: #e8ecf0; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.tag-notstarted { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.tag-partial { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
+.phase-label { display: inline-block; background: #2c3e50; color: white; border-radius: 3px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+.result-box { background: #eafaf1; border-left: 4px solid #27ae60; padding: 10px 14px; margin: 1em 0; border-radius: 3px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Дорожня карта рефакторингу коду</h1>
+<p><em>Статус: 2026-06-03.</em></p>
+<p>Поетапне розкладання god-класів <code>ViewportWidget</code> та <code>SceneTreeGraphicsWidget</code> на
+сфокусовані підсистемні контролери, консолідація дублікатів утиліт та виправлення коректності.</p>
+
+<hr>
+
+<h2><span class="phase-label">Фаза 1</span> Витягування підсистем Viewport</h2>
+
+<table>
+<thead><tr><th>Підсистема</th><th>Новий клас / файл</th><th>Рядки</th><th>Статус</th></tr></thead>
+<tbody>
+<tr><td>Програмний рендерер</td><td><code>ViewportSoftwareRenderer</code> (<code>viewportsoftwarerenderer.h/.cpp</code>)</td><td>~297</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>OpenGL рендерер</td><td><code>ViewportGLRenderer</code> (<code>viewportglrenderer.h/.cpp</code>)</td><td>~606</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Гізмо осей</td><td><code>ViewportAxisGizmo</code> (<code>viewportaxisgizmo.h/.cpp</code>)</td><td>~468</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Прев'ю трансформацій / форм</td><td><code>ViewportOverlayPreview</code> (<code>viewportoverlaypreview.h/.cpp</code>)</td><td>~202</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Модель камери</td><td><code>ViewportCamera</code> (<code>viewportcamera.h/.cpp</code>)</td><td>~44</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Іменовані константи</td><td><code>ViewportConstants</code> (<code>viewportconstants.h</code>)</td><td>~26</td><td><span class="tag-done">✅ Готово</span></td></tr>
+</tbody>
+</table>
+<div class="result-box"><strong>Результат:</strong> <code>ViewportWidget</code> скорочено з ~3 700 до ~1 042 рядків (−72%).</div>
+
+<hr>
+
+<h2><span class="phase-label">Фаза 2</span> Усунення дублікатів утиліт</h2>
+
+<table>
+<thead><tr><th>Елемент</th><th>До</th><th>Після</th><th>Статус</th></tr></thead>
+<tbody>
+<tr><td><code>isValidIdentifier</code></td><td>3 копії в різних файлах</td><td>Інлайн у <code>scenestringutils.h</code></td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td><code>splitAtTopLevelCommas</code></td><td>Дублікат у <code>openscadparser.cpp</code></td><td>Видалено; залишилась одна канонічна копія</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Преамбула корекції числа</td><td>4 однакові преамбули в <code>SceneController</code></td><td>Хелпер <code>adjustedNumberReplacement</code> + метод <code>setCtrlHighlight</code></td><td><span class="tag-done">✅ Готово</span></td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="phase-label">Фаза 3</span> Декомпозиція god-класу дерева сцени</h2>
+
+<p><code>SceneTreeGraphicsWidget</code> починав з ~6 195 рядків. Кожна підсистема нижче витягнута як
+friend-клас за тим самим патерном, що і у Фазі 1.</p>
+
+<h3>3.1 — Витягнуті підсистеми</h3>
+
+<table>
+<thead><tr><th>Підсистема</th><th>Файл</th><th>Рядки</th><th>Статус</th></tr></thead>
+<tbody>
+<tr><td>Режим редагування кольору</td><td><code>scenetreecoloreditmode.h/.cpp</code></td><td>~1 135</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Обробник колеса (Ctrl+scroll, 8 кейсів)</td><td><code>scenetreewheelhandler.h/.cpp</code></td><td>~183</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Менеджер наведення (підказки, підсвітка)</td><td><code>scenetreehovermanager.h/.cpp</code></td><td>~1 192</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Менеджер хіт-тестів (всі <code>*ControlAt</code>)</td><td><code>scenetreehittestmanager.h/.cpp</code></td><td>~278</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Вбудований редактор виразів</td><td><code>scenetreeinlineeditor.h/.cpp</code></td><td>~157</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Контролер полотна (панорамування / зум)</td><td><code>scenetreecanvascontroller.h/.cpp</code></td><td>~174</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Контролер прев'ю перетягування</td><td><code>scenetreedroppreviewcontroller.h/.cpp</code></td><td>~267</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Контролер оверлею (скляні панелі)</td><td><code>scenetreeoverlaycontroller.h/.cpp</code></td><td>~381</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Рендерер тулбару</td><td><code>scenetreetoolbarrenderer.h/.cpp</code></td><td>~192</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Лейаут виразів</td><td><code>scenetreeexpressionlayout.h/.cpp</code></td><td>~440</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Рендерер вузлів дерева</td><td><code>scenetreenoderenderer.h/.cpp</code></td><td>~1 605</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Малювання іконок</td><td><code>scenetreetoolbarrenderer.h/.cpp</code></td><td>~392</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Геометрія прев'ю</td><td><code>scenetreepreviewgeometry.h/.cpp</code></td><td>~227</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Рендерер прев'ю</td><td><code>scenetreepreviewrenderer.h/.cpp</code></td><td>~395</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Обробник перетягування по полотну</td><td><code>scenetreegraphicswidget_canvasdrag.cpp</code></td><td>~299</td><td><span class="tag-done">✅ Готово</span></td></tr>
+</tbody>
+</table>
+
+<h3>3.2 — Консолідація констант та типів</h3>
+
+<table>
+<thead><tr><th>Елемент</th><th>Деталі</th><th>Статус</th></tr></thead>
+<tbody>
+<tr><td>Структура <code>CanvasBackgroundTheme</code> + хелпери</td><td>Об'єднано з 2 дублікатів в анонімних просторах імен у простір імен <code>SceneTreeGraphics</code> в <code>scenetreegraphicsconstants.h</code></td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Константи Z-рівня оверлею та відступів</td><td><code>OverlayBaseZ</code>, <code>HintOverlayZ</code>, <code>OverlayMargin</code>, <code>OverlayBottomGap</code> централізовано; замінено hard-coded числа у 3 файлах</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Структура <code>ExpressionEditTarget</code></td><td>Перенесено з внутрішнього класу <code>SceneTreeGraphicsWidget</code> в глобальну область у <code>scenetreeinlineeditor.h</code>; víджет використовує <code>using</code>-псевдонім</td><td><span class="tag-done">✅ Готово</span></td></tr>
+<tr><td>Видалення мертвого коду з <code>widget.cpp</code></td><td>~15 невикористаних функцій + 3 константи видалено (математика прев'ю drag, lerp кольору, інтерпольовані прямокутники тощо)</td><td><span class="tag-done">✅ Готово</span></td></tr>
+</tbody>
+</table>
+
+<div class="result-box"><strong>Результат:</strong> <code>SceneTreeGraphicsWidget</code> скорочено з ~6 195 до ~1 812 рядків (−71%).</div>
+
+<h3>3.3 — Залишилось</h3>
+
+<table>
+<thead><tr><th>Завдання</th><th>Цільовий файл</th><th>Прибл. рядків</th><th>Статус</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>Розбити <code>SceneTreeNodeRenderer</code></strong></td>
+  <td><code>scenetreenoderenderer.cpp</code> → утиліти малювання примітивів, математика лейауту, рендер виразів, розміри прев'ю</td>
+  <td>~1 605</td>
+  <td><span class="tag-notstarted">❌ Не розпочато</span></td>
+</tr>
+<tr>
+  <td><strong>Розбити <code>SceneTreeHoverManager</code></strong></td>
+  <td><code>scenetreehovermanager.cpp</code> виріс з ~450 до ~1 192 рядків після додавання hint overlay — кандидат на витягування <code>SceneTreeHintOverlay</code></td>
+  <td>~1 192</td>
+  <td><span class="tag-notstarted">❌ Не розпочато</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2><span class="phase-label">Фаза 4</span> Виправлення коректності (пов'язані з рефакторингом)</h2>
+
+<p>Ці баги були виявлені під час роботи з god-класами і виправлені в тому ж сеансі.</p>
+
+<table>
+<thead><tr><th>Баг</th><th>Першопричина</th><th>Місце виправлення</th><th>Статус</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>$fn=</code> зникає після Apply Code</td>
+  <td>Regex парсера <code>[A-Za-z_]</code> відкидав префікс <code>$</code></td>
+  <td><code>openscadparser.cpp</code> — змінено на <code>\$?[A-Za-z_]</code></td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+<tr>
+  <td><code>$fn</code> не впливає на геометрію у viewport</td>
+  <td><code>buildCsgPreview(scene)</code> передавав управління в <code>buildCsgPreview(shapes)</code> без параметра <code>fn</code></td>
+  <td><code>csgevaluator.cpp</code> — <code>fn</code> прокинуто через весь flat-shapes шлях</td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+<tr>
+  <td>Галочка <code>center</code> ігнорується в Manifold CSG</td>
+  <td><code>Manifold::Cube/Cylinder</code> завжди мали <code>center=true</code></td>
+  <td><code>manifoldcsg.cpp</code> — змінено на <code>shape.center</code></td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+<tr>
+  <td>Галочка <code>center</code> ігнорується у тестах перетину</td>
+  <td><code>containsPoint</code> для Cube/Square/Cylinder/Cone не зміщував межі на half-size при <code>center=true</code></td>
+  <td><code>csgevaluator.cpp</code> — виправлено граничні перевірки</td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+<tr>
+  <td>Viewport не оновлювався після зміни <code>center</code></td>
+  <td><code>refreshSceneViews()</code> не викликав <code>invalidateCsgPreview()</code></td>
+  <td><code>mainwindow.cpp</code> — додано відсутній виклик</td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+<tr>
+  <td>GL VBO не оновлювався після зміни <code>center</code></td>
+  <td><code>shapeFingerprint</code> не включав <code>shape.center</code>, <code>shape.radius2</code>, дані поліедрів → однаковий <code>meshKey</code> → завантаження VBO пропускалось</td>
+  <td><code>viewporthelpers.cpp</code> — розширено <code>shapeFingerprint</code></td>
+  <td><span class="tag-done">✅ Виправлено</span></td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>Поточні розміри файлів</h2>
+
+<h3>Підсистема дерева сцени</h3>
+<table>
+<thead><tr><th>Файл</th><th>Рядки</th></tr></thead>
+<tbody>
+<tr><td><code>scenetreegraphicswidget.cpp</code></td><td>1 812</td></tr>
+<tr><td><code>scenetreenoderenderer.cpp</code></td><td>1 605</td></tr>
+<tr><td><code>scenetreehovermanager.cpp</code></td><td>1 192</td></tr>
+<tr><td><code>scenetreecoloreditmode.cpp</code></td><td>1 135</td></tr>
+<tr><td><code>scenetreelayout.cpp</code></td><td>503</td></tr>
+<tr><td><code>scenetreeexpressionlayout.cpp</code></td><td>440</td></tr>
+<tr><td><code>scenetreepreviewrenderer.cpp</code></td><td>395</td></tr>
+<tr><td><code>scenetreetoolbarrenderer.cpp</code> / іконки</td><td>392</td></tr>
+<tr><td><code>scenetreeoverlaycontroller.cpp</code></td><td>381</td></tr>
+<tr><td><code>scenetreeiconpainter.cpp</code></td><td>392</td></tr>
+<tr><td><code>scenetree.cpp</code></td><td>615</td></tr>
+<tr><td><code>scenetreepalette.cpp</code></td><td>290</td></tr>
+<tr><td><code>scenetreegraphicswidget_canvasdrag.cpp</code></td><td>299</td></tr>
+<tr><td><code>scenetreedroppreviewcontroller.cpp</code></td><td>267</td></tr>
+<tr><td><code>scenetreeinlinetextinput.cpp</code></td><td>281</td></tr>
+<tr><td><code>scenetreehittestmanager.cpp</code></td><td>278</td></tr>
+<tr><td><code>scenetreepreviewgeometry.cpp</code></td><td>227</td></tr>
+<tr><td><code>scenetreetoolmetadata.cpp</code></td><td>245</td></tr>
+<tr><td><code>scenetreecanvascontroller.cpp</code></td><td>174</td></tr>
+<tr><td><code>scenetreetoolbarrenderer.cpp</code></td><td>192</td></tr>
+<tr><td><code>scenetreewheelhandler.cpp</code></td><td>183</td></tr>
+<tr><td><code>scenetreeinlineeditor.cpp</code></td><td>157</td></tr>
+<tr><td><code>scenetreecanvasgraphics.cpp</code></td><td>105</td></tr>
+<tr><td><code>scenetreeglasspanelhelpers.cpp</code></td><td>68</td></tr>
+</tbody>
+</table>
+
+<h3>Підсистема Viewport</h3>
+<table>
+<thead><tr><th>Файл</th><th>Рядки</th></tr></thead>
+<tbody>
+<tr><td><code>viewporthelpers.cpp</code></td><td>1 082</td></tr>
+<tr><td><code>viewportwidget.cpp</code></td><td>1 042</td></tr>
+<tr><td><code>viewportglrenderer.cpp</code></td><td>606</td></tr>
+<tr><td><code>viewportaxisgizmo.cpp</code></td><td>468</td></tr>
+<tr><td><code>viewportsoftwarerenderer.cpp</code></td><td>297</td></tr>
+<tr><td><code>viewportoverlaypreview.cpp</code></td><td>202</td></tr>
+<tr><td><code>viewportcamera.cpp</code></td><td>23</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>Рекомендовані наступні кроки</h2>
+<ol>
+<li><strong>Розбити <code>SceneTreeNodeRenderer</code></strong> — 1 605 рядків, найбільший одноцільовий файл. Можливий розподіл: утиліти малювання примітивів, малювання фреймів груп, рендер виразів, розрахунок розмірів прев'ю.</li>
+<li><strong>Розбити <code>SceneTreeHoverManager</code></strong> — виріс з ~450 до ~1 192 рядків після додавання hint overlay. Можна витягти рендеринг підказкового оверлею в окремий клас <code>SceneTreeHintOverlay</code>.</li>
+<li><strong>Розбити <code>viewporthelpers.cpp</code></strong> — 1 082 рядки; містить побудову мешів, хешування форм, логіку interaction mesh, рядкові утиліти — кандидат на 2–3 файли.</li>
+</ol>
+
+</body>
+</html>

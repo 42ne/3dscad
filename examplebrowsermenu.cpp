@@ -19,7 +19,7 @@
 
 // ── ExampleBrowserMenu ────────────────────────────────────────────────────────
 
-ExampleBrowserMenu::ExampleBrowserMenu(QMenu *menu, QObject *parent)
+ExampleBrowserMenu::ExampleBrowserMenu(QMenu *menu, const QString &subdirName, QObject *parent)
     : QObject(parent)
 {
     m_preview    = new ExamplePreviewPopup;   // top-level popup, no Qt parent
@@ -33,7 +33,7 @@ ExampleBrowserMenu::ExampleBrowserMenu(QMenu *menu, QObject *parent)
     connect(menu,         &QMenu::aboutToHide,                      this, &ExampleBrowserMenu::hidePreview);
 
     // ── populate menu ─────────────────────────────────────────────────────────
-    const QString path = examplesPath();
+    const QString path = examplesPath(subdirName);
     if (path.isEmpty()) {
         menu->addAction("(no examples found)")->setEnabled(false);
         return;
@@ -99,11 +99,11 @@ void ExampleBrowserMenu::hidePreview()
 }
 
 // static
-QString ExampleBrowserMenu::examplesPath()
+QString ExampleBrowserMenu::examplesPath(const QString &subdirName)
 {
     QDir dir(QCoreApplication::applicationDirPath());
     for (int i = 0; i < 6; ++i) {
-        QDir candidate(dir.absoluteFilePath("docs/sample_codes"));
+        QDir candidate(dir.absoluteFilePath("docs/" + subdirName));
         if (candidate.exists()) return candidate.absolutePath();
         if (!dir.cdUp()) break;
     }
