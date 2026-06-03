@@ -172,12 +172,16 @@ See [docs/sfxbuilder.md](docs/sfxbuilder.md) for full usage instructions.
 
 ## Supported OpenSCAD Subset
 
-The visual tree is intentionally round-tripped through a small OpenSCAD subset:
-top-level scene variables, top-level module declarations, explicit module calls,
-boolean groups, transform groups, for loops, and cube/sphere/cylinder
-primitives. Module declarations do not create geometry by themselves; use the
-module card's non-code call handle in the graphics tree, or write an explicit
-`module_name(...);` call in supported code.
+The visual tree is intentionally round-tripped through a supported OpenSCAD
+subset: top-level scene variables, top-level module declarations, explicit
+module calls, boolean groups, transform groups, for loops,
+`linear_extrude` (with `height`, `center`, `twist`, `slices`, `scale`),
+`resize()`, `color()`, `hull`, `minkowski`, `polyhedron`, and
+cube/sphere/cylinder/circle/square primitives. Block comments `/* ... */`
+and the special variables `$fn`/`$fa`/`$fs` are also supported in
+expressions. Module declarations do not create geometry by themselves; use
+the module card's non-code call handle in the graphics tree, or write an
+explicit `module_name(...);` call in supported code.
 
 See [docs/openscad_subset.md](docs/openscad_subset.md) for the current syntax
 contract and known limitations for correct tree reconstruction.

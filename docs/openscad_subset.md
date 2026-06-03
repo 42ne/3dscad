@@ -10,7 +10,8 @@ The safest rule is simple: keep code close to the editor's generated format.
 
 Supported at top level:
 
-- line comments that start with `//`
+- line comments `//` and block comments `/* ... */`
+- special variables `$fn`, `$fa`, `$fs` (with defaults 0, 12, 2; settable via `$fn = 64;`)
 - variable assignments, for example `flange_r = 52;`
 - vector variable assignments (stored for primitive lookup, not shown in tree), for example `body_size = [28, 28, 4];`
 - top-level module declarations, for example `module peg(r = 6) { ... }`
@@ -70,10 +71,18 @@ color("red") {
 linear_extrude(height = 15) {
     circle(r=8);
 }
+
+resize([30, 20, 10]) {
+    sphere(r=10);
+}
+
+linear_extrude(height = 40, center = true, twist = 180, slices = 60, scale = 0.5) {
+    square([10, 20], center = true);
+}
 ```
 
-Note: `linear_extrude` currently supports only the `height` parameter. It does
-not support `twist`, `slices`, `scale`, or `center`.
+All `linear_extrude` parameters are supported: `height`, `center`, `twist`,
+`slices`, and `scale`.
 
 Transform groups:
 
@@ -92,6 +101,14 @@ scale([1, 2, 1]) {
 
 mirror([1, 0, 0]) {
     sphere(r=8);
+}
+
+resize([30, 20, 10]) {
+    sphere(r=10);
+}
+
+resize([20, 40, 0], auto=[false, true, false]) {
+    cube([10, 10, 10], center=true);
 }
 ```
 
@@ -396,14 +413,12 @@ These constructs are outside the current round-trippable subset:
 - function declarations
 - list comprehensions and general vector/list expressions
 - `children()`
-- `$fn`, `$fa`, `$fs`, and other special variables
 - positional module arguments in the visual editor workflow
 - `offset`, `projection`
 - `import`, `surface`, `text`
-- `resize()`, `rotate_extrude`
+- `rotate_extrude`
 - `render()`
 - arbitrary named arguments on primitives beyond the generated forms
-- block comments `/* ... */` (single-line `//` only)
 - `if` inside modules always takes the true branch (parse-time limitation — module parameter values are only known at call time)
 
 For reliable tree reconstruction, keep generated block structure and one

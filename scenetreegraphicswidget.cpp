@@ -1421,7 +1421,9 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const bool verticalHeaderGroup = isVerticalHeaderOperation(node.operation);
     const qreal headerWidth = isTransformOperation(node.operation)
                                   ? transformHeaderWidthForNode(node)
-                                  : verticalHeaderGroup ? TransformHeaderWidth : 0.0;
+                                  : node.operation == SceneDocument::TreeNode::Resize
+                                      ? transformHeaderWidthForNode(node)
+                                      : verticalHeaderGroup ? TransformHeaderWidth : 0.0;
     const qreal headerHeight = verticalHeaderGroup ? 0.0 : GroupHeaderHeight;
     QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;

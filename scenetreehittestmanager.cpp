@@ -63,7 +63,8 @@ bool SceneTreeHitTestManager::transformControlAt(const QPointF &scenePosition,
         if (area.operation != SceneDocument::TreeNode::Translate
             && area.operation != SceneDocument::TreeNode::Rotate
             && area.operation != SceneDocument::TreeNode::Scale
-            && area.operation != SceneDocument::TreeNode::Mirror)
+            && area.operation != SceneDocument::TreeNode::Mirror
+            && area.operation != SceneDocument::TreeNode::Resize)
             continue;
         if (!area.rect.contains(scenePosition)) continue;
         if (!bestArea || area.depth > bestArea->depth) bestArea = &area;

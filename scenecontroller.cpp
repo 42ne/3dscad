@@ -1303,7 +1303,7 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
 
     const QString currentExpr = SceneTreeGraphics::transformAxisExpression(*group, axis);
     QStringList newExpressions = group->transformExpressions;
-    while (newExpressions.size() < 3) newExpressions.append(QString());
+    while (newExpressions.size() <= axis) newExpressions.append(QString());
 
     QVector3D position = group->position;
     QVector3D rotation = group->rotation;
@@ -1312,7 +1312,8 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
     if (numberStart >= 0 && numberLength > 0
         && numberStart + numberLength <= currentExpr.size()) {
 
-        const bool  isScale     = (group->operation == SceneDocument::TreeNode::Scale);
+        const bool  isScale     = (group->operation == SceneDocument::TreeNode::Scale
+                                   || group->operation == SceneDocument::TreeNode::Resize);
         const qreal minVal      = isScale ? 0.01 : -1e9;
         const QString numberText = currentExpr.mid(numberStart, numberLength);
         const int   decimalPoint = numberText.indexOf(QLatin1Char('.'));
@@ -1371,7 +1372,8 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
             else scale.setZ(float(newNumeric));
         }
     } else {
-        const bool  isScale = (group->operation == SceneDocument::TreeNode::Scale);
+        const bool  isScale = (group->operation == SceneDocument::TreeNode::Scale
+                            || group->operation == SceneDocument::TreeNode::Resize);
         const qreal step    = group->operation == SceneDocument::TreeNode::Rotate ? 5.0
                             : isScale ? 0.1 : 1.0;
         QVector3D *target   = (group->operation == SceneDocument::TreeNode::Translate
@@ -1421,7 +1423,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
         return;
 
     QStringList newExpressions = group->transformExpressions;
-    while (newExpressions.size() < 3)
+    while (newExpressions.size() <= axis)
         newExpressions.append(QString());
     if (newExpressions[axis] == trimmed)
         return;
@@ -1430,7 +1432,8 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
     QVector3D position = group->position;
     QVector3D rotation = group->rotation;
     QVector3D scale = group->scale;
-    if (group->operation == SceneDocument::TreeNode::Scale)
+    if (group->operation == SceneDocument::TreeNode::Scale
+        || group->operation == SceneDocument::TreeNode::Resize)
         numericValue = qMax<qreal>(0.01, numericValue);
 
     const bool usePosition = group->operation == SceneDocument::TreeNode::Translate

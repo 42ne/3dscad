@@ -272,7 +272,9 @@ static bool parseOperationLine(const QString &line,
                                QString *loopVariable = nullptr,
                                QString *loopRangeExpression = nullptr,
                                QColor *color = nullptr,
-                               QStringList *forExtraPairs = nullptr)
+                               QStringList *forExtraPairs = nullptr,
+                               bool *extraLinearExtrudeCenter = nullptr,
+                               int *extraLinearExtrudeSlices = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
@@ -287,6 +289,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression intersectionForRegex("^intersection_for\\s*\\((.+?)\\)\\s*\\{\\s*$");
     static const QRegularExpression colorRegex("^color\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression linearExtrudeRegex("^linear_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
+    static const QRegularExpression resizeRegex("^resize\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     // intersection_for → intersection() { for() { ... } }
     {
@@ -358,17 +361,63 @@ static bool parseOperationLine(const QString &line,
 
     QRegularExpressionMatch extrudeMatch = linearExtrudeRegex.match(line);
     if (extrudeMatch.hasMatch()) {
-        const auto args = parseNamedArgs(extrudeMatch.captured(1), {"height"});
+        const auto args = parseNamedArgs(extrudeMatch.captured(1), {"height", "center", "twist", "slices", "scale"});
         const QString heightExpr = args.value(QStringLiteral("height"), QStringLiteral("20"));
         qreal height = 20.0;
-        QString he;
-        if (!parseParamExpression(heightExpr, varValues, &height, &he))
+        QString heightExprStr;
+        if (!parseParamExpression(heightExpr, varValues, &height, &heightExprStr))
             return false;
+
+        const QString centerExpr = args.value(QStringLiteral("center"), QStringLiteral("false"));
+        const bool center = (centerExpr.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0);
+
+        const QString twistExpr = args.value(QStringLiteral("twist"), QStringLiteral("0"));
+        qreal twist = 0.0;
+        QString twistExprStr;
+        if (!parseParamExpression(twistExpr, varValues, &twist, &twistExprStr))
+            return false;
+
+        const QString slicesExpr = args.value(QStringLiteral("slices"), QStringLiteral("0"));
+        qreal slices = 0.0;
+        QString slicesExprStr;
+        if (!parseParamExpression(slicesExpr, varValues, &slices, &slicesExprStr))
+            return false;
+
+        const QString scaleExpr = args.value(QStringLiteral("scale"), QStringLiteral("1.0"));
+        qreal scaleVal = 1.0;
+        QString scaleExprStr;
+        if (!parseParamExpression(scaleExpr, varValues, &scaleVal, &scaleExprStr))
+            return false;
+
         *operation = SceneDocument::TreeNode::LinearExtrude;
         if (vector)
-            *vector = QVector3D(height, 1.0f, 1.0f);
+            *vector = QVector3D(float(height), float(twist), float(scaleVal));
         if (expressions)
-            *expressions = QStringList({he});
+            *expressions = QStringList({heightExprStr, twistExprStr, slicesExprStr, scaleExprStr});
+
+        if (extraLinearExtrudeCenter)
+            *extraLinearExtrudeCenter = center;
+        if (extraLinearExtrudeSlices)
+            *extraLinearExtrudeSlices = int(qRound(slices));
+        return true;
+    }
+
+    QRegularExpressionMatch resizeMatch = resizeRegex.match(line);
+    if (resizeMatch.hasMatch()) {
+        *operation = SceneDocument::TreeNode::Resize;
+        const QString inner = resizeMatch.captured(1).trimmed();
+        const QStringList parts = splitAtTopLevelCommas(inner);
+        QString vectorStr = parts.value(0).trimmed();
+        QString autoStr;
+        if (parts.size() >= 2 && parts[1].trimmed().startsWith(QStringLiteral("auto="), Qt::CaseInsensitive))
+            autoStr = parts[1].trimmed().mid(5).trimmed();
+        if (!parseVector3WithExpressions(vectorStr, varValues, vector, expressions))
+            return false;
+        if (expressions) {
+            while (expressions->size() < 4)
+                expressions->append(QString());
+            (*expressions)[3] = autoStr;
+        }
         return true;
     }
 
@@ -1132,8 +1181,11 @@ static bool parseBlock(ParserState *state,
         QString loopVariable, loopRangeExpression;
         QStringList forExtraPairs;
         QColor operationColor;
+        bool extrudeCenter = false;
+        int extrudeSlices = 0;
         if (parseOperationLine(line, &operation, &transformVector, state->variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs,
+                               &extrudeCenter, &extrudeSlices)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -1150,12 +1202,17 @@ static bool parseBlock(ParserState *state,
                 group.color = operationColor;
             } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
                 group.scale = transformVector;
+                group.linearExtrudeCenter = extrudeCenter;
+                group.linearExtrudeSlices = extrudeSlices;
+            } else if (operation == SceneDocument::TreeNode::Resize) {
+                group.scale = transformVector;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale
                 || operation == SceneDocument::TreeNode::Mirror
-                || operation == SceneDocument::TreeNode::LinearExtrude)
+                || operation == SceneDocument::TreeNode::LinearExtrude
+                || operation == SceneDocument::TreeNode::Resize)
                 group.transformExpressions = transformExpressions;
 
             parent->children.append(group);
@@ -1333,8 +1390,11 @@ static bool parseBlock(ParserState *state,
                             QStringList childExprs;
                             QString childLoopVar, childLoopRange;
                             QColor childColor;
+                            bool childExtrudeCenter = false;
+                            int childExtrudeSlices = 0;
                             if (parseOperationLine(ct, &childOp, &childVec, state->variableValues,
-                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor)) {
+                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor,
+                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;
@@ -1342,15 +1402,26 @@ static bool parseBlock(ParserState *state,
                                     childGroup.rotation = childVec;
                                 else if (childOp == SceneDocument::TreeNode::Scale)
                                     childGroup.scale = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Mirror)
+                                    childGroup.position = childVec;
                                 else if (childOp == SceneDocument::TreeNode::For) {
                                     childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
                                     childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
                                 } else if (childOp == SceneDocument::TreeNode::Color) {
                                     childGroup.color = childColor;
+                                } else if (childOp == SceneDocument::TreeNode::LinearExtrude) {
+                                    childGroup.scale = childVec;
+                                    childGroup.linearExtrudeCenter = childExtrudeCenter;
+                                    childGroup.linearExtrudeSlices = childExtrudeSlices;
+                                } else if (childOp == SceneDocument::TreeNode::Resize) {
+                                    childGroup.scale = childVec;
                                 }
                                 if (childOp == SceneDocument::TreeNode::Translate
                                     || childOp == SceneDocument::TreeNode::Rotate
-                                    || childOp == SceneDocument::TreeNode::Scale)
+                                    || childOp == SceneDocument::TreeNode::Scale
+                                    || childOp == SceneDocument::TreeNode::Mirror
+                                    || childOp == SceneDocument::TreeNode::LinearExtrude
+                                    || childOp == SceneDocument::TreeNode::Resize)
                                     childGroup.transformExpressions = childExprs;
                                 innermost->children.append(childGroup);
                                 if (!parseBlock(state, &innermost->children.last(), true, errorMessage))
@@ -1398,7 +1469,16 @@ static bool parseBlock(ParserState *state,
 static QVector<ParsedLine> normalizedLines(const QString &code)
 {
     QVector<ParsedLine> result;
-    const QStringList lines = code.split('\n');
+
+    QString cleaned = code;
+    QRegularExpression blockCommentRe(QStringLiteral("/\\*.*?\\*/"),
+                                      QRegularExpression::DotMatchesEverythingOption);
+    cleaned.replace(blockCommentRe, QString());
+    const int unclosed = cleaned.indexOf(QStringLiteral("/*"));
+    if (unclosed >= 0)
+        cleaned = cleaned.left(unclosed);
+
+    const QStringList lines = cleaned.split('\n');
     for (int i = 0; i < lines.size(); ++i) {
         QString line = lines[i].trimmed();
         const int commentIndex = line.indexOf(QStringLiteral("//"));
@@ -1763,8 +1843,11 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         QString loopVariable, loopRangeExpression;
         QStringList forExtraPairs;
         QColor operationColor;
+        bool extrudeCenter = false;
+        int extrudeSlices = 0;
         if (parseOperationLine(line, &operation, &transformVector, state.variableValues,
-                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs)) {
+                               &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs,
+                               &extrudeCenter, &extrudeSlices)) {
             ++state.index;
             SceneDocument::TreeNode group = makeGroupNode(operation, &state);
             if (operation == SceneDocument::TreeNode::Translate)
@@ -1782,12 +1865,17 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.color = operationColor;
             } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
                 group.scale = transformVector;
+                group.linearExtrudeCenter = extrudeCenter;
+                group.linearExtrudeSlices = extrudeSlices;
+            } else if (operation == SceneDocument::TreeNode::Resize) {
+                group.scale = transformVector;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
                 || operation == SceneDocument::TreeNode::Scale
                 || operation == SceneDocument::TreeNode::Mirror
-                || operation == SceneDocument::TreeNode::LinearExtrude)
+                || operation == SceneDocument::TreeNode::LinearExtrude
+                || operation == SceneDocument::TreeNode::Resize)
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
             SceneDocument::TreeNode *bodyParent = &sceneNode.children.last();
@@ -1960,8 +2048,11 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                             QStringList childExprs;
                             QString childLoopVar, childLoopRange;
                             QColor childColor;
+                            bool childExtrudeCenter = false;
+                            int childExtrudeSlices = 0;
                             if (parseOperationLine(ct, &childOp, &childVec, state.variableValues,
-                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor)) {
+                                                   &childExprs, &childLoopVar, &childLoopRange, &childColor,
+                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, &state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;
@@ -1969,15 +2060,26 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                                     childGroup.rotation = childVec;
                                 else if (childOp == SceneDocument::TreeNode::Scale)
                                     childGroup.scale = childVec;
+                                else if (childOp == SceneDocument::TreeNode::Mirror)
+                                    childGroup.position = childVec;
                                 else if (childOp == SceneDocument::TreeNode::For) {
                                     childGroup.loopVariable = childLoopVar.isEmpty() ? QStringLiteral("i") : childLoopVar;
                                     childGroup.loopRangeExpression = childLoopRange.isEmpty() ? QStringLiteral("[0 : 1 : 3]") : childLoopRange;
                                 } else if (childOp == SceneDocument::TreeNode::Color) {
                                     childGroup.color = childColor;
+                                } else if (childOp == SceneDocument::TreeNode::LinearExtrude) {
+                                    childGroup.scale = childVec;
+                                    childGroup.linearExtrudeCenter = childExtrudeCenter;
+                                    childGroup.linearExtrudeSlices = childExtrudeSlices;
+                                } else if (childOp == SceneDocument::TreeNode::Resize) {
+                                    childGroup.scale = childVec;
                                 }
                                 if (childOp == SceneDocument::TreeNode::Translate
                                     || childOp == SceneDocument::TreeNode::Rotate
-                                    || childOp == SceneDocument::TreeNode::Scale)
+                                    || childOp == SceneDocument::TreeNode::Scale
+                                    || childOp == SceneDocument::TreeNode::Mirror
+                                    || childOp == SceneDocument::TreeNode::LinearExtrude
+                                    || childOp == SceneDocument::TreeNode::Resize)
                                     childGroup.transformExpressions = childExprs;
                                 innermost->children.append(childGroup);
                                 if (!parseBlock(&state, &innermost->children.last(), true, errorMessage)) {

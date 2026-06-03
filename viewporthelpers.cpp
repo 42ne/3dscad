@@ -135,7 +135,8 @@ QVector3D transformPointForGroup(const QVector3D &point, const SceneDocument::Tr
         return point + group.position;
     if (group.operation == SceneDocument::TreeNode::Rotate)
         return rotatePoint(point, group.rotation);
-    if (group.operation == SceneDocument::TreeNode::Scale)
+    if (group.operation == SceneDocument::TreeNode::Scale
+        || group.operation == SceneDocument::TreeNode::Resize)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return reflectAcrossPlane(point, group.position);

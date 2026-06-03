@@ -701,6 +701,10 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
         node.scale = QVector3D(20, 1, 1);
         node.transformExpressions = QStringList({QStringLiteral("20")});
     }
+    if (operation == TreeNode::Resize) {
+        node.scale = QVector3D(10, 10, 10);
+        node.transformExpressions = {QStringLiteral("[10, 10, 10]")};
+    }
     return node;
 }
 

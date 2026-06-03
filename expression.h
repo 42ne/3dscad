@@ -242,11 +242,13 @@ private:
         bool parseIdentifier()
         {
             skipSpaces();
-            if (atEnd() || !(m_text[m_pos].isLetter() || m_text[m_pos] == QLatin1Char('_')))
+            if (atEnd() || !(m_text[m_pos].isLetter() || m_text[m_pos] == QLatin1Char('_')
+                             || m_text[m_pos] == QLatin1Char('$')))
                 return false;
 
             ++m_pos;
-            while (!atEnd() && (m_text[m_pos].isLetterOrNumber() || m_text[m_pos] == QLatin1Char('_')))
+            while (!atEnd() && (m_text[m_pos].isLetterOrNumber() || m_text[m_pos] == QLatin1Char('_')
+                                || m_text[m_pos] == QLatin1Char('$')))
                 ++m_pos;
 
             return true;
@@ -526,12 +528,14 @@ private:
                 // Try identifier — could be variable, constant, or function call
                 const int savedPos = m_pos;
                 const int start = m_pos;
-                if (atEnd() || !(m_text[m_pos].isLetter() || m_text[m_pos] == QLatin1Char('_'))) {
+                if (atEnd() || !(m_text[m_pos].isLetter() || m_text[m_pos] == QLatin1Char('_')
+                                 || m_text[m_pos] == QLatin1Char('$'))) {
                     m_pos = savedPos;
                     return setError(QStringLiteral("Expected number, variable, or '(' at position %1.").arg(m_pos + 1));
                 }
                 ++m_pos;
-                while (!atEnd() && (m_text[m_pos].isLetterOrNumber() || m_text[m_pos] == QLatin1Char('_')))
+                while (!atEnd() && (m_text[m_pos].isLetterOrNumber() || m_text[m_pos] == QLatin1Char('_')
+                                    || m_text[m_pos] == QLatin1Char('$')))
                     ++m_pos;
                 const QString name = m_text.mid(start, m_pos - start);
 
@@ -568,6 +572,19 @@ private:
             }
             if (name.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0) {
                 *result = 0.0;
+                return true;
+            }
+            // OpenSCAD special variables — default values; can be overridden via m_vars
+            if (name == QStringLiteral("$fn")) {
+                *result = m_vars.value(name, 0.0);
+                return true;
+            }
+            if (name == QStringLiteral("$fa")) {
+                *result = m_vars.value(name, 12.0);
+                return true;
+            }
+            if (name == QStringLiteral("$fs")) {
+                *result = m_vars.value(name, 2.0);
                 return true;
             }
             if (!m_vars.contains(name))

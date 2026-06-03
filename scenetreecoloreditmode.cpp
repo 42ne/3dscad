@@ -55,6 +55,7 @@ static QString colorEditOpName(SceneDocument::TreeNode::Operation op)
     case SceneDocument::TreeNode::Polyhedron:   return QStringLiteral("Polyhedron");
     case SceneDocument::TreeNode::Color:        return QStringLiteral("Color");
     case SceneDocument::TreeNode::LinearExtrude:return QStringLiteral("Linear extrude");
+    case SceneDocument::TreeNode::Resize:       return QStringLiteral("Resize");
     }
     return QStringLiteral("Group");
 }

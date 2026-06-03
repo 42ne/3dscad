@@ -334,12 +334,46 @@ void OpenScadGenerator::appendTreeNode(QString *code,
                                        && !node.transformExpressions.first().trimmed().isEmpty()
                                    ? node.transformExpressions.first().trimmed()
                                    : QString::number(node.scale.x(), 'g');
-        *code += QString("%1linear_extrude(height=%2, center=true) {\n")
-                     .arg(indent, heightExpr);
+        const QString centerStr = node.linearExtrudeCenter ? QStringLiteral("true") : QStringLiteral("false");
+        const QString twistExpr = node.transformExpressions.size() > 1
+                                  && !node.transformExpressions[1].trimmed().isEmpty()
+                              ? node.transformExpressions[1].trimmed()
+                              : QString::number(node.linearExtrudeTwist, 'g');
+        const QString slicesExpr = node.transformExpressions.size() > 2
+                                   && !node.transformExpressions[2].trimmed().isEmpty()
+                               ? node.transformExpressions[2].trimmed()
+                               : QString::number(node.linearExtrudeSlices);
+        const QString scaleExpr = node.transformExpressions.size() > 3
+                                  && !node.transformExpressions[3].trimmed().isEmpty()
+                              ? node.transformExpressions[3].trimmed()
+                              : QString::number(node.linearExtrudeScaleVal, 'g');
+        *code += QString("%1linear_extrude(height=%2, center=%3, twist=%4, slices=%5, scale=%6) {\n")
+                     .arg(indent, heightExpr, centerStr, twistExpr, slicesExpr, scaleExpr);
 
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent + "    ", ranges);
 
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    if (node.operation == SceneDocument::TreeNode::Resize) {
+        const QString vecExpr = !node.transformExpressions.isEmpty()
+                                    && !node.transformExpressions.first().trimmed().isEmpty()
+                                ? node.transformExpressions.first().trimmed()
+                                : QStringLiteral("[%1, %2, %3]")
+                                      .arg(QString::number(node.scale.x(), 'g'),
+                                           QString::number(node.scale.y(), 'g'),
+                                           QString::number(node.scale.z(), 'g'));
+        const QString autoStr = (node.transformExpressions.size() > 3
+                                 && !node.transformExpressions[3].trimmed().isEmpty())
+                                    ? QStringLiteral(", auto=%1").arg(node.transformExpressions[3])
+                                    : QString();
+        *code += QString("%1resize(%2%3) {\n").arg(indent, vecExpr, autoStr);
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
         *code += indent + "}\n";
         if (ranges)
             ranges->append({node.id, start, code->size() - start});

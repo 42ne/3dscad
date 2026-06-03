@@ -390,6 +390,27 @@ QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node)
     return QString::number(height, 'g');
 }
 
+QString linearExtrudeParam(const SceneDocument::TreeNode &node, int index, const QString &fallback)
+{
+    if (node.transformExpressions.size() > index) {
+        const QString expr = node.transformExpressions[index].trimmed();
+        if (!expr.isEmpty())
+            return expr;
+    }
+    return fallback;
+}
+
+QString linearExtrudeFullLabel(const SceneDocument::TreeNode &node)
+{
+    const QString h = linearExtrudeHeightExpression(node);
+    const QString c = node.linearExtrudeCenter ? QStringLiteral("true") : QStringLiteral("false");
+    const QString t = linearExtrudeParam(node, 1, QString::number(node.linearExtrudeTwist, 'g'));
+    const QString sl = linearExtrudeParam(node, 2, QString::number(node.linearExtrudeSlices));
+    const QString sc = linearExtrudeParam(node, 3, QString::number(node.linearExtrudeScaleVal, 'g'));
+    return QStringLiteral("linear_extrude(height = %1, center = %2, twist = %3, slices = %4, scale = %5)")
+        .arg(h, c, t, sl, sc);
+}
+
 QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF &metrics)
 {
     const QString prefix = QStringLiteral("linear_extrude(height = ");
@@ -400,20 +421,10 @@ QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF 
                   16.0);
 }
 
-qreal linearExtrudeHeaderMinWidth(const QString &heightExpression, const QFontMetricsF &metrics)
+qreal linearExtrudeHeaderMinWidth(const QString & /*heightExpression*/, const QFontMetricsF & /*metrics*/)
 {
-    const QString expression = heightExpression.trimmed().isEmpty()
-        ? QStringLiteral("20")
-        : heightExpression.trimmed();
-    const QString prefix = QStringLiteral("linear_extrude(height = ");
-    const QRectF measureRect(0.0, 0.0, 2048.0, GroupHeaderHeight);
-
-    qreal right = 64.0 + metrics.horizontalAdvance(prefix);
-    const QVector<ExpressionTextSpan> spans = linearExtrudeHeightTextSpans(measureRect, expression, metrics);
-    for (const ExpressionTextSpan &span : spans)
-        right = qMax(right, span.rect.right());
-
-    return right + metrics.horizontalAdvance(QStringLiteral(")")) + 36.0;
+    // Full label is drawn as plain text; min width is based on any content
+    return 80.0;
 }
 
 QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect,

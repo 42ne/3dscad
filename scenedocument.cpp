@@ -520,7 +520,8 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
     if (node->type == TreeNode::Group
         && (node->operation == TreeNode::Translate
             || node->operation == TreeNode::Rotate
-            || node->operation == TreeNode::Scale)) {
+            || node->operation == TreeNode::Scale
+            || node->operation == TreeNode::Resize)) {
         for (int i = 0; i < node->transformExpressions.size() && i < 3; ++i) {
             const QString &expr = node->transformExpressions[i];
             if (expr.isEmpty())

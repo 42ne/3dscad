@@ -42,6 +42,7 @@ public:
             For,
             Color,
             LinearExtrude,
+            Resize,     // resize([x,y,z]) or resize([x,y,z], auto=[x,y,z]); newsize in scale
             Scene // top-level container; flattened in code generation, never emitted as a block
         };
 
@@ -55,12 +56,21 @@ public:
         QString variableName;
         QString variableExpression = QStringLiteral("0");
         qreal variableValue = 0.0;
+
+        // LinearExtrude parameters
+        float linearExtrudeTwist = 0.0f;
+        int linearExtrudeSlices = 0;       // 0 = auto (use $fn/$fa/$fs)
+        float linearExtrudeScaleVal = 1.0f;
+        bool linearExtrudeCenter = false;
         QVector3D position = QVector3D(0, 0, 0);
         QVector3D rotation = QVector3D(0, 0, 0);
         QVector3D scale = QVector3D(1, 1, 1);
         QStringList transformExpressions; // 3 entries (x,y,z) for Translate/Rotate/Scale
         QString loopVariable = QStringLiteral("i");
         QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
+
+        // Resize parameters
+        QVector3D resizeAuto = QVector3D(0, 0, 0); // auto=[x,y,z], 0 means not set
         QColor color = QColor(79, 163, 255);
         QVector<TreeNode> children;
     };

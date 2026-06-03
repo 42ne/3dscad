@@ -333,6 +333,25 @@ void paintOperationIcon(QPainter *painter,
         painter->drawEllipse(top);
         painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
         painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
+    } else if (operation == SceneDocument::TreeNode::Resize) {
+        painter->setPen(QPen(accent.darker(155), 1.3));
+        const QRectF r = symbolRect.adjusted(2.0, 2.0, -2.0, -2.0);
+        painter->drawRect(r);
+        // Diagonal arrows at corners
+        const qreal arrowLen = 4.0;
+        for (int corner = 0; corner < 4; ++corner) {
+            const int sx = (corner & 1) ? 1 : -1;
+            const int sy = (corner & 2) ? 1 : -1;
+            const QPointF baseC = (corner & 1) ? r.topRight() : r.topLeft();
+            const QPointF cornerPt = (corner & 2) ? ((corner & 1) ? r.bottomRight() : r.bottomLeft()) : baseC;
+            QPointF dir(float(-sx), float(-sy));
+            const QPointF tip = cornerPt + dir * arrowLen;
+            painter->drawLine(cornerPt, tip);
+            // Arrowhead
+            const QPointF perp(-dir.y(), dir.x());
+            painter->drawLine(tip, tip - dir * 2.0 + perp * 1.5);
+            painter->drawLine(tip, tip - dir * 2.0 - perp * 1.5);
+        }
     } else if (operation == SceneDocument::TreeNode::Polyhedron) {
         painter->setPen(QPen(accent.darker(155), 1.25));
         const QPointF top(symbolRect.center().x(), symbolRect.top() + 1.0);

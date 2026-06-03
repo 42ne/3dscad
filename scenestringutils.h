@@ -21,7 +21,7 @@ inline bool isValidIdentifier(const QString &name)
         return false;
 
     const QChar first = name.front();
-    if (!(first == QLatin1Char('_') || first.isLetter()))
+    if (!(first == QLatin1Char('_') || first == QLatin1Char('$') || first.isLetter()))
         return false;
 
     for (const QChar ch : name) {
@@ -151,6 +151,14 @@ inline SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
                 evaluated.position.setZ(static_cast<float>(value));
         } else if (evaluated.operation == SceneDocument::TreeNode::LinearExtrude) {
             evaluated.scale.setX(static_cast<float>(qMax<qreal>(0.1, value)));
+        } else if (evaluated.operation == SceneDocument::TreeNode::Resize) {
+            value = qMax<qreal>(0.01, value);
+            if (axis == 0)
+                evaluated.scale.setX(static_cast<float>(value));
+            else if (axis == 1)
+                evaluated.scale.setY(static_cast<float>(value));
+            else
+                evaluated.scale.setZ(static_cast<float>(value));
         }
     }
 

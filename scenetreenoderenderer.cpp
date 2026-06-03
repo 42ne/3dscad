@@ -1153,17 +1153,19 @@ private:
         } else if (m_operation == SceneDocument::TreeNode::LinearExtrude) {
             painter->save();
             painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
+            const qreal textLeft = iconRect.right() + 10.0;
+            const qreal labelWidth = qMax<qreal>(0.0, m_rect.right() - textLeft - 38.0);
+
             const QString heightExpression = !m_transformExpressions.isEmpty()
                 && !m_transformExpressions.first().trimmed().isEmpty()
                     ? m_transformExpressions.first().trimmed()
                     : QString::number(m_transformValues.x() > 0.0f ? m_transformValues.x() : 20.0f, 'g');
             const QString prefix = QStringLiteral("linear_extrude(height = ");
-            const QFontMetricsF metrics(sceneTreeGraphicsFont());
-            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
-            const qreal textLeft = iconRect.right() + 10.0;
+            const qreal prefixAdvance = metrics.horizontalAdvance(prefix);
             painter->setPen(SceneTreePalette::numLabelText(pt2));
-            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0,
-                                     metrics.horizontalAdvance(prefix), 16.0),
+            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0, prefixAdvance, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, prefix);
 
             const QVector<ExpressionTextSpan> spans = linearExtrudeHeightTextSpans(m_rect, heightExpression, metrics);
@@ -1180,10 +1182,9 @@ private:
                     : (Qt::AlignLeft | Qt::AlignVCenter);
                 painter->drawText(span.rect, align, span.text);
             }
-            const qreal suffixLeft = linearExtrudeHeightTextRect(m_rect, metrics).left()
-                                     + metrics.horizontalAdvance(heightExpression);
             painter->setPen(SceneTreePalette::numLabelText(pt2));
-            painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
+            painter->drawText(QRectF(linearExtrudeHeightTextRect(m_rect, metrics).right(),
+                                     m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
             painter->restore();
         } else {
@@ -1666,6 +1667,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                     : node.operation == SceneDocument::TreeNode::Mirror    ? node.position
                                     : node.operation == SceneDocument::TreeNode::Scale     ? node.scale
                                     : node.operation == SceneDocument::TreeNode::LinearExtrude ? node.scale
+                                    : node.operation == SceneDocument::TreeNode::Resize    ? node.scale
                                                                                            : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;

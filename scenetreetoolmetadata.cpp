@@ -171,6 +171,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::LinearExtrude;
         return true;
     }
+    if (normalized == QStringLiteral("resize")) {
+        *operation = SceneDocument::TreeNode::Resize;
+        return true;
+    }
     if (normalized == QStringLiteral("for")) {
         *operation = SceneDocument::TreeNode::For;
         return true;
@@ -197,6 +201,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Minkowski, "minkowski", QColor(227, 235, 248), GroupMinWidth},
     {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), 300.0},
     {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Resize, "resize", QColor(218, 238, 218), GroupWideMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},

@@ -368,6 +368,7 @@ static QString nodeTypeLabel(const SceneDocument::TreeNode &node)
     case N::Rotate:       return QStringLiteral("Rot");
     case N::Scale:        return QStringLiteral("Scale");
     case N::For:          return QStringLiteral("For");
+    case N::Resize:       return QStringLiteral("Resize");
     default:              return QStringLiteral("?");
     }
 }
