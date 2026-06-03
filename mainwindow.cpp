@@ -497,6 +497,7 @@ void MainWindow::refreshSceneViews()
     refreshShapeList();
     m_viewport->setSelectedIndex(m_controller->scene().selectedIndex());
     m_viewport->setSelectedGroupId(m_controller->selectedDirectGroupId());
+    m_viewport->invalidateCsgPreview();
     refreshProperties();
 }
 

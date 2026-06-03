@@ -67,7 +67,7 @@ static Manifold manifoldFromSceneMesh(const SceneMesh &mesh)
     return Manifold(meshGl);
 }
 
-static Manifold manifoldFromShape(const ShapeNode &shape)
+static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
 {
     Manifold result;
 
@@ -75,10 +75,12 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         || shape.type == ShapeNode::Face3D)
         return {}; // polyhedron data components are handled by their group
 
+    const int circularSegments = fn > 0 ? qMax(3, fn) : 32;
+
     if (shape.type == ShapeNode::Cube) {
-        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), true);
+        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), shape.center);
     } else if (shape.type == ShapeNode::Square) {
-        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), true);
+        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), shape.center);
     } else if (shape.type == ShapeNode::Polyhedron) {
         ShapeNode localShape = shape;
         localShape.position = QVector3D();
@@ -90,13 +92,13 @@ static Manifold manifoldFromShape(const ShapeNode &shape)
         localShape.rotation = QVector3D();
         result = manifoldFromSceneMesh(buildShapeMesh(localShape));
     } else if (shape.type == ShapeNode::Sphere) {
-        result = Manifold::Sphere(shape.radius, 32);
+        result = Manifold::Sphere(shape.radius, circularSegments);
     } else if (shape.type == ShapeNode::Cone) {
-        result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, 32, true);
+        result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, circularSegments, shape.center);
     } else if (shape.type == ShapeNode::Circle) {
-        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, 64, true);
+        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, fn > 0 ? circularSegments : 64, true);
     } else {
-        result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, 32, true);
+        result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, circularSegments, shape.center);
     }
 
     return result.Rotate(shape.rotation.x(), shape.rotation.y(), shape.rotation.z())
@@ -153,7 +155,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (!shape)
             return {};
 
-        return manifoldFromShape(shapeWithEvaluatedParameters(*shape, variables));
+        const int fn = static_cast<int>(variables.value(QStringLiteral("$fn"), 0.0));
+        return manifoldFromShape(shapeWithEvaluatedParameters(*shape, variables), fn);
     }
 
     if (node.type == SceneDocument::TreeNode::Variable)

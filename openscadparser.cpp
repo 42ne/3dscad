@@ -447,7 +447,7 @@ static bool parseOperationLine(const QString &line,
 
 static bool parseVariableLine(const QString &line, QString *name, QString *expression, qreal *value, QString *errorMessage)
 {
-    static const QRegularExpression regex("^([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.+)\\s*;\\s*$");
+    static const QRegularExpression regex("^(\\$?[A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.+)\\s*;\\s*$");
     const QRegularExpressionMatch match = regex.match(line);
     if (!match.hasMatch())
         return false;

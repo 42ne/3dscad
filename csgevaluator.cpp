@@ -96,6 +96,10 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
     }
 
     if (shape.type == ShapeNode::Square) {
+        if (!shape.center)
+            return local.x() >= 0 && local.x() <= shape.size.x()
+                   && local.y() >= 0 && local.y() <= shape.size.y()
+                   && qAbs(local.z()) <= 0.05f;
         return qAbs(local.x()) <= shape.size.x() * 0.5f
                && qAbs(local.y()) <= shape.size.y() * 0.5f
                && qAbs(local.z()) <= 0.05f;
@@ -119,6 +123,9 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
 
     if (shape.type == ShapeNode::Cylinder) {
         const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
+        if (!shape.center)
+            return radialDistanceSquared <= shape.radius * shape.radius
+                   && local.z() >= 0 && local.z() <= shape.height;
         return radialDistanceSquared <= shape.radius * shape.radius
                && qAbs(local.z()) <= shape.height * 0.5f;
     }
@@ -127,6 +134,9 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
         // Approximate: use max(r1, r2) as a bounding cylinder (conservative)
         const float maxR = qMax(shape.radius, shape.radius2);
         const float radialDistanceSquared = local.x() * local.x() + local.y() * local.y();
+        if (!shape.center)
+            return radialDistanceSquared <= maxR * maxR
+                   && local.z() >= 0 && local.z() <= shape.height;
         return radialDistanceSquared <= maxR * maxR
                && qAbs(local.z()) <= shape.height * 0.5f;
     }
@@ -149,6 +159,10 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
     if (shape.type == ShapeNode::Point3D || shape.type == ShapeNode::Face3D)
         return false;
 
+    if (!shape.center)
+        return local.x() >= 0 && local.x() <= shape.size.x()
+               && local.y() >= 0 && local.y() <= shape.size.y()
+               && local.z() >= 0 && local.z() <= shape.size.z();
     const QVector3D half = shape.size * 0.5f;
     return qAbs(local.x()) <= half.x()
            && qAbs(local.y()) <= half.y()
@@ -157,8 +171,11 @@ static bool containsPoint(const ShapeNode &shape, const QVector3D &worldPoint)
 
 static Box boxFromCube(const ShapeNode &shape, int shapeIndex)
 {
-    const QVector3D half = shape.size * 0.5f;
-    return {shape.position - half, shape.position + half, shapeIndex};
+    if (shape.center) {
+        const QVector3D half = shape.size * 0.5f;
+        return {shape.position - half, shape.position + half, shapeIndex};
+    }
+    return {shape.position, shape.position + shape.size, shapeIndex};
 }
 
 static bool intersects(const Box &left, const Box &right)
@@ -593,10 +610,10 @@ static QVector<Box> subtractBox(const Box &source, const Box &cutter)
     return result;
 }
 
-static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex, int treeNodeId = 0)
+static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex, int treeNodeId = 0, int fn = 0)
 {
     CsgRenderItem item;
-    item.mesh = buildShapeMesh(shape);
+    item.mesh = buildShapeMesh(shape, fn);
     item.shapeIndex = shapeIndex;
     item.treeNodeId = treeNodeId;
     item.booleanMode = shape.booleanMode;
@@ -706,9 +723,11 @@ static void appendTreeHelpers(CsgPreview *preview,
             return;
 
         const ShapeNode evaluatedShape = shapeWithEvaluatedParameters(*shape, variables);
+        const int fn = static_cast<int>(variables.value(QStringLiteral("$fn"), 0.0));
         CsgRenderItem helper = renderItemFromShape(evaluatedShape,
                                                    scene.indexOfShapeId(shape->id),
-                                                   ownerTreeNodeId > 0 ? ownerTreeNodeId : node.id);
+                                                   ownerTreeNodeId > 0 ? ownerTreeNodeId : node.id,
+                                                   fn);
         helper.mesh = transformedMesh(helper.mesh, groupStack);
         helper.booleanMode = inheritedMode;
         helper.color = inheritedColor;
@@ -924,14 +943,14 @@ static bool appendClippedCubeSubtractCutFaces(CsgRenderItem *item,
     return item->mesh.triangles.size() > originalTriangleCount;
 }
 
-static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeNode> &shapes)
+static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0)
 {
     for (int i = 0; i < shapes.size(); ++i) {
         const ShapeNode &shape = shapes[i];
         if (shape.booleanMode != ShapeNode::Subtract)
             continue;
 
-        const SceneMesh cutterMesh = buildShapeMesh(shape);
+        const SceneMesh cutterMesh = buildShapeMesh(shape, fn);
         CsgRenderItem item;
         item.shapeIndex = i;
         item.booleanMode = ShapeNode::Subtract;
@@ -965,19 +984,19 @@ static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeN
     }
 }
 
-static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes)
+static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0)
 {
     for (int i = 0; i < shapes.size(); ++i) {
         if (shapes[i].booleanMode == ShapeNode::Add)
             continue;
 
-        CsgRenderItem helper = renderItemFromShape(shapes[i], i);
+        CsgRenderItem helper = renderItemFromShape(shapes[i], i, 0, fn);
         helper.helper = true;
         preview->items.append(helper);
     }
 }
 
-static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes)
+static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes, int fn = 0)
 {
     CsgPreview preview;
     preview.mode = CsgPreview::MeshApproximate;
@@ -997,7 +1016,7 @@ static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes
         if (shape.booleanMode != ShapeNode::Add)
             continue;
 
-        const SceneMesh sourceMesh = buildShapeMesh(shape);
+        const SceneMesh sourceMesh = buildShapeMesh(shape, fn);
         CsgRenderItem item;
         item.shapeIndex = i;
         item.booleanMode = ShapeNode::Add;
@@ -1040,13 +1059,13 @@ static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes
             preview.items.append(item);
     }
 
-    appendSubtractCutFaceItems(&preview, shapes);
-    appendHelpers(&preview, shapes);
+    appendSubtractCutFaceItems(&preview, shapes, fn);
+    appendHelpers(&preview, shapes, fn);
     preview.statusText = "CSG preview: mesh approximate with subtract cut faces";
     return preview;
 }
 
-CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn)
 {
     CsgPreview preview;
     bool hasBoolean = false;
@@ -1086,11 +1105,11 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
         preview.mode = CsgPreview::BoxComputed;
 
     if (preview.mode == CsgPreview::MeshApproximate)
-        return buildMeshApproximationPreview(shapes);
+        return buildMeshApproximationPreview(shapes, fn);
 
     if (preview.mode != CsgPreview::BoxComputed) {
         for (int i = 0; i < shapes.size(); ++i)
-            preview.items.append(renderItemFromShape(shapes[i], i));
+            preview.items.append(renderItemFromShape(shapes[i], i, 0, fn));
 
         preview.statusText = preview.mode == CsgPreview::Plain
                                  ? "CSG preview: plain mesh"
@@ -1120,7 +1139,7 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes)
 
     preview.items = buildSurfaceItems(result, shapes.size());
 
-    appendHelpers(&preview, shapes);
+    appendHelpers(&preview, shapes, fn);
 
     preview.statusText = "CSG preview: box mode";
     return preview;
@@ -1304,5 +1323,6 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
         return preview;
     }
 
-    return buildCsgPreview(shapes);
+    const int fn = static_cast<int>(topLevelVariables(scene.treeRoot()).value(QStringLiteral("$fn"), 0.0));
+    return buildCsgPreview(shapes, fn);
 }

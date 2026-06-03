@@ -176,11 +176,11 @@ SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum)
     return mesh;
 }
 
-static SceneMesh buildSphereMesh(const ShapeNode &shape)
+static SceneMesh buildSphereMesh(const ShapeNode &shape, int fn = 0)
 {
     SceneMesh mesh;
-    const int stacks = 12;
-    const int sectors = 24;
+    const int sectors = fn > 0 ? qMax(3, fn)     : 24;
+    const int stacks  = fn > 0 ? qMax(2, fn / 2) : 12;
 
     for (int i = 0; i < sectors; ++i) {
         const float angle = 2.0f * M_PI * i / sectors;
@@ -220,12 +220,12 @@ static SceneMesh buildSphereMesh(const ShapeNode &shape)
     return mesh;
 }
 
-static SceneMesh buildCylinderMesh(const ShapeNode &shape)
+static SceneMesh buildCylinderMesh(const ShapeNode &shape, int fn = 0)
 {
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = 24;
+    const int sectors = fn > 0 ? qMax(3, fn) : 24;
 
     const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
     const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
@@ -250,13 +250,13 @@ static SceneMesh buildCylinderMesh(const ShapeNode &shape)
     return mesh;
 }
 
-static SceneMesh buildConeMesh(const ShapeNode &shape)
+static SceneMesh buildConeMesh(const ShapeNode &shape, int fn = 0)
 {
     // Frustum/cone: bottom radius = shape.radius (r1), top radius = shape.radius2 (r2)
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = 24;
+    const int sectors = fn > 0 ? qMax(3, fn) : 24;
 
     const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
     const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
@@ -294,12 +294,12 @@ static SceneMesh buildConeMesh(const ShapeNode &shape)
     return mesh;
 }
 
-static SceneMesh buildCircleMesh(const ShapeNode &shape)
+static SceneMesh buildCircleMesh(const ShapeNode &shape, int fn = 0)
 {
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = 48;
+    const int sectors = fn > 0 ? qMax(3, fn) : 48;
     constexpr float thickness = 0.1f;
 
     for (int i = 0; i < sectors; ++i) {
@@ -391,13 +391,13 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
     return mesh;
 }
 
-SceneMesh buildShapeMesh(const ShapeNode &shape)
+SceneMesh buildShapeMesh(const ShapeNode &shape, int fn)
 {
     if (shape.type == ShapeNode::Polyhedron)
         return buildPolyhedronMesh(shape);
 
     if (shape.type == ShapeNode::Circle)
-        return buildCircleMesh(shape);
+        return buildCircleMesh(shape, fn);
 
     if (shape.type == ShapeNode::Square)
         return buildSquareMesh(shape);
@@ -406,13 +406,13 @@ SceneMesh buildShapeMesh(const ShapeNode &shape)
         return buildFlatPolygonMesh(shape.polyhedronPoints, shape);
 
     if (shape.type == ShapeNode::Sphere)
-        return buildSphereMesh(shape);
+        return buildSphereMesh(shape, fn);
 
     if (shape.type == ShapeNode::Cylinder)
-        return buildCylinderMesh(shape);
+        return buildCylinderMesh(shape, fn);
 
     if (shape.type == ShapeNode::Cone)
-        return buildConeMesh(shape);
+        return buildConeMesh(shape, fn);
 
     if (shape.type == ShapeNode::Point3D) {
         // Render as a small sphere (dot) at the point's position

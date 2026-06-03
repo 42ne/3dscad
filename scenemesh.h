@@ -21,7 +21,8 @@ struct SceneMesh
     QVector<QVector3D> shadowPoints;
 };
 
-SceneMesh buildShapeMesh(const ShapeNode &shape);
+// fn: $fn override (0 = use default segment count).
+SceneMesh buildShapeMesh(const ShapeNode &shape, int fn = 0);
 SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum);
 
 #endif

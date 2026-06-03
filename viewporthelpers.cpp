@@ -1,4 +1,5 @@
 #include "viewporthelpers.h"
+#include "scenestringutils.h"
 
 #include <QHash>
 #include <QLinearGradient>
@@ -273,7 +274,10 @@ const ShapeNode *shapeForPrimitiveNode(const SceneDocument *scene, const SceneDo
 
 SceneMesh interactionMeshForShape(const SceneDocument *scene, const ShapeNode &shape)
 {
-    SceneMesh mesh = buildShapeMesh(shape);
+    const int fn = scene
+        ? static_cast<int>(topLevelVariables(scene->treeRoot()).value(QStringLiteral("$fn"), 0.0))
+        : 0;
+    SceneMesh mesh = buildShapeMesh(shape, fn);
     if (!scene)
         return mesh;
 
@@ -1137,9 +1141,19 @@ uint shapeFingerprint(const ShapeNode &shape, uint seed)
     seed = qHash(shape.size.y(), seed);
     seed = qHash(shape.size.z(), seed);
     seed = qHash(shape.radius, seed);
+    seed = qHash(shape.radius2, seed);
     seed = qHash(shape.height, seed);
+    seed = qHash(shape.center, seed);
     for (const QString &expression : shape.parameterExpressions)
         seed = qHash(expression, seed);
+    for (const QVector3D &pt : shape.polyhedronPoints) {
+        seed = qHash(pt.x(), seed);
+        seed = qHash(pt.y(), seed);
+        seed = qHash(pt.z(), seed);
+    }
+    for (const QVector<int> &face : shape.polyhedronFaces)
+        for (int idx : face)
+            seed = qHash(idx, seed);
     return seed;
 }
 
