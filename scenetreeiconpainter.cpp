@@ -333,6 +333,28 @@ void paintOperationIcon(QPainter *painter,
         painter->drawEllipse(top);
         painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
         painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
+    } else if (operation == SceneDocument::TreeNode::RotateExtrude) {
+        // Torus (front view): outer ellipse + inner hole = solid of revolution
+        const QRectF sr = symbolRect.adjusted(1.5, 2.0, -1.5, -2.0);
+        const QPointF c = sr.center();
+        const qreal rx = sr.width()  * 0.46;
+        const qreal ry = sr.height() * 0.46;
+        const qreal hx = rx * 0.42;
+        const qreal hy = ry * 0.42;
+
+        QPainterPath torus;
+        torus.addEllipse(c, rx, ry);
+        torus.addEllipse(c, hx, hy);
+
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(255, 255, 255, 55));
+        painter->drawPath(torus);
+
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->drawEllipse(c, rx, ry);
+        painter->setPen(QPen(accent.darker(155), 1.1));
+        painter->drawEllipse(c, hx, hy);
     } else if (operation == SceneDocument::TreeNode::Resize) {
         painter->setPen(QPen(accent.darker(155), 1.3));
         const QRectF r = symbolRect.adjusted(2.0, 2.0, -2.0, -2.0);

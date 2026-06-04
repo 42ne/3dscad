@@ -46,6 +46,39 @@ bool SceneTreeInlineEditor::validateInlineExpression(const SceneTreeGraphicsWidg
     if (target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::ModuleCallArgument)
         return ExpressionSyntax::validate(trimmed, errorMessage);
 
+    // LinearExtrude full expression (secondaryId == -1): "h=20, c=false, t=0, sl=0, sc=1"
+    if (target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Transform
+        && target.secondaryId == -1 && m_widget->m_scene) {
+        const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(target.nodeId);
+        if (node && node->operation == SceneDocument::TreeNode::LinearExtrude) {
+            // Must have at least one recognizable key=value pair.
+            const bool hasParam = trimmed.contains(QLatin1Char('='))
+                && (trimmed.contains(QStringLiteral("h="))    || trimmed.contains(QStringLiteral("height="))
+                 || trimmed.contains(QStringLiteral("t="))    || trimmed.contains(QStringLiteral("twist="))
+                 || trimmed.contains(QStringLiteral("sl="))   || trimmed.contains(QStringLiteral("slices="))
+                 || trimmed.contains(QStringLiteral("sc="))   || trimmed.contains(QStringLiteral("scale=")));
+            if (hasParam) return true;
+            if (errorMessage) *errorMessage = QStringLiteral("Use: h=<height>, c=true/false, t=<twist>, sl=<slices>, sc=<scale>");
+            return false;
+        }
+    }
+
+    // LinearExtrude center (boolean) — accept true/false
+    if (target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Transform
+        && target.secondaryId == 1 && m_widget->m_scene) {
+        const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(target.nodeId);
+        if (node && node->operation == SceneDocument::TreeNode::LinearExtrude) {
+            const QString low = trimmed.toLower();
+            if (low == QStringLiteral("true") || low == QStringLiteral("false")
+                || low == QStringLiteral("1") || low == QStringLiteral("0")) {
+                return true;
+            }
+            if (errorMessage)
+                *errorMessage = QStringLiteral("Enter true or false.");
+            return false;
+        }
+    }
+
     if (target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::PolyhedronParticipation) {
         bool ok = false;
         trimmed.toInt(&ok);

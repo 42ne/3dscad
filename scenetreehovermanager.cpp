@@ -7,6 +7,7 @@
 #include "scenestringutils.h"
 #include "scenetreepalette.h"
 #include "scenetreelayout.h"
+#include "scenetreeexpressionlayout.h"
 #include "scenetreenoderenderer.h"
 
 #include <QApplication>
@@ -334,6 +335,23 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
     if (m_widget->transformControlAt(scenePosition, &groupId, &operation, &axis, &transformNumberStart, &transformNumberLength)
         && transformNumberStart >= 0
         && transformNumberLength > 0) {
+        if (operation == SceneDocument::TreeNode::LinearExtrude) {
+            static const char *LinExtrNames[] = {"height", "center", "twist", "slices", "scale"};
+            const int clampedAxis = qBound(0, axis, 4);
+            const QString name = QString::fromLatin1(LinExtrNames[clampedAxis]);
+            setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
+            return controlDown
+                ? QStringLiteral("Linear extrude %1\nMouse wheel: change value")
+                      .arg(name)
+                : QStringLiteral("Linear extrude %1\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group")
+                      .arg(name);
+        }
+        if (operation == SceneDocument::TreeNode::RotateExtrude) {
+            setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
+            return controlDown
+                ? QStringLiteral("Rotate extrude angle\nMouse wheel: change value")
+                : QStringLiteral("Rotate extrude angle\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group");
+        }
         static const char *AxisNames[] = {"X", "Y", "Z"};
         const QString axisName = QString::fromLatin1(AxisNames[qBound(0, axis, 2)]);
         setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
@@ -835,14 +853,44 @@ QRectF SceneTreeHoverManager::hoverScrollZoneRect(const QPointF &scenePosition) 
         if (m_widget->transformControlAt(scenePosition, &groupId, &op, &axis, &numStart, &numLen) && numStart >= 0) {
             const SceneDocument::TreeNode *node = m_widget->m_scene ? m_widget->m_scene->treeNodeById(groupId) : nullptr;
             if (node) {
-                const QString expr = transformAxisExpression(*node, axis);
-                const qreal hw = transformHeaderWidthForNode(*node);
-                const QFontMetricsF metrics(sceneTreeGraphicsFont());
-                const auto controls = transformParameterNumberControls(
-                    m_widget->groupRectForNode(groupId), axis, expr, metrics, hw);
-                for (const auto &ctl : controls) {
-                    if (ctl.start == numStart)
-                        return ctl.rect;
+                // LinearExtrude: use paramInfos to get the pill rect for the hovered param
+                if (op == SceneDocument::TreeNode::LinearExtrude) {
+                    const QString heightExpr = linearExtrudeHeightExpression(*node);
+                    const QString centerExpr = node->linearExtrudeCenter
+                        ? QStringLiteral("true") : QStringLiteral("false");
+                    const QString twistExpr = linearExtrudeParam(*node, 1,
+                        QString::number(node->linearExtrudeTwist, 'g'));
+                    const QString slicesExpr = linearExtrudeParam(*node, 2,
+                        QString::number(node->linearExtrudeSlices));
+                    const QString scaleExpr = linearExtrudeParam(*node, 3,
+                        QString::number(node->linearExtrudeScaleVal, 'g'));
+                    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                    const auto paramInfos = linearExtrudeParamInfos(
+                        m_widget->groupRectForNode(groupId),
+                        heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
+                    for (const auto &pInfo : paramInfos) {
+                        if (pInfo.paramIndex == axis)
+                            return pInfo.textRect;
+                    }
+                } else if (op == SceneDocument::TreeNode::RotateExtrude) {
+                    const QString angleExpr = rotateExtrudeAngleExpression(*node);
+                    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                    const auto paramInfos = rotateExtrudeParamInfos(
+                        m_widget->groupRectForNode(groupId), angleExpr, metrics);
+                    for (const auto &pInfo : paramInfos) {
+                        if (pInfo.paramIndex == axis)
+                            return pInfo.textRect;
+                    }
+                } else {
+                    const QString expr = transformAxisExpression(*node, axis);
+                    const qreal hw = transformHeaderWidthForNode(*node);
+                    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                    const auto controls = transformParameterNumberControls(
+                        m_widget->groupRectForNode(groupId), axis, expr, metrics, hw);
+                    for (const auto &ctl : controls) {
+                        if (ctl.start == numStart)
+                            return ctl.rect;
+                    }
                 }
             }
         }
@@ -1061,6 +1109,7 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
     const SceneTreeLayout::GroupHitArea *bestLinearExtrude = nullptr;
     for (const SceneTreeLayout::GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
         if (area.operation != SceneDocument::TreeNode::LinearExtrude
+            || area.collapsed
             || !area.rect.contains(scenePosition)) {
             continue;
         }
@@ -1070,27 +1119,113 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
     if (bestLinearExtrude) {
         const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(bestLinearExtrude->groupId);
         if (node) {
-            const QString expression = linearExtrudeHeightExpression(*node);
-            const QRectF textRect = linearExtrudeHeightTextRect(bestLinearExtrude->rect, metrics);
-            const qreal prefixLeft = bestLinearExtrude->rect.left() + 68.0;
-            const qreal expressionRight = textRect.left()
-                                          + qMax<qreal>(40.0, metrics.horizontalAdvance(expression) + 8.0);
-            const QRectF hoverRect(prefixLeft,
-                                   textRect.top() - 1.0,
-                                   qMin(bestLinearExtrude->rect.right() - prefixLeft - 28.0,
-                                        expressionRight - prefixLeft),
-                                   textRect.height() + 2.0);
-            if (hoverRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition)) {
+            const QString heightExpr = linearExtrudeHeightExpression(*node);
+            const QString centerExpr = node->linearExtrudeCenter
+                ? QStringLiteral("true") : QStringLiteral("false");
+            const QString twistExpr = linearExtrudeParam(*node, 1,
+                QString::number(node->linearExtrudeTwist, 'g'));
+            const QString slicesExpr = linearExtrudeParam(*node, 2,
+                QString::number(node->linearExtrudeSlices));
+            const QString scaleExpr = linearExtrudeParam(*node, 3,
+                QString::number(node->linearExtrudeScaleVal, 'g'));
+
+            const auto paramInfos = linearExtrudeParamInfos(
+                bestLinearExtrude->rect,
+                heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
+
+            for (const LinearExtrudeParamInfo &pInfo : paramInfos) {
+                const QRectF pillRect = pInfo.textRect;
+                // Expand hit area slightly
+                if (!pillRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
+                    continue;
+
                 if (target) {
                     target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Transform;
-                    target->hoverRect = hoverRect;
-                    target->editRect = textRect;
-                    target->label = QStringLiteral("Linear extrude height");
-                    target->expression = expression;
+                    target->hoverRect = pillRect;
+                    target->editRect = pillRect;
+                    const char *labelNames[] = {
+                        "Linear extrude height",
+                        "Linear extrude center",
+                        "Linear extrude twist",
+                        "Linear extrude slices",
+                        "Linear extrude scale"
+                    };
+                    target->label = QLatin1String(labelNames[pInfo.paramIndex]);
+                    target->expression = pInfo.expression;
                     target->nodeId = bestLinearExtrude->groupId;
-                    target->secondaryId = 0;
+                    target->secondaryId = pInfo.paramIndex;
                 }
                 return true;
+            }
+
+            // Click in header but not on a specific pill → offer full expression edit.
+            // Exclude the rightmost 34px (chevron zone) so collapse still works.
+            const QRectF headerArea(bestLinearExtrude->rect.left(),
+                                    bestLinearExtrude->rect.top(),
+                                    bestLinearExtrude->rect.width() - 34.0,
+                                    GroupHeaderHeight);
+            if (headerArea.contains(scenePosition)) {
+                const QString fullExpr = QStringLiteral("h=%1, c=%2, t=%3, sl=%4, sc=%5")
+                    .arg(heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr);
+                const QRectF fullRect = paramInfos.isEmpty()
+                    ? headerArea
+                    : QRectF(paramInfos.first().textRect.left()
+                                 - metrics.horizontalAdvance(paramInfos.first().label),
+                             headerArea.top() + 3.0,
+                             paramInfos.last().textRect.right()
+                                 - (paramInfos.first().textRect.left()
+                                    - metrics.horizontalAdvance(paramInfos.first().label))
+                                 + metrics.horizontalAdvance(QStringLiteral(")")),
+                             headerArea.height() - 6.0);
+                if (target) {
+                    target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Transform;
+                    target->hoverRect = fullRect;
+                    target->editRect  = fullRect;
+                    target->label = QStringLiteral("Linear extrude params");
+                    target->expression = fullExpr;
+                    target->nodeId = bestLinearExtrude->groupId;
+                    target->secondaryId = -1; // signals "full expression"
+                }
+                return true;
+            }
+        }
+    }
+
+    // ── RotateExtrude ───────────────────────────────────────────────────────
+    {
+        const SceneTreeLayout::GroupHitArea *bestRotateExtrude = nullptr;
+        for (const SceneTreeLayout::GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
+            if (area.operation != SceneDocument::TreeNode::RotateExtrude
+                || area.collapsed
+                || !area.rect.contains(scenePosition)) {
+                continue;
+            }
+            if (!bestRotateExtrude || area.depth > bestRotateExtrude->depth)
+                bestRotateExtrude = &area;
+        }
+        if (bestRotateExtrude) {
+            const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(bestRotateExtrude->groupId);
+            if (node) {
+                const QString angleExpr = rotateExtrudeAngleExpression(*node);
+                const auto paramInfos = rotateExtrudeParamInfos(
+                    bestRotateExtrude->rect, angleExpr, metrics);
+
+                for (const RotateExtrudeParamInfo &pInfo : paramInfos) {
+                    const QRectF pillRect = pInfo.textRect;
+                    if (!pillRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
+                        continue;
+
+                    if (target) {
+                        target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Transform;
+                        target->hoverRect = pillRect;
+                        target->editRect = pillRect;
+                        target->label = QStringLiteral("Rotate extrude angle");
+                        target->expression = pInfo.expression;
+                        target->nodeId = bestRotateExtrude->groupId;
+                        target->secondaryId = 0;
+                    }
+                    return true;
+                }
             }
         }
     }

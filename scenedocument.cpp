@@ -728,6 +728,13 @@ bool SceneDocument::updateGroupTransform(int groupId, const QVector3D &position,
     return m_tree.updateGroupTransform(groupId, position, rotation, scale, transformExpressions);
 }
 
+bool SceneDocument::updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
+                                                    float twist, int slices, float scaleVal,
+                                                    const QStringList &transformExpressions)
+{
+    return m_tree.updateGroupLinearExtrudeParams(groupId, scale, twist, slices, scaleVal, transformExpressions);
+}
+
 bool SceneDocument::updateGroupColor(int groupId, const QColor &color)
 {
     return m_tree.updateGroupColor(groupId, color);

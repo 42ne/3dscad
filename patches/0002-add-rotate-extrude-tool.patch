@@ -1,0 +1,568 @@
+diff --git a/scenecontroller.cpp b/scenecontroller.cpp
+index 31560cc..4b32e43 100644
+--- a/scenecontroller.cpp
++++ b/scenecontroller.cpp
+@@ -1302,14 +1302,16 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
+     if (!group || group->type != SceneDocument::TreeNode::Group) return;
+ 
+     const bool isLinExtr = group->operation == SceneDocument::TreeNode::LinearExtrude;
++    const bool isRotExtr = group->operation == SceneDocument::TreeNode::RotateExtrude;
+ 
+-    if (!isLinExtr && (axis > 2)) return;
++    if (!isLinExtr && !isRotExtr && (axis > 2)) return;
+     if (isLinExtr && (axis > 4)) return;
++    if (isRotExtr && (axis > 0)) return;
+     // Center (axis 1) is boolean — not scrollable
+     if (isLinExtr && axis == 1) return;
+ 
+     const QString currentExpr = (isLinExtr && axis > 2)
+-        ? QString() // for slices/scale we don't use standard expression path
++        ? QString()
+         : SceneTreeGraphics::transformAxisExpression(*group, axis);
+     QStringList newExpressions = group->transformExpressions;
+     while (newExpressions.size() <= axis) newExpressions.append(QString());
+@@ -1361,6 +1363,27 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
+         return;
+     }
+ 
++    // ── RotateExtrude numeric adjustment ─────────────────────────────────
++    if (isRotExtr) {
++        const qreal step = 1.0;
++        const float newAngle = float(qMax(-1e9, double(group->scale.x()) + delta * step));
++        QVector3D newScale = group->scale;
++        newScale.setX(newAngle);
++        newExpressions[0] = QString::number(newAngle, 'f', 0);
++
++        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
++        if (!m_scene.updateGroupTransform(groupId, position, rotation, newScale, newExpressions))
++            return;
++        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
++        m_scene.restoreSnapshot(oldSnapshot);
++        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
++                                                        [this]() { emit sceneChanged(); });
++        m_undoStack->push(command);
++        m_ctrlHighlight.active = false;
++        emit ctrlHighlightChanged();
++        return;
++    }
++
+     // ── Standard transform adjustment ─────────────────────────────────────
+     if (axis > 2) return;
+ 
+@@ -1467,6 +1490,11 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
+         return;
+ 
+     const bool isLinExtr = group->operation == SceneDocument::TreeNode::LinearExtrude;
++    const bool isRotExtr = group->operation == SceneDocument::TreeNode::RotateExtrude;
++
++    // RotateExtrude does not support full-expression mode
++    if (isRotExtr && axis < 0)
++        return;
+ 
+     // LinearExtrude full expression: "h=<height>, c=<center>, t=<twist>, sl=<slices>, sc=<scale>"
+     if (axis == -1 && isLinExtr) {
+@@ -1644,6 +1672,35 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
+         return;
+     }
+ 
++    // ── RotateExtrude single-angle edit ────────────────────────────────────
++    if (isRotExtr && axis == 0) {
++        QHash<QString, qreal> varValues;
++        collectVariableValues(m_scene.treeRoot(), &varValues);
++        qreal v = 0.0;
++        if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
++            return;
++        newExpressions[0] = trimmed;
++        QVector3D newScale = group->scale;
++        newScale.setX(float(v));
++
++        if (newExpressions[0] == group->transformExpressions.value(0)
++            && qFuzzyCompare(newScale.x(), group->scale.x()))
++            return;
++
++        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
++        if (!m_scene.updateGroupTransform(groupId, group->position, group->rotation,
++                                           newScale, newExpressions))
++            return;
++        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
++        m_scene.restoreSnapshot(oldSnapshot);
++        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
++                                                        [this]() { emit sceneChanged(); });
++        m_undoStack->push(command);
++        m_ctrlHighlight.active = false;
++        emit ctrlHighlightChanged();
++        return;
++    }
++
+     // ── Standard transform expression edit ─────────────────────────────────
+     if (axis > 2) return;
+ 
+diff --git a/scenetreeexpressionlayout.cpp b/scenetreeexpressionlayout.cpp
+index 7fcfd1a..fb9d9aa 100644
+--- a/scenetreeexpressionlayout.cpp
++++ b/scenetreeexpressionlayout.cpp
+@@ -541,6 +541,57 @@ QVector<LinearExtrudeParamInfo> linearExtrudeParamInfos(
+     return infos;
+ }
+ 
++// ── rotate_extrude layout helpers ──────────────────────────────────────────
++
++static const char *kRotateExtrudePrefix = "rotate_extrude(angle=";
++static constexpr qreal kRotateExtrudeTextLeft = 64.0;
++
++QString rotateExtrudeAngleExpression(const SceneDocument::TreeNode &node)
++{
++    if (!node.transformExpressions.isEmpty()) {
++        const QString expr = node.transformExpressions.first().trimmed();
++        if (!expr.isEmpty())
++            return expr;
++    }
++    const qreal angle = node.scale.x();
++    return QString::number(angle, 'g');
++}
++
++qreal rotateExtrudeHeaderMinWidth(const QString &angleExpression,
++                                   const QFontMetricsF &metrics)
++{
++    const QString expr = angleExpression.trimmed().isEmpty()
++        ? QStringLiteral("360") : angleExpression.trimmed();
++    const qreal prefixW = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
++    const qreal exprW   = metrics.horizontalAdvance(expr);
++    const qreal pillW   = qMax(exprW + 8.0, 20.0);
++    const qreal closeW  = metrics.horizontalAdvance(QStringLiteral(")"));
++    return kRotateExtrudeTextLeft + prefixW + pillW + closeW + 36.0;
++}
++
++QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
++    const QRectF &groupRect,
++    const QString &angleExpression,
++    const QFontMetricsF &metrics)
++{
++    const QString expr = angleExpression.trimmed().isEmpty()
++        ? QStringLiteral("360") : angleExpression.trimmed();
++
++    const qreal textLeft = groupRect.left() + kRotateExtrudeTextLeft;
++    const qreal prefixW  = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
++    const qreal exprW    = metrics.horizontalAdvance(expr);
++    const qreal pillW    = qMax(exprW + 8.0, 20.0);
++    const qreal pillTop  = groupRect.top() + 7.0;
++    const qreal pillH    = 14.0;
++
++    RotateExtrudeParamInfo info;
++    info.paramIndex = 0;
++    info.expression = expr;
++    info.textRect   = QRectF(textLeft + prefixW, pillTop, pillW, pillH);
++
++    return {info};
++}
++
+ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count)
+ {
+     if (index < 0 || count <= 0 || index >= count)
+diff --git a/scenetreeexpressionlayout.h b/scenetreeexpressionlayout.h
+index 1b58779..df1422a 100644
+--- a/scenetreeexpressionlayout.h
++++ b/scenetreeexpressionlayout.h
+@@ -42,6 +42,12 @@ struct LinearExtrudeParamInfo {
+     bool isNumber = true;   // false for center (boolean toggle)
+ };
+ 
++struct RotateExtrudeParamInfo {
++    int paramIndex = 0;    // always 0 (angle)
++    QString expression;    // e.g. "360"
++    QRectF textRect;       // interactive pill area
++};
++
+ QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis);
+ qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node);
+ QRectF transformParameterControlRect(const QRectF &groupRect, int axis, qreal headerWidth = TransformHeaderWidth);
+@@ -71,6 +77,14 @@ QVector<LinearExtrudeParamInfo> linearExtrudeParamInfos(
+     const QString &slicesExpression,
+     const QString &scaleExpression,
+     const QFontMetricsF &metrics);
++QString rotateExtrudeAngleExpression(const SceneDocument::TreeNode &node);
++qreal rotateExtrudeHeaderMinWidth(const QString &angleExpression,
++                                   const QFontMetricsF &metrics);
++QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
++    const QRectF &groupRect,
++    const QString &angleExpression,
++    const QFontMetricsF &metrics);
++
+ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
+ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
+ QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);
+diff --git a/scenetreegraphicswidget.cpp b/scenetreegraphicswidget.cpp
+index a7a26fc..ae73a20 100644
+--- a/scenetreegraphicswidget.cpp
++++ b/scenetreegraphicswidget.cpp
+@@ -85,7 +85,8 @@ qreal horizontalHeaderMinWidth(const SceneDocument::TreeNode &node)
+ {
+     if (isVerticalHeaderOperation(node.operation)
+         || node.operation == SceneDocument::TreeNode::For
+-        || node.operation == SceneDocument::TreeNode::LinearExtrude) {
++        || node.operation == SceneDocument::TreeNode::LinearExtrude
++        || node.operation == SceneDocument::TreeNode::RotateExtrude) {
+         return minimumWidthForOperation(node.operation);
+     }
+ 
+@@ -1526,6 +1527,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
+             linearExtrudeHeightExpression(node),
+             QFontMetricsF(sceneTreeGraphicsFont()),
+             centerExpr, twistExpr, slicesExpr, scaleExpr);
++    } else if (node.operation == SceneDocument::TreeNode::RotateExtrude) {
++        const QString angleExpr = SceneTreeGraphics::rotateExtrudeAngleExpression(node);
++        parameterHeaderMinWidth = SceneTreeGraphics::rotateExtrudeHeaderMinWidth(
++            angleExpr, QFontMetricsF(sceneTreeGraphicsFont()));
+     }
+ 
+     const QSizeF size = collapsedGroup
+diff --git a/scenetreehittestmanager.cpp b/scenetreehittestmanager.cpp
+index abd81d4..7ddfcdc 100644
+--- a/scenetreehittestmanager.cpp
++++ b/scenetreehittestmanager.cpp
+@@ -58,14 +58,16 @@ bool SceneTreeHitTestManager::transformControlAt(const QPointF &scenePosition,
+                                                  int *numberLength) const
+ {
+     const GroupHitArea *bestArea = nullptr;
+-    bool isLinearExtrude = false;
++    enum { Standard, Linear, Rotate } paramGroupKind = Standard;
+     for (const GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
+         if (area.collapsed) continue;
+-        if (area.operation == SceneDocument::TreeNode::LinearExtrude) {
++        if (area.operation == SceneDocument::TreeNode::LinearExtrude
++            || area.operation == SceneDocument::TreeNode::RotateExtrude) {
+             if (!area.rect.contains(scenePosition)) continue;
+             if (!bestArea || area.depth > bestArea->depth) {
+                 bestArea = &area;
+-                isLinearExtrude = true;
++                paramGroupKind = (area.operation == SceneDocument::TreeNode::LinearExtrude)
++                    ? Linear : Rotate;
+             }
+             continue;
+         }
+@@ -78,41 +80,61 @@ bool SceneTreeHitTestManager::transformControlAt(const QPointF &scenePosition,
+         if (!area.rect.contains(scenePosition)) continue;
+         if (!bestArea || area.depth > bestArea->depth) {
+             bestArea = &area;
+-            isLinearExtrude = false;
++            paramGroupKind = Standard;
+         }
+     }
+     if (!bestArea) return false;
+ 
+-    if (isLinearExtrude) {
+-        // Check each linearExtrude param pill
++    if (paramGroupKind != Standard) {
++        // Check each param pill
+         if (!m_widget->m_scene) return false;
+         const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(bestArea->groupId);
+         if (!node) return false;
+ 
+-        const QString heightExpr = SceneTreeGraphics::linearExtrudeHeightExpression(*node);
+-        const QString centerExpr = node->linearExtrudeCenter
+-            ? QStringLiteral("true") : QStringLiteral("false");
+-        const QString twistExpr = SceneTreeGraphics::linearExtrudeParam(*node, 1,
+-            QString::number(node->linearExtrudeTwist, 'g'));
+-        const QString slicesExpr = SceneTreeGraphics::linearExtrudeParam(*node, 2,
+-            QString::number(node->linearExtrudeSlices));
+-        const QString scaleExpr = SceneTreeGraphics::linearExtrudeParam(*node, 3,
+-            QString::number(node->linearExtrudeScaleVal, 'g'));
+-
+-        const QFontMetricsF metrics(sceneTreeGraphicsFont());
+-        const auto paramInfos = SceneTreeGraphics::linearExtrudeParamInfos(
+-            bestArea->rect,
+-            heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
+-
+-        for (const LinearExtrudeParamInfo &pInfo : paramInfos) {
+-            if (!pInfo.textRect.contains(scenePosition))
+-                continue;
+-            if (groupId)   *groupId   = bestArea->groupId;
+-            if (operation) *operation = bestArea->operation;
+-            if (axisOut)   *axisOut   = pInfo.paramIndex;
+-            if (numberStart) *numberStart = 0;
+-            if (numberLength) *numberLength = pInfo.expression.size();
+-            return true;
++        if (paramGroupKind == Linear) {
++            const QString heightExpr = SceneTreeGraphics::linearExtrudeHeightExpression(*node);
++            const QString centerExpr = node->linearExtrudeCenter
++                ? QStringLiteral("true") : QStringLiteral("false");
++            const QString twistExpr = SceneTreeGraphics::linearExtrudeParam(*node, 1,
++                QString::number(node->linearExtrudeTwist, 'g'));
++            const QString slicesExpr = SceneTreeGraphics::linearExtrudeParam(*node, 2,
++                QString::number(node->linearExtrudeSlices));
++            const QString scaleExpr = SceneTreeGraphics::linearExtrudeParam(*node, 3,
++                QString::number(node->linearExtrudeScaleVal, 'g'));
++
++            const QFontMetricsF metrics(sceneTreeGraphicsFont());
++            const auto paramInfos = SceneTreeGraphics::linearExtrudeParamInfos(
++                bestArea->rect,
++                heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
++
++            for (const LinearExtrudeParamInfo &pInfo : paramInfos) {
++                if (!pInfo.textRect.contains(scenePosition))
++                    continue;
++                if (groupId)   *groupId   = bestArea->groupId;
++                if (operation) *operation = bestArea->operation;
++                if (axisOut)   *axisOut   = pInfo.paramIndex;
++                if (numberStart) *numberStart = 0;
++                if (numberLength) *numberLength = pInfo.expression.size();
++                return true;
++            }
++        } else {
++            // RotateExtrude
++            const QString angleExpr = SceneTreeGraphics::rotateExtrudeAngleExpression(*node);
++            const QFontMetricsF metrics(sceneTreeGraphicsFont());
++
++            const auto paramInfos = SceneTreeGraphics::rotateExtrudeParamInfos(
++                bestArea->rect, angleExpr, metrics);
++
++            for (const RotateExtrudeParamInfo &pInfo : paramInfos) {
++                if (!pInfo.textRect.contains(scenePosition))
++                    continue;
++                if (groupId)   *groupId   = bestArea->groupId;
++                if (operation) *operation = bestArea->operation;
++                if (axisOut)   *axisOut   = pInfo.paramIndex;
++                if (numberStart) *numberStart = 0;
++                if (numberLength) *numberLength = pInfo.expression.size();
++                return true;
++            }
+         }
+         return false;
+     }
+diff --git a/scenetreehovermanager.cpp b/scenetreehovermanager.cpp
+index 2a54223..bc9c41f 100644
+--- a/scenetreehovermanager.cpp
++++ b/scenetreehovermanager.cpp
+@@ -346,6 +346,12 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
+                 : QStringLiteral("Linear extrude %1\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group")
+                       .arg(name);
+         }
++        if (operation == SceneDocument::TreeNode::RotateExtrude) {
++            setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
++            return controlDown
++                ? QStringLiteral("Rotate extrude angle\nMouse wheel: change value")
++                : QStringLiteral("Rotate extrude angle\nHold Ctrl + mouse wheel: change value\nClick block: select the transform group");
++        }
+         static const char *AxisNames[] = {"X", "Y", "Z"};
+         const QString axisName = QString::fromLatin1(AxisNames[qBound(0, axis, 2)]);
+         setKey(QStringLiteral("transform:%1:%2:%3").arg(groupId).arg(transformNumberStart).arg(controlDown));
+@@ -866,6 +872,15 @@ QRectF SceneTreeHoverManager::hoverScrollZoneRect(const QPointF &scenePosition)
+                         if (pInfo.paramIndex == axis)
+                             return pInfo.textRect;
+                     }
++                } else if (op == SceneDocument::TreeNode::RotateExtrude) {
++                    const QString angleExpr = rotateExtrudeAngleExpression(*node);
++                    const QFontMetricsF metrics(sceneTreeGraphicsFont());
++                    const auto paramInfos = rotateExtrudeParamInfos(
++                        m_widget->groupRectForNode(groupId), angleExpr, metrics);
++                    for (const auto &pInfo : paramInfos) {
++                        if (pInfo.paramIndex == axis)
++                            return pInfo.textRect;
++                    }
+                 } else {
+                     const QString expr = transformAxisExpression(*node, axis);
+                     const qreal hw = transformHeaderWidthForNode(*node);
+@@ -1175,6 +1190,44 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
+         }
+     }
+ 
++    // ── RotateExtrude ───────────────────────────────────────────────────────
++    {
++        const SceneTreeLayout::GroupHitArea *bestRotateExtrude = nullptr;
++        for (const SceneTreeLayout::GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
++            if (area.operation != SceneDocument::TreeNode::RotateExtrude
++                || !area.rect.contains(scenePosition)) {
++                continue;
++            }
++            if (!bestRotateExtrude || area.depth > bestRotateExtrude->depth)
++                bestRotateExtrude = &area;
++        }
++        if (bestRotateExtrude) {
++            const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(bestRotateExtrude->groupId);
++            if (node) {
++                const QString angleExpr = rotateExtrudeAngleExpression(*node);
++                const auto paramInfos = rotateExtrudeParamInfos(
++                    bestRotateExtrude->rect, angleExpr, metrics);
++
++                for (const RotateExtrudeParamInfo &pInfo : paramInfos) {
++                    const QRectF pillRect = pInfo.textRect;
++                    if (!pillRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
++                        continue;
++
++                    if (target) {
++                        target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Transform;
++                        target->hoverRect = pillRect;
++                        target->editRect = pillRect;
++                        target->label = QStringLiteral("Rotate extrude angle");
++                        target->expression = pInfo.expression;
++                        target->nodeId = bestRotateExtrude->groupId;
++                        target->secondaryId = 0;
++                    }
++                    return true;
++                }
++            }
++        }
++    }
++
+     const SceneDocument::TreeNode *bestNode = nullptr;
+     QRectF bestRect;
+     int bestDepth = -1;
+diff --git a/scenetreeiconpainter.cpp b/scenetreeiconpainter.cpp
+index 60290d2..9223a59 100644
+--- a/scenetreeiconpainter.cpp
++++ b/scenetreeiconpainter.cpp
+@@ -333,6 +333,38 @@ void paintOperationIcon(QPainter *painter,
+         painter->drawEllipse(top);
+         painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
+         painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
++    } else if (operation == SceneDocument::TreeNode::RotateExtrude) {
++        painter->setPen(QPen(accent.darker(155), 1.4));
++        painter->setBrush(QColor(255, 255, 255, 40));
++        const QRectF sr = symbolRect.adjusted(2.0, 2.0, -2.0, -2.0);
++        const QPointF c(sr.center().x(), sr.center().y() + 1.0);
++        const qreal r = qMin(sr.width(), sr.height()) * 0.38;
++        // 270-degree arc suggesting rotation
++        QPainterPath arcPath;
++        constexpr int steps = 14;
++        arcPath.moveTo(c + QPointF(r, 0.0));
++        for (int i = 1; i <= steps; ++i) {
++            const qreal a = -qreal(i) * 270.0 / steps * M_PI / 180.0;
++            arcPath.lineTo(c + QPointF(r * cos(a), -r * sin(a)));
++        }
++        painter->setBrush(Qt::NoBrush);
++        painter->setPen(QPen(accent.darker(155), 1.6));
++        painter->drawPath(arcPath);
++        // Arrow head at the end of the arc
++        const qreal endA = -270.0 * M_PI / 180.0;
++        const QPointF endP = c + QPointF(r * cos(endA), -r * sin(endA));
++        const qreal arrLen = 4.5;
++        painter->setBrush(accent.darker(155));
++        QPolygonF arrowHead;
++        arrowHead << endP
++                  << endP + QPointF(-arrLen, -arrLen * 0.5)
++                  << endP + QPointF(-arrLen,  arrLen * 0.5);
++        painter->drawPolygon(arrowHead);
++        // Small profile rectangle near the start of the arc
++        const QPointF startP = c + QPointF(r * 0.55, 0.0);
++        painter->setBrush(QColor(255, 255, 255, 90));
++        painter->setPen(QPen(accent.darker(155), 1.0));
++        painter->drawRect(QRectF(startP.x() - 1.5, startP.y() - 5.0, 3.0, 10.0));
+     } else if (operation == SceneDocument::TreeNode::Resize) {
+         painter->setPen(QPen(accent.darker(155), 1.3));
+         const QRectF r = symbolRect.adjusted(2.0, 2.0, -2.0, -2.0);
+diff --git a/scenetreenoderenderer.cpp b/scenetreenoderenderer.cpp
+index c4503c9..5026814 100644
+--- a/scenetreenoderenderer.cpp
++++ b/scenetreenoderenderer.cpp
+@@ -1235,6 +1235,40 @@ private:
+             painter->drawText(QRectF(closeX, m_rect.top() + 7.0, 12.0, 16.0),
+                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+             painter->restore();
++        } else if (m_operation == SceneDocument::TreeNode::RotateExtrude) {
++            painter->save();
++            painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
++            const QFontMetricsF metrics(sceneTreeGraphicsFont());
++            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
++
++            const QString angleExpr = !m_transformExpressions.isEmpty()
++                && !m_transformExpressions.first().trimmed().isEmpty()
++                    ? m_transformExpressions.first().trimmed()
++                    : QString::number(m_transformValues.x(), 'g');
++
++            const QString prefix = QStringLiteral("rotate_extrude(angle=");
++            const qreal prefixAdvance = metrics.horizontalAdvance(prefix);
++            const qreal textLeft = iconRect.right() + 10.0;
++            painter->setPen(SceneTreePalette::numLabelText(pt2));
++            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0, prefixAdvance, 16.0),
++                              Qt::AlignLeft | Qt::AlignVCenter, prefix);
++
++            const qreal exprW  = metrics.horizontalAdvance(angleExpr);
++            const qreal pillW  = qMax(exprW + 8.0, 20.0);
++            const QRectF pillRect(textLeft + prefixAdvance, m_rect.top() + 7.0,
++                                  pillW, 14.0);
++            const bool isActive = m_activeTransformAxis == 0;
++            paintRoundedPanel(painter, pillRect, 3.0,
++                QPen(isActive ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder,
++                     isActive ? 2 : 1),
++                QBrush(isActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
++            painter->setPen(SceneTreePalette::numText(pt2));
++            painter->drawText(pillRect, Qt::AlignHCenter | Qt::AlignVCenter, angleExpr);
++
++            painter->setPen(SceneTreePalette::numLabelText(pt2));
++            painter->drawText(QRectF(pillRect.right(), m_rect.top() + 7.0, 12.0, 16.0),
++                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
++            painter->restore();
+         } else {
+             // Reserve space for the chevron (18 px from the right edge + 10 px gap)
+             // so the label text never overlaps the collapse indicator.
+@@ -1718,7 +1752,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
+                                     : node.operation == SceneDocument::TreeNode::Scale     ? node.scale
+                                     : node.operation == SceneDocument::TreeNode::LinearExtrude ? node.scale
+                                     : node.operation == SceneDocument::TreeNode::Resize    ? node.scale
+-                                                                                           : QVector3D();
++                                    : node.operation == SceneDocument::TreeNode::RotateExtrude ? node.scale
++                                                                                            : QVector3D();
+     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
+     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
+     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
+diff --git a/scenetreepreviewgeometry.cpp b/scenetreepreviewgeometry.cpp
+index 7b7640e..9932a25 100644
+--- a/scenetreepreviewgeometry.cpp
++++ b/scenetreepreviewgeometry.cpp
+@@ -185,11 +185,16 @@ QSizeF previewSizeForTool(const QString &tool)
+     if (tool == "linear_extrude")
+         return QSizeF(qMax(GroupWideMinWidth,
+                            linearExtrudeHeaderMinWidth(QStringLiteral("20"),
+-                                                       QFontMetricsF(sceneTreeGraphicsFont()),
+-                                                       QStringLiteral("false"),
+-                                                       QStringLiteral("0"),
+-                                                       QStringLiteral("0"),
+-                                                       QStringLiteral("1"))),
++                                                        QFontMetricsF(sceneTreeGraphicsFont()),
++                                                        QStringLiteral("false"),
++                                                        QStringLiteral("0"),
++                                                        QStringLiteral("0"),
++                                                        QStringLiteral("1"))),
++                      GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
++    if (tool == "rotate_extrude")
++        return QSizeF(qMax(GroupWideMinWidth,
++                           rotateExtrudeHeaderMinWidth(QStringLiteral("360"),
++                                                       QFontMetricsF(sceneTreeGraphicsFont()))),
+                       GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+     if (tool == "color")
+         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+diff --git a/scenetreetoolbarrenderer.cpp b/scenetreetoolbarrenderer.cpp
+index 05adfac..7091658 100644
+--- a/scenetreetoolbarrenderer.cpp
++++ b/scenetreetoolbarrenderer.cpp
+@@ -42,6 +42,7 @@ QStringList paletteTools()
+         QStringLiteral("hull"),
+         QStringLiteral("minkowski"),
+         QStringLiteral("polyhedron"),
++        QStringLiteral("rotate_extrude"),
+         QStringLiteral("linear_extrude"),
+         // ── Structure / control flow ──────────────────────────────────────────
+         QStringLiteral("module"),
+diff --git a/scenetreetoolmetadata.cpp b/scenetreetoolmetadata.cpp
+index 3635beb..2c3c87d 100644
+--- a/scenetreetoolmetadata.cpp
++++ b/scenetreetoolmetadata.cpp
+@@ -171,6 +171,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
+         *operation = SceneDocument::TreeNode::LinearExtrude;
+         return true;
+     }
++    if (normalized == QStringLiteral("rotate_extrude")) {
++        *operation = SceneDocument::TreeNode::RotateExtrude;
++        return true;
++    }
+     if (normalized == QStringLiteral("resize")) {
+         *operation = SceneDocument::TreeNode::Resize;
+         return true;
+@@ -202,6 +206,7 @@ const OperationVisual OperationVisuals[] = {
+     {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), 300.0},
+     {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
+     {SceneDocument::TreeNode::Resize, "resize", QColor(218, 238, 218), GroupWideMinWidth},
++    {SceneDocument::TreeNode::RotateExtrude, "rotate_extrude", QColor(225, 235, 245), GroupWideMinWidth},
+     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
+     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
+     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},

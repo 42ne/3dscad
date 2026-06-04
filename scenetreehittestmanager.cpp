@@ -58,8 +58,19 @@ bool SceneTreeHitTestManager::transformControlAt(const QPointF &scenePosition,
                                                  int *numberLength) const
 {
     const GroupHitArea *bestArea = nullptr;
+    enum { Standard, Linear, Rotate } paramGroupKind = Standard;
     for (const GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
         if (area.collapsed) continue;
+        if (area.operation == SceneDocument::TreeNode::LinearExtrude
+            || area.operation == SceneDocument::TreeNode::RotateExtrude) {
+            if (!area.rect.contains(scenePosition)) continue;
+            if (!bestArea || area.depth > bestArea->depth) {
+                bestArea = &area;
+                paramGroupKind = (area.operation == SceneDocument::TreeNode::LinearExtrude)
+                    ? Linear : Rotate;
+            }
+            continue;
+        }
         if (area.operation != SceneDocument::TreeNode::Translate
             && area.operation != SceneDocument::TreeNode::Rotate
             && area.operation != SceneDocument::TreeNode::Scale
@@ -67,9 +78,66 @@ bool SceneTreeHitTestManager::transformControlAt(const QPointF &scenePosition,
             && area.operation != SceneDocument::TreeNode::Resize)
             continue;
         if (!area.rect.contains(scenePosition)) continue;
-        if (!bestArea || area.depth > bestArea->depth) bestArea = &area;
+        if (!bestArea || area.depth > bestArea->depth) {
+            bestArea = &area;
+            paramGroupKind = Standard;
+        }
     }
     if (!bestArea) return false;
+
+    if (paramGroupKind != Standard) {
+        // Check each param pill
+        if (!m_widget->m_scene) return false;
+        const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(bestArea->groupId);
+        if (!node) return false;
+
+        if (paramGroupKind == Linear) {
+            const QString heightExpr = SceneTreeGraphics::linearExtrudeHeightExpression(*node);
+            const QString centerExpr = node->linearExtrudeCenter
+                ? QStringLiteral("true") : QStringLiteral("false");
+            const QString twistExpr = SceneTreeGraphics::linearExtrudeParam(*node, 1,
+                QString::number(node->linearExtrudeTwist, 'g'));
+            const QString slicesExpr = SceneTreeGraphics::linearExtrudeParam(*node, 2,
+                QString::number(node->linearExtrudeSlices));
+            const QString scaleExpr = SceneTreeGraphics::linearExtrudeParam(*node, 3,
+                QString::number(node->linearExtrudeScaleVal, 'g'));
+
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const auto paramInfos = SceneTreeGraphics::linearExtrudeParamInfos(
+                bestArea->rect,
+                heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
+
+            for (const LinearExtrudeParamInfo &pInfo : paramInfos) {
+                if (!pInfo.textRect.contains(scenePosition))
+                    continue;
+                if (groupId)   *groupId   = bestArea->groupId;
+                if (operation) *operation = bestArea->operation;
+                if (axisOut)   *axisOut   = pInfo.paramIndex;
+                if (numberStart) *numberStart = 0;
+                if (numberLength) *numberLength = pInfo.expression.size();
+                return true;
+            }
+        } else {
+            // RotateExtrude
+            const QString angleExpr = SceneTreeGraphics::rotateExtrudeAngleExpression(*node);
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+
+            const auto paramInfos = SceneTreeGraphics::rotateExtrudeParamInfos(
+                bestArea->rect, angleExpr, metrics);
+
+            for (const RotateExtrudeParamInfo &pInfo : paramInfos) {
+                if (!pInfo.textRect.contains(scenePosition))
+                    continue;
+                if (groupId)   *groupId   = bestArea->groupId;
+                if (operation) *operation = bestArea->operation;
+                if (axisOut)   *axisOut   = pInfo.paramIndex;
+                if (numberStart) *numberStart = 0;
+                if (numberLength) *numberLength = pInfo.expression.size();
+                return true;
+            }
+        }
+        return false;
+    }
 
     qreal headerWidth = TransformHeaderWidth;
     if (!bestArea->children.isEmpty())

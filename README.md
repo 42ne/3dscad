@@ -146,7 +146,29 @@ There is also a small GUI wrapper at `tools/manifoldbuilder` for running the
 same Manifold build script without typing the PowerShell command. See
 [docs/manifoldbuilder.md](docs/manifoldbuilder.md).
 
-With Qt's MinGW GCC 8, current Manifold may require local sequential fallbacks in `build/manifold-src/src/parallel.h` for `std::reduce`, `std::inclusive_scan`, and `std::exclusive_scan`.
+The build script automatically patches `build/manifold-src/src/parallel.h` with two fixes:
+
+1. **GCC 8 numeric fallbacks** — replaces `std::reduce`, `std::inclusive_scan`, and
+   `std::exclusive_scan` stdlib calls with sequential implementations, since MinGW GCC 8
+   does not ship those C++17 parallel numeric functions.
+2. **Hull alias fix** (`manifold-hull-fix.patch`) — fixes an alias bug in the sequential
+   `exclusive_scan` loop that caused `Manifold::Hull()` to always return an empty mesh.
+   See [`docs/bugfix-manifold-hull-empty.md`](docs/bugfix-manifold-hull-empty.md) for details.
+
+Both patches are applied on every script run and are idempotent (safe to re-run). If
+`build/manifold-src/` is ever reset (e.g. after `git submodule update` or a manual
+checkout), simply re-run the build script:
+
+```powershell
+.\scripts\build-manifold.ps1
+```
+
+To check manually whether the hull fix is present:
+
+```powershell
+Select-String -Path "build\manifold-src\src\parallel.h" -Pattern "auto cur = \*first"
+# Should print a match on the line with the fix; no output means the patch is missing.
+```
 
 The in-viewport `OpenGL` checkbox enables the optional experimental viewport backend. In this mode solid scene meshes, grid/axes, contact shadows, and selection edges are drawn through OpenGL shader paths with depth testing and cached VBOs. Gizmos, helper overlays, and text remain `QPainter` overlays; accurate GPU-side or on-demand picking is still future work.
 

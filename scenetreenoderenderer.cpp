@@ -951,7 +951,9 @@ public:
                   const QString &moduleName = QString(),
                   int depth = 0,
                   int theme = 0,
-                  bool collapsed = false)
+                  bool collapsed = false,
+                  bool linearExtrudeCenter = false,
+                  int linearExtrudeSlices = 0)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
@@ -974,6 +976,8 @@ public:
         , m_depth(depth)
         , m_theme(theme)
         , m_collapsed(collapsed)
+        , m_linearExtrudeCenter(linearExtrudeCenter)
+        , m_linearExtrudeSlices(linearExtrudeSlices)
     {
         setZValue(zValue);
     }
@@ -1155,36 +1159,114 @@ private:
             painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
             const QFontMetricsF metrics(sceneTreeGraphicsFont());
             const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
-            const qreal textLeft = iconRect.right() + 10.0;
-            const qreal labelWidth = qMax<qreal>(0.0, m_rect.right() - textLeft - 38.0);
 
-            const QString heightExpression = !m_transformExpressions.isEmpty()
+            // Gather all param expressions
+            const QString heightExpr = !m_transformExpressions.isEmpty()
                 && !m_transformExpressions.first().trimmed().isEmpty()
                     ? m_transformExpressions.first().trimmed()
                     : QString::number(m_transformValues.x() > 0.0f ? m_transformValues.x() : 20.0f, 'g');
-            const QString prefix = QStringLiteral("linear_extrude(height = ");
+            const QString centerExpr = m_linearExtrudeCenter
+                ? QStringLiteral("true") : QStringLiteral("false");
+            const QString twistExpr = m_transformExpressions.size() > 1
+                && !m_transformExpressions[1].trimmed().isEmpty()
+                    ? m_transformExpressions[1].trimmed()
+                    : QString::number(m_transformValues.y(), 'g');
+            const QString slicesExpr = m_transformExpressions.size() > 2
+                && !m_transformExpressions[2].trimmed().isEmpty()
+                    ? m_transformExpressions[2].trimmed()
+                    : QString::number(m_linearExtrudeSlices);
+            const QString scaleExpr = m_transformExpressions.size() > 3
+                && !m_transformExpressions[3].trimmed().isEmpty()
+                    ? m_transformExpressions[3].trimmed()
+                    : QString::number(m_transformValues.z(), 'g');
+
+            const auto paramInfos = linearExtrudeParamInfos(m_rect,
+                heightExpr, centerExpr, twistExpr, slicesExpr, scaleExpr, metrics);
+
+            // Draw a subtle frame around the entire expression "linear_extrude(...)"
+            const qreal textLeft = iconRect.right() + 10.0;
+            const qreal frameRight = paramInfos.isEmpty()
+                ? textLeft + 80.0
+                : paramInfos.last().textRect.right() + metrics.horizontalAdvance(QStringLiteral(")")) + 4.0;
+            const QRectF frameRect(textLeft - 3.0,
+                                   m_rect.top() + 4.0,
+                                   frameRight - textLeft + 3.0,
+                                   GroupHeaderHeight - 8.0);
+            const bool dark = SceneTreePalette::isDarkTheme(pt2);
+            const QColor frameBorder = dark ? QColor(200, 215, 235, 55) : QColor(80, 100, 130, 45);
+            paintRoundedPanel(painter, frameRect, 5.0,
+                              QPen(frameBorder, 1.0), Qt::NoBrush);
+
+            // Draw the static prefix "linear_extrude("
+            const QString prefix = QStringLiteral("linear_extrude(");
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0,
+                                     metrics.horizontalAdvance(prefix), 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, prefix);
+
+            for (const LinearExtrudeParamInfo &pInfo : paramInfos) {
+                const int idx = pInfo.paramIndex;
+                const bool isActive = m_activeTransformAxis == idx;
+                const QRectF &pillRect = pInfo.textRect;
+
+                // Label before the pill (e.g. "h=", ", c=", ", t=", ...)
+                painter->setPen(SceneTreePalette::numLabelText(pt2));
+                const qreal labelW = metrics.horizontalAdvance(pInfo.label);
+                painter->drawText(QRectF(pillRect.left() - labelW, m_rect.top() + 7.0,
+                                         labelW, 16.0),
+                                  Qt::AlignLeft | Qt::AlignVCenter, pInfo.label);
+
+                // Pill background
+                paintRoundedPanel(painter, pillRect, 3.0,
+                    QPen(isActive ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder,
+                         isActive ? 2 : 1),
+                    QBrush(isActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
+
+                // Pill text
+                painter->setPen(SceneTreePalette::numText(pt2));
+                painter->drawText(pillRect, Qt::AlignHCenter | Qt::AlignVCenter, pInfo.expression);
+            }
+
+            // Closing ')'
+            const qreal closeX = paramInfos.isEmpty()
+                ? textLeft + metrics.horizontalAdvance(prefix)
+                : paramInfos.last().textRect.right();
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(closeX, m_rect.top() + 7.0, 12.0, 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+            painter->restore();
+        } else if (m_operation == SceneDocument::TreeNode::RotateExtrude) {
+            painter->save();
+            painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
+
+            const QString angleExpr = !m_transformExpressions.isEmpty()
+                && !m_transformExpressions.first().trimmed().isEmpty()
+                    ? m_transformExpressions.first().trimmed()
+                    : QString::number(m_transformValues.x(), 'g');
+
+            const QString prefix = QStringLiteral("rotate_extrude(angle=");
             const qreal prefixAdvance = metrics.horizontalAdvance(prefix);
+            const qreal textLeft = iconRect.right() + 10.0;
             painter->setPen(SceneTreePalette::numLabelText(pt2));
             painter->drawText(QRectF(textLeft, m_rect.top() + 7.0, prefixAdvance, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, prefix);
 
-            const QVector<ExpressionTextSpan> spans = linearExtrudeHeightTextSpans(m_rect, heightExpression, metrics);
-            for (const ExpressionTextSpan &span : spans) {
-                if (span.number) {
-                    const bool active = m_activeTransformAxis == 0 && span.start == m_activeTransformNumberStart;
-                    paintRoundedPanel(painter, span.rect, 3.0,
-                                      QPen(active ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder, active ? 2 : 1),
-                                      QBrush(active ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
-                }
-                painter->setPen(span.number ? SceneTreePalette::numText(pt2) : SceneTreePalette::textMuted(pt2));
-                const Qt::Alignment align = span.number
-                    ? (Qt::AlignHCenter | Qt::AlignVCenter)
-                    : (Qt::AlignLeft | Qt::AlignVCenter);
-                painter->drawText(span.rect, align, span.text);
-            }
+            const qreal exprW  = metrics.horizontalAdvance(angleExpr);
+            const qreal pillW  = qMax(exprW + 8.0, 20.0);
+            const QRectF pillRect(textLeft + prefixAdvance, m_rect.top() + 7.0,
+                                  pillW, 14.0);
+            const bool isActive = m_activeTransformAxis == 0;
+            paintRoundedPanel(painter, pillRect, 3.0,
+                QPen(isActive ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder,
+                     isActive ? 2 : 1),
+                QBrush(isActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
+            painter->setPen(SceneTreePalette::numText(pt2));
+            painter->drawText(pillRect, Qt::AlignHCenter | Qt::AlignVCenter, angleExpr);
+
             painter->setPen(SceneTreePalette::numLabelText(pt2));
-            painter->drawText(QRectF(linearExtrudeHeightTextRect(m_rect, metrics).right(),
-                                     m_rect.top() + 7.0, 10.0, 16.0),
+            painter->drawText(QRectF(pillRect.right(), m_rect.top() + 7.0, 12.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
             painter->restore();
         } else {
@@ -1408,6 +1490,8 @@ private:
     int         m_depth = 0;
     int         m_theme = 0;
     bool        m_collapsed = false;
+    bool        m_linearExtrudeCenter = false;
+    int         m_linearExtrudeSlices = 0;
 };
 
 
@@ -1668,7 +1752,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                     : node.operation == SceneDocument::TreeNode::Scale     ? node.scale
                                     : node.operation == SceneDocument::TreeNode::LinearExtrude ? node.scale
                                     : node.operation == SceneDocument::TreeNode::Resize    ? node.scale
-                                                                                           : QVector3D();
+                                    : node.operation == SceneDocument::TreeNode::RotateExtrude ? node.scale
+                                                                                            : QVector3D();
     const int activeAxis = node.id == m_activeTransformNodeId ? m_activeTransformAxis : -1;
     const int activeNumberStart = node.id == m_activeTransformNodeId ? m_activeTransformNumberStart : -1;
     const int activeForLoopStart = node.id == m_activeForLoopNodeId ? m_activeForLoopNumberStart : -1;
@@ -1682,8 +1767,9 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformValues, activeAxis, activeNumberStart,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
-                                       node.color, thumbnail, node.moduleName,
-                                       depth, m_theme, collapsed));
+                                        node.color, thumbnail, node.moduleName,
+                                        depth, m_theme, collapsed,
+                                        node.linearExtrudeCenter, node.linearExtrudeSlices));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),
@@ -1715,7 +1801,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
                                  QColor(), QImage(), QString(),
-                                 0, theme);
+                                 0, theme, false, false, 0);
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
@@ -1771,7 +1857,7 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
                                    color, QImage(), QString(),
-                                   depth, theme);
+                                   depth, theme, false, false, 0);
     scene->addItem(item);
     appendPreviewItem(items, item);
 }

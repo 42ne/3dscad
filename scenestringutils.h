@@ -111,7 +111,9 @@ inline SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
     if (evaluated.transformExpressions.isEmpty())
         return evaluated;
 
-    for (int axis = 0; axis < evaluated.transformExpressions.size() && axis < 3; ++axis) {
+    // LinearExtrude has 4 expressions: [height, twist, slices, scale] — allow up to 4.
+    const int maxAxis = (evaluated.operation == SceneDocument::TreeNode::LinearExtrude) ? 4 : 3;
+    for (int axis = 0; axis < evaluated.transformExpressions.size() && axis < maxAxis; ++axis) {
         const QString expression = evaluated.transformExpressions[axis].trimmed();
         if (expression.isEmpty())
             continue;
@@ -150,7 +152,16 @@ inline SceneDocument::TreeNode nodeWithEvaluatedTransform(const SceneDocument::T
             else
                 evaluated.position.setZ(static_cast<float>(value));
         } else if (evaluated.operation == SceneDocument::TreeNode::LinearExtrude) {
-            evaluated.scale.setX(static_cast<float>(qMax<qreal>(0.1, value)));
+            // expressions: [0]=height, [1]=twist, [2]=slices, [3]=scale
+            if (axis == 0)
+                evaluated.scale.setX(static_cast<float>(qMax<qreal>(0.1, value)));
+            else if (axis == 1)
+                evaluated.linearExtrudeTwist = static_cast<float>(value);
+            // axis 2 = slices: already stored in linearExtrudeSlices at parse time
+            else if (axis == 3)
+                evaluated.linearExtrudeScaleVal = static_cast<float>(qMax<qreal>(0.001, value));
+        } else if (evaluated.operation == SceneDocument::TreeNode::RotateExtrude) {
+            evaluated.scale.setX(static_cast<float>(qBound<qreal>(0.1, value, 360.0)));
         } else if (evaluated.operation == SceneDocument::TreeNode::Resize) {
             value = qMax<qreal>(0.01, value);
             if (axis == 0)

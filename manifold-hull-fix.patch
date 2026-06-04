@@ -1,14 +1,14 @@
 --- a/build/manifold-src/src/parallel.h
 +++ b/build/manifold-src/src/parallel.h
-@@ -633,8 +633,9 @@ void exclusive_scan(ExecutionPolicy policy, InputIter first, InputIter last,
+@@ -647,8 +647,9 @@ void exclusive_scan(ExecutionPolicy policy, InputIter first, InputIter last,
+   (void)identity;
  #endif
-   T sum = init;
    for (; first != last; ++first, ++d_first) {
--    *d_first = sum;
--    sum = f(sum, *first);
+-    *d_first = init;
+-    init = f(init, *first);
 +    auto cur = *first;  // read BEFORE write — fixes aliased/in-place usage
-+    *d_first = sum;
-+    sum = f(sum, cur);
++    *d_first = init;
++    init = f(init, cur);
    }
  }
 
@@ -22,6 +22,6 @@ empty mesh.
 
 Fix: save *first before overwriting *d_first.
 
-Apply this patch after downloading/extracting the manifold 3.4.1 source:
+Apply this patch after downloading/extracting the manifold source:
   patch -p1 < manifold-hull-fix.patch
 from the build/ directory.

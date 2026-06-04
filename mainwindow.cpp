@@ -145,6 +145,11 @@ void MainWindow::buildUi()
     connect(m_exampleBrowserTutorials, &ExampleBrowserMenu::exampleSelected,
             this, &MainWindow::loadExample);
 
+    auto *testsMenu          = fileMenu->addMenu("Tests");
+    m_exampleBrowserTests    = new ExampleBrowserMenu(testsMenu, "sample_codes_tests", this);
+    connect(m_exampleBrowserTests, &ExampleBrowserMenu::exampleSelected,
+            this, &MainWindow::loadExample);
+
     auto *editMenu = appMenuBar->addMenu("Edit");
     editMenu->addAction(m_controller->undoAction());
     editMenu->addAction(m_controller->redoAction());

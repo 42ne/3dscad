@@ -85,7 +85,8 @@ qreal horizontalHeaderMinWidth(const SceneDocument::TreeNode &node)
 {
     if (isVerticalHeaderOperation(node.operation)
         || node.operation == SceneDocument::TreeNode::For
-        || node.operation == SceneDocument::TreeNode::LinearExtrude) {
+        || node.operation == SceneDocument::TreeNode::LinearExtrude
+        || node.operation == SceneDocument::TreeNode::RotateExtrude) {
         return minimumWidthForOperation(node.operation);
     }
 
@@ -1104,7 +1105,9 @@ void SceneTreeGraphicsWidget::beginTreeZoomSnapshot()
     }
 
     QPixmap snapshot(pixelSize);
-    snapshot.fill(Qt::transparent);
+    const CanvasBackgroundTheme bgTheme =
+        activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
+    snapshot.fill(bgTheme.background);
 
     QSet<QGraphicsItem *> treeSet;
     for (QGraphicsItem *item : m_treeItems)
@@ -1120,14 +1123,19 @@ void SceneTreeGraphicsWidget::beginTreeZoomSnapshot()
         item->setVisible(false);
     }
 
+    // Suppress the scene's hardcoded background brush so the pixmap fill
+    // is the only background; the grid is still drawn by drawBackground().
+    const QBrush savedBg = m_graphicsScene->backgroundBrush();
+    m_graphicsScene->setBackgroundBrush(Qt::NoBrush);
+
     QPainter painter(&snapshot);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     m_graphicsScene->render(&painter,
-                            QRectF(QPointF(0.0, 0.0), QSizeF(pixelSize)),
-                            bounds,
-                            Qt::IgnoreAspectRatio);
+        QRectF(QPointF(0.0, 0.0), QSizeF(pixelSize)),
+        bounds, Qt::IgnoreAspectRatio);
     painter.end();
+    m_graphicsScene->setBackgroundBrush(savedBg);
 
     for (QGraphicsItem *item : hiddenItems)
         if (item)
@@ -1514,9 +1522,22 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
             forLoopRangeExpression(node),
             QFontMetricsF(sceneTreeGraphicsFont()));
     } else if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
+        const QString centerExpr = node.linearExtrudeCenter
+            ? QStringLiteral("true") : QStringLiteral("false");
+        const QString twistExpr = SceneTreeGraphics::linearExtrudeParam(node, 1,
+            QString::number(node.linearExtrudeTwist, 'g'));
+        const QString slicesExpr = SceneTreeGraphics::linearExtrudeParam(node, 2,
+            QString::number(node.linearExtrudeSlices));
+        const QString scaleExpr = SceneTreeGraphics::linearExtrudeParam(node, 3,
+            QString::number(node.linearExtrudeScaleVal, 'g'));
         parameterHeaderMinWidth = SceneTreeGraphics::linearExtrudeHeaderMinWidth(
             linearExtrudeHeightExpression(node),
-            QFontMetricsF(sceneTreeGraphicsFont()));
+            QFontMetricsF(sceneTreeGraphicsFont()),
+            centerExpr, twistExpr, slicesExpr, scaleExpr);
+    } else if (node.operation == SceneDocument::TreeNode::RotateExtrude) {
+        const QString angleExpr = SceneTreeGraphics::rotateExtrudeAngleExpression(node);
+        parameterHeaderMinWidth = SceneTreeGraphics::rotateExtrudeHeaderMinWidth(
+            angleExpr, QFontMetricsF(sceneTreeGraphicsFont()));
     }
 
     const QSizeF size = collapsedGroup

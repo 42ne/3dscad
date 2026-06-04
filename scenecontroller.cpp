@@ -1296,18 +1296,96 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
                                                     int numberStart, int numberLength,
                                                     qreal delta)
 {
-    if (axis < 0 || axis > 2 || qFuzzyIsNull(delta)) return;
+    if (axis < 0 || qFuzzyIsNull(delta)) return;
 
     const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
     if (!group || group->type != SceneDocument::TreeNode::Group) return;
 
-    const QString currentExpr = SceneTreeGraphics::transformAxisExpression(*group, axis);
+    const bool isLinExtr = group->operation == SceneDocument::TreeNode::LinearExtrude;
+    const bool isRotExtr = group->operation == SceneDocument::TreeNode::RotateExtrude;
+
+    if (!isLinExtr && !isRotExtr && (axis > 2)) return;
+    if (isLinExtr && (axis > 4)) return;
+    if (isRotExtr && (axis > 0)) return;
+    // Center (axis 1) is boolean — not scrollable
+    if (isLinExtr && axis == 1) return;
+
+    const QString currentExpr = (isLinExtr && axis > 2)
+        ? QString()
+        : SceneTreeGraphics::transformAxisExpression(*group, axis);
     QStringList newExpressions = group->transformExpressions;
     while (newExpressions.size() <= axis) newExpressions.append(QString());
 
     QVector3D position = group->position;
     QVector3D rotation = group->rotation;
     QVector3D scale    = group->scale;
+    float newTwist   = group->linearExtrudeTwist;
+    int   newSlices  = group->linearExtrudeSlices;
+    float newScaleVal= group->linearExtrudeScaleVal;
+
+    // ── LinearExtrude numeric adjustment ──────────────────────────────────
+    if (isLinExtr) {
+        const qreal step = (axis == 3) ? 1.0          // slices (integer)
+                         : (axis == 4) ? 0.1          // scale value
+                         :                1.0;         // height / twist
+        auto adjustVal = [&](float current, qreal minV) -> float {
+            return float(qMax(minV, double(current) + delta * step));
+        };
+
+        if (axis == 0) {
+            const qreal minVal = 0.01;
+            const float newVal = adjustVal(scale.x(), minVal);
+            scale.setX(newVal);
+            newExpressions[0] = QString::number(newVal, 'f', 1);
+        } else if (axis == 2) {
+            newTwist = adjustVal(newTwist, -1e9);
+            newExpressions[1] = QString::number(newTwist, 'g');
+        } else if (axis == 3) {
+            newSlices = int(adjustVal(float(newSlices), 0.0));
+            newExpressions[2] = QString::number(newSlices);
+        } else if (axis == 4) {
+            newScaleVal = adjustVal(newScaleVal, 0.01);
+            newExpressions[3] = QString::number(newScaleVal, 'g');
+        }
+
+        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+        if (!m_scene.updateGroupLinearExtrudeParams(groupId, scale,
+                                                    newTwist, newSlices, newScaleVal,
+                                                    newExpressions))
+            return;
+        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+        m_scene.restoreSnapshot(oldSnapshot);
+        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                        [this]() { emit sceneChanged(); });
+        m_undoStack->push(command);
+        m_ctrlHighlight.active = false;
+        emit ctrlHighlightChanged();
+        return;
+    }
+
+    // ── RotateExtrude numeric adjustment ─────────────────────────────────
+    if (isRotExtr) {
+        const qreal step = 1.0;
+        const float newAngle = float(qMax(-1e9, double(group->scale.x()) + delta * step));
+        QVector3D newScale = group->scale;
+        newScale.setX(newAngle);
+        newExpressions[0] = QString::number(newAngle, 'f', 0);
+
+        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+        if (!m_scene.updateGroupTransform(groupId, position, rotation, newScale, newExpressions))
+            return;
+        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+        m_scene.restoreSnapshot(oldSnapshot);
+        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                        [this]() { emit sceneChanged(); });
+        m_undoStack->push(command);
+        m_ctrlHighlight.active = false;
+        emit ctrlHighlightChanged();
+        return;
+    }
+
+    // ── Standard transform adjustment ─────────────────────────────────────
+    if (axis > 2) return;
 
     if (numberStart >= 0 && numberLength > 0
         && numberStart + numberLength <= currentExpr.size()) {
@@ -1407,14 +1485,225 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
 
 void SceneController::handleTransformExpressionEdited(int groupId, int axis, const QString &expression)
 {
-    if (axis < 0 || axis > 2)
-        return;
-
     const SceneDocument::TreeNode *group = m_scene.treeNodeById(groupId);
     if (!group || group->type != SceneDocument::TreeNode::Group)
         return;
 
+    const bool isLinExtr = group->operation == SceneDocument::TreeNode::LinearExtrude;
+    const bool isRotExtr = group->operation == SceneDocument::TreeNode::RotateExtrude;
+
+    // RotateExtrude does not support full-expression mode
+    if (isRotExtr && axis < 0)
+        return;
+
+    // LinearExtrude full expression: "h=<height>, c=<center>, t=<twist>, sl=<slices>, sc=<scale>"
+    if (axis == -1 && isLinExtr) {
+        // Parse comma-separated key=value pairs
+        const auto parseVal = [&](const QString &src, const QString &key, const QString &altKey) -> QString {
+            for (const QString &part : src.split(QLatin1Char(','))) {
+                const int eq = part.indexOf(QLatin1Char('='));
+                if (eq < 0) continue;
+                const QString k = part.left(eq).trimmed().toLower();
+                if (k == key || k == altKey)
+                    return part.mid(eq + 1).trimmed();
+            }
+            return QString();
+        };
+        const QString hStr  = parseVal(expression, QStringLiteral("h"),  QStringLiteral("height"));
+        const QString cStr  = parseVal(expression, QStringLiteral("c"),  QStringLiteral("center"));
+        const QString tStr  = parseVal(expression, QStringLiteral("t"),  QStringLiteral("twist"));
+        const QString slStr = parseVal(expression, QStringLiteral("sl"), QStringLiteral("slices"));
+        const QString scStr = parseVal(expression, QStringLiteral("sc"), QStringLiteral("scale"));
+
+        QHash<QString, qreal> varValues;
+        collectVariableValues(m_scene.treeRoot(), &varValues);
+
+        QVector3D scale = group->scale;
+        float newTwist   = group->linearExtrudeTwist;
+        int   newSlices  = group->linearExtrudeSlices;
+        float newScaleVal= group->linearExtrudeScaleVal;
+        bool  newCenter  = group->linearExtrudeCenter;
+        QStringList newExpressions = group->transformExpressions;
+        while (newExpressions.size() < 4) newExpressions.append(QString());
+
+        if (!hStr.isEmpty()) {
+            qreal v = 0.0;
+            if (ExpressionSyntax::evaluate(hStr, varValues, &v)) {
+                scale.setX(float(qMax<qreal>(0.01, v)));
+                newExpressions[0] = hStr;
+            }
+        }
+        if (!cStr.isEmpty()) {
+            const QString cl = cStr.toLower();
+            newCenter = (cl == QLatin1String("true") || cl == QLatin1String("1"));
+        }
+        if (!tStr.isEmpty()) {
+            qreal v = 0.0;
+            if (ExpressionSyntax::evaluate(tStr, varValues, &v)) {
+                newTwist = float(v);
+                newExpressions[1] = tStr;
+            }
+        }
+        if (!slStr.isEmpty()) {
+            bool ok = false;
+            int iv = slStr.toInt(&ok);
+            if (ok) { newSlices = qMax(0, iv); newExpressions[2] = slStr; }
+        }
+        if (!scStr.isEmpty()) {
+            qreal v = 0.0;
+            if (ExpressionSyntax::evaluate(scStr, varValues, &v)) {
+                newScaleVal = float(qMax<qreal>(0.01, v));
+                newExpressions[3] = scStr;
+            }
+        }
+
+        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+        {
+            SceneDocument::TreeNode *mut = m_scene.treeNodeById(groupId);
+            if (mut) mut->linearExtrudeCenter = newCenter;
+        }
+        if (!m_scene.updateGroupLinearExtrudeParams(groupId, scale, newTwist, newSlices, newScaleVal, newExpressions)) {
+            m_scene.restoreSnapshot(oldSnapshot);
+            return;
+        }
+        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+        m_scene.restoreSnapshot(oldSnapshot);
+        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                        [this]() { emit sceneChanged(); });
+        m_undoStack->push(command);
+        m_ctrlHighlight.active = false;
+        emit ctrlHighlightChanged();
+        return;
+    }
+
+    if (axis < 0 || axis > 4)
+        return;
     const QString trimmed = expression.trimmed();
+
+    QStringList newExpressions = group->transformExpressions;
+    while (newExpressions.size() <= axis)
+        newExpressions.append(QString());
+
+    if (isLinExtr) {
+        QVector3D scale = group->scale;
+        float newTwist   = group->linearExtrudeTwist;
+        int   newSlices  = group->linearExtrudeSlices;
+        float newScaleVal= group->linearExtrudeScaleVal;
+
+        if (axis == 0) { // height
+            QHash<QString, qreal> varValues;
+            collectVariableValues(m_scene.treeRoot(), &varValues);
+            qreal v = 0.0;
+            if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
+                return;
+            v = qMax<qreal>(0.01, v);
+            scale.setX(float(v));
+            newExpressions[0] = trimmed;
+        } else if (axis == 1) { // center — toggle
+            const bool newCenter = trimmed.compare(QLatin1String("true"), Qt::CaseInsensitive) == 0
+                                  || trimmed == QLatin1String("1");
+            if (newCenter == group->linearExtrudeCenter)
+                return;
+            newExpressions[1].clear(); // center doesn't use transformExpressions
+            // Toggle: update the node directly via snapshot cycle
+            const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+            {
+                SceneDocument::TreeNode *mutableNode = m_scene.treeNodeById(groupId);
+                if (mutableNode)
+                    mutableNode->linearExtrudeCenter = newCenter;
+            }
+            const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+            m_scene.restoreSnapshot(oldSnapshot);
+            auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                            [this]() { emit sceneChanged(); });
+            m_undoStack->push(command);
+            m_ctrlHighlight.active = false;
+            emit ctrlHighlightChanged();
+            return;
+        } else if (axis == 2) { // twist
+            QHash<QString, qreal> varValues;
+            collectVariableValues(m_scene.treeRoot(), &varValues);
+            qreal v = 0.0;
+            if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
+                return;
+            newTwist = float(v);
+            newExpressions[1] = trimmed;
+        } else if (axis == 3) { // slices
+            bool ok = false;
+            int iv = trimmed.toInt(&ok);
+            if (!ok) return;
+            iv = qMax(0, iv);
+            newSlices = iv;
+            newExpressions[2] = trimmed;
+        } else if (axis == 4) { // scale
+            QHash<QString, qreal> varValues;
+            collectVariableValues(m_scene.treeRoot(), &varValues);
+            qreal v = 0.0;
+            if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
+                return;
+            v = qMax<qreal>(0.01, v);
+            newScaleVal = float(v);
+            newExpressions[3] = trimmed;
+        }
+
+        // Map axis to transformExpressions index:
+        // axis 0→0, axis 1→N/A, axis 2→1, axis 3→2, axis 4→3
+        const int exprIdx = (axis >= 2) ? axis - 1 : axis;
+        if (axis != 1
+            && newExpressions[exprIdx] == group->transformExpressions.value(exprIdx)
+            && scale == group->scale
+            && qFuzzyCompare(newTwist, group->linearExtrudeTwist)
+            && newSlices == group->linearExtrudeSlices
+            && qFuzzyCompare(newScaleVal, group->linearExtrudeScaleVal))
+            return;
+
+        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+        if (!m_scene.updateGroupLinearExtrudeParams(groupId, scale,
+                                                    newTwist, newSlices, newScaleVal,
+                                                    newExpressions))
+            return;
+        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+        m_scene.restoreSnapshot(oldSnapshot);
+        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                        [this]() { emit sceneChanged(); });
+        m_undoStack->push(command);
+        m_ctrlHighlight.active = false;
+        emit ctrlHighlightChanged();
+        return;
+    }
+
+    // ── RotateExtrude single-angle edit ────────────────────────────────────
+    if (isRotExtr && axis == 0) {
+        QHash<QString, qreal> varValues;
+        collectVariableValues(m_scene.treeRoot(), &varValues);
+        qreal v = 0.0;
+        if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
+            return;
+        newExpressions[0] = trimmed;
+        QVector3D newScale = group->scale;
+        newScale.setX(float(v));
+
+        if (newExpressions[0] == group->transformExpressions.value(0)
+            && qFuzzyCompare(newScale.x(), group->scale.x()))
+            return;
+
+        const SceneDocument::Snapshot oldSnapshot = m_scene.snapshot();
+        if (!m_scene.updateGroupTransform(groupId, group->position, group->rotation,
+                                           newScale, newExpressions))
+            return;
+        const SceneDocument::Snapshot newSnapshot = m_scene.snapshot();
+        m_scene.restoreSnapshot(oldSnapshot);
+        auto *command = new UpdateGroupTransformCommand(&m_scene, oldSnapshot, newSnapshot,
+                                                        [this]() { emit sceneChanged(); });
+        m_undoStack->push(command);
+        m_ctrlHighlight.active = false;
+        emit ctrlHighlightChanged();
+        return;
+    }
+
+    // ── Standard transform expression edit ─────────────────────────────────
+    if (axis > 2) return;
+
     QHash<QString, qreal> varValues;
     collectVariableValues(m_scene.treeRoot(), &varValues);
 
@@ -1422,9 +1711,6 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
     if (!ExpressionSyntax::evaluate(trimmed, varValues, &numericValue))
         return;
 
-    QStringList newExpressions = group->transformExpressions;
-    while (newExpressions.size() <= axis)
-        newExpressions.append(QString());
     if (newExpressions[axis] == trimmed)
         return;
     newExpressions[axis] = trimmed;
@@ -1440,7 +1726,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
                              || group->operation == SceneDocument::TreeNode::Mirror;
     QVector3D *target = usePosition ? &position
                        : group->operation == SceneDocument::TreeNode::Rotate ? &rotation
-                                                                             : &scale;
+                                                                              : &scale;
     if (axis == 0)
         target->setX(float(numericValue));
     else if (axis == 1)

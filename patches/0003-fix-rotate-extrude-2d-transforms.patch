@@ -1,0 +1,146 @@
+From: Tar <tar@anomalyco.com>
+Date: Thu, 4 Jun 2026 12:30:00 +0300
+Subject: Fix rotate_extrude 2D profile transforms (Scale & Rotate)
+
+The old collectRotateExtrudePolygons only handled Translate (via a
+downward-accumulated offset) and ignored Scale and Rotate wrappers
+around the 2D profile primitives.  It also applied the translate
+offset *before* collecting children, which gives the wrong transform
+order for OpenSCAD semantics (innermost transform first).
+
+Rewrite the function so that:
+- Children are collected first (innermost applied first).
+- Each group node's transform (Translate, Scale, or Rotate Z)
+  is applied *after* collecting child polygons.
+- Scale scales X/Y of every polygon vertex.
+- Rotate rotates every polygon vertex around the origin by Z angle.
+
+Also fix the call site in evaluateNode to drop the unused
+"{0.0, 0.0}" offset argument.
+
+Note: This patch applies on top of the rotate_extrude toolbar patch
+(0002).
+
+---
+ manifoldcsg.cpp | 97 +++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 49 insertions(+), 48 deletions(-)
+
+diff --git a/manifoldcsg.cpp b/manifoldcsg.cpp
+index ... 100644
+--- a/manifoldcsg.cpp
++++ b/manifoldcsg.cpp
+@@ -119,58 +119,59 @@ static void collectRotateExtrudePolygons(
+     const SceneDocument::TreeNode &node,
+     const SceneDocument &scene,
+     const QHash<QString, qreal> &variables,
+     int segs,
+-    vec2 offset,
+     Polygons &out)
+ {
+     if (node.type == SceneDocument::TreeNode::Primitive) {
+         const ShapeNode *shape = scene.shapeById(node.shapeId);
+         if (!shape) return;
+         const ShapeNode ev = shapeWithEvaluatedParameters(*shape, variables);
+         SimplePolygon poly;
+         if (ev.type == ShapeNode::Circle) {
+             for (int i = 0; i < segs; ++i) {
+                 const double a = 2.0 * M_PI * i / segs;
+-                poly.push_back({offset.x + ev.radius * std::cos(a),
+-                                offset.y + ev.radius * std::sin(a)});
++                poly.push_back({ev.radius * std::cos(a),
++                                ev.radius * std::sin(a)});
+             }
+         } else if (ev.type == ShapeNode::Square) {
+             const float hx = ev.size.x() * 0.5f;
+             const float hy = ev.size.y() * 0.5f;
+             const float cx = ev.center ? 0.0f : hx;
+             const float cy = ev.center ? 0.0f : hy;
+-            poly = {{offset.x - hx + cx, offset.y - hy + cy},
+-                    {offset.x + hx + cx, offset.y - hy + cy},
+-                    {offset.x + hx + cx, offset.y + hy + cy},
+-                    {offset.x - hx + cx, offset.y + hy + cy}};
++            poly = {{-hx + cx, -hy + cy},
++                    { hx + cx, -hy + cy},
++                    { hx + cx,  hy + cy},
++                    {-hx + cx,  hy + cy}};
+         } else if (ev.type == ShapeNode::Polygon2D) {
+             for (const QVector3D &pt : ev.polyhedronPoints)
+-                poly.push_back({offset.x + pt.x(), offset.y + pt.y()});
++                poly.push_back({pt.x(), pt.y()});
+         }
+         if (static_cast<int>(poly.size()) >= 3)
+             out.push_back(poly);
+         return;
+     }
+
+     if (node.type != SceneDocument::TreeNode::Group)
+         return;
+
+-    vec2 childOffset = offset;
+-    const SceneDocument::TreeNode *evalNode = &node;
+-    SceneDocument::TreeNode evTemp = node;
+-
+-    if (node.operation == SceneDocument::TreeNode::Translate) {
+-        // Apply evaluated XY translation to the 2D offset
+-        SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
+-        childOffset.x += ev2.position.x();
+-        childOffset.y += ev2.position.y();
++    // Collect children first (innermost transform applies first).
++    Polygons childPolys;
++    for (const SceneDocument::TreeNode &child : node.children)
++        collectRotateExtrudePolygons(child, scene, variables, segs, childPolys);
++
++    // Apply this node's 2D transform to the collected child polygons.
++    if (node.operation == SceneDocument::TreeNode::Translate) {
++        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
++        const float tx = ev2.position.x();
++        const float ty = ev2.position.y();
++        if (qAbs(tx) > 0.001f || qAbs(ty) > 0.001f) {
++            for (SimplePolygon &poly : childPolys)
++                for (vec2 &pt : poly) {
++                    pt.x += tx;
++                    pt.y += ty;
++                }
++        }
++    } else if (node.operation == SceneDocument::TreeNode::Scale) {
++        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
++        const float sx = ev2.scale.x();
++        const float sy = ev2.scale.y();
++        if (qAbs(sx - 1.0f) > 0.001f || qAbs(sy - 1.0f) > 0.001f) {
++            for (SimplePolygon &poly : childPolys)
++                for (vec2 &pt : poly) {
++                    pt.x *= sx;
++                    pt.y *= sy;
++                }
++        }
++    } else if (node.operation == SceneDocument::TreeNode::Rotate) {
++        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
++        const float angle = ev2.rotation.z();
++        if (qAbs(angle) > 0.001f) {
++            const float rad = angle * M_PI / 180.0f;
++            const float c = std::cos(rad);
++            const float s = std::sin(rad);
++            for (SimplePolygon &poly : childPolys)
++                for (vec2 &pt : poly) {
++                    const float nx = pt.x * c - pt.y * s;
++                    const float ny = pt.x * s + pt.y * c;
++                    pt.x = nx;
++                    pt.y = ny;
++                }
++        }
+     }
+
+-    for (const SceneDocument::TreeNode &child : evalNode->children)
+-        collectRotateExtrudePolygons(child, scene, variables, segs, childOffset, out);
++    out.insert(out.end(), childPolys.begin(), childPolys.end());
+ }
+ 
+ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
+@@ -373,7 +374,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
+         Polygons polygons;
+         for (const SceneDocument::TreeNode *child : geometryChildren)
+-            collectRotateExtrudePolygons(*child, scene, localVariables, segs, {0.0, 0.0}, polygons);
++            collectRotateExtrudePolygons(*child, scene, localVariables, segs, polygons);
+         if (polygons.empty())
+             return {};
+         return applyNodeTransform(Manifold::Revolve(polygons, fn > 0 ? fn : 0, static_cast<double>(angle)), evaluatedNode);

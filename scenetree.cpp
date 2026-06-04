@@ -291,6 +291,30 @@ bool SceneTree::updateGroupTransform(int groupId, const QVector3D &position, con
     return true;
 }
 
+bool SceneTree::updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
+                                                float twist, int slices, float scaleVal,
+                                                const QStringList &transformExpressions)
+{
+    TreeNode *node = nodeById(groupId);
+    if (!node || node->type != TreeNode::Group
+        || node->operation != TreeNode::LinearExtrude)
+        return false;
+
+    if (node->scale == scale
+        && qFuzzyCompare(node->linearExtrudeTwist, twist)
+        && node->linearExtrudeSlices == slices
+        && qFuzzyCompare(node->linearExtrudeScaleVal, scaleVal)
+        && node->transformExpressions == transformExpressions)
+        return false;
+
+    node->scale = scale;
+    node->linearExtrudeTwist = twist;
+    node->linearExtrudeSlices = slices;
+    node->linearExtrudeScaleVal = scaleVal;
+    node->transformExpressions = transformExpressions;
+    return true;
+}
+
 bool SceneTree::updateGroupColor(int groupId, const QColor &color)
 {
     TreeNode *node = nodeById(groupId);
@@ -698,8 +722,16 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
     if (operation == TreeNode::Mirror)
         node.position = QVector3D(1, 0, 0);
     if (operation == TreeNode::LinearExtrude) {
-        node.scale = QVector3D(20, 1, 1);
-        node.transformExpressions = QStringList({QStringLiteral("20")});
+        node.scale = QVector3D(20, 0, 1);
+        node.linearExtrudeTwist    = 0.0f;
+        node.linearExtrudeSlices   = 0;
+        node.linearExtrudeScaleVal = 1.0f;
+        node.transformExpressions = QStringList({QStringLiteral("20"), QStringLiteral("0"),
+                                                 QStringLiteral("0"),  QStringLiteral("1")});
+    }
+    if (operation == TreeNode::RotateExtrude) {
+        node.scale = QVector3D(360, 1, 1);
+        node.transformExpressions = QStringList({QStringLiteral("360")});
     }
     if (operation == TreeNode::Resize) {
         node.scale = QVector3D(10, 10, 10);

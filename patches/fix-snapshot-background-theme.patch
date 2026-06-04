@@ -1,0 +1,54 @@
+From: 
+Date: 
+Subject: fix: use active theme background in tree zoom snapshot
+
+The TreeGraphicsScene hardcodes setBackgroundBrush(CanvasBackground) in its
+constructor — a fixed dark blue-gray (31, 41, 55).  When beginTreeZoomSnapshot()
+renders the scene into a cached pixmap via m_graphicsScene->render(), this
+hardcoded background is drawn, making the snapshot background always dark
+regardless of the user's chosen canvas background theme.
+
+Fix:  Fill the snapshot pixmap with the active theme background colour
+(activeCanvasBackgroundTheme) and temporarily clear the scene's background
+brush during rendering so the scene does not overdraw it with the hardcoded
+colour.
+
+diff --git a/scenetreegraphicswidget.cpp b/scenetreegraphicswidget.cpp
+index 1111111..2222222 100644
+--- a/scenetreegraphicswidget.cpp
++++ b/scenetreegraphicswidget.cpp
+@@ -1104,7 +1104,9 @@ void SceneTreeGraphicsWidget::beginTreeZoomSnapshot()
+     }
+
+     QPixmap snapshot(pixelSize);
+-    snapshot.fill(Qt::transparent);
++    const CanvasBackgroundTheme bgTheme =
++        activeCanvasBackgroundTheme(m_canvasBackgroundTheme);
++    snapshot.fill(bgTheme.background);
+
+     QSet<QGraphicsItem *> treeSet;
+     for (QGraphicsItem *item : m_treeItems)
+@@ -1119,11 +1121,15 @@ void SceneTreeGraphicsWidget::beginTreeZoomSnapshot()
+         item->setVisible(false);
+     }
+
++    // Suppress the scene's hardcoded background brush so the pixmap fill
++    // is the only background; the grid is still drawn by drawBackground().
++    const QBrush savedBg = m_graphicsScene->backgroundBrush();
++    m_graphicsScene->setBackgroundBrush(Qt::NoBrush);
++
+     QPainter painter(&snapshot);
+     painter.setRenderHint(QPainter::Antialiasing, true);
+     painter.setRenderHint(QPainter::TextAntialiasing, true);
+-    m_graphicsScene->render(&painter,
+-                            QRectF(QPointF(0.0, 0.0), QSizeF(pixelSize)),
+-                            bounds,
+-                            Qt::IgnoreAspectRatio);
++    m_graphicsScene->render(&painter,
++        QRectF(QPointF(0.0, 0.0), QSizeF(pixelSize)),
++        bounds, Qt::IgnoreAspectRatio);
+     painter.end();
++    m_graphicsScene->setBackgroundBrush(savedBg);
+
+     for (QGraphicsItem *item : hiddenItems)
+         if (item)

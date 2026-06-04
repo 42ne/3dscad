@@ -42,6 +42,7 @@ public:
             For,
             Color,
             LinearExtrude,
+            RotateExtrude, // rotate_extrude(angle=360); angle stored in scale.x()
             Resize,     // resize([x,y,z]) or resize([x,y,z], auto=[x,y,z]); newsize in scale
             Scene // top-level container; flattened in code generation, never emitted as a block
         };
@@ -99,6 +100,9 @@ public:
     bool setVariableIsParameter(int variableId, bool isParameter);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
+    bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
+                                         float twist, int slices, float scaleVal,
+                                         const QStringList &transformExpressions = QStringList());
     bool updateGroupColor(int groupId, const QColor &color);
 
     // Primitive management

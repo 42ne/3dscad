@@ -402,8 +402,20 @@ SceneMesh buildShapeMesh(const ShapeNode &shape, int fn)
     if (shape.type == ShapeNode::Square)
         return buildSquareMesh(shape);
 
-    if (shape.type == ShapeNode::Polygon2D)
+    if (shape.type == ShapeNode::Polygon2D) {
+        // If paths are specified, use paths[0] (outer contour) to order points.
+        if (!shape.polyhedronFaces.isEmpty()) {
+            const QVector<int> &outerPath = shape.polyhedronFaces.first();
+            QVector<QVector3D> ordered;
+            ordered.reserve(outerPath.size());
+            for (int idx : outerPath)
+                if (idx >= 0 && idx < shape.polyhedronPoints.size())
+                    ordered.append(shape.polyhedronPoints[idx]);
+            if (ordered.size() >= 3)
+                return buildFlatPolygonMesh(ordered, shape);
+        }
         return buildFlatPolygonMesh(shape.polyhedronPoints, shape);
+    }
 
     if (shape.type == ShapeNode::Sphere)
         return buildSphereMesh(shape, fn);

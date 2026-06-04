@@ -235,12 +235,15 @@ static bool isModuleDefinitionLine(const QString &line, QString *name, QString *
 }
 
 // Matches any module-style call: <ident>(<args>);
+// Uses balanced-paren matching so nested calls like part(sin(45), r) are handled.
 static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QString *args = nullptr)
 {
-    static const QRegularExpression regex("^([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*;\\s*$");
-    const QRegularExpressionMatch match = regex.match(line);
-    if (!match.hasMatch())
+    // Quick identifier check before the expensive scan.
+    static const QRegularExpression identRe("^([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    const QRegularExpressionMatch identMatch = identRe.match(line);
+    if (!identMatch.hasMatch())
         return false;
+    const QString callName = identMatch.captured(1).trimmed();
 
     static const QStringList reservedCalls = {
         QStringLiteral("cube"),
@@ -250,15 +253,34 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         QStringLiteral("square"),
         QStringLiteral("polygon"),
         QStringLiteral("linear_extrude"),
-        QStringLiteral("polyhedron")
+        QStringLiteral("rotate_extrude"),
+        QStringLiteral("polyhedron"),
+        QStringLiteral("echo"),
+        QStringLiteral("assert")
     };
-    if (reservedCalls.contains(match.captured(1)))
+    if (reservedCalls.contains(callName))
         return false;
 
-    if (name)
-        *name = match.captured(1).trimmed();
-    if (args)
-        *args = match.captured(2).trimmed();
+    // Find the balanced closing paren.
+    QString argsOut;
+    if (!extractCallArgs(line, callName, &argsOut))
+        return false;
+
+    // After the closing paren must be optional whitespace + ';'
+    const int parenEnd = line.indexOf('(', callName.size());
+    int depth = 0, closePos = -1;
+    for (int i = parenEnd; i < line.size(); ++i) {
+        if (line[i] == '(') ++depth;
+        else if (line[i] == ')') { if (--depth == 0) { closePos = i; break; } }
+    }
+    if (closePos < 0)
+        return false;
+    const QString tail = line.mid(closePos + 1).trimmed();
+    if (tail != QStringLiteral(";"))
+        return false;
+
+    if (name) *name = callName;
+    if (args) *args = argsOut.trimmed();
     return true;
 }
 
@@ -289,6 +311,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression intersectionForRegex("^intersection_for\\s*\\((.+?)\\)\\s*\\{\\s*$");
     static const QRegularExpression colorRegex("^color\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression linearExtrudeRegex("^linear_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
+    static const QRegularExpression rotateExtrudeRegex("^rotate_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression resizeRegex("^resize\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     // intersection_for → intersection() { for() { ... } }
@@ -399,6 +422,22 @@ static bool parseOperationLine(const QString &line,
             *extraLinearExtrudeCenter = center;
         if (extraLinearExtrudeSlices)
             *extraLinearExtrudeSlices = int(qRound(slices));
+        return true;
+    }
+
+    QRegularExpressionMatch rotExtrudeMatch = rotateExtrudeRegex.match(line);
+    if (rotExtrudeMatch.hasMatch()) {
+        const auto args = parseNamedArgs(rotExtrudeMatch.captured(1), {"angle"});
+        const QString angleExpr = args.value(QStringLiteral("angle"), QStringLiteral("360"));
+        qreal angle = 360.0;
+        QString angleExprStr;
+        if (!parseParamExpression(angleExpr, varValues, &angle, &angleExprStr))
+            return false;
+        *operation = SceneDocument::TreeNode::RotateExtrude;
+        if (vector)
+            *vector = QVector3D(float(angle), 0.0f, 0.0f);
+        if (expressions)
+            *expressions = QStringList({angleExprStr});
         return true;
     }
 
@@ -659,41 +698,50 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
     }
 
     if (extractCallArgs(line, "polygon", &argsStr) && line.endsWith(';')) {
-        const QString normalized = argsStr.trimmed();
-        const int pointsKey = normalized.indexOf(QStringLiteral("points"));
-        const int listStart = normalized.indexOf(QLatin1Char('['), pointsKey >= 0 ? pointsKey : 0);
-        int depth = 0;
-        int listEnd = -1;
-        for (int i = listStart; i >= 0 && i < normalized.size(); ++i) {
-            if (normalized[i] == QLatin1Char('[')) ++depth;
-            else if (normalized[i] == QLatin1Char(']')) {
-                --depth;
-                if (depth == 0) { listEnd = i; break; }
+        // Helper: find matching ']' for an '[' at position start.
+        auto findMatchingBracket = [](const QString &s, int start) -> int {
+            int depth = 0;
+            for (int i = start; i < s.size(); ++i) {
+                if (s[i] == QLatin1Char('[')) ++depth;
+                else if (s[i] == QLatin1Char(']')) { if (--depth == 0) return i; }
             }
-        }
-        if (listStart < 0 || listEnd <= listStart) {
+            return -1;
+        };
+
+        const auto polygonArgs = parseNamedArgs(argsStr, {"points"});
+        const QString pointsStr = polygonArgs.value(QStringLiteral("points"));
+        const QString pathsStr  = polygonArgs.value(QStringLiteral("paths"));
+
+        // ── Parse points ──────────────────────────────────────────────────
+        const int ptsStart = pointsStr.isEmpty()
+            ? argsStr.indexOf(QLatin1Char('['))
+            : pointsStr.indexOf(QLatin1Char('['));
+        const int ptsEnd = ptsStart >= 0 ? findMatchingBracket(
+            pointsStr.isEmpty() ? argsStr : pointsStr, ptsStart) : -1;
+        if (ptsStart < 0 || ptsEnd <= ptsStart) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("polygon on line %1: missing or malformed points");
             return false;
         }
-        const QString listText = normalized.mid(listStart + 1, listEnd - listStart - 1);
+        const QString &ptsSource = pointsStr.isEmpty() ? argsStr : pointsStr;
+        const QString ptsInner = ptsSource.mid(ptsStart + 1, ptsEnd - ptsStart - 1);
         QVector<QVector3D> points;
         int pos = 0;
-        while (pos < listText.size()) {
-            const int start = listText.indexOf(QLatin1Char('['), pos);
+        while (pos < ptsInner.size()) {
+            const int start = ptsInner.indexOf(QLatin1Char('['), pos);
             if (start < 0) break;
-            const int end = listText.indexOf(QLatin1Char(']'), start + 1);
+            const int end = findMatchingBracket(ptsInner, start);
             if (end < 0) break;
-            const QStringList parts = splitAtTopLevelCommas(listText.mid(start + 1, end - start - 1));
-            if (parts.size() != 2) {
+            const QStringList coords = splitAtTopLevelCommas(ptsInner.mid(start + 1, end - start - 1));
+            if (coords.size() != 2) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("polygon on line %1: expected [x, y] points");
                 return false;
             }
             qreal x = 0.0, y = 0.0;
             QString xe, ye;
-            if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
-                || !parseParamExpression(parts[1], state->variableValues, &y, &ye)) {
+            if (!parseParamExpression(coords[0], state->variableValues, &x, &xe)
+                || !parseParamExpression(coords[1], state->variableValues, &y, &ye)) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("polygon on line %1: could not parse point");
                 return false;
@@ -706,10 +754,40 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
                 *errorMessage = QStringLiteral("polygon on line %1: expected at least 3 points");
             return false;
         }
+
+        // ── Parse paths (optional) ────────────────────────────────────────
+        // paths=[[i0,i1,...], [j0,j1,...]] where first path = outer, rest = holes.
+        QVector<QVector<int>> paths;
+        if (!pathsStr.isEmpty()) {
+            const int outerStart = pathsStr.indexOf(QLatin1Char('['));
+            const int outerEnd   = outerStart >= 0 ? findMatchingBracket(pathsStr, outerStart) : -1;
+            if (outerStart >= 0 && outerEnd > outerStart) {
+                const QString outerInner = pathsStr.mid(outerStart + 1, outerEnd - outerStart - 1);
+                int p = 0;
+                while (p < outerInner.size()) {
+                    const int s = outerInner.indexOf(QLatin1Char('['), p);
+                    if (s < 0) break;
+                    const int e = findMatchingBracket(outerInner, s);
+                    if (e < 0) break;
+                    const QStringList idxStrs = splitAtTopLevelCommas(outerInner.mid(s + 1, e - s - 1));
+                    QVector<int> path;
+                    for (const QString &is : idxStrs) {
+                        bool ok = false;
+                        const int idx = is.trimmed().toInt(&ok);
+                        if (ok) path.append(idx);
+                    }
+                    if (path.size() >= 3) paths.append(path);
+                    p = e + 1;
+                }
+            }
+        }
+
         shape->id = state->nextShapeId++;
         shape->type = ShapeNode::Polygon2D;
         shape->name = QStringLiteral("Polygon %1").arg(shape->id);
         shape->polyhedronPoints = points;
+        if (!paths.isEmpty())
+            shape->polyhedronFaces = paths; // paths[0]=outer, paths[1..]=holes
         return true;
     }
 
@@ -803,6 +881,7 @@ static bool parsePolyhedron(const QString &line, PolyhedronData *data, QString *
         return false;
 
     const auto args = parseNamedArgs(argsStr, {"points", "faces"});
+    // "convexity" is a rendering hint only — parsed and silently ignored.
     const QString pointsStr = args.value(QStringLiteral("points"));
     const QString facesStr  = args.value(QStringLiteral("faces"));
     if (pointsStr.isEmpty() || facesStr.isEmpty()) {
@@ -943,7 +1022,7 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "if", "else", "color", "linear_extrude",
+        "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "if", "else", "color", "linear_extrude", "rotate_extrude",
         "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
@@ -1029,6 +1108,11 @@ static bool parseBlock(ParserState *state,
                     }
                 }
             }
+        }
+
+        // ── echo(...); / assert(...); — no geometry, skip silently ─────────
+        if (line.startsWith(QLatin1String("echo")) || line.startsWith(QLatin1String("assert"))) {
+            continue;
         }
 
         QString callName, callArgs;
@@ -1201,9 +1285,13 @@ static bool parseBlock(ParserState *state,
             } else if (operation == SceneDocument::TreeNode::Color) {
                 group.color = operationColor;
             } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
-                group.scale = transformVector;
+                group.scale = transformVector;            // x=height, y=twist, z=scaleVal
                 group.linearExtrudeCenter = extrudeCenter;
                 group.linearExtrudeSlices = extrudeSlices;
+                group.linearExtrudeTwist   = transformVector.y();
+                group.linearExtrudeScaleVal = transformVector.z() > 0.001f ? transformVector.z() : 1.0f;
+            } else if (operation == SceneDocument::TreeNode::RotateExtrude) {
+                group.scale = transformVector; // scale.x() = angle
             } else if (operation == SceneDocument::TreeNode::Resize) {
                 group.scale = transformVector;
             }
@@ -1212,6 +1300,7 @@ static bool parseBlock(ParserState *state,
                 || operation == SceneDocument::TreeNode::Scale
                 || operation == SceneDocument::TreeNode::Mirror
                 || operation == SceneDocument::TreeNode::LinearExtrude
+                || operation == SceneDocument::TreeNode::RotateExtrude
                 || operation == SceneDocument::TreeNode::Resize)
                 group.transformExpressions = transformExpressions;
 
@@ -1413,6 +1502,10 @@ static bool parseBlock(ParserState *state,
                                     childGroup.scale = childVec;
                                     childGroup.linearExtrudeCenter = childExtrudeCenter;
                                     childGroup.linearExtrudeSlices = childExtrudeSlices;
+                                    childGroup.linearExtrudeTwist    = childVec.y();
+                                    childGroup.linearExtrudeScaleVal = childVec.z() > 0.001f ? childVec.z() : 1.0f;
+                                } else if (childOp == SceneDocument::TreeNode::RotateExtrude) {
+                                    childGroup.scale = childVec;
                                 } else if (childOp == SceneDocument::TreeNode::Resize) {
                                     childGroup.scale = childVec;
                                 }
@@ -1421,6 +1514,7 @@ static bool parseBlock(ParserState *state,
                                     || childOp == SceneDocument::TreeNode::Scale
                                     || childOp == SceneDocument::TreeNode::Mirror
                                     || childOp == SceneDocument::TreeNode::LinearExtrude
+                                    || childOp == SceneDocument::TreeNode::RotateExtrude
                                     || childOp == SceneDocument::TreeNode::Resize)
                                     childGroup.transformExpressions = childExprs;
                                 innermost->children.append(childGroup);
@@ -1466,6 +1560,56 @@ static bool parseBlock(ParserState *state,
     return true;
 }
 
+// Splits a single line on { } ; that appear outside of () and [].
+// Handles compact OpenSCAD like: translate([0,0,0]) { sphere(r=3); }
+// → produces: "translate([0,0,0]) {", "sphere(r=3);", "}"
+static QVector<QString> expandInlineBlocks(const QString &line)
+{
+    QVector<QString> parts;
+    QString current;
+    int parenDepth   = 0;
+    int bracketDepth = 0;
+
+    for (const QChar ch : line) {
+        if (ch == QLatin1Char('(')) {
+            ++parenDepth;
+            current += ch;
+        } else if (ch == QLatin1Char(')')) {
+            --parenDepth;
+            current += ch;
+        } else if (ch == QLatin1Char('[')) {
+            ++bracketDepth;
+            current += ch;
+        } else if (ch == QLatin1Char(']')) {
+            --bracketDepth;
+            current += ch;
+        } else if (parenDepth == 0 && bracketDepth == 0 && ch == QLatin1Char('{')) {
+            const QString seg = current.trimmed();
+            parts.append(seg.isEmpty() ? QStringLiteral("{") : seg + QStringLiteral(" {"));
+            current.clear();
+        } else if (parenDepth == 0 && bracketDepth == 0 && ch == QLatin1Char('}')) {
+            const QString seg = current.trimmed();
+            if (!seg.isEmpty())
+                parts.append(seg);
+            parts.append(QStringLiteral("}"));
+            current.clear();
+        } else if (parenDepth == 0 && bracketDepth == 0 && ch == QLatin1Char(';')) {
+            const QString seg = current.trimmed();
+            if (!seg.isEmpty())
+                parts.append(seg + QLatin1Char(';'));
+            current.clear();
+        } else {
+            current += ch;
+        }
+    }
+
+    const QString tail = current.trimmed();
+    if (!tail.isEmpty())
+        parts.append(tail);
+
+    return parts;
+}
+
 static QVector<ParsedLine> normalizedLines(const QString &code)
 {
     QVector<ParsedLine> result;
@@ -1478,15 +1622,50 @@ static QVector<ParsedLine> normalizedLines(const QString &code)
     if (unclosed >= 0)
         cleaned = cleaned.left(unclosed);
 
-    const QStringList lines = cleaned.split('\n');
-    for (int i = 0; i < lines.size(); ++i) {
-        QString line = lines[i].trimmed();
-        const int commentIndex = line.indexOf(QStringLiteral("//"));
-        if (commentIndex >= 0)
-            line = line.left(commentIndex).trimmed();
-        if (line.isEmpty())
-            continue;
-        result.append({line, i + 1});
+    // Pass 1: join continuation lines (unbalanced parens/brackets at end of line).
+    // This turns multi-line expressions like:
+    //   translate([cos(a)*r,
+    //              sin(a)*r,
+    //              0]) {
+    // into a single text line before further processing.
+    QVector<QPair<QString, int>> joined; // (text, originalLineNumber)
+    {
+        QString acc;
+        int accLine = -1;
+        int pd = 0, bd = 0; // paren / bracket depth
+        const QStringList rawLines = cleaned.split(QLatin1Char('\n'));
+        for (int i = 0; i < rawLines.size(); ++i) {
+            QString line = rawLines[i].trimmed();
+            const int ci = line.indexOf(QStringLiteral("//"));
+            if (ci >= 0) line = line.left(ci).trimmed();
+            if (line.isEmpty()) continue;
+
+            if (acc.isEmpty()) accLine = i + 1;
+            acc += line;
+
+            for (const QChar ch : line) {
+                if      (ch == QLatin1Char('(')) ++pd;
+                else if (ch == QLatin1Char(')')) --pd;
+                else if (ch == QLatin1Char('[')) ++bd;
+                else if (ch == QLatin1Char(']')) --bd;
+            }
+
+            if (pd <= 0 && bd <= 0) {
+                pd = 0; bd = 0;
+                joined.append({acc, accLine});
+                acc.clear();
+            }
+        }
+        if (!acc.isEmpty())
+            joined.append({acc, accLine});
+    }
+
+    // Pass 2: split each joined line on { } ; at depth 0 (expandInlineBlocks).
+    for (const auto &entry : joined) {
+        for (const QString &part : expandInlineBlocks(entry.first)) {
+            if (!part.isEmpty())
+                result.append({part, entry.second});
+        }
     }
     return result;
 }
@@ -1867,6 +2046,10 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.scale = transformVector;
                 group.linearExtrudeCenter = extrudeCenter;
                 group.linearExtrudeSlices = extrudeSlices;
+                group.linearExtrudeTwist    = transformVector.y();
+                group.linearExtrudeScaleVal = transformVector.z() > 0.001f ? transformVector.z() : 1.0f;
+            } else if (operation == SceneDocument::TreeNode::RotateExtrude) {
+                group.scale = transformVector;
             } else if (operation == SceneDocument::TreeNode::Resize) {
                 group.scale = transformVector;
             }
@@ -1875,6 +2058,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 || operation == SceneDocument::TreeNode::Scale
                 || operation == SceneDocument::TreeNode::Mirror
                 || operation == SceneDocument::TreeNode::LinearExtrude
+                || operation == SceneDocument::TreeNode::RotateExtrude
                 || operation == SceneDocument::TreeNode::Resize)
                 group.transformExpressions = transformExpressions;
             sceneNode.children.append(group);
@@ -1994,6 +2178,12 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             continue;
         }
 
+        // ── echo(...); / assert(...); at top level — skip silently ──────────
+        if (line.startsWith(QLatin1String("echo")) || line.startsWith(QLatin1String("assert"))) {
+            ++state.index;
+            continue;
+        }
+
         // Brace-free single-child transform at top level.
         {
             SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
@@ -2071,6 +2261,10 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                                     childGroup.scale = childVec;
                                     childGroup.linearExtrudeCenter = childExtrudeCenter;
                                     childGroup.linearExtrudeSlices = childExtrudeSlices;
+                                    childGroup.linearExtrudeTwist    = childVec.y();
+                                    childGroup.linearExtrudeScaleVal = childVec.z() > 0.001f ? childVec.z() : 1.0f;
+                                } else if (childOp == SceneDocument::TreeNode::RotateExtrude) {
+                                    childGroup.scale = childVec;
                                 } else if (childOp == SceneDocument::TreeNode::Resize) {
                                     childGroup.scale = childVec;
                                 }
@@ -2079,6 +2273,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                                     || childOp == SceneDocument::TreeNode::Scale
                                     || childOp == SceneDocument::TreeNode::Mirror
                                     || childOp == SceneDocument::TreeNode::LinearExtrude
+                                    || childOp == SceneDocument::TreeNode::RotateExtrude
                                     || childOp == SceneDocument::TreeNode::Resize)
                                     childGroup.transformExpressions = childExprs;
                                 innermost->children.append(childGroup);

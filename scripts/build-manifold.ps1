@@ -36,29 +36,46 @@ function Patch-ManifoldParallelHeader {
     }
 
     $text = Get-Content $parallelHeader -Raw
-    if ($text -notmatch "std::reduce|std::inclusive_scan|std::exclusive_scan") {
-        return
+    # Normalise line endings to LF for consistent matching; we will restore CRLF at save.
+    $text = $text.Replace("`r`n", "`n")
+
+    # ── GCC 8 numeric fallbacks ────────────────────────────────────────────────
+    if ($text -match "std::reduce|std::inclusive_scan|std::exclusive_scan") {
+        $text = $text.Replace(
+            "return std::reduce(first, last, init, f);",
+            "for (auto it = first; it != last; ++it) {`n    init = f(init, *it);`n  }`n  return init;"
+        )
+        $text = $text.Replace(
+            "return std::reduce(range.begin(), range.end(), value, f);",
+            "for (auto it = range.begin(); it != range.end(); ++it) {`n              value = f(value, *it);`n            }`n            return value;"
+        )
+        $text = $text.Replace(
+            "std::inclusive_scan(first, last, d_first);",
+            "if (first == last) return;`n  T sum = *first;`n  *d_first = sum;`n  ++first;`n  ++d_first;`n  for (; first != last; ++first, ++d_first) {`n    sum = sum + *first;`n    *d_first = sum;`n  }"
+        )
+        # Replace stdlib call with sequential loop (still has alias bug — fixed below).
+        $text = $text.Replace(
+            "std::exclusive_scan(first, last, d_first, init, f);",
+            "for (; first != last; ++first, ++d_first) {`n    *d_first = init;`n    init = f(init, *first);`n  }"
+        )
+        Write-Host "Patched Manifold parallel.h for Qt MinGW GCC 8 numeric fallbacks."
     }
 
-    $text = $text.Replace(
-        "return std::reduce(first, last, init, f);",
-        "for (auto it = first; it != last; ++it) {`r`n    init = f(init, *it);`r`n  }`r`n  return init;"
-    )
-    $text = $text.Replace(
-        "return std::reduce(range.begin(), range.end(), value, f);",
-        "for (auto it = range.begin(); it != range.end(); ++it) {`r`n              value = f(value, *it);`r`n            }`r`n            return value;"
-    )
-    $text = $text.Replace(
-        "std::inclusive_scan(first, last, d_first);",
-        "if (first == last) return;`r`n  T sum = *first;`r`n  *d_first = sum;`r`n  ++first;`r`n  ++d_first;`r`n  for (; first != last; ++first, ++d_first) {`r`n    sum = sum + *first;`r`n    *d_first = sum;`r`n  }"
-    )
-    $text = $text.Replace(
-        "std::exclusive_scan(first, last, d_first, init, f);",
-        "for (; first != last; ++first, ++d_first) {`r`n    *d_first = init;`r`n    init = f(init, *first);`r`n  }"
-    )
+    # ── Hull fix: exclusive_scan alias bug (manifold-hull-fix.patch) ──────────
+    # When input and output iterators alias the same buffer, writing *d_first
+    # before reading *first corrupts the scan.  Save *first first.
+    $buggyLoop  = "for (; first != last; ++first, ++d_first) {`n    *d_first = init;`n    init = f(init, *first);`n  }"
+    $fixedLoop  = "for (; first != last; ++first, ++d_first) {`n    auto cur = *first;  // read BEFORE write -- fixes aliased/in-place usage`n    *d_first = init;`n    init = f(init, cur);`n  }"
+    if ($text.Contains("auto cur = *first")) {
+        Write-Host "Hull fix already applied to Manifold parallel.h - skipping."
+    } elseif ($text.Contains("*d_first = init;")) {
+        $text = $text.Replace($buggyLoop, $fixedLoop)
+        Write-Host "Applied hull fix to Manifold parallel.h (exclusive_scan alias bug)."
+    } else {
+        Write-Warning "Hull fix: expected loop pattern not found in parallel.h - manual check required."
+    }
 
     Set-Content -Path $parallelHeader -Value $text -NoNewline
-    Write-Host "Patched Manifold parallel.h for Qt MinGW GCC 8 numeric fallbacks."
 }
 
 if (!(Test-Path $cmake)) {

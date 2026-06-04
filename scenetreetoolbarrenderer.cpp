@@ -42,6 +42,7 @@ QStringList paletteTools()
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),
         QStringLiteral("polyhedron"),
+        QStringLiteral("rotate_extrude"),
         QStringLiteral("linear_extrude"),
         // ── Structure / control flow ──────────────────────────────────────────
         QStringLiteral("module"),

@@ -411,20 +411,76 @@ QString linearExtrudeFullLabel(const SceneDocument::TreeNode &node)
         .arg(h, c, t, sl, sc);
 }
 
+// The function-name part drawn as a static label; individual params follow.
+static const char *kLinearExtrudePrefix = "linear_extrude(";
+
+// Pixel offset from groupRect.left() where the expression text starts.
+// = iconLeft(30) + headerIconSize(24) + gap(10) = 64.
+static constexpr qreal kLinearExtrudeTextLeft = 64.0;
+
 QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF &metrics)
 {
-    const QString prefix = QStringLiteral("linear_extrude(height = ");
-    const qreal left = groupRect.left() + 68.0 + metrics.horizontalAdvance(prefix);
-    return QRectF(left,
-                  groupRect.top() + 7.0,
-                  qMax<qreal>(0.0, groupRect.right() - left - 8.0),
-                  16.0);
+    // Returns the pill rect for the height parameter (param index 0).
+    const qreal labelW = metrics.horizontalAdvance(QStringLiteral("h="));
+    const qreal left   = groupRect.left() + kLinearExtrudeTextLeft
+                         + metrics.horizontalAdvance(QLatin1String(kLinearExtrudePrefix))
+                         + labelW;
+    return QRectF(left, groupRect.top() + 7.0, qMax(20.0, 0.0), 14.0);
 }
 
-qreal linearExtrudeHeaderMinWidth(const QString & /*heightExpression*/, const QFontMetricsF & /*metrics*/)
+QString linearExtrudeExtraParams(const SceneDocument::TreeNode &node)
 {
-    // Full label is drawn as plain text; min width is based on any content
-    return 80.0;
+    QString extra;
+    if (node.transformExpressions.size() > 1) {
+        const QString twistStr = node.transformExpressions[1].trimmed();
+        if (!twistStr.isEmpty() && twistStr != QLatin1String("0"))
+            extra += QStringLiteral(", twist=") + twistStr;
+        else if (qAbs(node.linearExtrudeTwist) > 0.001f)
+            extra += QStringLiteral(", twist=") + QString::number(node.linearExtrudeTwist, 'g');
+    }
+    if (node.transformExpressions.size() > 2) {
+        const QString slicesStr = node.transformExpressions[2].trimmed();
+        if (!slicesStr.isEmpty() && slicesStr != QLatin1String("0"))
+            extra += QStringLiteral(", slices=") + slicesStr;
+        else if (node.linearExtrudeSlices > 0)
+            extra += QStringLiteral(", slices=") + QString::number(node.linearExtrudeSlices);
+    }
+    if (node.transformExpressions.size() > 3) {
+        const QString scaleStr = node.transformExpressions[3].trimmed();
+        if (!scaleStr.isEmpty() && scaleStr != QLatin1String("1"))
+            extra += QStringLiteral(", scale=") + scaleStr;
+        else if (qAbs(node.linearExtrudeScaleVal - 1.0f) > 0.001f)
+            extra += QStringLiteral(", scale=") + QString::number(node.linearExtrudeScaleVal, 'g');
+    }
+    return extra;
+}
+
+qreal linearExtrudeHeaderMinWidth(const QString &heightExpression,
+                                   const QFontMetricsF &metrics,
+                                   const QString &centerExpression,
+                                   const QString &twistExpression,
+                                   const QString &slicesExpression,
+                                   const QString &scaleExpression)
+{
+    // Mirrors linearExtrudeParamInfos() position logic.
+    qreal cursorX = kLinearExtrudeTextLeft
+                    + metrics.horizontalAdvance(QLatin1String(kLinearExtrudePrefix));
+
+    struct { QString label; QString expr; bool isNumber; } params[] = {
+        {QStringLiteral("h="),   heightExpression.trimmed().isEmpty()  ? QStringLiteral("20")    : heightExpression.trimmed(),  true},
+        {QStringLiteral(", c="), centerExpression.trimmed().isEmpty()  ? QStringLiteral("false") : centerExpression.trimmed(),  false},
+        {QStringLiteral(", t="), twistExpression.trimmed().isEmpty()   ? QStringLiteral("0")     : twistExpression.trimmed(),   true},
+        {QStringLiteral(", sl="),slicesExpression.trimmed().isEmpty()  ? QStringLiteral("0")     : slicesExpression.trimmed(),  true},
+        {QStringLiteral(", sc="),scaleExpression.trimmed().isEmpty()   ? QStringLiteral("1")     : scaleExpression.trimmed(),   true},
+    };
+    for (const auto &p : params) {
+        const qreal labelW = metrics.horizontalAdvance(p.label);
+        const qreal exprW  = metrics.horizontalAdvance(p.expr);
+        const qreal pillW  = p.isNumber ? qMax(exprW + 8.0, 20.0) : exprW + 8.0;
+        cursorX += labelW + pillW;
+    }
+    cursorX += metrics.horizontalAdvance(QLatin1String(")"));
+    return cursorX + 36.0; // 36 = right margin for chevron
 }
 
 QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect,
@@ -437,6 +493,103 @@ QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect
     return expressionSpansInTextRect(linearExtrudeHeightTextRect(groupRect, metrics),
                                      expression,
                                      metrics);
+}
+
+QVector<LinearExtrudeParamInfo> linearExtrudeParamInfos(
+    const QRectF &groupRect,
+    const QString &heightExpression,
+    const QString &centerExpression,
+    const QString &twistExpression,
+    const QString &slicesExpression,
+    const QString &scaleExpression,
+    const QFontMetricsF &metrics)
+{
+    // textLeft matches the renderer: iconRect.right() + 10 = rect.left() + 30 + 24 + 10 = rect.left() + 64
+    const qreal textLeft = groupRect.left() + kLinearExtrudeTextLeft;
+    const qreal pillTop  = groupRect.top() + 7.0;
+    const qreal pillH    = 14.0;
+
+    // Cursor starts right after the static prefix "linear_extrude("
+    qreal cursorX = textLeft + metrics.horizontalAdvance(QLatin1String(kLinearExtrudePrefix));
+
+    struct ParamDef { int index; QString label; QString expression; bool isNumber; };
+    const QVector<ParamDef> defs = {
+        {0, QStringLiteral("h="),   heightExpression.trimmed().isEmpty()  ? QStringLiteral("20")    : heightExpression.trimmed(),  true},
+        {1, QStringLiteral(", c="), centerExpression.trimmed().isEmpty()  ? QStringLiteral("false") : centerExpression.trimmed(),  false},
+        {2, QStringLiteral(", t="), twistExpression.trimmed().isEmpty()   ? QStringLiteral("0")     : twistExpression.trimmed(),   true},
+        {3, QStringLiteral(", sl="),slicesExpression.trimmed().isEmpty()  ? QStringLiteral("0")     : slicesExpression.trimmed(),  true},
+        {4, QStringLiteral(", sc="),scaleExpression.trimmed().isEmpty()   ? QStringLiteral("1")     : scaleExpression.trimmed(),   true},
+    };
+
+    QVector<LinearExtrudeParamInfo> infos;
+    for (const ParamDef &def : defs) {
+        LinearExtrudeParamInfo info;
+        info.paramIndex = def.index;
+        info.label      = def.label;
+        info.expression = def.expression;
+        info.isNumber   = def.isNumber;
+
+        const qreal labelW = metrics.horizontalAdvance(def.label);
+        const qreal exprW  = metrics.horizontalAdvance(def.expression);
+        const qreal pillW  = def.isNumber ? qMax(exprW + 8.0, 20.0) : exprW + 8.0;
+
+        info.textRect = QRectF(cursorX + labelW, pillTop, pillW, pillH);
+        cursorX += labelW + pillW; // advance by full pill width, not just text width
+        infos.append(info);
+    }
+
+    return infos;
+}
+
+// ── rotate_extrude layout helpers ──────────────────────────────────────────
+
+static const char *kRotateExtrudePrefix = "rotate_extrude(angle=";
+static constexpr qreal kRotateExtrudeTextLeft = 64.0;
+
+QString rotateExtrudeAngleExpression(const SceneDocument::TreeNode &node)
+{
+    if (!node.transformExpressions.isEmpty()) {
+        const QString expr = node.transformExpressions.first().trimmed();
+        if (!expr.isEmpty())
+            return expr;
+    }
+    const qreal angle = node.scale.x();
+    return QString::number(angle, 'g');
+}
+
+qreal rotateExtrudeHeaderMinWidth(const QString &angleExpression,
+                                   const QFontMetricsF &metrics)
+{
+    const QString expr = angleExpression.trimmed().isEmpty()
+        ? QStringLiteral("360") : angleExpression.trimmed();
+    const qreal prefixW = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
+    const qreal exprW   = metrics.horizontalAdvance(expr);
+    const qreal pillW   = qMax(exprW + 8.0, 20.0);
+    const qreal closeW  = metrics.horizontalAdvance(QStringLiteral(")"));
+    return kRotateExtrudeTextLeft + prefixW + pillW + closeW + 36.0;
+}
+
+QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
+    const QRectF &groupRect,
+    const QString &angleExpression,
+    const QFontMetricsF &metrics)
+{
+    const QString expr = angleExpression.trimmed().isEmpty()
+        ? QStringLiteral("360") : angleExpression.trimmed();
+
+    const qreal textLeft = groupRect.left() + kRotateExtrudeTextLeft;
+    const qreal prefixW  = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
+    const qreal exprW    = metrics.horizontalAdvance(expr);
+    const qreal pillW    = qMax(exprW + 8.0, 20.0);
+    const qreal pillTop  = groupRect.top() + 7.0;
+    const qreal pillH    = 14.0;
+
+    RotateExtrudeParamInfo info;
+    info.paramIndex = 0;
+    info.expression = expr;
+    info.textRect   = QRectF(textLeft + prefixW, pillTop, pillW, pillH);
+
+    return {info};
 }
 
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count)

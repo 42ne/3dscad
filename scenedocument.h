@@ -68,6 +68,9 @@ public:
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
+    bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
+                                          float twist, int slices, float scaleVal,
+                                          const QStringList &transformExpressions = QStringList());
     bool updateGroupColor(int groupId, const QColor &color);
 
     // Polyhedron face index helpers

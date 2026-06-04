@@ -185,6 +185,15 @@ QSizeF previewSizeForTool(const QString &tool)
     if (tool == "linear_extrude")
         return QSizeF(qMax(GroupWideMinWidth,
                            linearExtrudeHeaderMinWidth(QStringLiteral("20"),
+                                                        QFontMetricsF(sceneTreeGraphicsFont()),
+                                                        QStringLiteral("false"),
+                                                        QStringLiteral("0"),
+                                                        QStringLiteral("0"),
+                                                        QStringLiteral("1"))),
+                      GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "rotate_extrude")
+        return QSizeF(qMax(GroupWideMinWidth,
+                           rotateExtrudeHeaderMinWidth(QStringLiteral("360"),
                                                        QFontMetricsF(sceneTreeGraphicsFont()))),
                       GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "color")

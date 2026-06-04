@@ -34,6 +34,20 @@ struct ExpressionTextSpan {
     bool number = false;
 };
 
+struct LinearExtrudeParamInfo {
+    int paramIndex = 0;    // 0=height, 1=center, 2=twist, 3=slices, 4=scale
+    QString label;          // e.g. "height=", ", center=", ", twist=", etc.
+    QString expression;     // e.g. "15", "true", "0", "1", "0.3"
+    QRectF textRect;        // interactive pill area (in group-relative coords)
+    bool isNumber = true;   // false for center (boolean toggle)
+};
+
+struct RotateExtrudeParamInfo {
+    int paramIndex = 0;    // always 0 (angle)
+    QString expression;    // e.g. "360"
+    QRectF textRect;       // interactive pill area
+};
+
 QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis);
 qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node);
 QRectF transformParameterControlRect(const QRectF &groupRect, int axis, qreal headerWidth = TransformHeaderWidth);
@@ -45,9 +59,32 @@ qreal forLoopHeaderMinWidth(const QString &variableName, const QString &rangeExp
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node);
+QString linearExtrudeParam(const SceneDocument::TreeNode &node, int index, const QString &fallback);
+QString linearExtrudeExtraParams(const SceneDocument::TreeNode &node);
 QRectF linearExtrudeHeightTextRect(const QRectF &groupRect, const QFontMetricsF &metrics);
-qreal linearExtrudeHeaderMinWidth(const QString &heightExpression, const QFontMetricsF &metrics);
+qreal linearExtrudeHeaderMinWidth(const QString &heightExpression,
+                                   const QFontMetricsF &metrics,
+                                   const QString &centerExpression,
+                                   const QString &twistExpression,
+                                   const QString &slicesExpression,
+                                   const QString &scaleExpression);
 QVector<ExpressionTextSpan> linearExtrudeHeightTextSpans(const QRectF &groupRect, const QString &heightExpression, const QFontMetricsF &metrics);
+QVector<LinearExtrudeParamInfo> linearExtrudeParamInfos(
+    const QRectF &groupRect,
+    const QString &heightExpression,
+    const QString &centerExpression,
+    const QString &twistExpression,
+    const QString &slicesExpression,
+    const QString &scaleExpression,
+    const QFontMetricsF &metrics);
+QString rotateExtrudeAngleExpression(const SceneDocument::TreeNode &node);
+qreal rotateExtrudeHeaderMinWidth(const QString &angleExpression,
+                                   const QFontMetricsF &metrics);
+QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
+    const QRectF &groupRect,
+    const QString &angleExpression,
+    const QFontMetricsF &metrics);
+
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);

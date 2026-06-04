@@ -68,6 +68,7 @@ private:
 
     ExampleBrowserMenu      *m_exampleBrowser          = nullptr;
     ExampleBrowserMenu      *m_exampleBrowserTutorials = nullptr;
+    ExampleBrowserMenu      *m_exampleBrowserTests     = nullptr;
     ViewportWidget          *m_viewport          = nullptr;
     SceneTreeGraphicsWidget *m_sceneTreeGraphics  = nullptr;
     CodeEditorPanel         *m_codeEditorPanel    = nullptr;

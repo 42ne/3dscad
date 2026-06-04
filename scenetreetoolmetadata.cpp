@@ -143,6 +143,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Translate;
         return true;
     }
+    if (normalized == QStringLiteral("rotate_extrude")) {
+        *operation = SceneDocument::TreeNode::RotateExtrude;
+        return true;
+    }
     if (normalized.contains("rotate")) {
         *operation = SceneDocument::TreeNode::Rotate;
         return true;
@@ -202,6 +206,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Polyhedron, "polyhedron", QColor(218, 238, 228), 300.0},
     {SceneDocument::TreeNode::LinearExtrude, "linear_extrude", QColor(222, 238, 232), GroupWideMinWidth},
     {SceneDocument::TreeNode::Resize, "resize", QColor(218, 238, 218), GroupWideMinWidth},
+    {SceneDocument::TreeNode::RotateExtrude, "rotate_extrude", QColor(225, 235, 245), GroupWideMinWidth},
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},

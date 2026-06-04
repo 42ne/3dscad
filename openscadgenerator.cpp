@@ -329,6 +329,18 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::RotateExtrude) {
+        const QString angleExpr = !node.transformExpressions.isEmpty()
+                                      && !node.transformExpressions.first().trimmed().isEmpty()
+                                  ? node.transformExpressions.first().trimmed()
+                                  : QString::number(node.scale.x(), 'g');
+        *code += QString("%1rotate_extrude(angle=%2) {\n").arg(indent, angleExpr);
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+        *code += indent + "}\n";
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
         const QString heightExpr = !node.transformExpressions.isEmpty()
                                        && !node.transformExpressions.first().trimmed().isEmpty()

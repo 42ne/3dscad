@@ -20,6 +20,9 @@ static QMutex s_manifoldMutex;
 
 using manifold::Manifold;
 using manifold::MeshGL;
+using manifold::Polygons;
+using manifold::SimplePolygon;
+using manifold::vec2;
 using manifold::vec3;
 
 static QVector3D faceNormal(const QVector3D &a, const QVector3D &b, const QVector3D &c)
@@ -80,7 +83,11 @@ static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), shape.center);
     } else if (shape.type == ShapeNode::Square) {
-        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), shape.center);
+        // z is always 0..0.1 so linear_extrude can scale it to 0..height.
+        // XY centering is handled separately to avoid coupling to z.
+        result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), false);
+        if (shape.center)
+            result = result.Translate(vec3(-shape.size.x() * 0.5f, -shape.size.y() * 0.5f, 0.0f));
     } else if (shape.type == ShapeNode::Polyhedron) {
         ShapeNode localShape = shape;
         localShape.position = QVector3D();
@@ -96,13 +103,104 @@ static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
     } else if (shape.type == ShapeNode::Cone) {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, circularSegments, shape.center);
     } else if (shape.type == ShapeNode::Circle) {
-        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, fn > 0 ? circularSegments : 64, true);
+        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, fn > 0 ? circularSegments : 64, false);
     } else {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, circularSegments, shape.center);
     }
 
     return result.Rotate(shape.rotation.x(), shape.rotation.y(), shape.rotation.z())
         .Translate(vec3(shape.position.x(), shape.position.y(), shape.position.z()));
+}
+
+// Recursively collect 2D polygons from rotate_extrude children.
+// Applies XY translation offsets from Translate group wrappers.
+// This is needed because rotate_extrude profiles are often written as:
+//   translate([r, 0, 0]) { circle(d=tube); }
+static void collectRotateExtrudePolygons(
+    const SceneDocument::TreeNode &node,
+    const SceneDocument &scene,
+    const QHash<QString, qreal> &variables,
+    int segs,
+    Polygons &out)
+{
+    if (node.type == SceneDocument::TreeNode::Primitive) {
+        const ShapeNode *shape = scene.shapeById(node.shapeId);
+        if (!shape) return;
+        const ShapeNode ev = shapeWithEvaluatedParameters(*shape, variables);
+        SimplePolygon poly;
+        if (ev.type == ShapeNode::Circle) {
+            for (int i = 0; i < segs; ++i) {
+                const double a = 2.0 * M_PI * i / segs;
+                poly.push_back({ev.radius * std::cos(a),
+                                ev.radius * std::sin(a)});
+            }
+        } else if (ev.type == ShapeNode::Square) {
+            const float hx = ev.size.x() * 0.5f;
+            const float hy = ev.size.y() * 0.5f;
+            const float cx = ev.center ? 0.0f : hx;
+            const float cy = ev.center ? 0.0f : hy;
+            poly = {{-hx + cx, -hy + cy},
+                    { hx + cx, -hy + cy},
+                    { hx + cx,  hy + cy},
+                    {-hx + cx,  hy + cy}};
+        } else if (ev.type == ShapeNode::Polygon2D) {
+            for (const QVector3D &pt : ev.polyhedronPoints)
+                poly.push_back({pt.x(), pt.y()});
+        }
+        if (static_cast<int>(poly.size()) >= 3)
+            out.push_back(poly);
+        return;
+    }
+
+    if (node.type != SceneDocument::TreeNode::Group)
+        return;
+
+    // Collect children first (innermost transform applies first).
+    Polygons childPolys;
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectRotateExtrudePolygons(child, scene, variables, segs, childPolys);
+
+    // Apply this node's 2D transform to the collected child polygons.
+    if (node.operation == SceneDocument::TreeNode::Translate) {
+        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
+        const float tx = ev2.position.x();
+        const float ty = ev2.position.y();
+        if (qAbs(tx) > 0.001f || qAbs(ty) > 0.001f) {
+            for (SimplePolygon &poly : childPolys)
+                for (vec2 &pt : poly) {
+                    pt.x += tx;
+                    pt.y += ty;
+                }
+        }
+    } else if (node.operation == SceneDocument::TreeNode::Scale) {
+        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
+        const float sx = ev2.scale.x();
+        const float sy = ev2.scale.y();
+        if (qAbs(sx - 1.0f) > 0.001f || qAbs(sy - 1.0f) > 0.001f) {
+            for (SimplePolygon &poly : childPolys)
+                for (vec2 &pt : poly) {
+                    pt.x *= sx;
+                    pt.y *= sy;
+                }
+        }
+    } else if (node.operation == SceneDocument::TreeNode::Rotate) {
+        const SceneDocument::TreeNode ev2 = nodeWithEvaluatedTransform(node, variables);
+        const float angle = ev2.rotation.z();
+        if (qAbs(angle) > 0.001f) {
+            const float rad = angle * M_PI / 180.0f;
+            const float c = std::cos(rad);
+            const float s = std::sin(rad);
+            for (SimplePolygon &poly : childPolys)
+                for (vec2 &pt : poly) {
+                    const float nx = pt.x * c - pt.y * s;
+                    const float ny = pt.x * s + pt.y * c;
+                    pt.x = nx;
+                    pt.y = ny;
+                }
+        }
+    }
+
+    out.insert(out.end(), childPolys.begin(), childPolys.end());
 }
 
 static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
@@ -116,6 +214,7 @@ static bool isUnionLikeOperation(SceneDocument::TreeNode::Operation operation)
            || operation == SceneDocument::TreeNode::Mirror
            || operation == SceneDocument::TreeNode::Color
            || operation == SceneDocument::TreeNode::LinearExtrude
+           || operation == SceneDocument::TreeNode::RotateExtrude
            || operation == SceneDocument::TreeNode::Resize;
 }
 
@@ -130,10 +229,8 @@ static Manifold applyNodeTransform(const Manifold &source, const SceneDocument::
     if (node.operation == SceneDocument::TreeNode::Resize)
         return source.Scale(vec3(node.scale.x(), node.scale.y(), node.scale.z()));
     if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
-        constexpr float baseThickness = 0.1f;
-        const float height = qMax(0.1f, node.scale.x());
-        const float es = node.linearExtrudeScaleVal > 0.01f ? node.linearExtrudeScaleVal : 1.0f;
-        return source.Scale(vec3(es, es, height / baseThickness));
+        // Handled directly in evaluateNode via Manifold::Extrude — no post-transform needed.
+        return source;
     }
     if (node.operation == SceneDocument::TreeNode::Mirror) {
         const QVector3D &n = node.position;
@@ -266,6 +363,44 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (parts.empty())
             return {};
         return applyNodeTransform(Manifold::Hull(parts), evaluatedNode);
+    }
+
+    if (evaluatedNode.operation == SceneDocument::TreeNode::LinearExtrude) {
+        const int fn     = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
+        const float height = qMax(0.01f, evaluatedNode.scale.x());
+        const float twist  = evaluatedNode.linearExtrudeTwist;
+        const int slices   = evaluatedNode.linearExtrudeSlices > 0
+                                 ? evaluatedNode.linearExtrudeSlices
+                                 : (qAbs(twist) > 0.001f ? qMax(2, fn > 0 ? fn : 20) : 0);
+        const float es = evaluatedNode.linearExtrudeScaleVal > 0.01f
+                             ? evaluatedNode.linearExtrudeScaleVal : 1.0f;
+        const int profileSegs = fn > 0 ? qMax(3, fn) : 32;
+
+        Polygons polygons;
+        for (const SceneDocument::TreeNode *child : geometryChildren)
+            collectRotateExtrudePolygons(*child, scene, localVariables, profileSegs, polygons);
+        if (polygons.empty())
+            return {};
+
+        Manifold extruded = Manifold::Extrude(polygons, static_cast<double>(height),
+                                              slices,
+                                              static_cast<double>(twist),
+                                              vec2(es, es));
+        if (evaluatedNode.linearExtrudeCenter)
+            extruded = extruded.Translate(vec3(0.0, 0.0, static_cast<double>(-height * 0.5f)));
+        return extruded;
+    }
+
+    if (evaluatedNode.operation == SceneDocument::TreeNode::RotateExtrude) {
+        const int fn = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
+        const float angle = qBound(0.1f, evaluatedNode.scale.x(), 360.0f);
+        const int segs = fn > 0 ? qMax(3, fn) : 32;
+        Polygons polygons;
+        for (const SceneDocument::TreeNode *child : geometryChildren)
+            collectRotateExtrudePolygons(*child, scene, localVariables, segs, polygons);
+        if (polygons.empty())
+            return {};
+        return applyNodeTransform(Manifold::Revolve(polygons, fn > 0 ? fn : 0, static_cast<double>(angle)), evaluatedNode);
     }
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::Minkowski) {
