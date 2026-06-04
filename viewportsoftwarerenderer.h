@@ -43,6 +43,9 @@ public:
         // CSG preview
         const CsgPreview *cachedCsgPreview = nullptr;
         bool csgComputing = false;
+        // Per-group selection mesh (separate from CSG preview)
+        const SceneMesh *cachedSelectionMesh = nullptr;
+        int cachedSelectionMeshGroupId = 0;
         // Animation
         float selectionShimmerPhase = 0.0f;
         // Output buffers (pointers to ViewportWidget members, filled during render)

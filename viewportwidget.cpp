@@ -7,6 +7,8 @@
 
 #include "scenedocument.h"
 #include "scenemesh.h"
+#include "manifoldcsg.h"
+#include <QPair>
 #include "scenetreegraphicshelpers.h"
 
 #include <QCheckBox>
@@ -123,6 +125,8 @@ ViewportWidget::ViewportWidget(QWidget *parent)
     });
     connect(&m_csgWatcher, &QFutureWatcher<CsgPreview>::finished,
             this, &ViewportWidget::onCsgPreviewReady);
+    connect(&m_selectionMeshWatcher, &QFutureWatcher<QPair<int, SceneMesh>>::finished,
+            this, &ViewportWidget::onSelectionMeshReady);
 
     updateViewportControls();
 
@@ -156,6 +160,16 @@ void ViewportWidget::setSelectedIndex(int index)
     m_glRenderer.clearMeshCache();
     updateSelectionShimmerTimer();
 
+    // Build selection mesh for the primitive synchronously (no Manifold needed).
+    // Use m_cachedSelectionMeshGroupId = -1 as the "primitive selection" marker.
+    if (index >= 0 && m_scene && m_shapes && index < m_shapes->size()) {
+        m_cachedSelectionMesh = interactionMeshForShape(m_scene, m_shapes->at(index));
+        m_cachedSelectionMeshGroupId = -1;
+    } else {
+        m_cachedSelectionMesh = SceneMesh();
+        m_cachedSelectionMeshGroupId = 0;
+    }
+
     update();
 }
 
@@ -167,6 +181,59 @@ void ViewportWidget::setSelectedGroupId(int groupId)
     m_glRenderer.clearMeshCache();
     updateSelectionShimmerTimer();
 
+    if (groupId > 0) {
+        const uint fp = m_scene ? sceneFingerprint(*m_scene) : 0;
+        if (groupId == m_cachedSelectionMeshGroupId && fp == m_cachedSelectionMeshFingerprint) {
+            // Cache hit — mesh already correct, nothing to do
+        } else {
+            // Clear stale cache and launch a lightweight async compute
+            m_cachedSelectionMesh = SceneMesh();
+            m_cachedSelectionMeshGroupId = 0;
+            startAsyncSelectionMeshCompute(groupId);
+        }
+    } else {
+        m_cachedSelectionMesh = SceneMesh();
+        m_cachedSelectionMeshGroupId = 0;
+    }
+
+    update();
+}
+
+void ViewportWidget::startAsyncSelectionMeshCompute(int groupId)
+{
+    if (!m_scene || groupId <= 0) return;
+    if (m_selectionMeshWatcher.isRunning()) {
+        m_selectionMeshWatcher.cancel();
+        m_selectionMeshWatcher.waitForFinished();
+    }
+    m_pendingSelectionGroupId = groupId;
+    const SceneDocument::Snapshot snap = m_scene->snapshot();
+    const uint fp = sceneFingerprint(*m_scene);
+    m_selectionMeshWatcher.setFuture(
+        QtConcurrent::run([snap, groupId, fp]() -> QPair<int, SceneMesh> {
+            SceneDocument doc;
+            doc.restoreSnapshot(snap);
+            const SceneDocument::TreeNode *node = doc.treeNodeById(groupId);
+            if (!node || (node->type != SceneDocument::TreeNode::Group
+                          && node->type != SceneDocument::TreeNode::ModuleCall))
+                return {groupId, SceneMesh()};
+            SceneMesh mesh;
+            buildManifoldNodeMesh(*node, doc, &mesh, nullptr);
+            Q_UNUSED(fp)
+            return {groupId, mesh};
+        }));
+}
+
+void ViewportWidget::onSelectionMeshReady()
+{
+    const auto result = m_selectionMeshWatcher.result();
+    const int resultGroupId = result.first;
+    if (resultGroupId == m_selectedGroupId && m_scene) {
+        m_cachedSelectionMesh = result.second;
+        m_cachedSelectionMeshGroupId = resultGroupId;
+        m_cachedSelectionMeshFingerprint = sceneFingerprint(*m_scene);
+        m_glRenderer.clearMeshCache();
+    }
     update();
 }
 
@@ -566,6 +633,8 @@ void ViewportWidget::paintSoftware(QPainter &painter, bool drawSceneMeshes)
     ctx.draggingGroup = m_draggingGroup;
     ctx.cachedCsgPreview = &m_cachedCsgPreview;
     ctx.csgComputing = m_csgComputing;
+    ctx.cachedSelectionMesh = m_cachedSelectionMesh.triangles.isEmpty() ? nullptr : &m_cachedSelectionMesh;
+    ctx.cachedSelectionMeshGroupId = m_cachedSelectionMeshGroupId;
     ctx.selectionShimmerPhase = m_selectionShimmerPhase;
     ctx.pickBuffer = &m_pickBuffer;
     ctx.depthBuffer = &m_depthBuffer;

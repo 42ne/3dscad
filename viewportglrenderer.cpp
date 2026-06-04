@@ -405,19 +405,22 @@ void ViewportGLRenderer::renderPreview(ViewportWidget &w)
             }
             return;
         }
-        // Priority 1: per-group 3D selection mesh (built async, exact match by treeNodeId)
-        bool foundSelectionGroup = false;
-        for (const CsgRenderItem &item : w.m_cachedCsgPreview.items) {
-            if (item.isSelectionGroup
-                    && itemBelongsToSelection(item, w.m_shapes, selectedShapeIds, selectedTreeNodeId)) {
-                visitor(item.mesh);
-                foundSelectionGroup = true;
-            }
+        // Priority 1a: group selection — per-group 3D mesh (async computed)
+        if (selectedTreeNodeId > 0
+                && w.m_cachedSelectionMeshGroupId == selectedTreeNodeId
+                && !w.m_cachedSelectionMesh.triangles.isEmpty()) {
+            visitor(w.m_cachedSelectionMesh);
+            return;
         }
-        if (foundSelectionGroup) return;
+        // Priority 1b: primitive selection — interaction mesh (synchronously built)
+        if (selectedTreeNodeId == 0 && w.m_selectedIndex >= 0
+                && w.m_cachedSelectionMeshGroupId == -1
+                && !w.m_cachedSelectionMesh.triangles.isEmpty()) {
+            visitor(w.m_cachedSelectionMesh);
+            return;
+        }
 
-        // Fallback: flat helper meshes (primitive selection, or group selection
-        // while per-group mesh is still computing)
+        // Fallback: flat helpers (while group selection mesh is still computing)
         for (const CsgRenderItem &item : w.m_cachedCsgPreview.items) {
             const bool selected = !w.m_draggingGroup
                                   && itemBelongsToSelection(item, w.m_shapes, selectedShapeIds, selectedTreeNodeId);
@@ -446,27 +449,38 @@ void ViewportGLRenderer::renderPreview(ViewportWidget &w)
         QVector<OpenGLLineVertex> structuralEdgeCoreVerts;
         QVector<OpenGLLineVertex> silhouetteGlowVerts;
         QVector<OpenGLLineVertex> silhouetteCoreVerts;
-        const QVector4D hiddenEdgeGlowColor = colorToVector4(QColor(180, 210, 240, 18));
-        const QVector4D hiddenEdgeCoreColor = colorToVector4(QColor(210, 228, 248, 40));
+        const QVector4D hiddenEdgeGlowColor = colorToVector4(QColor(80, 180, 255, 90));
+        const QVector4D hiddenEdgeCoreColor = colorToVector4(QColor(140, 210, 255, 180));
         const QVector4D structuralEdgeGlowColor = colorToVector4(QColor(255, 183, 64, 110));
         const QVector4D structuralEdgeCoreColor = colorToVector4(QColor(255, 218, 128, 220));
         const QVector4D silhouetteGlowColor = colorToVector4(QColor(255, 185, 60, 175));
         const QVector4D silhouetteCoreColor = colorToVector4(QColor(255, 222, 134, 255));
         for (const ViewportSelectionEdgeCandidate &edge : m_selectionEdgeCandidates) {
             if (edge.structural) {
-                structuralEdgeGlowVerts.append({edge.from, structuralEdgeGlowColor});
-                structuralEdgeGlowVerts.append({edge.to, structuralEdgeGlowColor});
-                structuralEdgeCoreVerts.append({edge.from, structuralEdgeCoreColor});
-                structuralEdgeCoreVerts.append({edge.to, structuralEdgeCoreColor});
-                hiddenEdgeGlowVerts.append({edge.from, hiddenEdgeGlowColor});
-                hiddenEdgeGlowVerts.append({edge.to, hiddenEdgeGlowColor});
-                hiddenEdgeCoreVerts.append({edge.from, hiddenEdgeCoreColor});
-                hiddenEdgeCoreVerts.append({edge.to, hiddenEdgeCoreColor});
+                // Classify by face visibility: visible face → gold, all faces hidden → blue
+                bool hasVisibleFace = edge.normals.isEmpty();
+                for (const QVector3D &normal : edge.normals) {
+                    if (w.m_camera.toCameraDirection(normal).z() < 0.0f) {
+                        hasVisibleFace = true;
+                        break;
+                    }
+                }
+                if (hasVisibleFace) {
+                    structuralEdgeGlowVerts.append({edge.from, structuralEdgeGlowColor});
+                    structuralEdgeGlowVerts.append({edge.to, structuralEdgeGlowColor});
+                    structuralEdgeCoreVerts.append({edge.from, structuralEdgeCoreColor});
+                    structuralEdgeCoreVerts.append({edge.to, structuralEdgeCoreColor});
+                } else {
+                    hiddenEdgeGlowVerts.append({edge.from, hiddenEdgeGlowColor});
+                    hiddenEdgeGlowVerts.append({edge.to, hiddenEdgeGlowColor});
+                    hiddenEdgeCoreVerts.append({edge.from, hiddenEdgeCoreColor});
+                    hiddenEdgeCoreVerts.append({edge.to, hiddenEdgeCoreColor});
+                }
             } else {
                 bool hasVisibleFace = false;
                 bool hasHiddenFace  = false;
                 for (const QVector3D &normal : edge.normals) {
-                    const bool visible = w.m_camera.toCameraDirection(normal).z() >= 0.0f;
+                    const bool visible = w.m_camera.toCameraDirection(normal).z() < 0.0f;
                     hasVisibleFace = hasVisibleFace || visible;
                     hasHiddenFace  = hasHiddenFace  || !visible;
                 }

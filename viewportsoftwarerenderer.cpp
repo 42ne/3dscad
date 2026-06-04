@@ -200,16 +200,18 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
         } else {
             const CsgPreview &preview = *ctx.cachedCsgPreview;
             csgStatus = ctx.csgComputing ? QStringLiteral("CSG preview: computing…") : preview.statusText;
-            // Check if a per-group 3D selection mesh is available (takes priority
-            // over flat 2D helpers which show wrong geometry for LinearExtrude).
-            bool hasSelectionGroupMatch = false;
-            for (const CsgRenderItem &item : preview.items) {
-                if (item.isSelectionGroup
-                        && itemBelongsToSelection(item, ctx.shapes, selectedShapeIds, selectedTreeNodeId)) {
-                    hasSelectionGroupMatch = true;
-                    break;
-                }
-            }
+            // Check if the dedicated selection mesh for the current group is ready.
+            // True when a dedicated 3D/interaction selection mesh is available.
+            const bool hasSelectionGroupMatch =
+                (selectedTreeNodeId > 0
+                 && ctx.cachedSelectionMeshGroupId == selectedTreeNodeId
+                 && ctx.cachedSelectionMesh != nullptr
+                 && !ctx.cachedSelectionMesh->triangles.isEmpty())
+                ||
+                (selectedTreeNodeId == 0 && ctx.selectedIndex >= 0
+                 && ctx.cachedSelectionMeshGroupId == -1
+                 && ctx.cachedSelectionMesh != nullptr
+                 && !ctx.cachedSelectionMesh->triangles.isEmpty());
 
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = !ctx.draggingGroup
@@ -228,9 +230,8 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                     if (!drawSceneMeshes)
                         continue;
 
-                    if (item.isSelectionGroup && selected) {
-                        // Per-group 3D mesh: draw its edges as selection outline
-                        appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, false);
+                    if (false && selected) {
+                        // (legacy isSelectionGroup path — replaced by cachedSelectionMesh)
                     } else if (!item.isSelectionGroup && item.booleanMode == ShapeNode::Subtract) {
                         const bool selectedCut = selected;
                         QColor cutColor = selectedCut
@@ -254,6 +255,10 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                     appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, false);
                 }
             }
+
+            // Draw edges from the dedicated 3D selection mesh
+            if (hasSelectionGroupMatch && ctx.cachedSelectionMesh)
+                appendCutFeatureEdges(selectedFeatureLines, *ctx.cachedSelectionMesh, selectionFeatureColor, false);
         }
 
         for (const Line2D &line : backgroundHelperLines) {

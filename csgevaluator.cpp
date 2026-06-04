@@ -639,15 +639,6 @@ static QVector3D transformPositionForGroup(const QVector3D &point, const SceneDo
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
     if (group.operation == SceneDocument::TreeNode::Resize)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
-    if (group.operation == SceneDocument::TreeNode::LinearExtrude) {
-        constexpr float baseThickness = 0.1f;
-        const float height = qMax(0.1f, group.scale.x());
-        const float es = group.linearExtrudeScaleVal > 0.01f ? group.linearExtrudeScaleVal : 1.0f;
-        float z = point.z() * (height / baseThickness);
-        if (group.linearExtrudeCenter)
-            z -= height * 0.5f;
-        return QVector3D(point.x() * es, point.y() * es, z);
-    }
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return reflectAcrossPlane(point, group.position);
     return point;
@@ -668,12 +659,6 @@ static QVector3D transformNormalForGroup(const QVector3D &normal, const SceneDoc
         return QVector3D(qFuzzyIsNull(group.scale.x()) ? normal.x() : normal.x() / group.scale.x(),
                          qFuzzyIsNull(group.scale.y()) ? normal.y() : normal.y() / group.scale.y(),
                          qFuzzyIsNull(group.scale.z()) ? normal.z() : normal.z() / group.scale.z());
-    }
-    if (group.operation == SceneDocument::TreeNode::LinearExtrude) {
-        constexpr float baseThickness = 0.1f;
-        const float height = qMax(0.1f, group.scale.x());
-        const float es = group.linearExtrudeScaleVal > 0.01f ? group.linearExtrudeScaleVal : 1.0f;
-        return QVector3D(normal.x() / es, normal.y() / es, normal.z() / (height / baseThickness));
     }
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return -reflectAcrossPlane(normal, group.position); // negate to compensate winding reversal

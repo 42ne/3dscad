@@ -139,15 +139,6 @@ QVector3D transformPointForGroup(const QVector3D &point, const SceneDocument::Tr
     if (group.operation == SceneDocument::TreeNode::Scale
         || group.operation == SceneDocument::TreeNode::Resize)
         return QVector3D(point.x() * group.scale.x(), point.y() * group.scale.y(), point.z() * group.scale.z());
-    if (group.operation == SceneDocument::TreeNode::LinearExtrude) {
-        constexpr float baseThickness = 0.1f;
-        const float height = qMax(0.1f, group.scale.x());
-        const float es = group.linearExtrudeScaleVal > 0.01f ? group.linearExtrudeScaleVal : 1.0f;
-        float z = point.z() * (height / baseThickness);
-        if (group.linearExtrudeCenter)
-            z -= height * 0.5f;
-        return QVector3D(point.x() * es, point.y() * es, z);
-    }
     if (group.operation == SceneDocument::TreeNode::Mirror)
         return reflectAcrossPlane(point, group.position);
     return point;

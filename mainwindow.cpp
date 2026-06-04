@@ -476,14 +476,12 @@ void MainWindow::onSelectionChanged(int nodeId)
     } else if (node->type == SceneDocument::TreeNode::ModuleCall) {
         m_viewport->setSelectedIndex(-1);
         m_viewport->setSelectedGroupId(nodeId);
-        m_viewport->invalidateCsgPreview(); // rebuild selection mesh for this group
     } else if (node->type == SceneDocument::TreeNode::Variable) {
         m_viewport->setSelectedIndex(-1);
         m_viewport->setSelectedGroupId(0);
     } else { // Group
         m_viewport->setSelectedIndex(-1);
         m_viewport->setSelectedGroupId(nodeId);
-        m_viewport->invalidateCsgPreview(); // rebuild selection mesh for this group
     }
 
     m_viewport->update();

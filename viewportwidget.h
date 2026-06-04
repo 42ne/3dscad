@@ -127,6 +127,8 @@ private:
     void updateViewportControls();
     void startAsyncCsgCompute();
     void onCsgPreviewReady();
+    void startAsyncSelectionMeshCompute(int groupId);
+    void onSelectionMeshReady();
     QVector<SceneDocument::TreeNode> parentGroupStackForGroup(int groupId) const;
     QVector3D transformOriginForGroup(int groupId) const;
     QVector3D worldAxisVectorForGroup(int groupId, const QVector3D &localAxis) const;
@@ -188,6 +190,13 @@ private:
     bool m_csgPreviewDirty = true;
     bool m_csgComputing = false;
     QFutureWatcher<CsgPreview> m_csgWatcher;
+    // Separate lightweight async compute for the selection group mesh.
+    // Keyed by (groupId, sceneFingerprint) so stale results are discarded.
+    SceneMesh m_cachedSelectionMesh;
+    int  m_cachedSelectionMeshGroupId = 0;
+    uint m_cachedSelectionMeshFingerprint = 0;
+    int  m_pendingSelectionGroupId = 0;
+    QFutureWatcher<QPair<int, SceneMesh>> m_selectionMeshWatcher;
     QTimer m_selectionShimmerTimer;
     float m_selectionShimmerPhase = 0.0f;
     QVector<int> m_pickBuffer;
