@@ -520,3 +520,96 @@ bool buildManifoldCsgMesh(const SceneDocument &scene, SceneMesh *mesh, QString *
     return false;
 #endif
 }
+
+// Finds the path from root to the node with targetId. Returns true if found.
+static bool findNodePath(const SceneDocument::TreeNode &current,
+                          int targetId,
+                          QVector<const SceneDocument::TreeNode *> &path)
+{
+    path.push_back(&current);
+    if (current.id == targetId)
+        return true;
+    for (const SceneDocument::TreeNode &child : current.children) {
+        if (findNodePath(child, targetId, path))
+            return true;
+    }
+    path.pop_back();
+    return false;
+}
+
+// Evaluates the node with targetId in world-space by applying all parent transforms.
+static Manifold evaluateNodeById(int targetId,
+                                  const SceneDocument &scene,
+                                  const QHash<QString, qreal> &rootVariables)
+{
+    QVector<const SceneDocument::TreeNode *> path;
+    if (!findNodePath(scene.treeRoot(), targetId, path) || path.isEmpty())
+        return {};
+
+    // Accumulate variable context from root down to (but not including) the target
+    QHash<QString, qreal> vars = rootVariables;
+    for (int i = 0; i < static_cast<int>(path.size()) - 1; ++i) {
+        for (const SceneDocument::TreeNode &c : path[i]->children) {
+            if (c.type == SceneDocument::TreeNode::Variable)
+                vars[c.variableName] = c.variableValue;
+        }
+    }
+
+    // Evaluate the target node itself in local space
+    Manifold result = evaluateNode(*path.last(), scene, vars);
+    if (result.IsEmpty() || result.Status() != Manifold::Error::NoError)
+        return {};
+
+    // Apply parent transform groups (Translate/Rotate/Scale/Mirror/Resize)
+    // Process from direct parent up toward root
+    for (int i = static_cast<int>(path.size()) - 2; i >= 0; --i) {
+        const SceneDocument::TreeNode *ancestor = path[i];
+        if (ancestor->type != SceneDocument::TreeNode::Group)
+            continue;
+        const auto op = ancestor->operation;
+        if (op != SceneDocument::TreeNode::Translate
+            && op != SceneDocument::TreeNode::Rotate
+            && op != SceneDocument::TreeNode::Scale
+            && op != SceneDocument::TreeNode::Mirror
+            && op != SceneDocument::TreeNode::Resize)
+            continue;
+        // Recompute variable context up to this ancestor's level
+        QHash<QString, qreal> ancestorVars = rootVariables;
+        for (int j = 0; j < i; ++j) {
+            for (const SceneDocument::TreeNode &c : path[j]->children) {
+                if (c.type == SceneDocument::TreeNode::Variable)
+                    ancestorVars[c.variableName] = c.variableValue;
+            }
+        }
+        const SceneDocument::TreeNode evAncestor = nodeWithEvaluatedTransform(*ancestor, ancestorVars);
+        result = applyNodeTransform(result, evAncestor);
+    }
+
+    return result;
+}
+
+bool buildManifoldNodeMesh(const SceneDocument::TreeNode &node,
+                           const SceneDocument &scene,
+                           SceneMesh *mesh,
+                           QString *errorMessage)
+{
+#ifdef HAVE_MANIFOLD_CSG
+    if (!mesh)
+        return false;
+
+    QMutexLocker locker(&s_manifoldMutex);
+
+    const QHash<QString, qreal> variables = topLevelVariables(scene.treeRoot());
+    const Manifold result = evaluateNodeById(node.id, scene, variables);
+
+    if (result.Status() != Manifold::Error::NoError || result.IsEmpty())
+        return false;
+
+    *mesh = sceneMeshFromManifold(result);
+    return !mesh->triangles.isEmpty();
+#else
+    Q_UNUSED(node); Q_UNUSED(scene); Q_UNUSED(mesh);
+    if (errorMessage) *errorMessage = "Manifold CSG is not built.";
+    return false;
+#endif
+}

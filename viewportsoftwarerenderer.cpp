@@ -200,6 +200,17 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
         } else {
             const CsgPreview &preview = *ctx.cachedCsgPreview;
             csgStatus = ctx.csgComputing ? QStringLiteral("CSG preview: computing…") : preview.statusText;
+            // Check if a per-group 3D selection mesh is available (takes priority
+            // over flat 2D helpers which show wrong geometry for LinearExtrude).
+            bool hasSelectionGroupMatch = false;
+            for (const CsgRenderItem &item : preview.items) {
+                if (item.isSelectionGroup
+                        && itemBelongsToSelection(item, ctx.shapes, selectedShapeIds, selectedTreeNodeId)) {
+                    hasSelectionGroupMatch = true;
+                    break;
+                }
+            }
+
             for (const CsgRenderItem &item : preview.items) {
                 const bool selected = !ctx.draggingGroup
                                       && itemBelongsToSelection(item, ctx.shapes, selectedShapeIds, selectedTreeNodeId);
@@ -217,7 +228,10 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                     if (!drawSceneMeshes)
                         continue;
 
-                    if (item.booleanMode == ShapeNode::Subtract) {
+                    if (item.isSelectionGroup && selected) {
+                        // Per-group 3D mesh: draw its edges as selection outline
+                        appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, false);
+                    } else if (!item.isSelectionGroup && item.booleanMode == ShapeNode::Subtract) {
                         const bool selectedCut = selected;
                         QColor cutColor = selectedCut
                                               ? (ctx.darkViewportTheme ? QColor(188, 210, 218, 58) : QColor(190, 205, 212, 82))
@@ -229,7 +243,8 @@ QString ViewportSoftwareRenderer::renderScene(QPainter &painter, const Context &
                         appendProjectedHull(cutHelperOutlines, item.mesh, cutEdgeColor);
                         if (selectedCut)
                             appendCutFeatureEdges(foregroundHelperLines, item.mesh, cutEdgeColor);
-                    } else if (selected) {
+                    } else if (!item.isSelectionGroup && selected && !hasSelectionGroupMatch) {
+                        // Flat helper fallback — only when no 3D selection mesh exists
                         appendCutFeatureEdges(selectedFeatureLines, item.mesh, selectionFeatureColor, true);
                     }
                 } else if (drawSceneMeshes) {

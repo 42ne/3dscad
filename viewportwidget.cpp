@@ -317,10 +317,11 @@ void ViewportWidget::startAsyncCsgCompute()
     if (m_scene) {
         // Snapshot the scene so the worker thread has its own independent copy.
         const SceneDocument::Snapshot snap = m_scene->snapshot();
-        m_csgWatcher.setFuture(QtConcurrent::run([snap]() -> CsgPreview {
+        const int selGroupId = m_selectedGroupId;
+        m_csgWatcher.setFuture(QtConcurrent::run([snap, selGroupId]() -> CsgPreview {
             SceneDocument doc;
             doc.restoreSnapshot(snap);
-            return buildCsgPreview(doc);
+            return buildCsgPreview(doc, selGroupId);
         }));
     } else {
         const QVector<ShapeNode> shapes = *m_shapes;

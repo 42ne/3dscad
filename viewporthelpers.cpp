@@ -1198,6 +1198,13 @@ uint treeFingerprint(const SceneDocument::TreeNode &node, uint seed)
     seed = qHash(node.scale.y(), seed);
     seed = qHash(node.scale.z(), seed);
     seed = qHash(node.color.rgba(), seed);
+    seed = qHash(node.linearExtrudeCenter, seed);
+    seed = qHash(node.linearExtrudeTwist, seed);
+    seed = qHash(node.linearExtrudeSlices, seed);
+    seed = qHash(node.linearExtrudeScaleVal, seed);
+    seed = qHash(node.resizeAuto.x(), seed);
+    seed = qHash(node.resizeAuto.y(), seed);
+    seed = qHash(node.resizeAuto.z(), seed);
     for (const QString &expression : node.transformExpressions)
         seed = qHash(expression, seed);
     seed = qHash(node.children.size(), seed);

@@ -17,6 +17,7 @@ struct CsgRenderItem
     QColor color;
     bool computed = false;
     bool helper = false;
+    bool isSelectionGroup = false; // per-top-level-group 3D mesh used only for selection edges
 };
 
 struct CsgPreview
@@ -35,6 +36,6 @@ struct CsgPreview
 };
 
 CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn = 0);
-CsgPreview buildCsgPreview(const SceneDocument &scene);
+CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId = 0);
 
 #endif

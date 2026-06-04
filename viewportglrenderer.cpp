@@ -405,6 +405,19 @@ void ViewportGLRenderer::renderPreview(ViewportWidget &w)
             }
             return;
         }
+        // Priority 1: per-group 3D selection mesh (built async, exact match by treeNodeId)
+        bool foundSelectionGroup = false;
+        for (const CsgRenderItem &item : w.m_cachedCsgPreview.items) {
+            if (item.isSelectionGroup
+                    && itemBelongsToSelection(item, w.m_shapes, selectedShapeIds, selectedTreeNodeId)) {
+                visitor(item.mesh);
+                foundSelectionGroup = true;
+            }
+        }
+        if (foundSelectionGroup) return;
+
+        // Fallback: flat helper meshes (primitive selection, or group selection
+        // while per-group mesh is still computing)
         for (const CsgRenderItem &item : w.m_cachedCsgPreview.items) {
             const bool selected = !w.m_draggingGroup
                                   && itemBelongsToSelection(item, w.m_shapes, selectedShapeIds, selectedTreeNodeId);

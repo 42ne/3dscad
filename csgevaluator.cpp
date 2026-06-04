@@ -1260,7 +1260,7 @@ static QColor firstTreeColor(const SceneDocument::TreeNode &node, const QColor &
     return QColor();
 }
 
-CsgPreview buildCsgPreview(const SceneDocument &scene)
+CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId)
 {
     const QVector<ShapeNode> &shapes = scene.shapes();
 
@@ -1299,6 +1299,29 @@ CsgPreview buildCsgPreview(const SceneDocument &scene)
             preview.mode = CsgPreview::ManifoldComputed;
             preview.items.append(item);
             appendTreeHelpers(&preview, scene, scene.treeRoot(), ShapeNode::Add, topLevelVariables(scene.treeRoot()));
+
+            // Build a 3D selection mesh for the currently selected group.
+            // Uses the exact selectedGroupId so it works at any tree depth.
+            if (selectedGroupId > 0) {
+                const SceneDocument::TreeNode *selNode = scene.treeNodeById(selectedGroupId);
+                if (selNode && (selNode->type == SceneDocument::TreeNode::Group
+                               || selNode->type == SceneDocument::TreeNode::ModuleCall)) {
+                    SceneMesh selMesh;
+                    const bool gotMesh = buildManifoldNodeMesh(*selNode, scene, &selMesh, nullptr);
+                    if (gotMesh) {
+                        CsgRenderItem selItem;
+                        selItem.mesh = selMesh;
+                        selItem.treeNodeId = selectedGroupId;
+                        selItem.shapeIndex = -1;
+                        selItem.booleanMode = ShapeNode::Add;
+                        selItem.computed = true;
+                        selItem.helper = true;
+                        selItem.isSelectionGroup = true;
+                        preview.items.append(selItem);
+                    }
+                }
+            }
+
             preview.statusText = hasTreeBoolean
                                      ? "CSG preview: Manifold exact mesh"
                                      : hasForOperation

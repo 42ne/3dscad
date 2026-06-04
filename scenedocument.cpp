@@ -370,11 +370,19 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
         return false;
 
     // Build variable context excluding self to prevent trivial self-reference.
+    // Recurse the whole tree so module-local variables and scene-container
+    // variables are all in scope (mirrors collectVariableValues in the inline editor).
     QHash<QString, qreal> varValues;
-    for (const TreeNode &child : m_tree.root().children) {
-        if (child.type == TreeNode::Variable && child.id != variableId)
-            varValues[child.variableName] = child.variableValue;
-    }
+    std::function<void(const TreeNode &)> collectVars = [&](const TreeNode &n) {
+        if (n.type == TreeNode::Variable) {
+            if (n.id != variableId)
+                varValues[n.variableName] = n.variableValue;
+            return;
+        }
+        for (const TreeNode &child : n.children)
+            collectVars(child);
+    };
+    collectVars(m_tree.root());
 
     qreal value = 0.0;
     if (!ExpressionSyntax::evaluate(trimmed, varValues, &value))
