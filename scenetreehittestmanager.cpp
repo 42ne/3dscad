@@ -202,11 +202,34 @@ bool SceneTreeHitTestManager::shapeParameterControlAt(const QPointF &scenePositi
     const ShapeNode *shape = m_widget->m_scene->shapeById(bestNode->shapeId);
     if (!shape) return false;
 
-    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+    const QFontMetricsF metrics(sceneTreeValueFont());
     const auto controls = shapeParameterControls(*shape);
+    const bool isCube = (shape->type == ShapeNode::Cube);
     for (int i = 0; i < controls.size(); ++i) {
-        if (!shapeParameterControlRect(bestRect, i, controls.size()).contains(scenePosition))
+        const QRectF rowRect = shapeParameterControlRect(bestRect, i, controls.size());
+        if (!rowRect.contains(scenePosition))
             continue;
+        if (isCube) {
+            // Cube uses field area starting at 14+2px (not PrimitiveParamLabelArea).
+            constexpr qreal kLabelW = 14.0;
+            const QRectF fieldRect(rowRect.left() + kLabelW + 2.0, rowRect.top(),
+                                   rowRect.width() - kLabelW - 4.0, rowRect.height());
+            const QVector<ExpressionTextSpan> spans =
+                expressionSpansInTextRect(fieldRect, controls[i].expression, metrics);
+            const bool simple = (spans.size() == 1 && spans.first().number);
+            for (const ExpressionTextSpan &span : spans) {
+                if (!span.number) continue;
+                if (!simple && !span.rect.adjusted(-2,-1,2,1).contains(scenePosition))
+                    continue;
+                if (shapeId)     *shapeId     = bestNode->shapeId;
+                if (nodeId)      *nodeId      = bestNode->id;
+                if (parameter)   *parameter   = i;
+                if (numberStart) *numberStart = span.start;
+                if (numberLength)*numberLength= span.length;
+                return true;
+            }
+            continue;
+        }
         const auto numCtrls = shapeParameterNumberControls(
             bestRect, i, controls.size(), controls[i].expression, metrics);
         for (const ExpressionNumberControl &nc : numCtrls) {

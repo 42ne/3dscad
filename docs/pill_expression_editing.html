@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Pill / Expression Editing — behavior spec</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1040px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.6; }
+h1 { border-bottom: 2px solid #4a90d9; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #4a90d9; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #4a90d9; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f5f8fc; }
+tr:hover { background: #eaf1f9; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+pre code { background: transparent; padding: 0; }
+.note { border-left: 3px solid #e67e22; margin: 1em 0; padding: .5em 1em; background: #fef9f0; border-radius: 0 4px 4px 0; }
+.todo { border-left: 3px solid #e74c3c; margin: 1em 0; padding: .5em 1em; background: #fdf0f0; border-radius: 0 4px 4px 0; }
+.done-tag { display:inline-block; background:#27ae60; color:white; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.todo-tag { display:inline-block; background:#e74c3c; color:white; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+
+/* Pixel diagram styles */
+.diagram { background: #2b2b3b; border-radius: 6px; padding: 16px; margin: 1em 0; font-family: monospace; font-size: 13px; color: #cdd6f4; white-space: pre; overflow-x: auto; }
+.hl-label  { color: #a6da95; }
+.hl-field  { color: #89b4fa; }
+.hl-pill   { color: #f38ba8; }
+.hl-op     { color: #fab387; }
+.hl-gap    { color: #6c7086; }
+</style>
+</head>
+<body>
+
+<h1>Pill / Expression Editing — behavior spec</h1>
+<p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на Cube-картці.</em></p>
+<p>Документ описує правила рендерингу, ховеру та редагування числових «піллів» у
+рядках параметрів шейп-карточки. Мета — зафіксувати логіку перед тим, як вона
+буде винесена у реюзабельний клас.</p>
+
+<hr>
+
+<h2>1. Структура рядка параметра (Cube)</h2>
+
+<p>Кожен параметр (X, Y, Z) займає один горизонтальний рядок поза рамкою
+картки. Рядок ділиться на дві зони:</p>
+
+<div class="diagram">rowRect  ┌─────────────────────────────────────────────────────┐
+         │ <span class="hl-label">LABEL</span>  │  <span class="hl-field">FIELD AREA  (expression / pills)            </span>  │
+         │<span class="hl-label"> 14px  </span>│<span class="hl-field">  +2px gap     rowWidth - 14 - 4px             </span>  │
+         └─────────────────────────────────────────────────────┘
+                  fieldRect = rowRect.adjusted(+16, 0, -4, 0)</div>
+
+<table>
+<thead><tr><th>Зона</th><th>Ширина</th><th>Вміст</th></tr></thead>
+<tbody>
+<tr><td><strong>Label</strong></td><td><code>kLabelW = 14 px</code></td>
+    <td>Букви «X», «Y», «Z». Без «=». Колір <code>numLabelText</code>.</td></tr>
+<tr><td><strong>Field</strong></td><td><code>rowWidth − 14 − 4 px</code></td>
+    <td>Всі піллі та оператори вираження.</td></tr>
+</tbody>
+</table>
+
+<p>Константа для старих шейпів (не Cube): <code>PrimitiveParamLabelArea</code> — ширша зона
+мітки з «=», поле залишається праворуч.</p>
+
+<hr>
+
+<h2>2. Розбивка виразу на спани (<code>ExpressionTextSpan</code>)</h2>
+
+<p>Функція <code>expressionSpansInTextRect(fieldRect, expression, metrics)</code> повертає
+вектор спанів. Кожен спан:</p>
+
+<pre><code>struct ExpressionTextSpan {
+    QString text;    // "25", "+", "230", "(", "a", …
+    int start;       // позиція в рядку expression
+    int length;      // довжина підрядка
+    QRectF rect;     // bounding rect у scene coords (з ±4px паддінгом для числел)
+    bool number;     // true → цифровий літерал або ident з десятковим значенням
+};</code></pre>
+
+<div class="note">
+  <strong>Важливо:</strong> <code>expressionSpansInTextRect</code> додає ±4 px
+  горизонтального паддінгу до <code>rect.width()</code> для числових спанів.
+  Рендерер та менеджери ховеру усувають цей паддінг і будують
+  <em>pillRect</em> вручну.
+</div>
+
+<h3>Формула pillRect</h3>
+<pre><code>// Скрізь однакова (renderer, hoverManager, hitTestManager)
+const qreal textW    = span.rect.width() - 8.0;   // strip ±4px padding
+const qreal pillW    = textW + 4.0;                // +2px кожного боку
+const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
+QRectF pillRect(pillLeft, fieldRect.top(), pillW, fieldRect.height());</code></pre>
+
+<h3>Приклади розбивки</h3>
+<table>
+<thead><tr><th>expression</th><th>Спани (text / number)</th><th>Тип поля</th></tr></thead>
+<tbody>
+<tr><td><code>25</code></td>    <td>[{«25», true}]</td>                           <td>Simple (1 пілл)</td></tr>
+<tr><td><code>25+230</code></td><td>[{«25», true}, {«+», false}, {«230», true}]</td><td>Complex (2 піллі)</td></tr>
+<tr><td><code>w/2</code></td>   <td>[{«w», false}, {«/», false}, {«2», true}]</td> <td>Complex (1 пілл)</td></tr>
+<tr><td><code>a+b</code></td>   <td>[{«a», false}, {«+», false}, {«b», false}]</td><td>No-pill (лише текст)</td></tr>
+</tbody>
+</table>
+
+<p>Ознака <code>simpleNumber = (spans.size() == 1 &amp;&amp; spans.first().number)</code>
+перемикає кілька гілок поведінки нижче.</p>
+
+<hr>
+
+<h2>3. Рендеринг</h2>
+
+<table>
+<thead><tr><th>Елемент</th><th>Що малюється</th></tr></thead>
+<tbody>
+<tr><td>Числовий спан (неактивний)</td>
+    <td>Rounded-rect (r=3) з кольором <code>pillFill(theme)</code>,
+        border <code>pillBorder(QColor(255,255,255,32), theme)</code>, товщина 1.</td></tr>
+<tr><td>Числовий спан (активний)</td>
+    <td>Той самий округлений прямокутник, але <code>pillFillActive()</code> та
+        <code>pillBorderActive()</code>, товщина 2.</td></tr>
+<tr><td>Оператор / змінна</td>
+    <td>Текст кольором <code>textMuted(theme)</code>, вирівнювання ліво-центр.
+        Без фону.</td></tr>
+<tr><td>Активним є пілл</td>
+    <td><code>i == m_activeParamIndex &amp;&amp; span.start == m_activeNumberStart</code>.</td></tr>
+</tbody>
+</table>
+
+<p>Порядок малювання: спочатку всі пілл-фони, потім всі тексти (щоб текст
+операторів не перекривався фоном сусіднього пілла).</p>
+
+<hr>
+
+<h2>4. Ховер-стани</h2>
+
+<p>Менеджер ховеру (<code>SceneTreeHoverManager::expressionEditTargetAt</code>) повертає
+<code>ExpressionEditTarget</code>. Поле <code>hoverRect</code> — жовта рамка,
+<code>editRect</code> — куди ставиться inline-editor при кліку.</p>
+
+<h3>4.1 Простий вираз (simpleNumber = true)</h3>
+
+<table>
+<thead><tr><th>Положення курсора</th><th>hoverRect</th><th>editRect</th><th>spanStart</th><th>Tooltip</th></tr></thead>
+<tbody>
+<tr>
+  <td>В межах <code>rowRect.adjusted(-2,-1.5,2,1.5)</code></td>
+  <td><code>pillRect</code> (жовта рамка навколо одного пілла)</td>
+  <td><code>pillRect</code></td>
+  <td>≥ 0 (start числа)</td>
+  <td>«Shape X<br>Click: edit this number<br>Hold Ctrl + mouse wheel: change value»</td>
+</tr>
+</tbody>
+</table>
+
+<h3>4.2 Складний вираз (simpleNumber = false)</h3>
+
+<table>
+<thead><tr><th>Положення курсора</th><th>hoverRect</th><th>editRect</th><th>spanStart</th><th>Tooltip</th></tr></thead>
+<tbody>
+<tr>
+  <td>На конкретному числовому пілі (<code>pr.adjusted(-2,-1,2,1)</code> contains pos)</td>
+  <td><code>QRectF()</code> — <strong>немає жовтої рамки</strong><br>(cyan scroll zone достатньо)</td>
+  <td><code>pillRect(span)</code></td>
+  <td>≥ 0 (start цього числа)</td>
+  <td>«Shape X<br>Click: edit this number<br>Hold Ctrl + mouse wheel: change value»</td>
+</tr>
+<tr>
+  <td>Між піллями / на операторі (в межах fieldArea, але поза піллями)</td>
+  <td><code>exprBounds.adjusted(-4,0,4,0)</code> — <strong>жовта рамка навколо всіх елементів</strong></td>
+  <td><code>exprBounds.adjusted(-4,0,4,0)</code></td>
+  <td>-1</td>
+  <td>«Shape X — expression<br>Click: edit whole expression<br>Hold Ctrl + mouse wheel: change individual numbers»</td>
+</tr>
+</tbody>
+</table>
+
+<h3>4.3 Ховер поза полем (на картці, але не у field area)</h3>
+
+<table>
+<thead><tr><th>Стан Ctrl</th><th>Tooltip</th></tr></thead>
+<tbody>
+<tr><td>Не затиснутий</td>
+    <td>«Shape X<br>Hold Ctrl + mouse wheel: change value<br>Click: edit expression»</td></tr>
+<tr><td>Затиснутий (controlDown)</td>
+    <td>«Shape X<br>Mouse wheel: change value<br>Hover between numbers to edit expression»</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+Для старих шейпів (не Cube) ховер поза полем показує:
+«Hold Ctrl + mouse wheel: change value / Click card: select object» — без прямого виклику редагування виразу.
+</div>
+
+<hr>
+
+<h2>5. Scroll-зони (cyan підсвічування)</h2>
+
+<p>Функція <code>hoverScrollZoneRect</code> повертає прямокутник для cyan-рамки, яка
+показується при наведенні з Ctrl або при скролі:</p>
+
+<table>
+<thead><tr><th>Умова</th><th>Повертає</th></tr></thead>
+<tbody>
+<tr>
+  <td>Cursor on a specific number pill (<code>span.start == numStart</code>)</td>
+  <td><code>pillRect(span)</code> — cyan рамка навколо одного пілла</td>
+</tr>
+<tr>
+  <td>No specific pill match (між піллями або simpleNumber)</td>
+  <td><code>fieldRect</code> — cyan рамка навколо всього поля</td>
+</tr>
+</tbody>
+</table>
+
+<p>Де <code>numStart = m_activeShapeParameterNumberStart</code>, встановлюється
+<code>updateActiveShapeParameterControl</code> при русі миші з Ctrl.</p>
+
+<hr>
+
+<h2>6. Inline-редактор та збереження</h2>
+
+<p>При кліку викликається
+<code>SceneTreeInlineEditor::startInlineExpressionEdit(target)</code>.
+Текстовий input ставиться на <code>target.editRect</code> і показує
+<code>target.expression</code> (або окреме число, або повний вираз).</p>
+
+<p>При підтвердженні (Enter):</p>
+
+<pre><code>// SceneTreeInlineEditor.cpp
+case ExpressionEditTarget::ShapeParameter: {
+    QString exprToSave = newExpression;
+    if (target.spanStart >= 0 && !target.fullExpression.isEmpty()) {
+        // Splice: замінити лише підрядок [spanStart, spanStart+spanLength)
+        exprToSave = target.fullExpression.left(target.spanStart)
+                   + newExpression
+                   + target.fullExpression.mid(target.spanStart + target.spanLength);
+    }
+    emit shapeParameterExpressionEdited(target.nodeId, target.secondaryId, exprToSave);
+}</code></pre>
+
+<table>
+<thead><tr><th>spanStart</th><th>fullExpression</th><th>Результат</th></tr></thead>
+<tbody>
+<tr>
+  <td>≥ 0</td><td>«25+230»</td>
+  <td>Замінити лише «230» → «25+<em>нове значення</em>»</td>
+</tr>
+<tr>
+  <td>-1</td><td>порожній</td>
+  <td>Зберегти <code>newExpression</code> як повний вираз</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>7. Структура ExpressionEditTarget (повна)</h2>
+
+<pre><code>struct ExpressionEditTarget {
+    enum Kind { None, Transform, ShapeParameter, Variable,
+                ModuleCallArgument, PolyhedronParticipation, Polygon2DPoint };
+    Kind    kind        = None;
+    QRectF  hoverRect;          // жовта рамка; QRectF() = не показувати
+    QRectF  editRect;           // куди розміщується inline input
+    QString label;              // рядок у tooltip (напр. "Shape X")
+    QString expression;         // те, що показується в input
+    int     nodeId      = 0;
+    int     secondaryId = 0;    // для ShapeParameter: індекс параметра (0=X,1=Y,2=Z)
+    // Sub-expression fields (Cube):
+    QString fullExpression;     // повний вираз рядка
+    int     spanStart   = -1;   // >= 0 → splice-збереження
+    int     spanLength  = 0;
+};</code></pre>
+
+<hr>
+
+<h2>8. Порівняння: Cube vs інші шейпи</h2>
+
+<table>
+<thead><tr><th>Аспект</th><th>Cube <span class="done-tag">DONE</span></th><th>Інші шейпи</th></tr></thead>
+<tbody>
+<tr><td>Label area width</td>     <td>14 px (лише буква)</td>       <td><code>PrimitiveParamLabelArea</code> (ширше, з «=»)</td></tr>
+<tr><td>Field area</td>           <td>rowWidth − 18 px</td>          <td>rowWidth − PrimitiveParamLabelArea</td></tr>
+<tr><td>Sub-expression editing</td><td>Так (spanStart/splice)</td>  <td>Ні (лише повний вираз)</td></tr>
+<tr><td>hoverRect на конкретному пілі</td><td>QRectF() (немає)</td> <td>rowRect (вся рядок)</td></tr>
+<tr><td>hoverRect на field area</td><td>exprBounds (тільки контент)</td><td>editRect</td></tr>
+<tr><td>Tooltip "on card"</td>    <td>«Click: edit expression»</td> <td>«Click card: select object»</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2>9. Правила дублювання коду (поточні проблеми)</h2>
+
+<p>Формула <code>pillRect</code> та логіка розгалуження
+<code>isCube / shape->type == ShapeNode::Cube</code> зараз продубльована в трьох
+місцях:</p>
+
+<ol>
+  <li><code>scenetreenoderenderer.cpp</code> — рендер</li>
+  <li><code>scenetreehovermanager.cpp</code> — ховер-тергет + scroll-зона</li>
+  <li><code>scenetreehittestmanager.cpp</code> — hit-test при кліку</li>
+</ol>
+
+<div class="todo">
+  <strong>Наступний крок:</strong> Виділити реюзабельний клас (напр.
+  <code>PillFieldLayout</code> або <code>ExpressionPillLayout</code>), який
+  інкапсулює:
+  <ul>
+    <li>fieldRect з параметрів карточки (labelWidth, gap);</li>
+    <li><code>spans()</code> → вектор <code>ExpressionTextSpan</code>;</li>
+    <li><code>pillRectFor(span)</code>;</li>
+    <li><code>spanAt(scenePos)</code> → optional&lt;ExpressionTextSpan&gt;;</li>
+    <li>логіку simple/complex;</li>
+    <li>scroll-zone rect;</li>
+    <li>hover-target (hoverRect, editRect, spanStart).</li>
+  </ul>
+  Будь-яка картка передає <code>QRectF fieldRect</code>, <code>QString expression</code>
+  і отримує готову поведінку.
+</div>
+
+<hr>
+
+<h2>10. Повна таблиця сценаріїв взаємодії</h2>
+
+<table>
+<thead>
+<tr>
+  <th>#</th>
+  <th>Вираз</th>
+  <th>Курсор</th>
+  <th>Ctrl</th>
+  <th>Дія</th>
+  <th>Ефект</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>1</td><td><code>25</code></td>           <td>На пілі</td>              <td>—</td>  <td>Ховер</td>    <td>Жовта рамка = pillRect. Tooltip: «Click: edit this number»</td></tr>
+<tr><td>2</td><td><code>25</code></td>           <td>На пілі</td>              <td>—</td>  <td>Клік</td>     <td>Inline input на pillRect, значення «25». Enter → зберегти</td></tr>
+<tr><td>3</td><td><code>25</code></td>           <td>На пілі</td>              <td>+</td>  <td>Scroll ±</td> <td>Число змінюється. Splice не потрібен (single number → повна заміна)</td></tr>
+<tr><td>4</td><td><code>25+230</code></td>       <td>На пілі «25»</td>        <td>—</td>  <td>Ховер</td>    <td>Cyan рамка на «25». Жовтої рамки немає. Tooltip: «Click: edit this number»</td></tr>
+<tr><td>5</td><td><code>25+230</code></td>       <td>На пілі «25»</td>        <td>—</td>  <td>Клік</td>     <td>Input на pillRect(«25»), значення «25». Enter → splice → «<em>нове</em>+230»</td></tr>
+<tr><td>6</td><td><code>25+230</code></td>       <td>Між «+» символом</td>   <td>—</td>  <td>Ховер</td>    <td>Жовта рамка = exprBounds(«25»∪«+»∪«230»). Tooltip: «Click: edit whole expression»</td></tr>
+<tr><td>7</td><td><code>25+230</code></td>       <td>Між піллями</td>         <td>—</td>  <td>Клік</td>     <td>Input на exprRect, значення «25+230». Enter → зберегти повністю</td></tr>
+<tr><td>8</td><td><code>25+230</code></td>       <td>На пілі «230»</td>       <td>+</td>  <td>Scroll ±</td> <td>Змінюється лише «230» → splice → «25+<em>нове</em>»</td></tr>
+<tr><td>9</td><td><code>будь-який</code></td>    <td>На label або card</td>   <td>—</td>  <td>Ховер</td>    <td>Tooltip: «Hold Ctrl + mouse wheel: change value / Click: edit expression»</td></tr>
+<tr><td>10</td><td><code>будь-який</code></td>   <td>На label або card</td>   <td>+</td>  <td>Scroll ±</td> <td>Змінюється активне число або перше число виразу</td></tr>
+</tbody>
+</table>
+
+<hr>
+<p><em>Документ згенеровано на основі змін у гілці <code>exp8</code> (diff від HEAD до робочого дерева,
+файли scenetreenoderenderer.cpp, scenetreehovermanager.cpp, scenetreehittestmanager.cpp,
+scenetreeinlineeditor.cpp/.h).</em></p>
+
+</body>
+</html>

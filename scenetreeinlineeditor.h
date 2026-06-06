@@ -25,6 +25,11 @@ struct ExpressionEditTarget {
     QString expression;
     int nodeId = 0;
     int secondaryId = 0;
+    // Sub-expression editing: when spanStart >= 0, saving replaces only [spanStart, spanStart+spanLength)
+    // within fullExpression, leaving the rest intact.
+    QString fullExpression;
+    int spanStart  = -1;
+    int spanLength = 0;
 };
 
 class SceneTreeInlineEditor : public QObject

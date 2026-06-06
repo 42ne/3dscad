@@ -103,6 +103,8 @@ void SceneTreeInlineEditor::startInlineExpressionEdit(const SceneTreeGraphicsWid
 
     m_inlineInputActive = true;
     m_inlineInputSceneRect = target.editRect;
+    m_widget->m_hoverManager->m_hoveredScrollRect = QRectF();
+    m_widget->m_hoverManager->updateActiveShapeParameterControl(QPointF(), false);
 
     m_inlineInput->startEditing(
         m_widget->mapFromScene(target.editRect).boundingRect(),
@@ -128,9 +130,16 @@ void SceneTreeInlineEditor::startInlineExpressionEdit(const SceneTreeGraphicsWid
             case SceneTreeGraphicsWidget::ExpressionEditTarget::Transform:
                 emit m_widget->transformExpressionEdited(target.nodeId, target.secondaryId, newExpression);
                 break;
-            case SceneTreeGraphicsWidget::ExpressionEditTarget::ShapeParameter:
-                emit m_widget->shapeParameterExpressionEdited(target.nodeId, target.secondaryId, newExpression);
+            case SceneTreeGraphicsWidget::ExpressionEditTarget::ShapeParameter: {
+                QString exprToSave = newExpression;
+                if (target.spanStart >= 0 && !target.fullExpression.isEmpty()) {
+                    exprToSave = target.fullExpression.left(target.spanStart)
+                               + newExpression
+                               + target.fullExpression.mid(target.spanStart + target.spanLength);
+                }
+                emit m_widget->shapeParameterExpressionEdited(target.nodeId, target.secondaryId, exprToSave);
                 break;
+            }
             case SceneTreeGraphicsWidget::ExpressionEditTarget::Polygon2DPoint: {
                 const int pointIndex = target.secondaryId / 2;
                 const int coord = target.secondaryId % 2;

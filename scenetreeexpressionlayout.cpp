@@ -86,9 +86,8 @@ QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidt
 QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics)
 {
     QVector<ExpressionTextSpan> spans;
-    // OpenSCAD expressions already have spaces around operators (e.g. "a + b"),
-    // so no extra gap is needed — the natural spaces provide visual separation.
-    const qreal operatorGap = 0.0;
+    // Extra padding around arithmetic operators so pill borders don't overlap them.
+    const qreal operatorGap = 4.0;
     qreal x = textRect.left();
 
     const QString trimmed = expression.trimmed();

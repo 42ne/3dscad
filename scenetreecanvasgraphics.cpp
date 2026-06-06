@@ -50,6 +50,13 @@ QFont sceneTreeGraphicsFont()
     return font;
 }
 
+QFont sceneTreeValueFont()
+{
+    QFont font = sceneTreeGraphicsFont();
+    font.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
+    return font;
+}
+
 void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width)
 {
     QVarLengthArray<QLineF, 128> lines;

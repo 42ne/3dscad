@@ -37,6 +37,7 @@ CanvasBackgroundTheme activeCanvasBackgroundTheme(int index);
 bool usesDarkOverlayGlass(int backgroundTheme);
 
 QFont sceneTreeGraphicsFont();
+QFont sceneTreeValueFont();
 void drawCanvasGrid(QPainter *painter, const QRectF &rect, qreal gridSize, const QColor &color, int width);
 QGraphicsScene *createTreeGraphicsScene(QObject *parent = nullptr);
 
