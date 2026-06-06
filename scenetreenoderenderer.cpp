@@ -59,6 +59,39 @@ QColor translucent(const QColor &color, int alpha)
     return QColor(color.red(), color.green(), color.blue(), alpha);
 }
 
+bool isHighlightedVariableReference(const ExpressionTextSpan &span, const QString &variableName)
+{
+    return span.identifier && !variableName.isEmpty() && span.text == variableName;
+}
+
+QColor expressionSpanTextColor(SceneTreePalette::Theme theme,
+                               const ExpressionTextSpan &span,
+                               const QColor &mutedColor,
+                               const QString &highlightedVariableName,
+                               bool blinkOn)
+{
+    if (span.number)
+        return SceneTreePalette::numText(theme);
+    if (isHighlightedVariableReference(span, highlightedVariableName))
+        return blinkOn ? QColor(255, 238, 130) : SceneTreePalette::varText(theme);
+    return span.identifier ? SceneTreePalette::varText(theme) : mutedColor;
+}
+
+void paintVariableReferenceBlink(QPainter *painter,
+                                 const QRectF &rect,
+                                 const ExpressionTextSpan &span,
+                                 const QString &highlightedVariableName,
+                                 bool blinkOn)
+{
+    if (!blinkOn || !isHighlightedVariableReference(span, highlightedVariableName))
+        return;
+    paintRoundedPanel(painter,
+                      rect.adjusted(-2.0, 1.0, 2.0, -1.0),
+                      3.0,
+                      QPen(QColor(120, 20, 18, 160), 1.0),
+                      QBrush(QColor(120, 20, 18, 95)));
+}
+
 QRectF boundedVerticalLabelRect(qreal left, qreal top, qreal bottom, qreal width, qreal preferredHeight)
 {
     if (bottom <= top)
@@ -648,7 +681,9 @@ public:
                       qreal opacity,
                       qreal zValue,
                       int theme = 0,
-                      const QImage &thumbnail = QImage())
+                      const QImage &thumbnail = QImage(),
+                      const QString &highlightedVariableReference = QString(),
+                      bool variableReferenceBlinkOn = false)
         : m_rect(rect)
         , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
@@ -658,6 +693,8 @@ public:
         , m_opacity(opacity)
         , m_theme(theme)
         , m_thumbnail(thumbnail)
+        , m_highlightedVariableReference(highlightedVariableReference)
+        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
         setZValue(zValue);
     }
@@ -789,9 +826,10 @@ public:
                 for (const ExpressionTextSpan &span : pillLayout.spans()) {
                     const QRectF tr = span.number ? pillLayout.pillRectFor(span)
                                                   : pillLayout.visualRectFor(span);
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt)
-                                                : span.identifier ? SceneTreePalette::varText(pt)
-                                                                  : SceneTreePalette::textMuted(pt));
+                    paintVariableReferenceBlink(painter, tr, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                    painter->setPen(expressionSpanTextColor(pt, span, SceneTreePalette::textMuted(pt),
+                                                            m_highlightedVariableReference,
+                                                            m_variableReferenceBlinkOn));
                     painter->drawText(tr,
                                       span.number ? (Qt::AlignHCenter | Qt::AlignVCenter)
                                                   : (Qt::AlignLeft    | Qt::AlignVCenter),
@@ -827,9 +865,10 @@ public:
                 }
 
                 for (const ExpressionTextSpan &span : spans) {
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt)
-                                                : span.identifier ? SceneTreePalette::varText(pt)
-                                                                  : SceneTreePalette::textMuted(pt));
+                    paintVariableReferenceBlink(painter, span.rect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                    painter->setPen(expressionSpanTextColor(pt, span, SceneTreePalette::textMuted(pt),
+                                                            m_highlightedVariableReference,
+                                                            m_variableReferenceBlinkOn));
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft   | Qt::AlignVCenter);
@@ -849,6 +888,8 @@ private:
     qreal m_opacity = 1.0;
     int m_theme = 0;
     QImage m_thumbnail;
+    QString m_highlightedVariableReference;
+    bool m_variableReferenceBlinkOn = false;
 };
 
 class VariableCardItem final : public QGraphicsItem
@@ -863,7 +904,9 @@ public:
                      qreal zValue,
                      bool isParameter = false,
                      int depth = 0,
-                     int theme = 0)
+                     int theme = 0,
+                     const QString &highlightedVariableReference = QString(),
+                     bool variableReferenceBlinkOn = false)
         : m_rect(rect)
         , m_name(name)
         , m_expression(expression)
@@ -873,6 +916,8 @@ public:
         , m_isParameter(isParameter)
         , m_depth(depth)
         , m_theme(theme)
+        , m_highlightedVariableReference(highlightedVariableReference)
+        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
         Q_UNUSED(m_depth);  // reserved for future depth-tinted variable rows
         setZValue(zValue);
@@ -934,7 +979,12 @@ public:
                                   nameW,
                                   16.0);
 
-        painter->setPen(nameColor);
+        if (m_name == m_highlightedVariableReference)
+            paintVariableReferenceBlink(painter, textLineRect, {m_name, 0, m_name.size(), textLineRect, false, true},
+                                        m_highlightedVariableReference, m_variableReferenceBlinkOn);
+        painter->setPen((m_name == m_highlightedVariableReference && m_variableReferenceBlinkOn)
+                            ? QColor(255, 238, 130)
+                            : nameColor);
         painter->drawText(textLineRect, Qt::AlignLeft | Qt::AlignVCenter, m_name);
 
         painter->setPen(SceneTreePalette::numLabelText(pt));
@@ -959,12 +1009,15 @@ public:
         }
 
         for (const ExpressionTextSpan &span : pillLayout.spans()) {
-            painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
             const Qt::Alignment align = span.number
                 ? (Qt::AlignHCenter | Qt::AlignVCenter)
                 : (Qt::AlignLeft   | Qt::AlignVCenter);
             const QRectF textRect = span.number ? pillLayout.pillRectFor(span)
                                                 : pillLayout.visualRectFor(span);
+            paintVariableReferenceBlink(painter, textRect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+            painter->setPen(expressionSpanTextColor(pt, span, SceneTreePalette::textMuted(pt),
+                                                    m_highlightedVariableReference,
+                                                    m_variableReferenceBlinkOn));
             painter->drawText(textRect, align, span.text);
         }
         painter->restore();
@@ -980,6 +1033,8 @@ private:
     bool    m_isParameter = false;
     int     m_depth = 0;
     int     m_theme = 0;
+    QString m_highlightedVariableReference;
+    bool    m_variableReferenceBlinkOn = false;
 };
 
 class GroupCardItem final : public QGraphicsItem
@@ -1009,7 +1064,9 @@ public:
                   int theme = 0,
                   bool collapsed = false,
                   bool linearExtrudeCenter = false,
-                  int linearExtrudeSlices = 0)
+                  int linearExtrudeSlices = 0,
+                  const QString &highlightedVariableReference = QString(),
+                  bool variableReferenceBlinkOn = false)
         : m_rect(rect)
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
@@ -1034,6 +1091,8 @@ public:
         , m_collapsed(collapsed)
         , m_linearExtrudeCenter(linearExtrudeCenter)
         , m_linearExtrudeSlices(linearExtrudeSlices)
+        , m_highlightedVariableReference(highlightedVariableReference)
+        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
         setZValue(zValue);
     }
@@ -1198,7 +1257,10 @@ private:
                                       QPen(active ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder, active ? 2 : 1),
                                       QBrush(active ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
-                painter->setPen(span.number ? SceneTreePalette::numText(pt2) : span.identifier ? SceneTreePalette::varText(pt2) : SceneTreePalette::textMuted(pt2));
+                paintVariableReferenceBlink(painter, span.rect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                painter->setPen(expressionSpanTextColor(pt2, span, SceneTreePalette::textMuted(pt2),
+                                                        m_highlightedVariableReference,
+                                                        m_variableReferenceBlinkOn));
                 const Qt::Alignment align = span.number
                     ? (Qt::AlignHCenter | Qt::AlignVCenter)
                     : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1468,7 +1530,10 @@ private:
                                                numActive ? 2 : 1),
                                           QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                     }
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
+                    paintVariableReferenceBlink(painter, span.rect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                    painter->setPen(expressionSpanTextColor(pt, span, SceneTreePalette::textMuted(pt),
+                                                            m_highlightedVariableReference,
+                                                            m_variableReferenceBlinkOn));
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1515,7 +1580,10 @@ private:
                                       QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
                 // Numbers: span.rect is 4 px wider on each side → centre digit inside pill.
-                painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
+                paintVariableReferenceBlink(painter, span.rect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                painter->setPen(expressionSpanTextColor(pt, span, SceneTreePalette::textMuted(pt),
+                                                        m_highlightedVariableReference,
+                                                        m_variableReferenceBlinkOn));
                 const Qt::Alignment align = span.number
                     ? (Qt::AlignHCenter | Qt::AlignVCenter)
                     : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1548,6 +1616,8 @@ private:
     bool        m_collapsed = false;
     bool        m_linearExtrudeCenter = false;
     int         m_linearExtrudeSlices = 0;
+    QString     m_highlightedVariableReference;
+    bool        m_variableReferenceBlinkOn = false;
 };
 
 
@@ -1563,7 +1633,9 @@ public:
                        qreal opacity,
                        qreal zValue,
                        int theme = 0,
-                       const QImage &thumbnail = QImage())
+                       const QImage &thumbnail = QImage(),
+                       const QString &highlightedVariableReference = QString(),
+                       bool variableReferenceBlinkOn = false)
         : m_rect(rect)
         , m_moduleName(moduleName)
         , m_params(params)
@@ -1573,6 +1645,8 @@ public:
         , m_opacity(opacity)
         , m_theme(theme)
         , m_thumbnail(thumbnail)
+        , m_highlightedVariableReference(highlightedVariableReference)
+        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
         setZValue(zValue);
     }
@@ -1686,7 +1760,10 @@ public:
                     }
                 }
                 for (const ExpressionTextSpan &span : spans) {
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : cMuted);
+                    paintVariableReferenceBlink(painter, span.rect, span, m_highlightedVariableReference, m_variableReferenceBlinkOn);
+                    painter->setPen(expressionSpanTextColor(pt, span, cMuted,
+                                                            m_highlightedVariableReference,
+                                                            m_variableReferenceBlinkOn));
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft   | Qt::AlignVCenter);
@@ -1719,6 +1796,8 @@ private:
     qreal m_opacity = 1.0;
     int m_theme = 0;
     QImage m_thumbnail;
+    QString m_highlightedVariableReference;
+    bool m_variableReferenceBlinkOn = false;
 };
 
 } // namespace
@@ -1768,10 +1847,16 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
     const int activeNumberStart = node.id == m_activeShapeNodeId ? m_activeShapeParamNumberStart : -1;
     if (shape && shape->type == ShapeNode::Polygon2D) {
         const QRectF cardRect(rect.topLeft(), QSizeF(qMin(rect.width(), PrimitiveWidth), PrimitiveHeight));
-        m_scene->addItem(new PrimitiveCardItem(cardRect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, m_theme, thumbnail));
+        m_scene->addItem(new PrimitiveCardItem(cardRect, shape, primitiveNumberText(label, node.shapeId),
+                                               node.id == m_selectedNodeId, activeParamIndex, activeNumberStart,
+                                               1.0, 5.0, m_theme, thumbnail,
+                                               m_highlightedVariableReference, m_variableReferenceBlinkOn));
         return;
     }
-    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId), node.id == m_selectedNodeId, activeParamIndex, activeNumberStart, 1.0, 5.0, m_theme, thumbnail));
+    m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId),
+                                           node.id == m_selectedNodeId, activeParamIndex, activeNumberStart,
+                                           1.0, 5.0, m_theme, thumbnail,
+                                           m_highlightedVariableReference, m_variableReferenceBlinkOn));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
@@ -1781,7 +1866,9 @@ void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, 
                                           node.id == m_selectedNodeId, activeNumberStart,
                                           1.0, 5.0, node.isParameter,
                                           0,        // depth (variables: no depth-hue shift)
-                                          m_theme));
+                                          m_theme,
+                                          m_highlightedVariableReference,
+                                          m_variableReferenceBlinkOn));
 }
 
 void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
@@ -1791,7 +1878,10 @@ void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node
 {
     const int activeVarNodeId = node.id == m_activeModuleCallNodeId ? m_activeModuleCallVarNodeId : 0;
     const int activeNumStart = node.id == m_activeModuleCallNodeId ? m_activeModuleCallNumberStart : -1;
-    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params, node.id == m_selectedNodeId, activeVarNodeId, activeNumStart, 1.0, 5.0, m_theme, thumbnail));
+    m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params,
+                                            node.id == m_selectedNodeId, activeVarNodeId, activeNumStart,
+                                            1.0, 5.0, m_theme, thumbnail,
+                                            m_highlightedVariableReference, m_variableReferenceBlinkOn));
     m_scene->addItem(createTreeNodeSelectionItem(node.id, rect, 5.0, m_onSelected));
 }
 
@@ -1825,7 +1915,8 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
                                         node.color, thumbnail, node.moduleName,
                                         depth, m_theme, collapsed,
-                                        node.linearExtrudeCenter, node.linearExtrudeSlices));
+                                        node.linearExtrudeCenter, node.linearExtrudeSlices,
+                                        m_highlightedVariableReference, m_variableReferenceBlinkOn));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,
                                                  zForDepth(depth, -80.0),

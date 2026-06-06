@@ -173,6 +173,12 @@ public:
     // Set the active visual theme (0 = Frost, 1 = Glass, 2 = Embers, 3 = Deep).
     // Returns *this so it can be chained: SceneTreeNodeRenderer(...).setTheme(t).renderXxx(...)
     SceneTreeNodeRenderer &setTheme(int theme) { m_theme = theme; return *this; }
+    SceneTreeNodeRenderer &setHighlightedVariableReference(const QString &name, bool blinkOn)
+    {
+        m_highlightedVariableReference = name;
+        m_variableReferenceBlinkOn = blinkOn;
+        return *this;
+    }
 
     static void renderPreviewTool(QGraphicsScene *scene,
                                   QVector<QGraphicsItem *> *items,
@@ -220,6 +226,8 @@ private:
     int m_activeModuleCallVarNodeId = 0;
     int m_activeModuleCallNumberStart = -1;
     int m_theme = 0;  // SceneTreePalette::Theme cast to int; 0 = Frost
+    QString m_highlightedVariableReference;
+    bool m_variableReferenceBlinkOn = false;
     NodeSelectedCallback m_onSelected;
 };
 

@@ -145,6 +145,16 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
     m_hitTest           = new SceneTreeHitTestManager(this);
     m_canvasController  = new SceneTreeCanvasController(this);
     m_wheelHandler      = new SceneTreeWheelHandler(this);
+    m_variableReferenceBlinkTimer = new QTimer(this);
+    m_variableReferenceBlinkTimer->setInterval(420);
+    connect(m_variableReferenceBlinkTimer, &QTimer::timeout, this, [this]() {
+        if (m_hoveredVariableReferenceName.isEmpty()) {
+            m_variableReferenceBlinkTimer->stop();
+            return;
+        }
+        m_variableReferenceBlinkOn = !m_variableReferenceBlinkOn;
+        refresh();
+    });
 
     m_thumbnailCache = new NodeThumbnailCache(QSize(68, 68), this);
     connect(m_thumbnailCache, &NodeThumbnailCache::thumbnailsUpdated,
@@ -322,6 +332,36 @@ void SceneTreeGraphicsWidget::refresh()
         if (updatesWereEnabled)
             view->update();
     }
+}
+
+void SceneTreeGraphicsWidget::updateHoveredVariableReference(const QPointF &scenePosition)
+{
+    QString hoveredName;
+    for (const RenameZone &zone : m_renameZones) {
+        if (zone.isModule)
+            continue;
+        if (zone.rect.adjusted(-2.0, -2.0, 2.0, 2.0).contains(scenePosition)) {
+            hoveredName = zone.currentName;
+            break;
+        }
+    }
+    setHoveredVariableReferenceName(hoveredName);
+}
+
+void SceneTreeGraphicsWidget::setHoveredVariableReferenceName(const QString &name)
+{
+    if (m_hoveredVariableReferenceName == name)
+        return;
+
+    m_hoveredVariableReferenceName = name;
+    m_variableReferenceBlinkOn = !name.isEmpty();
+    if (m_variableReferenceBlinkTimer) {
+        if (name.isEmpty())
+            m_variableReferenceBlinkTimer->stop();
+        else if (!m_variableReferenceBlinkTimer->isActive())
+            m_variableReferenceBlinkTimer->start();
+    }
+    refresh();
 }
 
 void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
@@ -837,6 +877,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
 
     // ── Toolbar drag ─────────────────────────────────────────────────────────
     if (m_overlay->m_dragPending || m_overlay->m_dragActive) {
+        setHoveredVariableReferenceName(QString());
         if (m_overlay->m_dragPending) {
             const int dist = (event->pos() - m_overlay->m_dragPressVp).manhattanLength();
             if (dist >= 8) {
@@ -870,6 +911,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
         const QPointF togVp = mapFromScene(m_overlay->m_colorEditToggleItem->pos());
         if (m_overlay->m_colorEditToggleItem->boundingRect().translated(togVp)
                 .contains(QPointF(event->pos()))) {
+            setHoveredVariableReferenceName(QString());
             clearColorEditHighlight();                  // remove any stale blink overlay
             QGraphicsView::mouseMoveEvent(event);       // deliver hover enter/move to toggle
             event->accept();
@@ -879,6 +921,7 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
 
     // ── Color-edit mode hover ─────────────────────────────────────────────────
     if (colorEditMode()) {
+        setHoveredVariableReferenceName(QString());
         updateColorEditHighlight(scenePosition);
         if (!(event->buttons() & Qt::LeftButton))
             QGraphicsView::mouseMoveEvent(event);       // hover events only — block drag propagation
@@ -896,11 +939,13 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     m_hoverManager->updateActiveModuleCallParamControl(scenePosition, controlDown);
 
     if (m_canvasController->updatePan(event->pos())) {
+        setHoveredVariableReferenceName(QString());
         event->accept();
         return;
     }
 
     m_hoverManager->updateHighlights(scenePosition);
+    updateHoveredVariableReference(scenePosition);
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -960,6 +1005,7 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
 void SceneTreeGraphicsWidget::leaveEvent(QEvent *event)
 {
     QGraphicsView::leaveEvent(event);
+    setHoveredVariableReferenceName(QString());
     clearColorEditHighlight();
     const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
                          || m_hoverManager->m_hoveredExpressionRect.isValid();
@@ -1255,6 +1301,7 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
                               0,
                               -1)
             .setTheme(m_treeTheme)
+            .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
             .renderVariable(node, rect);
         // Pass the canonical tool name ("var"/"par"), not the variable name.
         // renderPreviewTool() does not recognise arbitrary variable names and falls
@@ -1300,6 +1347,8 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
                           -1,
                           0,
                           -1)
+        .setTheme(m_treeTheme)
+        .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
         .renderPrimitive(node, rect, label, shape, thumbnail);
 
     if (shape && shape->type == ShapeNode::Polygon2D) {
@@ -1365,6 +1414,8 @@ QRectF SceneTreeGraphicsWidget::drawModuleCall(const SceneDocument::TreeNode &no
                           [this](int nodeId) { handleTreeNodeSelected(nodeId); },
                           0, -1, -1, 0, -1, -1, 0, -1, 0, -1,
                           node.id, activeMCVarNodeId, activeMCNumberStart)
+        .setTheme(m_treeTheme)
+        .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
         .renderModuleCall(node, rect, params, callThumbnail);
 
     // Pass "call" (canonical tool name) not the module name — same reason as "var".
@@ -1587,6 +1638,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                           m_hoverManager->m_activeForLoopNodeId,
                           m_hoverManager->m_activeForLoopNumberStart)
         .setTheme(m_treeTheme)
+        .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
         .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail, collapsedGroup);
 
     // ── Polyhedron table ──────────────────────────────────
@@ -1629,6 +1681,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                               -1,
                               0,
                               -1)
+            .setTheme(m_treeTheme)
+            .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
             .renderModuleCall(callTemplate, moduleCallTemplateRect, moduleCallTemplateParams);
         addNodeDragHandle(-node.id,
                           QStringLiteral("call"),

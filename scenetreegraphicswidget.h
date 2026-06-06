@@ -207,6 +207,8 @@ private:
     ShapeNode::Type typeForPrimitive(int shapeId) const;
     void syncThumbnailCache();
     void syncGroupThumbnailCache();
+    void updateHoveredVariableReference(const QPointF &scenePosition);
+    void setHoveredVariableReferenceName(const QString &name);
     void collectPrimitiveNodeShapes(const SceneDocument::TreeNode &node,
                                     QHash<int, ShapeNode> *out) const;
 
@@ -257,6 +259,9 @@ private:
     SceneTreeHitTestManager        *m_hitTest           = nullptr;
     SceneTreeCanvasController      *m_canvasController  = nullptr;
     SceneTreeWheelHandler          *m_wheelHandler      = nullptr;
+    QTimer                         *m_variableReferenceBlinkTimer = nullptr;
+    QString m_hoveredVariableReferenceName;
+    bool m_variableReferenceBlinkOn = false;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
     QGraphicsPixmapItem *m_treeZoomSnapshotItem = nullptr;
