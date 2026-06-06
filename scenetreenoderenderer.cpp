@@ -764,27 +764,24 @@ public:
                 painter->drawText(QRectF(rowRect.left(), rowRect.top(), 14.0, rowRect.height()),
                                   Qt::AlignLeft | Qt::AlignVCenter, control.label);
 
-                const QVector<ExpressionTextSpan> spans =
-                    expressionSpansInTextRect(fieldRect, control.expression, metrics);
+                const ExpressionPillLayout pillLayout(fieldRect, control.expression, metrics);
                 painter->save();
                 painter->setClipRect(fieldRect.adjusted(0.0, -2.0, 0.0, 2.0));
 
-                for (const ExpressionTextSpan &span : spans) {
+                for (const ExpressionTextSpan &span : pillLayout.spans()) {
                     if (!span.number) continue;
                     const bool active = (i == m_activeParamIndex)
                                         && (span.start == m_activeNumberStart);
-                    paintRoundedPanel(painter, cubeShapeParameterPillRect(fieldRect, span), 3.0,
+                    paintRoundedPanel(painter, pillLayout.pillRectFor(span), 3.0,
                                       QPen(active ? SceneTreePalette::pillBorderActive()
                                                   : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt),
                                            active ? 2 : 1),
                                       QBrush(active ? SceneTreePalette::pillFillActive()
                                                    : SceneTreePalette::pillFill(pt)));
                 }
-                for (const ExpressionTextSpan &span : spans) {
-                    const QRectF tr = span.number
-                        ? cubeShapeParameterPillRect(fieldRect, span)
-                        : QRectF(span.rect.left(), fieldRect.top(),
-                                 span.rect.width(), fieldRect.height());
+                for (const ExpressionTextSpan &span : pillLayout.spans()) {
+                    const QRectF tr = span.number ? pillLayout.pillRectFor(span)
+                                                  : pillLayout.visualRectFor(span);
                     painter->setPen(span.number ? SceneTreePalette::numText(pt)
                                                 : SceneTreePalette::textMuted(pt));
                     painter->drawText(tr,

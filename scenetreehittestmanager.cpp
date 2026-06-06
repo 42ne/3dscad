@@ -213,24 +213,16 @@ bool SceneTreeHitTestManager::shapeParameterControlAt(const QPointF &scenePositi
             const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
             if (!fieldRect.contains(scenePosition))
                 continue;
-            const QVector<ExpressionTextSpan> spans =
-                expressionSpansInTextRect(fieldRect, controls[i].expression, metrics);
-            const bool simple = (spans.size() == 1 && spans.first().number);
-            for (const ExpressionTextSpan &span : spans) {
-                if (!span.number) continue;
-                const QRectF pillRect = cubeShapeParameterPillRect(fieldRect, span);
-                if (!pillRect.intersects(fieldRect))
-                    continue;
-                if (!simple && !pillRect.adjusted(-2,-1,2,1).contains(scenePosition))
-                    continue;
-                if (shapeId)     *shapeId     = bestNode->shapeId;
-                if (nodeId)      *nodeId      = bestNode->id;
-                if (parameter)   *parameter   = i;
-                if (numberStart) *numberStart = span.start;
-                if (numberLength)*numberLength= span.length;
-                return true;
-            }
-            continue;
+            const ExpressionPillLayout pillLayout(fieldRect, controls[i].expression, metrics);
+            ExpressionTextSpan span;
+            if (!pillLayout.spanAt(scenePosition, &span, true))
+                continue;
+            if (shapeId)     *shapeId     = bestNode->shapeId;
+            if (nodeId)      *nodeId      = bestNode->id;
+            if (parameter)   *parameter   = i;
+            if (numberStart) *numberStart = span.start;
+            if (numberLength)*numberLength= span.length;
+            return true;
         }
         const auto numCtrls = shapeParameterNumberControls(
             bestRect, i, controls.size(), controls[i].expression, metrics);

@@ -292,33 +292,29 @@ case ExpressionEditTarget::ShapeParameter: {
 
 <hr>
 
-<h2>9. Правила дублювання коду (поточні проблеми)</h2>
+<h2>9. Реюзабельний layout-клас</h2>
 
-<p>Формула <code>pillRect</code> та логіка розгалуження
-<code>isCube / shape->type == ShapeNode::Cube</code> зараз продубльована в трьох
-місцях:</p>
+<p>Формула <code>pillRect</code> та базова логіка simple/complex винесені в
+<code>ExpressionPillLayout</code>. Клас не знає про конкретну картку: будь-який
+рендерер або менеджер передає <code>QRectF fieldRect</code>,
+<code>QString expression</code> і <code>QFontMetricsF</code>, після чого отримує
+однакову геометрію та hit-test поведінку.</p>
 
-<ol>
-  <li><code>scenetreenoderenderer.cpp</code> — рендер</li>
-  <li><code>scenetreehovermanager.cpp</code> — ховер-тергет + scroll-зона</li>
-  <li><code>scenetreehittestmanager.cpp</code> — hit-test при кліку</li>
-</ol>
-
-<div class="todo">
-  <strong>Наступний крок:</strong> Виділити реюзабельний клас (напр.
-  <code>PillFieldLayout</code> або <code>ExpressionPillLayout</code>), який
+<div class="note">
+  <strong>Зроблено:</strong> <code>ExpressionPillLayout</code>
   інкапсулює:
   <ul>
-    <li>fieldRect з параметрів карточки (labelWidth, gap);</li>
+    <li><code>fieldRect</code> як готову область виразу;</li>
     <li><code>spans()</code> → вектор <code>ExpressionTextSpan</code>;</li>
     <li><code>pillRectFor(span)</code>;</li>
-    <li><code>spanAt(scenePos)</code> → optional&lt;ExpressionTextSpan&gt;;</li>
+    <li><code>visiblePillRectFor(span)</code> з обрізкою по полю;</li>
+    <li><code>spanAt(scenePos)</code> → знайдений числовий span;</li>
     <li>логіку simple/complex;</li>
-    <li>scroll-zone rect;</li>
-    <li>hover-target (hoverRect, editRect, spanStart).</li>
+    <li><code>contentRect()</code> та <code>expressionEditRect()</code>;</li>
+    <li><code>scrollZoneRect(numberStart)</code>.</li>
   </ul>
-  Будь-яка картка передає <code>QRectF fieldRect</code>, <code>QString expression</code>
-  і отримує готову поведінку.
+  Геометрія конкретної картки (наприклад <code>cubeShapeParameterFieldRect(rowRect)</code>)
+  лишається зовнішнім адаптером.
 </div>
 
 <hr>

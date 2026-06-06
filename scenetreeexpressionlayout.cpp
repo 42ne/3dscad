@@ -4,6 +4,7 @@
 #include "scenetreetoolmetadata.h"
 
 #include <QFontMetricsF>
+#include <QPointF>
 #include <QtGlobal>
 
 namespace SceneTreeGraphics {
@@ -184,6 +185,109 @@ QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, co
     }
 
     return spans;
+}
+
+ExpressionPillLayout::ExpressionPillLayout(const QRectF &fieldRect,
+                                           const QString &expression,
+                                           const QFontMetricsF &metrics)
+    : m_fieldRect(fieldRect)
+    , m_expression(expression)
+    , m_spans(expressionSpansInTextRect(fieldRect, expression, metrics))
+{
+}
+
+bool ExpressionPillLayout::isSimpleNumber() const
+{
+    return m_spans.size() == 1 && m_spans.first().number;
+}
+
+bool ExpressionPillLayout::firstNumberSpan(ExpressionTextSpan *span) const
+{
+    for (const ExpressionTextSpan &candidate : m_spans) {
+        if (!candidate.number)
+            continue;
+        if (span)
+            *span = candidate;
+        return true;
+    }
+    return false;
+}
+
+bool ExpressionPillLayout::spanAt(const QPointF &scenePosition,
+                                  ExpressionTextSpan *span,
+                                  bool matchSimpleNumberField) const
+{
+    if (!m_fieldRect.contains(scenePosition))
+        return false;
+
+    if (matchSimpleNumberField && isSimpleNumber())
+        return firstNumberSpan(span);
+
+    for (const ExpressionTextSpan &candidate : m_spans) {
+        if (!candidate.number)
+            continue;
+        const QRectF pillRect = visiblePillRectFor(candidate);
+        if (pillRect.isEmpty())
+            continue;
+        if (!pillRect.adjusted(-2.0, -1.0, 2.0, 1.0).contains(scenePosition))
+            continue;
+        if (span)
+            *span = candidate;
+        return true;
+    }
+    return false;
+}
+
+QRectF ExpressionPillLayout::pillRectFor(const ExpressionTextSpan &span) const
+{
+    const qreal textW = span.rect.width() - 8.0;
+    const qreal pillW = textW + 4.0;
+    const qreal pillLeft = qMax(m_fieldRect.left(), span.rect.left() + 2.0);
+    return QRectF(pillLeft, m_fieldRect.top(), pillW, m_fieldRect.height());
+}
+
+QRectF ExpressionPillLayout::visiblePillRectFor(const ExpressionTextSpan &span) const
+{
+    return pillRectFor(span).intersected(m_fieldRect);
+}
+
+QRectF ExpressionPillLayout::visualRectFor(const ExpressionTextSpan &span) const
+{
+    if (span.number)
+        return visiblePillRectFor(span);
+    return QRectF(span.rect.left(), m_fieldRect.top(),
+                  span.rect.width(), m_fieldRect.height()).intersected(m_fieldRect);
+}
+
+QRectF ExpressionPillLayout::contentRect() const
+{
+    QRectF bounds;
+    for (const ExpressionTextSpan &span : m_spans) {
+        const QRectF rect = visualRectFor(span);
+        if (rect.isEmpty())
+            continue;
+        bounds = bounds.isNull() ? rect : bounds.united(rect);
+    }
+    return bounds;
+}
+
+QRectF ExpressionPillLayout::expressionEditRect() const
+{
+    const QRectF bounds = contentRect();
+    if (bounds.isEmpty())
+        return m_fieldRect;
+    return bounds.adjusted(-4.0, 0.0, 4.0, 0.0).intersected(m_fieldRect);
+}
+
+QRectF ExpressionPillLayout::scrollZoneRect(int numberStart) const
+{
+    for (const ExpressionTextSpan &span : m_spans) {
+        if (!span.number)
+            continue;
+        if (isSimpleNumber() || span.start == numberStart)
+            return visiblePillRectFor(span);
+    }
+    return m_fieldRect;
 }
 
 QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth)
@@ -610,14 +714,6 @@ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int cou
 QRectF cubeShapeParameterFieldRect(const QRectF &rowRect)
 {
     return rowRect.adjusted(16.0, 0.0, -4.0, 0.0);
-}
-
-QRectF cubeShapeParameterPillRect(const QRectF &fieldRect, const ExpressionTextSpan &span)
-{
-    const qreal textW = span.rect.width() - 8.0;
-    const qreal pillW = textW + 4.0;
-    const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
-    return QRectF(pillLeft, fieldRect.top(), pillW, fieldRect.height());
 }
 
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics)

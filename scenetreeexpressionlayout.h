@@ -10,6 +10,7 @@
 #include <QVector>
 
 class QFontMetricsF;
+class QPointF;
 
 namespace SceneTreeGraphics {
 
@@ -32,6 +33,36 @@ struct ExpressionTextSpan {
     int length = 0;
     QRectF rect;
     bool number = false;
+};
+
+class ExpressionPillLayout {
+public:
+    ExpressionPillLayout() = default;
+    ExpressionPillLayout(const QRectF &fieldRect,
+                         const QString &expression,
+                         const QFontMetricsF &metrics);
+
+    const QRectF &fieldRect() const { return m_fieldRect; }
+    const QString &expression() const { return m_expression; }
+    const QVector<ExpressionTextSpan> &spans() const { return m_spans; }
+
+    bool isSimpleNumber() const;
+    bool firstNumberSpan(ExpressionTextSpan *span) const;
+    bool spanAt(const QPointF &scenePosition,
+                ExpressionTextSpan *span,
+                bool matchSimpleNumberField = false) const;
+
+    QRectF pillRectFor(const ExpressionTextSpan &span) const;
+    QRectF visiblePillRectFor(const ExpressionTextSpan &span) const;
+    QRectF visualRectFor(const ExpressionTextSpan &span) const;
+    QRectF contentRect() const;
+    QRectF expressionEditRect() const;
+    QRectF scrollZoneRect(int numberStart) const;
+
+private:
+    QRectF m_fieldRect;
+    QString m_expression;
+    QVector<ExpressionTextSpan> m_spans;
 };
 
 struct LinearExtrudeParamInfo {
@@ -88,7 +119,6 @@ QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
 QRectF cubeShapeParameterFieldRect(const QRectF &rowRect);
-QRectF cubeShapeParameterPillRect(const QRectF &fieldRect, const ExpressionTextSpan &span);
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth);
