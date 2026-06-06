@@ -84,6 +84,23 @@ linear_extrude(height = 40, center = true, twist = 180, slices = 60, scale = 0.5
 All `linear_extrude` parameters are supported: `height`, `center`, `twist`,
 `slices`, and `scale`.
 
+Rotate extrude:
+
+```openscad
+rotate_extrude(angle=360) {
+    translate([8, 0, 0]) { circle(r=3); }
+}
+
+rotate_extrude(angle=180) {
+    square([6, 2]);
+}
+```
+
+The `angle` parameter controls the sweep in degrees (default 360 = full torus).
+Profile children should lie entirely in X ≥ 0; `translate([r, 0, 0])` offsets
+are applied before revolution. Profile translate wrappers are the only transform
+recognised inside a `rotate_extrude` body.
+
 Transform groups:
 
 ```openscad
@@ -245,6 +262,13 @@ sphere(r=12);
 cylinder(h=30, r=8, center=true);
 polyhedron(points=[[0,0,0],[10,0,0],[0,10,0],[0,0,10]],
            faces=[[0,2,1],[0,1,3],[1,2,3],[2,0,3]]);
+
+// 2D primitives — used as children of linear_extrude or rotate_extrude
+circle(r=8);
+circle(d=16);
+square([10, 20], center=true);
+square(10);
+polygon(points=[[0,0],[10,0],[5,10]]);
 ```
 
 Dimension arguments may also be expressions:
@@ -271,9 +295,25 @@ Additional accepted forms for each primitive:
 - `sphere(12)` — positional argument treated as radius
 - `sphere(d=24)` — diameter; stored as the expression `24/2`
 
-**Cylinder:**
+**Cylinder / Cone (frustum):**
 - `cylinder(h=30, r=8, center=true)` — named arguments in any order
 - `cylinder(30, 8)` — positional `h`, `r` (third positional is `center`)
+- `cylinder(h=20, r1=10, r2=0, center=true)` — cone: `r1` is bottom radius, `r2` is top radius
+- `cylinder(h=20, r1=8, r2=4, center=true)` — frustum
+- `cylinder(h=20, d1=16, d2=8, center=true)` — diameter form; stored as `d/2` expressions
+
+**Circle (2D):**
+- `circle(r=8)` — named argument
+- `circle(8)` — positional argument treated as radius
+- `circle(d=16)` — diameter; stored as the expression `16/2`
+
+**Square (2D):**
+- `square([10, 20], center=true)` — `[width, height]` vector
+- `square(10)` — scalar shorthand; creates a `10×10` square
+- `square([10, 20])` — `center` is optional (defaults to false)
+
+**Polygon (2D):**
+- `polygon(points=[[0,0],[10,0],[5,10]])` — arbitrary 2D polygon; paths optional
 
 **Polyhedron:**
 - `polyhedron(points=[...], faces=[...])` imports as an editable `Polyhedron`
@@ -416,7 +456,6 @@ These constructs are outside the current round-trippable subset:
 - positional module arguments in the visual editor workflow
 - `offset`, `projection`
 - `import`, `surface`, `text`
-- `rotate_extrude`
 - `render()`
 - arbitrary named arguments on primitives beyond the generated forms
 - `if` inside modules always takes the true branch (parse-time limitation — module parameter values are only known at call time)
