@@ -934,25 +934,15 @@ QRectF SceneTreeHoverManager::hoverScrollZoneRect(const QPointF &scenePosition) 
                             const QRectF rowRect = shapeParameterControlRect(
                                 child.rect, param, paramControls.size());
                             if (shape->type == ShapeNode::Cube) {
-                                constexpr qreal kLabelW = 14.0;
-                                const QRectF fieldRect(rowRect.left() + kLabelW + 2.0,
-                                                       rowRect.top(),
-                                                       rowRect.width() - kLabelW - 4.0,
-                                                       rowRect.height());
+                                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
                                 const QFontMetricsF fm(sceneTreeValueFont());
                                 const QVector<ExpressionTextSpan> spans =
                                     expressionSpansInTextRect(fieldRect, paramControls[param].expression, fm);
                                 const bool simple = (spans.size() == 1 && spans.first().number);
-                                // Return the same pill rect as the renderer draws.
-                                auto pillRect = [&](const ExpressionTextSpan &span) -> QRectF {
-                                    const qreal textW    = span.rect.width() - 8.0;
-                                    const qreal pillW    = textW + 4.0;
-                                    const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
-                                    return QRectF(pillLeft, fieldRect.top(), pillW, fieldRect.height());
-                                };
                                 for (const ExpressionTextSpan &span : spans) {
-                                    if (span.number && (simple || span.start == numStart))
-                                        return pillRect(span);
+                                    if (!span.number || (!simple && span.start != numStart))
+                                        continue;
+                                    return cubeShapeParameterPillRect(fieldRect, span).intersected(fieldRect);
                                 }
                                 return fieldRect;
                             }
@@ -1402,39 +1392,21 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
                 continue;
             // Cube uses full-width input fields — editRect matches the pill exactly.
             if (shape->type == ShapeNode::Cube) {
-                constexpr qreal kLabelW = 14.0;
-                const QRectF fieldRect(rowRect.left() + kLabelW + 2.0, rowRect.top(),
-                                       rowRect.width() - kLabelW - 4.0, rowRect.height());
+                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+                if (!fieldRect.contains(scenePosition))
+                    continue;
                 const QVector<ExpressionTextSpan> spans =
                     expressionSpansInTextRect(fieldRect, controls[i].expression, valueMetrics);
                 const bool simple = (spans.size() == 1 && spans.first().number);
-
-                // Same pill rect formula as the renderer.
-                auto pillRect = [&](const ExpressionTextSpan &span) -> QRectF {
-                    const qreal textW    = span.rect.width() - 8.0;
-                    const qreal pillW    = textW + 4.0;
-                    const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
-                    return QRectF(pillLeft, fieldRect.top(), pillW, fieldRect.height());
-                };
 
                 // For complex expressions: if cursor is on a specific number pill,
                 // suppress the yellow frame (cyan scroll zone is enough) but keep
                 // click-to-edit working — opening the editor for the whole expression.
                 if (!simple) {
-                    // Build the expression bounding rect (same as the "between pills" case).
-                    QRectF exprBoundsForPill;
-                    for (const ExpressionTextSpan &span : spans) {
-                        const QRectF r = span.number
-                            ? pillRect(span)
-                            : QRectF(span.rect.left(), fieldRect.top(),
-                                     span.rect.width(), fieldRect.height());
-                        exprBoundsForPill = exprBoundsForPill.isNull() ? r : exprBoundsForPill.united(r);
-                    }
-                    const QRectF exprEditRect = exprBoundsForPill.adjusted(-4, 0, 4, 0);
-
                     for (const ExpressionTextSpan &span : spans) {
                         if (!span.number) continue;
-                        const QRectF pr = pillRect(span);
+                        const QRectF pr = cubeShapeParameterPillRect(fieldRect, span).intersected(fieldRect);
+                        if (pr.isEmpty()) continue;
                         if (!pr.adjusted(-2, -1, 2, 1).contains(scenePosition)) continue;
                         if (target) {
                             target->kind           = SceneTreeGraphicsWidget::ExpressionEditTarget::ShapeParameter;
@@ -1456,13 +1428,14 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
                     QRectF exprBounds;
                     for (const ExpressionTextSpan &span : spans) {
                         const QRectF r = span.number
-                            ? pillRect(span)
+                            ? cubeShapeParameterPillRect(fieldRect, span).intersected(fieldRect)
                             : QRectF(span.rect.left(), fieldRect.top(),
-                                     span.rect.width(), fieldRect.height());
+                                     span.rect.width(), fieldRect.height()).intersected(fieldRect);
+                        if (r.isEmpty()) continue;
                         exprBounds = exprBounds.isNull() ? r : exprBounds.united(r);
                     }
                     if (target) {
-                        const QRectF exprRect = exprBounds.adjusted(-4, 0, 4, 0);
+                        const QRectF exprRect = exprBounds.adjusted(-4, 0, 4, 0).intersected(fieldRect);
                         target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::ShapeParameter;
                         target->hoverRect  = exprRect;
                         target->editRect   = exprRect;
@@ -1476,7 +1449,7 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
 
                 // Simple number: pill rect for both hover and edit.
                 const ExpressionTextSpan &firstSpan = spans.first();
-                const QRectF pr = pillRect(firstSpan);
+                const QRectF pr = cubeShapeParameterPillRect(fieldRect, firstSpan).intersected(fieldRect);
                 if (target) {
                     target->kind           = SceneTreeGraphicsWidget::ExpressionEditTarget::ShapeParameter;
                     target->hoverRect      = pr;

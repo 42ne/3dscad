@@ -210,16 +210,18 @@ bool SceneTreeHitTestManager::shapeParameterControlAt(const QPointF &scenePositi
         if (!rowRect.contains(scenePosition))
             continue;
         if (isCube) {
-            // Cube uses field area starting at 14+2px (not PrimitiveParamLabelArea).
-            constexpr qreal kLabelW = 14.0;
-            const QRectF fieldRect(rowRect.left() + kLabelW + 2.0, rowRect.top(),
-                                   rowRect.width() - kLabelW - 4.0, rowRect.height());
+            const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+            if (!fieldRect.contains(scenePosition))
+                continue;
             const QVector<ExpressionTextSpan> spans =
                 expressionSpansInTextRect(fieldRect, controls[i].expression, metrics);
             const bool simple = (spans.size() == 1 && spans.first().number);
             for (const ExpressionTextSpan &span : spans) {
                 if (!span.number) continue;
-                if (!simple && !span.rect.adjusted(-2,-1,2,1).contains(scenePosition))
+                const QRectF pillRect = cubeShapeParameterPillRect(fieldRect, span);
+                if (!pillRect.intersects(fieldRect))
+                    continue;
+                if (!simple && !pillRect.adjusted(-2,-1,2,1).contains(scenePosition))
                     continue;
                 if (shapeId)     *shapeId     = bestNode->shapeId;
                 if (nodeId)      *nodeId      = bestNode->id;

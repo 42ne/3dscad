@@ -607,6 +607,19 @@ QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int cou
     return QRectF(left, top, width, rowHeight);
 }
 
+QRectF cubeShapeParameterFieldRect(const QRectF &rowRect)
+{
+    return rowRect.adjusted(16.0, 0.0, -4.0, 0.0);
+}
+
+QRectF cubeShapeParameterPillRect(const QRectF &fieldRect, const ExpressionTextSpan &span)
+{
+    const qreal textW = span.rect.width() - 8.0;
+    const qreal pillW = textW + 4.0;
+    const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
+    return QRectF(pillLeft, fieldRect.top(), pillW, fieldRect.height());
+}
+
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics)
 {
     const QRectF rowRect = shapeParameterControlRect(primitiveRect, paramIndex, paramCount);

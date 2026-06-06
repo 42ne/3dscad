@@ -755,36 +755,25 @@ public:
         painter->setFont(valueFont);
 
         if (m_shape.type == ShapeNode::Cube) {
-            constexpr qreal kLabelW = 14.0;
             for (int i = 0; i < controls.size(); ++i) {
                 const ShapeParameterControl &control = controls[i];
                 const QRectF rowRect = shapeParameterControlRect(m_rect, i, controls.size());
-                const QRectF fieldRect(rowRect.left() + kLabelW + 2.0, rowRect.top(),
-                                       rowRect.width() - kLabelW - 4.0, rowRect.height());
+                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
 
                 painter->setPen(SceneTreePalette::numLabelText(pt));
-                painter->drawText(QRectF(rowRect.left(), rowRect.top(), kLabelW, rowRect.height()),
+                painter->drawText(QRectF(rowRect.left(), rowRect.top(), 14.0, rowRect.height()),
                                   Qt::AlignLeft | Qt::AlignVCenter, control.label);
 
                 const QVector<ExpressionTextSpan> spans =
                     expressionSpansInTextRect(fieldRect, control.expression, metrics);
-                const bool simpleNumber = (spans.size() == 1 && spans.first().number);
-
-                // expressionSpansInTextRect adds ±4px horizontal padding to number spans.
-                // Strip it and apply 2px — pill won't overlap adjacent operators.
-                // Simple number: centre pill in the field. Complex: flow left-to-right.
-                auto numPillRect = [&](const ExpressionTextSpan &span) -> QRectF {
-                    const qreal textW    = span.rect.width() - 8.0;
-                    const qreal pillW    = textW + 4.0;
-                    const qreal pillLeft = qMax(fieldRect.left(), span.rect.left() + 2.0);
-                    return QRectF(pillLeft, fieldRect.top(), pillW, fieldRect.height());
-                };
+                painter->save();
+                painter->setClipRect(fieldRect.adjusted(0.0, -2.0, 0.0, 2.0));
 
                 for (const ExpressionTextSpan &span : spans) {
                     if (!span.number) continue;
                     const bool active = (i == m_activeParamIndex)
                                         && (span.start == m_activeNumberStart);
-                    paintRoundedPanel(painter, numPillRect(span), 3.0,
+                    paintRoundedPanel(painter, cubeShapeParameterPillRect(fieldRect, span), 3.0,
                                       QPen(active ? SceneTreePalette::pillBorderActive()
                                                   : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt),
                                            active ? 2 : 1),
@@ -793,7 +782,7 @@ public:
                 }
                 for (const ExpressionTextSpan &span : spans) {
                     const QRectF tr = span.number
-                        ? numPillRect(span)
+                        ? cubeShapeParameterPillRect(fieldRect, span)
                         : QRectF(span.rect.left(), fieldRect.top(),
                                  span.rect.width(), fieldRect.height());
                     painter->setPen(span.number ? SceneTreePalette::numText(pt)
@@ -803,6 +792,7 @@ public:
                                                   : (Qt::AlignLeft    | Qt::AlignVCenter),
                                       span.text);
                 }
+                painter->restore();
             }
         } else {
             for (int i = 0; i < controls.size(); ++i) {
