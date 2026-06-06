@@ -299,16 +299,15 @@ bool SceneTreeHitTestManager::variableNumberControlAt(const QPointF &scenePositi
 
     const QFontMetricsF metrics(sceneTreeGraphicsFont());
     const qreal nameW = metrics.horizontalAdvance(bestNode->variableName);
-    const auto controls = expressionNumberControls(bestRect, bestNode->variableExpression,
-                                                   metrics, nameW);
-    for (const ExpressionNumberControl &ctrl : controls) {
-        if (!ctrl.rect.contains(scenePosition)) continue;
-        if (nodeId) *nodeId = bestNode->id;
-        if (start)  *start  = ctrl.start;
-        if (length) *length = ctrl.length;
-        return true;
-    }
-    return false;
+    const QRectF exprRect = variableExpressionTextRect(bestRect, nameW);
+    const ExpressionPillLayout pillLayout(exprRect, bestNode->variableExpression, metrics);
+    ExpressionTextSpan span;
+    if (!pillLayout.spanAt(scenePosition, &span))
+        return false;
+    if (nodeId) *nodeId = bestNode->id;
+    if (start)  *start  = span.start;
+    if (length) *length = span.length;
+    return true;
 }
 
 bool SceneTreeHitTestManager::forLoopRangeControlAt(const QPointF &scenePosition,

@@ -940,25 +940,32 @@ public:
                           Qt::AlignLeft | Qt::AlignVCenter,
                           QStringLiteral("="));
 
-        const QVector<ExpressionTextSpan> spans = expressionTextSpans(m_rect, m_expression, metrics, nameW);
-        for (const ExpressionTextSpan &span : spans) {
+        const QRectF exprRect = variableExpressionTextRect(m_rect, nameW);
+        const ExpressionPillLayout pillLayout(exprRect, m_expression, metrics);
+        painter->save();
+        painter->setClipRect(exprRect.adjusted(0.0, -2.0, 0.0, 2.0));
+
+        for (const ExpressionTextSpan &span : pillLayout.spans()) {
             if (!span.number)
                 continue;
             const bool active = span.start == m_activeNumberStart;
             paintRoundedPanel(painter,
-                              span.rect,
+                              pillLayout.pillRectFor(span),
                               4.0,
                               QPen(active ? SceneTreePalette::pillBorderActive() : SceneTreePalette::pillBorder(QColor(255,255,255,32), pt), active ? 2 : 1),
                               QBrush(active ? SceneTreePalette::pillFillActive() : SceneTreePalette::pillFill(pt)));
         }
 
-        for (const ExpressionTextSpan &span : spans) {
+        for (const ExpressionTextSpan &span : pillLayout.spans()) {
             painter->setPen(span.number ? SceneTreePalette::numText(pt) : SceneTreePalette::textMuted(pt));
             const Qt::Alignment align = span.number
                 ? (Qt::AlignHCenter | Qt::AlignVCenter)
                 : (Qt::AlignLeft   | Qt::AlignVCenter);
-            painter->drawText(span.rect, align, span.text);
+            const QRectF textRect = span.number ? pillLayout.pillRectFor(span)
+                                                : pillLayout.visualRectFor(span);
+            painter->drawText(textRect, align, span.text);
         }
+        painter->restore();
     }
 
 private:

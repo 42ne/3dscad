@@ -35,8 +35,8 @@ pre code { background: transparent; padding: 0; }
 <h1>Pill / Expression Editing — behavior spec</h1>
 <p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на не-табличних primitive-картках.</em></p>
 <p>Документ описує правила рендерингу, ховеру та редагування числових «піллів» у
-рядках параметрів шейп-карточки. Мета — зафіксувати логіку перед тим, як вона
-буде винесена у реюзабельний клас.</p>
+рядках параметрів шейп-карточки, а також у VAR/PAR expression-полях. Логіка
+винесена у реюзабельний <code>ExpressionPillLayout</code>.</p>
 
 <hr>
 
@@ -63,6 +63,10 @@ pre code { background: transparent; padding: 0; }
 
 <p>Для інших не-табличних шейпів використовується той самий <code>ExpressionPillLayout</code>,
 але поле починається після <code>PrimitiveParamLabelArea</code>: мітка ширша і містить «=».</p>
+
+<p>Для VAR/PAR рядків <code>ExpressionPillLayout</code> застосовується лише до
+області після знаку «=» (<code>variableExpressionTextRect</code>). Ім'я змінної або
+параметра залишається окремою <code>RenameZone</code> і не входить у expression field.</p>
 
 <hr>
 
@@ -229,7 +233,8 @@ QRectF pillRect(pillLeft, fieldRect.top(), pillW, fieldRect.height());</code></p
 <p>При підтвердженні (Enter):</p>
 
 <pre><code>// SceneTreeInlineEditor.cpp
-case ExpressionEditTarget::ShapeParameter: {
+case ExpressionEditTarget::ShapeParameter:
+case ExpressionEditTarget::Variable: {
     QString exprToSave = newExpression;
     if (target.spanStart >= 0 && !target.fullExpression.isEmpty()) {
         // Splice: замінити лише підрядок [spanStart, spanStart+spanLength)
@@ -237,7 +242,7 @@ case ExpressionEditTarget::ShapeParameter: {
                    + newExpression
                    + target.fullExpression.mid(target.spanStart + target.spanLength);
     }
-    emit shapeParameterExpressionEdited(target.nodeId, target.secondaryId, exprToSave);
+    // emit shapeParameterExpressionEdited(...) або variableExpressionEdited(...)
 }</code></pre>
 
 <table>
@@ -268,7 +273,7 @@ case ExpressionEditTarget::ShapeParameter: {
     QString expression;         // те, що показується в input
     int     nodeId      = 0;
     int     secondaryId = 0;    // для ShapeParameter: індекс параметра (0=X,1=Y,2=Z)
-    // Sub-expression fields (ExpressionPillLayout primitives):
+    // Sub-expression fields (ExpressionPillLayout fields):
     QString fullExpression;     // повний вираз рядка
     int     spanStart   = -1;   // >= 0 → splice-збереження
     int     spanLength  = 0;

@@ -167,15 +167,16 @@ SceneTreeColorEditMode::zoneAt(const QPointF &scenePos) const
                     const QFont font = sceneTreeGraphicsFont();
                     const QFontMetricsF metrics(font);
                     const qreal nameW = metrics.horizontalAdvance(node->variableName);
-                    const QVector<ExpressionTextSpan> spans =
-                        expressionTextSpans(child.rect, node->variableExpression, metrics, nameW);
-                    for (const ExpressionTextSpan &span : spans) {
-                        if (span.rect.contains(scenePos)) {
+                    const QRectF exprRect = variableExpressionTextRect(child.rect, nameW);
+                    const ExpressionPillLayout pillLayout(exprRect, node->variableExpression, metrics);
+                    for (const ExpressionTextSpan &span : pillLayout.spans()) {
+                        const QRectF spanRect = pillLayout.visualRectFor(span);
+                        if (spanRect.contains(scenePos)) {
                             const QString fn = span.number
                                 ? QStringLiteral("numText") : QStringLiteral("mutedText");
                             ColorZoneHit h{fn, span.number
                                 ? QStringLiteral("Number constant") : QStringLiteral("Formula"),
-                                span.rect, true, op, true};
+                                spanRect, true, op, true};
                             h.nodeId = child.nodeId;
                             h.spanText = span.text;
                             return h;
@@ -791,19 +792,21 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
                     m_blinkTargets.append(lbl);
                 } else {
                     const bool wantNumber = (prop.id != QLatin1String("mutedText"));
-                    for (const ExpressionTextSpan &span :
-                             expressionTextSpans(hit.rect, node->variableExpression, metrics, nameW)) {
+                    const QRectF exprRect = variableExpressionTextRect(hit.rect, nameW);
+                    const ExpressionPillLayout pillLayout(exprRect, node->variableExpression, metrics);
+                    for (const ExpressionTextSpan &span : pillLayout.spans()) {
                         if (span.number != wantNumber) continue;
+                        const QRectF spanRect = pillLayout.visualRectFor(span);
                         if (prop.id == QLatin1String("numFill")) {
                             QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
+                            path.addRoundedRect(spanRect, r, r);
                             auto *it = m_widget->m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
                             it->setZValue(8800.0);
                             it->setVisible(m_blinkOn);
                             m_blinkTargets.append(it);
                         } else if (prop.id == QLatin1String("numBorder")) {
                             QPainterPath path;
-                            path.addRoundedRect(span.rect, r, r);
+                            path.addRoundedRect(spanRect, r, r);
                             QPen borderPen(flash, 2.0);
                             borderPen.setCosmetic(true);
                             auto *it = m_widget->m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
@@ -814,10 +817,10 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
                             auto *lbl = new QGraphicsSimpleTextItem(span.text);
                             lbl->setFont(font);
                             const qreal tx = span.number
-                                ? span.rect.left() + (span.rect.width() - metrics.horizontalAdvance(span.text)) * 0.5
-                                : span.rect.left();
+                                ? spanRect.left() + (spanRect.width() - metrics.horizontalAdvance(span.text)) * 0.5
+                                : spanRect.left();
                             lbl->setPos(tx,
-                                        span.rect.top() + (span.rect.height() - metrics.height()) * 0.5);
+                                        spanRect.top() + (spanRect.height() - metrics.height()) * 0.5);
                             lbl->setBrush(QBrush(flash));
                             lbl->setZValue(8801.0);
                             m_widget->m_graphicsScene->addItem(lbl);

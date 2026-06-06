@@ -290,22 +290,6 @@ QRectF ExpressionPillLayout::scrollZoneRect(int numberStart) const
     return m_fieldRect;
 }
 
-QVector<ExpressionTextSpan> expressionTextSpans(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth)
-{
-    return expressionSpansInTextRect(variableExpressionTextRect(variableRect, nameTextWidth), expression, metrics);
-}
-
-QVector<ExpressionNumberControl> expressionNumberControls(const QRectF &variableRect, const QString &expression, const QFontMetricsF &metrics, qreal nameTextWidth)
-{
-    QVector<ExpressionNumberControl> controls;
-    const QVector<ExpressionTextSpan> spans = expressionTextSpans(variableRect, expression, metrics, nameTextWidth);
-    for (const ExpressionTextSpan &span : spans) {
-        if (span.number)
-            controls.append({span.text, span.start, span.length, span.rect});
-    }
-    return controls;
-}
-
 QString transformAxisExpression(const SceneDocument::TreeNode &node, int axis)
 {
     if (axis >= 0 && axis < node.transformExpressions.size() && !node.transformExpressions[axis].isEmpty())

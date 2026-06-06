@@ -317,6 +317,14 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
             return QStringLiteral("%1\nClick: edit whole expression\nHold Ctrl + mouse wheel: change individual numbers")
                 .arg(expressionTarget.label);
         }
+        if (expressionTarget.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Variable) {
+            if (expressionTarget.spanStart >= 0) {
+                return QStringLiteral("%1\nClick: edit this number\nHold Ctrl + mouse wheel: change value")
+                    .arg(expressionTarget.label);
+            }
+            return QStringLiteral("%1\nClick: edit whole expression\nHold Ctrl + mouse wheel: change individual numbers")
+                .arg(expressionTarget.label);
+        }
         return QStringLiteral("%1 expression\nClick: edit the full value after =\nEnter: apply; Esc: cancel")
             .arg(expressionTarget.label);
     }
@@ -966,13 +974,9 @@ QRectF SceneTreeHoverManager::hoverScrollZoneRect(const QPointF &scenePosition) 
                             continue;
                         const QFontMetricsF metrics(sceneTreeGraphicsFont());
                         const qreal nameW = metrics.horizontalAdvance(node->variableName);
-                        const auto controls = expressionNumberControls(
-                            child.rect, node->variableExpression, metrics, nameW);
-                        for (const auto &ctl : controls) {
-                            if (ctl.start == start)
-                                return ctl.rect;
-                        }
-                        break;
+                        const QRectF exprRect = variableExpressionTextRect(child.rect, nameW);
+                        const ExpressionPillLayout pillLayout(exprRect, node->variableExpression, metrics);
+                        return pillLayout.scrollZoneRect(start);
                     }
                 }
             }
@@ -1467,19 +1471,55 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
 
     if (bestNode->type == SceneDocument::TreeNode::Variable) {
         const qreal nameW = metrics.horizontalAdvance(bestNode->variableName);
-        const QRectF editRect = variableExpressionTextRect(bestRect, nameW);
-        const QRectF hoverRect(bestRect.left() + 38.0 + nameW,
-                               bestRect.top() + (VariableHeight - 18.0) * 0.5,
-                               bestRect.right() - (bestRect.left() + 38.0 + nameW) - 4.0,
-                               18.0);
-        if (!hoverRect.adjusted(-2.0, -2.0, 2.0, 2.0).contains(scenePosition))
+        const QRectF fieldRect = variableExpressionTextRect(bestRect, nameW);
+        if (!fieldRect.adjusted(-2.0, -2.0, 2.0, 2.0).contains(scenePosition))
             return false;
+        const ExpressionPillLayout pillLayout(fieldRect, bestNode->variableExpression, metrics);
+        const bool simple = pillLayout.isSimpleNumber();
+
+        if (!simple) {
+            ExpressionTextSpan span;
+            if (pillLayout.spanAt(scenePosition, &span, false)) {
+                const QRectF pr = pillLayout.visiblePillRectFor(span);
+                if (target) {
+                    target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Variable;
+                    target->hoverRect = QRectF();
+                    target->editRect = pr;
+                    target->label = QStringLiteral("Variable %1").arg(bestNode->variableName);
+                    target->expression = span.text;
+                    target->fullExpression = bestNode->variableExpression;
+                    target->spanStart = span.start;
+                    target->spanLength = span.length;
+                    target->nodeId = bestNode->id;
+                }
+                return true;
+            }
+
+            if (target) {
+                const QRectF exprRect = pillLayout.expressionEditRect();
+                target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Variable;
+                target->hoverRect = exprRect;
+                target->editRect = exprRect;
+                target->label = QStringLiteral("Variable %1").arg(bestNode->variableName);
+                target->expression = bestNode->variableExpression;
+                target->nodeId = bestNode->id;
+            }
+            return true;
+        }
+
+        ExpressionTextSpan firstSpan;
+        if (!pillLayout.firstNumberSpan(&firstSpan))
+            return false;
+        const QRectF pr = pillLayout.visiblePillRectFor(firstSpan);
         if (target) {
             target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Variable;
-            target->hoverRect = hoverRect;
-            target->editRect = editRect;
+            target->hoverRect = pr;
+            target->editRect = pr;
             target->label = QStringLiteral("Variable %1").arg(bestNode->variableName);
-            target->expression = bestNode->variableExpression;
+            target->expression = firstSpan.text;
+            target->fullExpression = bestNode->variableExpression;
+            target->spanStart = firstSpan.start;
+            target->spanLength = firstSpan.length;
             target->nodeId = bestNode->id;
         }
         return true;

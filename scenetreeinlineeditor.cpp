@@ -146,9 +146,16 @@ void SceneTreeInlineEditor::startInlineExpressionEdit(const SceneTreeGraphicsWid
                 emit m_widget->polygon2DPointExpressionEdited(target.nodeId, pointIndex, coord, newExpression);
                 break;
             }
-            case SceneTreeGraphicsWidget::ExpressionEditTarget::Variable:
-                emit m_widget->variableExpressionEdited(target.nodeId, newExpression);
+            case SceneTreeGraphicsWidget::ExpressionEditTarget::Variable: {
+                QString exprToSave = newExpression;
+                if (target.spanStart >= 0 && !target.fullExpression.isEmpty()) {
+                    exprToSave = target.fullExpression.left(target.spanStart)
+                               + newExpression
+                               + target.fullExpression.mid(target.spanStart + target.spanLength);
+                }
+                emit m_widget->variableExpressionEdited(target.nodeId, exprToSave);
                 break;
+            }
             case SceneTreeGraphicsWidget::ExpressionEditTarget::ModuleCallArgument:
                 emit m_widget->moduleCallArgumentExpressionEdited(target.nodeId, target.secondaryId, newExpression);
                 break;
