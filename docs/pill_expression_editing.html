@@ -33,7 +33,7 @@ pre code { background: transparent; padding: 0; }
 <body>
 
 <h1>Pill / Expression Editing — behavior spec</h1>
-<p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на Cube-картці.</em></p>
+<p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на Cube, Sphere, Cylinder, Cone.</em></p>
 <p>Документ описує правила рендерингу, ховеру та редагування числових «піллів» у
 рядках параметрів шейп-карточки. Мета — зафіксувати логіку перед тим, як вона
 буде винесена у реюзабельний клас.</p>
@@ -61,8 +61,8 @@ pre code { background: transparent; padding: 0; }
 </tbody>
 </table>
 
-<p>Константа для старих шейпів (не Cube): <code>PrimitiveParamLabelArea</code> — ширша зона
-мітки з «=», поле залишається праворуч.</p>
+<p>Для Sphere/Cylinder/Cone використовується той самий <code>ExpressionPillLayout</code>,
+але поле починається після <code>PrimitiveParamLabelArea</code>: мітка ширша і містить «=».</p>
 
 <hr>
 
@@ -189,7 +189,7 @@ QRectF pillRect(pillLeft, fieldRect.top(), pillW, fieldRect.height());</code></p
 </table>
 
 <div class="note">
-Для старих шейпів (не Cube) ховер поза полем показує:
+Для legacy-шейпів, які ще не підключені до <code>ExpressionPillLayout</code>, ховер поза полем показує:
 «Hold Ctrl + mouse wheel: change value / Click card: select object» — без прямого виклику редагування виразу.
 </div>
 
@@ -268,7 +268,7 @@ case ExpressionEditTarget::ShapeParameter: {
     QString expression;         // те, що показується в input
     int     nodeId      = 0;
     int     secondaryId = 0;    // для ShapeParameter: індекс параметра (0=X,1=Y,2=Z)
-    // Sub-expression fields (Cube):
+    // Sub-expression fields (ExpressionPillLayout primitives):
     QString fullExpression;     // повний вираз рядка
     int     spanStart   = -1;   // >= 0 → splice-збереження
     int     spanLength  = 0;
@@ -276,17 +276,17 @@ case ExpressionEditTarget::ShapeParameter: {
 
 <hr>
 
-<h2>8. Порівняння: Cube vs інші шейпи</h2>
+<h2>8. Порівняння: ExpressionPill primitives vs legacy шейпи</h2>
 
 <table>
-<thead><tr><th>Аспект</th><th>Cube <span class="done-tag">DONE</span></th><th>Інші шейпи</th></tr></thead>
+<thead><tr><th>Аспект</th><th>Cube</th><th>Sphere / Cylinder / Cone <span class="done-tag">DONE</span></th><th>Legacy шейпи</th></tr></thead>
 <tbody>
-<tr><td>Label area width</td>     <td>14 px (лише буква)</td>       <td><code>PrimitiveParamLabelArea</code> (ширше, з «=»)</td></tr>
-<tr><td>Field area</td>           <td>rowWidth − 18 px</td>          <td>rowWidth − PrimitiveParamLabelArea</td></tr>
-<tr><td>Sub-expression editing</td><td>Так (spanStart/splice)</td>  <td>Ні (лише повний вираз)</td></tr>
-<tr><td>hoverRect на конкретному пілі</td><td>QRectF() (немає)</td> <td>rowRect (вся рядок)</td></tr>
-<tr><td>hoverRect на field area</td><td>exprBounds (тільки контент)</td><td>editRect</td></tr>
-<tr><td>Tooltip "on card"</td>    <td>«Click: edit expression»</td> <td>«Click card: select object»</td></tr>
+<tr><td>Label area width</td>     <td>14 px (лише буква)</td>       <td><code>PrimitiveParamLabelArea</code> (ширше, з «=»)</td><td><code>PrimitiveParamLabelArea</code></td></tr>
+<tr><td>Field area</td>           <td>rowWidth − 18 px</td>          <td>rowWidth − PrimitiveParamLabelArea</td><td>rowWidth − PrimitiveParamLabelArea</td></tr>
+<tr><td>Sub-expression editing</td><td>Так (spanStart/splice)</td>  <td>Так (spanStart/splice)</td><td>Ні (лише повний вираз)</td></tr>
+<tr><td>hoverRect на конкретному пілі</td><td>QRectF() (немає)</td> <td>QRectF() (немає)</td><td>rowRect / editRect</td></tr>
+<tr><td>hoverRect на field area</td><td>exprBounds (тільки контент)</td><td>exprBounds (тільки контент)</td><td>editRect</td></tr>
+<tr><td>Tooltip "on card"</td>    <td>«Click: edit expression»</td><td>«Click: edit expression»</td><td>«Click card: select object»</td></tr>
 </tbody>
 </table>
 

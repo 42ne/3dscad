@@ -118,6 +118,8 @@ QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
 
 QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape);
 QRectF shapeParameterControlRect(const QRectF &primitiveRect, int index, int count);
+bool shapeUsesExpressionPillLayout(const ShapeNode &shape);
+QRectF shapeParameterFieldRect(const QRectF &rowRect, const ShapeNode &shape);
 QRectF cubeShapeParameterFieldRect(const QRectF &rowRect);
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics);

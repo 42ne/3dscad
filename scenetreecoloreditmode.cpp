@@ -197,7 +197,7 @@ SceneTreeColorEditMode::zoneAt(const QPointF &scenePos) const
                 if (node && node->type == SceneDocument::TreeNode::Primitive) {
                     const ShapeNode *shape = m_widget->m_scene->shapeById(node->shapeId);
                     if (shape) {
-                        const QFontMetricsF metrics(sceneTreeGraphicsFont());
+                        const QFontMetricsF metrics(sceneTreeValueFont());
                         const QVector<ShapeParameterControl> controls = shapeParameterControls(*shape);
                         const int count = controls.size();
                         for (int i = 0; i < count; ++i) {
@@ -211,16 +211,24 @@ SceneTreeColorEditMode::zoneAt(const QPointF &scenePos) const
                                 h.nodeId = child.nodeId;
                                 return h;
                             }
-                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea, rowRect.top(),
-                                                   rowRect.width() - PrimitiveParamLabelArea, rowRect.height());
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics)) {
-                                if (!span.rect.contains(scenePos)) continue;
+                            const QRectF textRect = shapeUsesExpressionPillLayout(*shape)
+                                ? shapeParameterFieldRect(rowRect, *shape)
+                                : QRectF(rowRect.left() + PrimitiveParamLabelArea, rowRect.top(),
+                                         rowRect.width() - PrimitiveParamLabelArea, rowRect.height());
+                            const ExpressionPillLayout pillLayout(textRect, controls[i].expression, metrics);
+                            const QVector<ExpressionTextSpan> spans = shapeUsesExpressionPillLayout(*shape)
+                                ? pillLayout.spans()
+                                : expressionSpansInTextRect(textRect, controls[i].expression, metrics);
+                            for (const ExpressionTextSpan &span : spans) {
+                                const QRectF spanRect = shapeUsesExpressionPillLayout(*shape)
+                                    ? pillLayout.visualRectFor(span)
+                                    : span.rect;
+                                if (!spanRect.contains(scenePos)) continue;
                                 const QString fn = span.number
                                     ? QStringLiteral("numText") : QStringLiteral("mutedText");
                                 ColorZoneHit h{fn, span.number ? QStringLiteral("Number constant")
                                                                : QStringLiteral("Formula"),
-                                               span.rect, true, op, true};
+                                               spanRect, true, op, true};
                                 h.nodeId = child.nodeId;
                                 h.spanText = span.text;
                                 return h;
@@ -586,24 +594,25 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
             QFont valueFont = font;
             valueFont.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 2.0));
             const QFontMetricsF metrics(font);
+            const QFontMetricsF valueMetrics(valueFont);
             const QFontMetricsF vfm(valueFont);
             const qreal r = 3.0 / qMax(0.001, qAbs(m_widget->transform().m11()));
             const bool wantNumber = (prop.id != QLatin1String("mutedText"));
 
             const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(hit.nodeId);
 
-            auto addSpanOverlay = [&](const ExpressionTextSpan &span) {
+            auto addSpanOverlayAt = [&](const ExpressionTextSpan &span, const QRectF &spanRect) {
                 if (span.number != wantNumber) return;
                 if (prop.id == QLatin1String("numFill")) {
                     QPainterPath path;
-                    path.addRoundedRect(span.rect, r, r);
+                    path.addRoundedRect(spanRect, r, r);
                     auto *it = m_widget->m_graphicsScene->addPath(path, Qt::NoPen, QBrush(flash));
                     it->setZValue(8800.0);
                     it->setVisible(m_blinkOn);
                     m_blinkTargets.append(it);
                 } else if (prop.id == QLatin1String("numBorder")) {
                     QPainterPath path;
-                    path.addRoundedRect(span.rect, r, r);
+                    path.addRoundedRect(spanRect, r, r);
                     QPen borderPen(flash, 2.0);
                     borderPen.setCosmetic(true);
                     auto *it = m_widget->m_graphicsScene->addPath(path, borderPen, Qt::NoBrush);
@@ -614,15 +623,18 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
                     auto *lbl = new QGraphicsSimpleTextItem(span.text);
                     lbl->setFont(valueFont);
                     const qreal tx = span.number
-                        ? span.rect.left() + (span.rect.width() - vfm.horizontalAdvance(span.text)) * 0.5
-                        : span.rect.left();
-                    lbl->setPos(tx, span.rect.top() + (span.rect.height() - vfm.height()) * 0.5);
+                        ? spanRect.left() + (spanRect.width() - vfm.horizontalAdvance(span.text)) * 0.5
+                        : spanRect.left();
+                    lbl->setPos(tx, spanRect.top() + (spanRect.height() - vfm.height()) * 0.5);
                     lbl->setBrush(QBrush(flash));
                     lbl->setZValue(8801.0);
                     m_widget->m_graphicsScene->addItem(lbl);
                     lbl->setVisible(m_blinkOn);
                     m_blinkTargets.append(lbl);
                 }
+            };
+            auto addSpanOverlay = [&](const ExpressionTextSpan &span) {
+                addSpanOverlayAt(span, span.rect);
             };
 
             if (node && node->type == SceneDocument::TreeNode::Primitive) {
@@ -646,13 +658,22 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
                             lbl->setVisible(m_blinkOn);
                             m_blinkTargets.append(lbl);
                         } else {
-                            const QRectF textRect(rowRect.left() + PrimitiveParamLabelArea,
-                                                  rowRect.top(),
-                                                  rowRect.width() - PrimitiveParamLabelArea,
-                                                  rowRect.height());
-                            for (const ExpressionTextSpan &span :
-                                     expressionSpansInTextRect(textRect, controls[i].expression, metrics))
-                                addSpanOverlay(span);
+                            const QRectF textRect = shapeUsesExpressionPillLayout(*shape)
+                                ? shapeParameterFieldRect(rowRect, *shape)
+                                : QRectF(rowRect.left() + PrimitiveParamLabelArea,
+                                         rowRect.top(),
+                                         rowRect.width() - PrimitiveParamLabelArea,
+                                         rowRect.height());
+                            const ExpressionPillLayout pillLayout(textRect, controls[i].expression, valueMetrics);
+                            const QVector<ExpressionTextSpan> spans = shapeUsesExpressionPillLayout(*shape)
+                                ? pillLayout.spans()
+                                : expressionSpansInTextRect(textRect, controls[i].expression, valueMetrics);
+                            for (const ExpressionTextSpan &span : spans) {
+                                const QRectF spanRect = shapeUsesExpressionPillLayout(*shape)
+                                    ? pillLayout.visualRectFor(span)
+                                    : span.rect;
+                                addSpanOverlayAt(span, spanRect);
+                            }
                         }
                     }
                 }

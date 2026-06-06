@@ -716,6 +716,24 @@ QRectF cubeShapeParameterFieldRect(const QRectF &rowRect)
     return rowRect.adjusted(16.0, 0.0, -4.0, 0.0);
 }
 
+bool shapeUsesExpressionPillLayout(const ShapeNode &shape)
+{
+    return shape.type == ShapeNode::Cube
+        || shape.type == ShapeNode::Sphere
+        || shape.type == ShapeNode::Cylinder
+        || shape.type == ShapeNode::Cone;
+}
+
+QRectF shapeParameterFieldRect(const QRectF &rowRect, const ShapeNode &shape)
+{
+    if (shape.type == ShapeNode::Cube)
+        return cubeShapeParameterFieldRect(rowRect);
+    return QRectF(rowRect.left() + PrimitiveParamLabelArea,
+                  rowRect.top(),
+                  rowRect.width() - PrimitiveParamLabelArea,
+                  rowRect.height());
+}
+
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics)
 {
     const QRectF rowRect = shapeParameterControlRect(primitiveRect, paramIndex, paramCount);

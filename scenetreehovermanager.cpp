@@ -408,7 +408,7 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
         const QVector<ShapeParameterControl> controls = shape ? shapeParameterControls(*shape) : QVector<ShapeParameterControl>();
         const QString label = parameter >= 0 && parameter < controls.size() ? controls[parameter].label : QStringLiteral("parameter");
         setKey(QStringLiteral("shape:%1:%2:%3").arg(nodeId).arg(parameter).arg(controlDown));
-        if (shape && shape->type == ShapeNode::Cube) {
+        if (shape && shapeUsesExpressionPillLayout(*shape)) {
             return controlDown
                 ? QStringLiteral("Shape %1\nMouse wheel: change value\nHover between numbers to edit expression").arg(label)
                 : QStringLiteral("Shape %1\nHold Ctrl + mouse wheel: change value\nClick: edit expression").arg(label);
@@ -933,8 +933,8 @@ QRectF SceneTreeHoverManager::hoverScrollZoneRect(const QPointF &scenePosition) 
                         if (param < paramControls.size()) {
                             const QRectF rowRect = shapeParameterControlRect(
                                 child.rect, param, paramControls.size());
-                            if (shape->type == ShapeNode::Cube) {
-                                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+                            if (shapeUsesExpressionPillLayout(*shape)) {
+                                const QRectF fieldRect = shapeParameterFieldRect(rowRect, *shape);
                                 const QFontMetricsF fm(sceneTreeValueFont());
                                 const ExpressionPillLayout pillLayout(
                                     fieldRect, paramControls[param].expression, fm);
@@ -1384,9 +1384,8 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
             const QRectF rowRect = shapeParameterControlRect(bestRect, i, controls.size());
             if (!rowRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition))
                 continue;
-            // Cube uses full-width input fields — editRect matches the pill exactly.
-            if (shape->type == ShapeNode::Cube) {
-                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+            if (shapeUsesExpressionPillLayout(*shape)) {
+                const QRectF fieldRect = shapeParameterFieldRect(rowRect, *shape);
                 if (!fieldRect.contains(scenePosition))
                     continue;
                 const ExpressionPillLayout pillLayout(fieldRect, controls[i].expression, valueMetrics);

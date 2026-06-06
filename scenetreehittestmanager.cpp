@@ -204,13 +204,13 @@ bool SceneTreeHitTestManager::shapeParameterControlAt(const QPointF &scenePositi
 
     const QFontMetricsF metrics(sceneTreeValueFont());
     const auto controls = shapeParameterControls(*shape);
-    const bool isCube = (shape->type == ShapeNode::Cube);
+    const bool usesPillLayout = shapeUsesExpressionPillLayout(*shape);
     for (int i = 0; i < controls.size(); ++i) {
         const QRectF rowRect = shapeParameterControlRect(bestRect, i, controls.size());
         if (!rowRect.contains(scenePosition))
             continue;
-        if (isCube) {
-            const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+        if (usesPillLayout) {
+            const QRectF fieldRect = shapeParameterFieldRect(rowRect, *shape);
             if (!fieldRect.contains(scenePosition))
                 continue;
             const ExpressionPillLayout pillLayout(fieldRect, controls[i].expression, metrics);

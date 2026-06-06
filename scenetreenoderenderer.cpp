@@ -754,15 +754,22 @@ public:
         const QVector<ShapeParameterControl> controls = shapeParameterControls(m_shape);
         painter->setFont(valueFont);
 
-        if (m_shape.type == ShapeNode::Cube) {
+        if (shapeUsesExpressionPillLayout(m_shape)) {
             for (int i = 0; i < controls.size(); ++i) {
                 const ShapeParameterControl &control = controls[i];
                 const QRectF rowRect = shapeParameterControlRect(m_rect, i, controls.size());
-                const QRectF fieldRect = cubeShapeParameterFieldRect(rowRect);
+                const QRectF fieldRect = shapeParameterFieldRect(rowRect, m_shape);
 
                 painter->setPen(SceneTreePalette::numLabelText(pt));
-                painter->drawText(QRectF(rowRect.left(), rowRect.top(), 14.0, rowRect.height()),
-                                  Qt::AlignLeft | Qt::AlignVCenter, control.label);
+                if (m_shape.type == ShapeNode::Cube) {
+                    painter->drawText(QRectF(rowRect.left(), rowRect.top(), 14.0, rowRect.height()),
+                                      Qt::AlignLeft | Qt::AlignVCenter, control.label);
+                } else {
+                    painter->drawText(QRectF(rowRect.left(), rowRect.top(),
+                                             PrimitiveParamLabelArea - 2.0, rowRect.height()),
+                                      Qt::AlignLeft | Qt::AlignVCenter,
+                                      control.label + QStringLiteral(" ="));
+                }
 
                 const ExpressionPillLayout pillLayout(fieldRect, control.expression, metrics);
                 painter->save();
