@@ -718,10 +718,8 @@ QRectF cubeShapeParameterFieldRect(const QRectF &rowRect)
 
 bool shapeUsesExpressionPillLayout(const ShapeNode &shape)
 {
-    return shape.type == ShapeNode::Cube
-        || shape.type == ShapeNode::Sphere
-        || shape.type == ShapeNode::Cylinder
-        || shape.type == ShapeNode::Cone;
+    return shape.type != ShapeNode::Polygon2D
+        && shape.type != ShapeNode::Polyhedron;
 }
 
 QRectF shapeParameterFieldRect(const QRectF &rowRect, const ShapeNode &shape)

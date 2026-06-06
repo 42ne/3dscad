@@ -33,7 +33,7 @@ pre code { background: transparent; padding: 0; }
 <body>
 
 <h1>Pill / Expression Editing — behavior spec</h1>
-<p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на Cube, Sphere, Cylinder, Cone.</em></p>
+<p><em>Стан на: 2026-06-07. Гілка <code>exp8</code>. Відлагоджено на не-табличних primitive-картках.</em></p>
 <p>Документ описує правила рендерингу, ховеру та редагування числових «піллів» у
 рядках параметрів шейп-карточки. Мета — зафіксувати логіку перед тим, як вона
 буде винесена у реюзабельний клас.</p>
@@ -61,7 +61,7 @@ pre code { background: transparent; padding: 0; }
 </tbody>
 </table>
 
-<p>Для Sphere/Cylinder/Cone використовується той самий <code>ExpressionPillLayout</code>,
+<p>Для інших не-табличних шейпів використовується той самий <code>ExpressionPillLayout</code>,
 але поле починається після <code>PrimitiveParamLabelArea</code>: мітка ширша і містить «=».</p>
 
 <hr>
@@ -279,14 +279,14 @@ case ExpressionEditTarget::ShapeParameter: {
 <h2>8. Порівняння: ExpressionPill primitives vs legacy шейпи</h2>
 
 <table>
-<thead><tr><th>Аспект</th><th>Cube</th><th>Sphere / Cylinder / Cone <span class="done-tag">DONE</span></th><th>Legacy шейпи</th></tr></thead>
+<thead><tr><th>Аспект</th><th>Cube</th><th>Інші не-табличні шейпи <span class="done-tag">DONE</span></th><th>Табличні шейпи</th></tr></thead>
 <tbody>
-<tr><td>Label area width</td>     <td>14 px (лише буква)</td>       <td><code>PrimitiveParamLabelArea</code> (ширше, з «=»)</td><td><code>PrimitiveParamLabelArea</code></td></tr>
+<tr><td>Label area width</td>     <td>14 px (лише буква)</td>       <td><code>PrimitiveParamLabelArea</code> (ширше, з «=»)</td><td>Табличні клітинки</td></tr>
 <tr><td>Field area</td>           <td>rowWidth − 18 px</td>          <td>rowWidth − PrimitiveParamLabelArea</td><td>rowWidth − PrimitiveParamLabelArea</td></tr>
-<tr><td>Sub-expression editing</td><td>Так (spanStart/splice)</td>  <td>Так (spanStart/splice)</td><td>Ні (лише повний вираз)</td></tr>
-<tr><td>hoverRect на конкретному пілі</td><td>QRectF() (немає)</td> <td>QRectF() (немає)</td><td>rowRect / editRect</td></tr>
-<tr><td>hoverRect на field area</td><td>exprBounds (тільки контент)</td><td>exprBounds (тільки контент)</td><td>editRect</td></tr>
-<tr><td>Tooltip "on card"</td>    <td>«Click: edit expression»</td><td>«Click: edit expression»</td><td>«Click card: select object»</td></tr>
+<tr><td>Sub-expression editing</td><td>Так (spanStart/splice)</td>  <td>Так (spanStart/splice)</td><td>Окрема таблична поведінка</td></tr>
+<tr><td>hoverRect на конкретному пілі</td><td>QRectF() (немає)</td> <td>QRectF() (немає)</td><td>Клітинка таблиці</td></tr>
+<tr><td>hoverRect на field area</td><td>exprBounds (тільки контент)</td><td>exprBounds (тільки контент)</td><td>Клітинка / рядок таблиці</td></tr>
+<tr><td>Tooltip "on card"</td>    <td>«Click: edit expression»</td><td>«Click: edit expression»</td><td>Табличні дії</td></tr>
 </tbody>
 </table>
 
