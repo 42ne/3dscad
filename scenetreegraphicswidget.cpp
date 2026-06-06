@@ -1266,7 +1266,11 @@ QRectF SceneTreeGraphicsWidget::drawNode(const SceneDocument::TreeNode &node, co
         // Register rename zone for the variable name text (badge = 38px, name follows).
         const QFontMetricsF metrics(sceneTreeGraphicsFont());
         const qreal nameW = qMax(metrics.horizontalAdvance(node.variableName), 24.0);
-        m_renameZones.append({QRectF(rect.left() + 38.0, rect.top(), nameW, VariableHeight),
+        constexpr qreal RenameTextHeight = 16.0;
+        m_renameZones.append({QRectF(rect.left() + 38.0,
+                                     rect.top() + (VariableHeight - RenameTextHeight) * 0.5,
+                                     nameW,
+                                     RenameTextHeight),
                               node.id, false, node.variableName});
 
         return rect;

@@ -763,7 +763,7 @@ public:
                 painter->setPen(SceneTreePalette::numLabelText(pt));
                 if (m_shape.type == ShapeNode::Cube) {
                     painter->drawText(QRectF(rowRect.left(), rowRect.top(), 14.0, rowRect.height()),
-                                      Qt::AlignLeft | Qt::AlignVCenter, control.label);
+                                      Qt::AlignLeft | Qt::AlignVCenter, control.label + QStringLiteral("="));
                 } else {
                     painter->drawText(QRectF(rowRect.left(), rowRect.top(),
                                              PrimitiveParamLabelArea - 2.0, rowRect.height()),
@@ -790,7 +790,8 @@ public:
                     const QRectF tr = span.number ? pillLayout.pillRectFor(span)
                                                   : pillLayout.visualRectFor(span);
                     painter->setPen(span.number ? SceneTreePalette::numText(pt)
-                                                : SceneTreePalette::textMuted(pt));
+                                                : span.identifier ? SceneTreePalette::varText(pt)
+                                                                  : SceneTreePalette::textMuted(pt));
                     painter->drawText(tr,
                                       span.number ? (Qt::AlignHCenter | Qt::AlignVCenter)
                                                   : (Qt::AlignLeft    | Qt::AlignVCenter),
@@ -827,7 +828,8 @@ public:
 
                 for (const ExpressionTextSpan &span : spans) {
                     painter->setPen(span.number ? SceneTreePalette::numText(pt)
-                                                : SceneTreePalette::textMuted(pt));
+                                                : span.identifier ? SceneTreePalette::varText(pt)
+                                                                  : SceneTreePalette::textMuted(pt));
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft   | Qt::AlignVCenter);
@@ -957,7 +959,7 @@ public:
         }
 
         for (const ExpressionTextSpan &span : pillLayout.spans()) {
-            painter->setPen(span.number ? SceneTreePalette::numText(pt) : SceneTreePalette::textMuted(pt));
+            painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
             const Qt::Alignment align = span.number
                 ? (Qt::AlignHCenter | Qt::AlignVCenter)
                 : (Qt::AlignLeft   | Qt::AlignVCenter);
@@ -1196,7 +1198,7 @@ private:
                                       QPen(active ? SceneTreePalette::cardPillBorderActive(m_operation) : cPillBorder, active ? 2 : 1),
                                       QBrush(active ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
-                painter->setPen(span.number ? SceneTreePalette::numText(pt2) : SceneTreePalette::textMuted(pt2));
+                painter->setPen(span.number ? SceneTreePalette::numText(pt2) : span.identifier ? SceneTreePalette::varText(pt2) : SceneTreePalette::textMuted(pt2));
                 const Qt::Alignment align = span.number
                     ? (Qt::AlignHCenter | Qt::AlignVCenter)
                     : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1466,7 +1468,7 @@ private:
                                                numActive ? 2 : 1),
                                           QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                     }
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : SceneTreePalette::textMuted(pt));
+                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1513,7 +1515,7 @@ private:
                                       QBrush(numActive ? SceneTreePalette::cardPillFillActive(m_operation) : cPillFill));
                 }
                 // Numbers: span.rect is 4 px wider on each side → centre digit inside pill.
-                painter->setPen(span.number ? SceneTreePalette::numText(pt) : SceneTreePalette::textMuted(pt));
+                painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : SceneTreePalette::textMuted(pt));
                 const Qt::Alignment align = span.number
                     ? (Qt::AlignHCenter | Qt::AlignVCenter)
                     : (Qt::AlignLeft | Qt::AlignVCenter);
@@ -1684,7 +1686,7 @@ public:
                     }
                 }
                 for (const ExpressionTextSpan &span : spans) {
-                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : cMuted);
+                    painter->setPen(span.number ? SceneTreePalette::numText(pt) : span.identifier ? SceneTreePalette::varText(pt) : cMuted);
                     const Qt::Alignment align = span.number
                         ? (Qt::AlignHCenter | Qt::AlignVCenter)
                         : (Qt::AlignLeft   | Qt::AlignVCenter);

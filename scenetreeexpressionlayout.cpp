@@ -159,7 +159,7 @@ QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, co
 
             const QString text = expression.mid(start, index - start);
             const qreal width = metrics.horizontalAdvance(text);
-            spans.append({text, start, index - start, QRectF(x, textRect.top(), width, textRect.height()), false});
+            spans.append({text, start, index - start, QRectF(x, textRect.top(), width, textRect.height()), false, true});
             x += width;
             continue;
         }

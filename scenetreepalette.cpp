@@ -201,6 +201,11 @@ QColor numLabelText(Theme theme)
     return isDarkTheme(theme) ? QColor(140, 175, 220) : QColor(80, 110, 160);
 }
 
+QColor varText(Theme theme)
+{
+    return isDarkTheme(theme) ? QColor(210, 100, 90) : QColor(170, 40, 30);
+}
+
 QColor leafCardFill()
 {
     return CustomThemeActive ? CustomTheme.leafCard : QColor(0, 0, 0, 0);

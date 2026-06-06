@@ -33,6 +33,7 @@ struct ExpressionTextSpan {
     int length = 0;
     QRectF rect;
     bool number = false;
+    bool identifier = false;
 };
 
 class ExpressionPillLayout {
