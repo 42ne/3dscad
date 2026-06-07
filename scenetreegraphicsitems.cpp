@@ -317,9 +317,9 @@ public:
         if (m_label == QStringLiteral("module"))
             glyphRect = QRectF(8.0*s, 6.0*s, 38.0*s, 40.0*s);
         if (isVariableToolName(m_label)) {
-            const QRectF badgeRect = glyphRect.adjusted(0.0, 8.0*s, 0.0, -8.0*s);
+            const QRectF badgeRect = glyphRect.adjusted(2.0*s, 6.0*s, -2.0*s, -6.0*s);
             painter->setPen(Qt::NoPen);
-            painter->setBrush(QColor(0, 0, 0, 35));
+            painter->setBrush(QColor(0, 0, 0, 40));
             painter->drawRoundedRect(badgeRect.translated(1.0, 1.0), 4.0*s, 4.0*s);
             QLinearGradient badgeGradient(badgeRect.topLeft(), badgeRect.bottomLeft());
             badgeGradient.setColorAt(0.0, QColor(255, 237, 172));
@@ -329,9 +329,9 @@ public:
             painter->drawRoundedRect(badgeRect, 4.0*s, 4.0*s);
             QFont font = painter->font();
             font.setBold(true);
-            font.setPointSizeF(qMax<qreal>(7.0, font.pointSizeF() - 1.0));
+            font.setPointSizeF(qMax<qreal>(7.5, font.pointSizeF()));
             painter->setFont(font);
-            painter->setPen(QColor(61, 48, 24));
+            painter->setPen(QColor(55, 38, 12));
             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
         } else if (operationTool) {
             const QColor operationIconAccent = operation == SceneDocument::TreeNode::For

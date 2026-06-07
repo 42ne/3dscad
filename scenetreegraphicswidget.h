@@ -126,6 +126,7 @@ signals:
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
+    void drawForeground(QPainter *painter, const QRectF &rect) override;
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -209,6 +210,9 @@ private:
     void syncGroupThumbnailCache();
     void updateHoveredVariableReference(const QPointF &scenePosition);
     void setHoveredVariableReferenceName(const QString &name);
+    void requestAnimatedNodeDelete(int nodeId, const QRectF &preferredRect = QRectF());
+    void startDeletePixelAnimation(int nodeId, const QRectF &rect);
+    QRectF nodeRectForDeleteAnimation(int nodeId) const;
     void collectPrimitiveNodeShapes(const SceneDocument::TreeNode &node,
                                     QHash<int, ShapeNode> *out) const;
 
@@ -262,6 +266,21 @@ private:
     QTimer                         *m_variableReferenceBlinkTimer = nullptr;
     QString m_hoveredVariableReferenceName;
     bool m_variableReferenceBlinkOn = false;
+    struct DeleteAnimTile {
+        QPixmap  pixmap;
+        QPointF  startPos;
+        QPointF  delta;
+        QSizeF   cellSize;
+        qreal    fadeRate = 1.0;
+        int      rotatSign = 1;
+        // current state, updated each animation frame:
+        QPointF  pos;
+        qreal    rotation = 0.0;
+        qreal    opacity  = 1.0;
+    };
+    QVector<DeleteAnimTile>      m_deleteAnimTiles;
+    QSet<int>                    m_pendingAnimatedDeleteNodeIds;
+    QVector<QVariantAnimation *> m_activeDeleteAnimations;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
     QGraphicsPixmapItem *m_treeZoomSnapshotItem = nullptr;

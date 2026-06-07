@@ -26,6 +26,7 @@
 #include <QFontMetricsF>
 #include <QGraphicsEllipseItem>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsRectItem>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSimpleTextItem>
@@ -364,6 +365,140 @@ void SceneTreeGraphicsWidget::setHoveredVariableReferenceName(const QString &nam
     refresh();
 }
 
+void SceneTreeGraphicsWidget::requestAnimatedNodeDelete(int nodeId, const QRectF &preferredRect)
+{
+    if (nodeId <= 0) {
+        emit treeNodeDeleteRequested(nodeId);
+        return;
+    }
+    if (m_pendingAnimatedDeleteNodeIds.contains(nodeId))
+        return;
+
+    setHoveredVariableReferenceName(QString());
+    const QRectF rect = preferredRect.isValid() ? preferredRect : nodeRectForDeleteAnimation(nodeId);
+    if (!rect.isValid() || rect.isEmpty()) {
+        emit treeNodeDeleteRequested(nodeId);
+        return;
+    }
+
+    m_pendingAnimatedDeleteNodeIds.insert(nodeId);
+    startDeletePixelAnimation(nodeId, rect);
+}
+
+QRectF SceneTreeGraphicsWidget::nodeRectForDeleteAnimation(int nodeId) const
+{
+    QRectF rect = groupRectForNode(nodeId);
+    if (!rect.isValid())
+        rect = rectForChildNode(nodeId);
+    return rect;
+}
+
+void SceneTreeGraphicsWidget::startDeletePixelAnimation(int nodeId, const QRectF &rect)
+{
+    if (!m_graphicsScene) {
+        m_pendingAnimatedDeleteNodeIds.remove(nodeId);
+        emit treeNodeDeleteRequested(nodeId);
+        return;
+    }
+
+    const QRectF clipped = rect.adjusted(1.0, 1.0, -1.0, -1.0);
+    if (!clipped.isValid() || clipped.isEmpty()) {
+        m_pendingAnimatedDeleteNodeIds.remove(nodeId);
+        emit treeNodeDeleteRequested(nodeId);
+        return;
+    }
+
+    // 1. Grab the card's appearance while it is still visible.
+    const QRect vpRect = mapFromScene(clipped).boundingRect()
+                             .intersected(viewport()->rect());
+    if (vpRect.isEmpty()) {
+        m_pendingAnimatedDeleteNodeIds.remove(nodeId);
+        emit treeNodeDeleteRequested(nodeId);
+        return;
+    }
+    const QPixmap capture = viewport()->grab(vpRect);
+    const qreal renderScale = capture.devicePixelRatioF();
+
+    // 2. Build tiles — stored in m_deleteAnimTiles (widget member, not scene items).
+    //    At t=0 they sit at the card's exact position with opacity=1, covering it
+    //    pixel-perfectly via drawForeground().  The scene is rebuilt without the
+    //    card one event-loop tick later (QueuedConnection below), so the first
+    //    repaint already shows tiles instead of the card.
+    const int columns = qBound(4, qRound(clipped.width()  / 10.0), 30);
+    const int rows    = qBound(2, qRound(clipped.height() / 10.0), 20);
+    const qreal cellW = clipped.width()  / columns;
+    const qreal cellH = clipped.height() / rows;
+    const QPointF center = clipped.center();
+
+    m_deleteAnimTiles.clear();
+    m_deleteAnimTiles.reserve(columns * rows);
+
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < columns; ++col) {
+            const QRectF tileScene(clipped.left() + col * cellW,
+                                   clipped.top()  + row * cellH, cellW, cellH);
+            const QRect tileVp = mapFromScene(tileScene).boundingRect()
+                                     .translated(-vpRect.topLeft())
+                                     .intersected(capture.rect());
+            QPixmap px = capture.copy(tileVp);
+            px.setDevicePixelRatio(renderScale);
+
+            const int idx = row * columns + col;
+            const QPointF startPos = tileScene.topLeft();
+            const QPointF fromCenter = startPos + QPointF(cellW * 0.5, cellH * 0.5) - center;
+            const qreal len = qMax<qreal>(1.0, std::sqrt(fromCenter.x() * fromCenter.x()
+                                                       + fromCenter.y() * fromCenter.y()));
+            const QPointF outward = fromCenter / len;
+            const qreal swirl = ((idx * 37) % 360) * 3.14159265358979323846 / 180.0;
+            const QPointF jitter(std::cos(swirl) * 14.0, std::sin(swirl) * 14.0);
+
+            DeleteAnimTile tile;
+            tile.pixmap    = px;
+            tile.startPos  = startPos;
+            tile.pos       = startPos;
+            tile.delta     = outward * (18.0 + (idx * 17) % 32) + jitter;
+            tile.cellSize  = QSizeF(cellW, cellH);
+            tile.fadeRate  = 1.0 + ((idx * 19 + col * 7 + row * 13) % 120) / 100.0;
+            tile.rotatSign = (idx % 2 == 0) ? 1 : -1;
+            m_deleteAnimTiles.append(tile);
+        }
+    }
+
+    // 3. Emit deletion in the next event-loop tick so the scene rebuilds without
+    //    the card while tiles are already flying in drawForeground.
+    //    resetGraphicsScene() no longer stops delete animations, so this is safe.
+    QMetaObject::invokeMethod(this, [this, nodeId]() {
+        m_pendingAnimatedDeleteNodeIds.remove(nodeId);
+        emit treeNodeDeleteRequested(nodeId);
+    }, Qt::QueuedConnection);
+
+    auto *animation = new QVariantAnimation(this);
+    animation->setDuration(480);
+    animation->setStartValue(0.0);
+    animation->setEndValue(1.0);
+    animation->setEasingCurve(QEasingCurve::OutCubic);
+
+    connect(animation, &QVariantAnimation::valueChanged, this,
+            [this](const QVariant &value) {
+        const qreal t = value.toReal();
+        for (auto &tile : m_deleteAnimTiles) {
+            tile.pos      = tile.startPos + tile.delta * t;
+            tile.rotation = tile.rotatSign * 80.0 * t;
+            tile.opacity  = qMax<qreal>(0.0, 1.0 - t * tile.fadeRate);
+        }
+        viewport()->update();
+    });
+
+    connect(animation, &QVariantAnimation::finished, this,
+            [this, animation]() {
+        m_deleteAnimTiles.clear();
+        animation->deleteLater();
+        viewport()->update();
+    });
+
+    animation->start();
+}
+
 void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
 {
     if (!m_scene)
@@ -441,6 +576,10 @@ void SceneTreeGraphicsWidget::compactRootBlocksAndFit()
 
 void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
+    // Delete animations keep tiles in m_deleteAnimTiles (widget member, not scene items)
+    // so they survive scene resets safely — don't stop them here.
+    m_pendingAnimatedDeleteNodeIds.clear();
+
     clearDropPreview();
     // Remove color-edit overlays before clear() deletes them under us.
     clearColorEditHighlight();
@@ -602,6 +741,27 @@ void SceneTreeGraphicsWidget::drawBackground(QPainter *painter, const QRectF &re
     drawCanvasGrid(painter, rect, 120.0, background.majorGrid, 1);
 }
 
+void SceneTreeGraphicsWidget::drawForeground(QPainter *painter, const QRectF &)
+{
+    if (m_deleteAnimTiles.isEmpty())
+        return;
+    painter->save();
+    for (const DeleteAnimTile &tile : m_deleteAnimTiles) {
+        if (tile.opacity <= 0.0) continue;
+        painter->save();
+        painter->setOpacity(tile.opacity);
+        const QPointF tileCenter = tile.pos + QPointF(tile.cellSize.width()  * 0.5,
+                                                      tile.cellSize.height() * 0.5);
+        painter->translate(tileCenter);
+        painter->rotate(tile.rotation);
+        painter->translate(-tileCenter);
+        painter->drawPixmap(QRectF(tile.pos, tile.cellSize), tile.pixmap,
+                            QRectF(QPointF(), QSizeF(tile.pixmap.size())));
+        painter->restore();
+    }
+    painter->restore();
+}
+
 void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape && colorEditMode()) {
@@ -622,7 +782,7 @@ void SceneTreeGraphicsWidget::keyPressEvent(QKeyEvent *event)
     }
 
     if ((event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) && m_selectedTreeNodeId > 0) {
-        emit treeNodeDeleteRequested(m_selectedTreeNodeId);
+        requestAnimatedNodeDelete(m_selectedTreeNodeId);
         event->accept();
         return;
     }
@@ -752,7 +912,7 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
                 || cell.type == PolyhedronTableItem::Cell::RemoveFace) {
                 m_selectedPolyhedronElementNodeIds.remove(cell.nodeId);
                 emit polyhedronElementSelectionChanged(m_selectedPolyhedronElementNodeIds.values().toVector());
-                emit treeNodeDeleteRequested(cell.nodeId);
+                requestAnimatedNodeDelete(cell.nodeId, cell.rect);
                 event->accept();
                 return;
             }
@@ -1953,7 +2113,7 @@ void SceneTreeGraphicsWidget::handleTreeNodeDrop(int nodeId, const QPointF &scen
         }
 
         m_dropPreview->scheduleCommit([this, nodeId]() {
-            emit treeNodeDeleteRequested(nodeId);
+            requestAnimatedNodeDelete(nodeId);
         });
         return;
     }

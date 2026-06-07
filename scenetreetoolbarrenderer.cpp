@@ -20,10 +20,7 @@ namespace {
 QStringList paletteTools()
 {
     return {
-        // ── Primitives ────────────────────────────────────────────────────────
-        QStringLiteral("circle"),
-        QStringLiteral("square"),
-        QStringLiteral("polygon"),
+        // ── 3-D primitives ────────────────────────────────────────────────────
         QStringLiteral("cube"),
         QStringLiteral("sphere"),
         QStringLiteral("cylinder"),
@@ -42,12 +39,16 @@ QStringList paletteTools()
         QStringLiteral("hull"),
         QStringLiteral("minkowski"),
         QStringLiteral("polyhedron"),
-        QStringLiteral("rotate_extrude"),
-        QStringLiteral("linear_extrude"),
         // ── Structure / control flow ──────────────────────────────────────────
         QStringLiteral("module"),
         QStringLiteral("var"),
         QStringLiteral("for"),
+        // ── 2-D splines → extrusions ──────────────────────────────────────────
+        QStringLiteral("circle"),
+        QStringLiteral("square"),
+        QStringLiteral("polygon"),
+        QStringLiteral("linear_extrude"),
+        QStringLiteral("rotate_extrude"),
     };
 }
 

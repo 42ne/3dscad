@@ -16,60 +16,92 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
     const QColor faceLight(221, 235, 248);
     const QColor faceDark(139, 176, 214);
 
+    // ── 2D spline icons: flat outline + square control-point nodes ───────────
+    auto drawNode = [&](QPainter *p, const QPointF &pt) {
+        p->drawRect(QRectF(pt.x() - 2.0, pt.y() - 2.0, 4.0, 4.0));
+    };
+    const QColor splineStroke(72, 110, 155);
+    const QColor splineFill(185, 213, 240, 38);
+    const QColor nodeStroke(60, 95, 140);
+    const QColor nodeFill(220, 235, 252);
+
     painter->setPen(QPen(outline, 1));
     if (type == ShapeNode::Square) {
-        painter->setPen(QPen(outline, 1));
-        painter->setBrush(face);
-        painter->drawRoundedRect(rect.adjusted(2.0, 3.0, -2.0, -3.0), 3.0, 3.0);
-        painter->setPen(QPen(faceDark, 1));
-        painter->drawLine(rect.left() + rect.width() * 0.30, rect.top() + 4.0,
-                          rect.left() + rect.width() * 0.30, rect.bottom() - 4.0);
-        painter->drawLine(rect.left() + 4.0, rect.top() + rect.height() * 0.68,
-                          rect.right() - 4.0, rect.top() + rect.height() * 0.68);
+        const QRectF sr = rect.adjusted(6.0, 6.0, -6.0, -6.0);
+        painter->setPen(QPen(splineStroke, 1.5));
+        painter->setBrush(splineFill);
+        painter->drawRect(sr);
+        painter->setPen(QPen(nodeStroke, 1.0));
+        painter->setBrush(nodeFill);
+        drawNode(painter, sr.topLeft());
+        drawNode(painter, sr.topRight());
+        drawNode(painter, sr.bottomRight());
+        drawNode(painter, sr.bottomLeft());
         return;
     }
     if (type == ShapeNode::Polygon2D) {
-        QPainterPath path;
-        path.moveTo(rect.center().x(), rect.top() + 3.0);
-        path.lineTo(rect.right() - 3.0, rect.top() + rect.height() * 0.46);
-        path.lineTo(rect.right() - rect.width() * 0.26, rect.bottom() - 3.0);
-        path.lineTo(rect.left() + 4.0, rect.bottom() - rect.height() * 0.28);
-        path.lineTo(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.28);
-        path.closeSubpath();
-        painter->setBrush(face);
-        painter->drawPath(path);
-        painter->setPen(QPen(faceDark, 1));
-        painter->drawLine(rect.left() + rect.width() * 0.24, rect.top() + rect.height() * 0.28,
-                          rect.right() - rect.width() * 0.26, rect.bottom() - 3.0);
+        const qreal cx = rect.center().x(), cy = rect.center().y();
+        const qreal rx = rect.width() * 0.33, ry = rect.height() * 0.33;
+        const struct { qreal a, s; } verts[] = {
+            { 90.0, 1.00}, {20.0, 0.88}, {310.0, 0.92},
+            {220.0, 0.88}, {150.0, 0.95}
+        };
+        QPolygonF poly;
+        for (const auto &v : verts) {
+            const qreal rad = v.a * M_PI / 180.0;
+            poly << QPointF(cx + std::cos(rad) * rx * v.s,
+                            cy - std::sin(rad) * ry * v.s);
+        }
+        painter->setPen(QPen(splineStroke, 1.5));
+        painter->setBrush(splineFill);
+        painter->drawPolygon(poly);
+        // Vertex nodes
+        painter->setPen(QPen(nodeStroke, 1.0));
+        painter->setBrush(nodeFill);
+        for (const QPointF &pt : poly) drawNode(painter, pt);
         return;
     }
     if (type == ShapeNode::Sphere) {
+        const QRectF sr = rect.adjusted(3.0, 3.0, -3.0, -3.0);
         painter->setBrush(face);
-        painter->drawEllipse(rect);
+        painter->drawEllipse(sr);
         painter->setPen(QPen(QColor(93, 127, 166), 1));
         painter->setBrush(Qt::NoBrush);
-        painter->drawEllipse(rect.adjusted(3.0, 9.0, -3.0, -9.0));
+        painter->drawEllipse(sr.adjusted(3.0, sr.height() * 0.28, -3.0, -sr.height() * 0.28));
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(255, 255, 255, 165));
-        painter->drawEllipse(QRectF(rect.left() + rect.width() * 0.25,
-                                    rect.top() + rect.height() * 0.18,
-                                    rect.width() * 0.22,
-                                    rect.height() * 0.16));
+        painter->drawEllipse(QRectF(sr.left() + sr.width() * 0.25,
+                                    sr.top()  + sr.height() * 0.18,
+                                    sr.width() * 0.22,
+                                    sr.height() * 0.16));
         return;
     }
 
     if (type == ShapeNode::Circle) {
-        painter->setBrush(QColor(178, 207, 238, 170));
-        painter->drawEllipse(rect.adjusted(2.0, 2.0, -2.0, -2.0));
-        painter->setPen(QPen(QColor(93, 127, 166), 1.2));
-        painter->setBrush(Qt::NoBrush);
-        painter->drawEllipse(rect.adjusted(5.0, 5.0, -5.0, -5.0));
+        const QRectF cr = rect.adjusted(6.0, 6.0, -6.0, -6.0);
+        // Flat circle outline
+        painter->setPen(QPen(splineStroke, 1.5));
+        painter->setBrush(splineFill);
+        painter->drawEllipse(cr);
+        // 4 control nodes at cardinal positions
+        const QPointF nodes[] = {
+            {cr.center().x(), cr.top()},    // N
+            {cr.right(),  cr.center().y()}, // E
+            {cr.center().x(), cr.bottom()}, // S
+            {cr.left(),   cr.center().y()}, // W
+        };
+        painter->setPen(QPen(nodeStroke, 1.0));
+        painter->setBrush(nodeFill);
+        for (const QPointF &pt : nodes) drawNode(painter, pt);
+        // Tangent handle stub at East node (shows it's a curve, not a circle primitive)
+        painter->setPen(QPen(splineStroke, 0.9));
+        painter->drawLine(nodes[1] + QPointF(0, -4.5), nodes[1] + QPointF(0, 4.5));
         return;
     }
 
     if (type == ShapeNode::Cylinder) {
-        const QRectF top(rect.left() + 3.0, rect.top() + 3.0, rect.width() - 6.0, rect.height() * 0.34);
-        const QRectF bottom(top.left(), rect.bottom() - top.height() - 3.0, top.width(), top.height());
+        const QRectF top(rect.left() + 5.0, rect.top() + 4.0, rect.width() - 10.0, rect.height() * 0.30);
+        const QRectF bottom(top.left(), rect.bottom() - top.height() - 4.0, top.width(), top.height());
         painter->setPen(Qt::NoPen);
         painter->setBrush(face);
         painter->drawRect(QRectF(top.left(), top.center().y(), top.width(), bottom.center().y() - top.center().y()));
@@ -84,10 +116,9 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
     }
 
     if (type == ShapeNode::Cone) {
-        // Base ellipse at bottom, slant sides meeting at apex
-        const qreal bh = rect.height() * 0.30; // base ellipse height
-        const QRectF base(rect.left() + 2.0, rect.bottom() - bh - 2.0, rect.width() - 4.0, bh);
-        const QPointF apex(rect.center().x(), rect.top() + 3.0);
+        const qreal bh = rect.height() * 0.28;
+        const QRectF base(rect.left() + 5.0, rect.bottom() - bh - 4.0, rect.width() - 10.0, bh);
+        const QPointF apex(rect.center().x(), rect.top() + 5.0);
         painter->setPen(Qt::NoPen);
         painter->setBrush(face);
         // Filled side triangle
@@ -324,8 +355,10 @@ void paintOperationIcon(QPainter *painter,
         painter->drawLine(QPointF(gx, center.y() - 2.5), QPointF(gx, center.y() + 2.5));
         painter->drawLine(QPointF(gx - 2.5, center.y()), QPointF(gx + 2.5, center.y()));
     } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
-        painter->setPen(QPen(accent.darker(155), 1.4));
-        painter->setBrush(QColor(255, 255, 255, 55));
+        const QColor extStroke(205, 220, 240);
+        const QColor extFill(255, 255, 255, 110);
+        painter->setPen(QPen(extStroke, 1.5));
+        painter->setBrush(extFill);
         const QRectF base(symbolRect.left() + 2.0, symbolRect.bottom() - symbolRect.height() * 0.34,
                           symbolRect.width() - 4.0, symbolRect.height() * 0.24);
         const QRectF top = base.translated(0.0, -symbolRect.height() * 0.42);
@@ -334,7 +367,8 @@ void paintOperationIcon(QPainter *painter,
         painter->drawLine(QPointF(base.left(), base.center().y()), QPointF(top.left(), top.center().y()));
         painter->drawLine(QPointF(base.right(), base.center().y()), QPointF(top.right(), top.center().y()));
     } else if (operation == SceneDocument::TreeNode::RotateExtrude) {
-        // Torus (front view): outer ellipse + inner hole = solid of revolution
+        const QColor extStroke(205, 220, 240);
+        const QColor extFill(255, 255, 255, 110);
         const QRectF sr = symbolRect.adjusted(1.5, 2.0, -1.5, -2.0);
         const QPointF c = sr.center();
         const qreal rx = sr.width()  * 0.46;
@@ -347,13 +381,13 @@ void paintOperationIcon(QPainter *painter,
         torus.addEllipse(c, hx, hy);
 
         painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(255, 255, 255, 55));
+        painter->setBrush(extFill);
         painter->drawPath(torus);
 
         painter->setBrush(Qt::NoBrush);
-        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setPen(QPen(extStroke, 1.5));
         painter->drawEllipse(c, rx, ry);
-        painter->setPen(QPen(accent.darker(155), 1.1));
+        painter->setPen(QPen(extStroke, 1.2));
         painter->drawEllipse(c, hx, hy);
     } else if (operation == SceneDocument::TreeNode::Resize) {
         painter->setPen(QPen(accent.darker(155), 1.3));
@@ -401,7 +435,11 @@ void paintOperationIcon(QPainter *painter,
         for (const QPointF &p : {top, left, right, bottom})
             painter->drawEllipse(p, 1.25, 1.25);
     } else if (operation == SceneDocument::TreeNode::For) {
-        painter->setPen(QPen(accent.darker(160), 1.6));
+        QFont forFont = painter->font();
+        forFont.setBold(true);
+        forFont.setPointSizeF(qMax<qreal>(7.5, forFont.pointSizeF()));
+        painter->setFont(forFont);
+        painter->setPen(QColor(210, 222, 238));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
     } else if (operation == SceneDocument::TreeNode::Color) {
         QLinearGradient swatch(symbolRect.topLeft(), symbolRect.bottomRight());
@@ -433,7 +471,7 @@ void paintOperationIcon(QPainter *painter,
         moduleFont.setBold(true);
         moduleFont.setPointSizeF(qMax<qreal>(8.0, moduleFont.pointSizeF() + 1.0));
         painter->setFont(moduleFont);
-        painter->setPen(QPen(accent.darker(165), 1.6));
+        painter->setPen(QColor(210, 222, 238));
         painter->drawText(rect, Qt::AlignCenter, QStringLiteral("M"));
         painter->restore();
     }

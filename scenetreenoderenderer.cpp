@@ -1267,7 +1267,7 @@ private:
                 painter->drawText(span.rect, align, span.text);
             }
             const qreal suffixLeft = forLoopRangeTextRect(m_rect, variableName, metrics).left()
-                                     + metrics.horizontalAdvance(rangeExpression);
+                                     + expressionVisualWidth(rangeExpression, metrics);
             painter->setPen(SceneTreePalette::numLabelText(pt2));
             painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
@@ -1371,7 +1371,7 @@ private:
             painter->drawText(QRectF(textLeft, m_rect.top() + 7.0, prefixAdvance, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, prefix);
 
-            const qreal exprW  = metrics.horizontalAdvance(angleExpr);
+            const qreal exprW  = expressionVisualWidth(angleExpr, metrics);
             const qreal pillW  = qMax(exprW + 8.0, 20.0);
             const QRectF pillRect(textLeft + prefixAdvance, m_rect.top() + 7.0,
                                   pillW, 14.0);
@@ -1770,7 +1770,7 @@ public:
                     painter->drawText(span.rect, align, span.text);
                 }
 
-                x += metrics.horizontalAdvance(m_params[i].expression);
+                x += expressionVisualWidth(m_params[i].expression, metrics);
 
                 if (i < m_params.size() - 1) {
                     const QString sep = QStringLiteral(", ");

@@ -124,6 +124,7 @@ QRectF shapeParameterFieldRect(const QRectF &rowRect, const ShapeNode &shape);
 QRectF cubeShapeParameterFieldRect(const QRectF &rowRect);
 QVector<ExpressionNumberControl> shapeParameterNumberControls(const QRectF &primitiveRect, int paramIndex, int paramCount, const QString &expression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, const QString &expression, const QFontMetricsF &metrics);
+qreal expressionVisualWidth(const QString &expression, const QFontMetricsF &metrics);
 QRectF variableExpressionTextRect(const QRectF &variableRect, qreal nameTextWidth);
 
 } // namespace SceneTreeGraphics

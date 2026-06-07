@@ -15,15 +15,20 @@ QSizeF primitivePreviewSize(const ShapeNode &shape)
         return QSizeF(190.0, PrimitiveHeight + 10.0 + 22.0 + points * 21.0 + 24.0);
     }
 
-    const QFontMetricsF metrics(sceneTreeGraphicsFont());
+    const QFontMetricsF metrics(sceneTreeValueFont());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
     qreal maxExprWidth = 0.0;
     for (const auto &control : controls) {
-        const qreal w = metrics.horizontalAdvance(control.expression) + 8.0;
+        const qreal w = expressionVisualWidth(control.expression, metrics);
         maxExprWidth = qMax(maxExprWidth, w);
     }
+    maxExprWidth = qMax(maxExprWidth, expressionVisualWidth(QStringLiteral("0"), metrics));
+    // Label area: cube uses kLabelW(14)+gap(2)+right-trim(4)=20; others use PrimitiveParamLabelArea.
+    const qreal labelArea = shapeUsesExpressionPillLayout(shape) && shape.type == ShapeNode::Cube
+        ? 20.0 : PrimitiveParamLabelArea;
+    // +8 right margin: ensures the last pill's 1px border and potential fp rounding fit.
     const qreal width = qMax<qreal>(PrimitiveWidth,
-                                    PrimitiveCardWidth + 4.0 + PrimitiveParamLabelArea + maxExprWidth + 4.0);
+                                    PrimitiveCardWidth + 4.0 + labelArea + maxExprWidth + 8.0);
     return QSizeF(width, PrimitiveHeight);
 }
 
@@ -100,9 +105,8 @@ QSizeF variablePreviewSize(const QString &name, const QString &expression)
     // Guarantee a minimum name width of ~3 chars so tiny names still look OK
     const qreal nameWidth = qMax(metrics.horizontalAdvance(QStringLiteral("xxx")),
                                  metrics.horizontalAdvance(trimmedName));
-    // Expression: actual advance + a little padding (operators add visual space in rendering)
-    const qreal exprWidth = qMax(metrics.horizontalAdvance(QStringLiteral("0")),
-                                 metrics.horizontalAdvance(trimmedExpr)) + 4.0;
+    const qreal exprWidth = qMax(expressionVisualWidth(QStringLiteral("0"), metrics),
+                                 expressionVisualWidth(trimmedExpr, metrics));
 
     // Single-row: badge(38) + nameW + gap(4) + eq(12) + gap(2) + exprW + right_pad(6)
     return QSizeF(qMax(PrimitiveWidth, 62.0 + nameWidth + exprWidth), VariableHeight);
@@ -110,8 +114,7 @@ QSizeF variablePreviewSize(const QString &name, const QString &expression)
 
 static qreal moduleCallExprAdvance(const QString &expr, const QFontMetricsF &metrics)
 {
-    // operatorGap is 0, so the actual advance is just the string width.
-    return metrics.horizontalAdvance(expr);
+    return expressionVisualWidth(expr, metrics);
 }
 
 QSizeF moduleCallPreviewSize(const QString &moduleName, const QVector<ModuleCallParam> &params)

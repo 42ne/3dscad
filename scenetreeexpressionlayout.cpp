@@ -187,6 +187,27 @@ QVector<ExpressionTextSpan> expressionSpansInTextRect(const QRectF &textRect, co
     return spans;
 }
 
+qreal expressionVisualWidth(const QString &expression, const QFontMetricsF &metrics)
+{
+    const QRectF measureRect(0.0, 0.0, 100000.0, 16.0);
+    QRectF bounds;
+    for (const ExpressionTextSpan &span : expressionSpansInTextRect(measureRect, expression, metrics)) {
+        QRectF rect;
+        if (span.number) {
+            rect = span.rect;
+        } else {
+            rect = QRectF(span.rect.left(),
+                          measureRect.top(),
+                          span.rect.width(),
+                          measureRect.height());
+        }
+        if (rect.isEmpty())
+            continue;
+        bounds = bounds.isNull() ? rect : bounds.united(rect);
+    }
+    return bounds.isNull() ? 0.0 : qMax<qreal>(0.0, bounds.right());
+}
+
 ExpressionPillLayout::ExpressionPillLayout(const QRectF &fieldRect,
                                            const QString &expression,
                                            const QFontMetricsF &metrics)
@@ -312,7 +333,7 @@ qreal transformHeaderWidthForNode(const SceneDocument::TreeNode &node)
     qreal maxExpressionWidth = 0.0;
     for (int axis = 0; axis < 3; ++axis) {
         const QString expression = transformAxisExpression(node, axis);
-        const qreal exprPx = metrics.horizontalAdvance(expression) + 8.0;
+        const qreal exprPx = expressionVisualWidth(expression, metrics);
         maxExpressionWidth = qMax(maxExpressionWidth, exprPx);
     }
 
@@ -562,7 +583,7 @@ qreal linearExtrudeHeaderMinWidth(const QString &heightExpression,
     };
     for (const auto &p : params) {
         const qreal labelW = metrics.horizontalAdvance(p.label);
-        const qreal exprW  = metrics.horizontalAdvance(p.expr);
+        const qreal exprW  = expressionVisualWidth(p.expr, metrics);
         const qreal pillW  = p.isNumber ? qMax(exprW + 8.0, 20.0) : exprW + 8.0;
         cursorX += labelW + pillW;
     }
@@ -617,7 +638,7 @@ QVector<LinearExtrudeParamInfo> linearExtrudeParamInfos(
         info.isNumber   = def.isNumber;
 
         const qreal labelW = metrics.horizontalAdvance(def.label);
-        const qreal exprW  = metrics.horizontalAdvance(def.expression);
+        const qreal exprW  = expressionVisualWidth(def.expression, metrics);
         const qreal pillW  = def.isNumber ? qMax(exprW + 8.0, 20.0) : exprW + 8.0;
 
         info.textRect = QRectF(cursorX + labelW, pillTop, pillW, pillH);
@@ -650,7 +671,7 @@ qreal rotateExtrudeHeaderMinWidth(const QString &angleExpression,
     const QString expr = angleExpression.trimmed().isEmpty()
         ? QStringLiteral("360") : angleExpression.trimmed();
     const qreal prefixW = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
-    const qreal exprW   = metrics.horizontalAdvance(expr);
+    const qreal exprW   = expressionVisualWidth(expr, metrics);
     const qreal pillW   = qMax(exprW + 8.0, 20.0);
     const qreal closeW  = metrics.horizontalAdvance(QStringLiteral(")"));
     return kRotateExtrudeTextLeft + prefixW + pillW + closeW + 36.0;
@@ -666,7 +687,7 @@ QVector<RotateExtrudeParamInfo> rotateExtrudeParamInfos(
 
     const qreal textLeft = groupRect.left() + kRotateExtrudeTextLeft;
     const qreal prefixW  = metrics.horizontalAdvance(QLatin1String(kRotateExtrudePrefix));
-    const qreal exprW    = metrics.horizontalAdvance(expr);
+    const qreal exprW    = expressionVisualWidth(expr, metrics);
     const qreal pillW    = qMax(exprW + 8.0, 20.0);
     const qreal pillTop  = groupRect.top() + 7.0;
     const qreal pillH    = 14.0;
@@ -752,7 +773,7 @@ QVector<ModuleCallParamControl> moduleCallParamControls(const QRectF &cardRect,
             if (span.number)
                 controls.append({params[i].varNodeId, span.start, span.length, span.rect});
         }
-        x += metrics.horizontalAdvance(params[i].expression);
+        x += expressionVisualWidth(params[i].expression, metrics);
         if (i < params.size() - 1)
             x += metrics.horizontalAdvance(QStringLiteral(", "));
     }
