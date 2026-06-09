@@ -281,6 +281,7 @@ private:
     QVector<DeleteAnimTile>      m_deleteAnimTiles;
     QSet<int>                    m_pendingAnimatedDeleteNodeIds;
     QVector<QVariantAnimation *> m_activeDeleteAnimations;
+    int                          m_hiddenForDeleteNodeId = 0;
     QPoint m_lastMousePosition;
     QRectF m_lastToolbarRect;
     QGraphicsPixmapItem *m_treeZoomSnapshotItem = nullptr;
