@@ -422,13 +422,16 @@ void SceneTreeGraphicsWidget::startDeletePixelAnimation(int nodeId, const QRectF
     const QPixmap capture = viewport()->grab(vpRect);
     const qreal renderScale = capture.devicePixelRatioF();
 
-    // 2. Hide the node from the tree layout and rebuild.
-    //    The node stays in the data model; m_hiddenForDeleteNodeId causes
-    //    drawChild/drawTreeOrPlaceholder to skip it, so containers immediately
-    //    reflow.  On heavy trees this rebuild may be slow but it runs before
-    //    the animation timer starts, leaving the timer to run uncontested.
-    m_hiddenForDeleteNodeId = nodeId;
-    refresh();
+    // 2. Make the node invisible without touching the layout.
+    //    We hide its scene items so the card disappears from the screen while
+    //    its layout space remains — other nodes do not shift yet.
+    //    The tiles placed in step 3 will fill that space during the animation.
+    for (QGraphicsItem *item : m_treeItems) {
+        if (!item) continue;
+        if (clipped.contains(item->sceneBoundingRect().center()))
+            item->setVisible(false);
+    }
+    viewport()->update();
 
     // 3. Build scatter tiles in viewport-pixel coordinates.
     //    Viewport pixels are independent of scene-coordinate shifts from reflow,
@@ -495,8 +498,8 @@ void SceneTreeGraphicsWidget::startDeletePixelAnimation(int nodeId, const QRectF
 
     connect(animation, &QVariantAnimation::finished, this,
             [this, nodeId, animation]() {
-        // 5. Animation done — commit deletion, final tree rebuild.
-        m_hiddenForDeleteNodeId = 0;
+        // 5. Animation done.  Now commit the deletion: remove from model,
+        //    which triggers refresh() → reflow of remaining nodes.
         m_deleteAnimTiles.clear();
         animation->deleteLater();
         m_pendingAnimatedDeleteNodeIds.remove(nodeId);
@@ -585,9 +588,6 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
 {
     // Delete animations keep tiles in m_deleteAnimTiles (widget member, not scene items)
     // so they survive scene resets safely — don't stop them here.
-    // m_hiddenForDeleteNodeId is intentionally preserved too: if refresh() is
-    // called while an animation is pending, the node must stay hidden in the
-    // rebuilt layout until the animation commits the deletion.
     m_pendingAnimatedDeleteNodeIds.clear();
 
     clearDropPreview();
@@ -654,8 +654,6 @@ void SceneTreeGraphicsWidget::drawTreeOrPlaceholder()
     QVector<QRectF> placedRootBlocks;
 
     for (const SceneDocument::TreeNode &child : m_scene->treeRoot().children) {
-        if (child.id == m_hiddenForDeleteNodeId)
-            continue;
         // Position: stored custom or auto-layout fallback.
         QPointF blockTopLeft = m_nodeCanvasPositions.value(child.id, autoPos);
         const QList<QGraphicsItem *> beforeBlockItems = m_graphicsScene->items();
@@ -1716,8 +1714,6 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const qreal polyhedronTableWidth  = polyhedronTableSize.width();
 
     auto drawChild = [&](const SceneDocument::TreeNode &child) {
-        if (child.id == m_hiddenForDeleteNodeId)
-            return;
         const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
         children.append({childRect, previewToolForNode(child), child.id});
         maxChildWidth = qMax(maxChildWidth, childRect.width());
