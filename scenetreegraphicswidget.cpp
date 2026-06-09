@@ -153,6 +153,8 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
             m_variableReferenceBlinkTimer->stop();
             return;
         }
+        if (m_dragActive)
+            return;
         m_variableReferenceBlinkOn = !m_variableReferenceBlinkOn;
         refresh();
     });
@@ -362,7 +364,8 @@ void SceneTreeGraphicsWidget::setHoveredVariableReferenceName(const QString &nam
         else if (!m_variableReferenceBlinkTimer->isActive())
             m_variableReferenceBlinkTimer->start();
     }
-    refresh();
+    if (!m_dragActive)
+        refresh();
 }
 
 void SceneTreeGraphicsWidget::requestAnimatedNodeDelete(int nodeId, const QRectF &preferredRect)
@@ -1105,7 +1108,21 @@ void SceneTreeGraphicsWidget::mouseMoveEvent(QMouseEvent *event)
     }
 
     m_hoverManager->updateHighlights(scenePosition);
-    updateHoveredVariableReference(scenePosition);
+    if (!m_dragActive)
+        updateHoveredVariableReference(scenePosition);
+
+    // Palette-tool drag: update the preview directly at the view level so it
+    // keeps tracking the cursor even if interactive tree items (expression
+    // fields, scroll zones) absorb the event before it reaches the
+    // QGraphicsScene grabber.  The call is cheap — startAnimation skips a
+    // re-render when the target hasn't changed.
+    if (m_dragActive && m_dropPreview->m_movingNodeId == 0
+        && !m_dropPreview->m_tool.isEmpty() && !m_dropPreview->m_finishing) {
+        showDropPreview(scenePosition,
+                        previewSizeForTool(m_dropPreview->m_tool),
+                        m_dropPreview->m_tool, 0);
+    }
+
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -1139,6 +1156,18 @@ void SceneTreeGraphicsWidget::mouseReleaseEvent(QMouseEvent *event)
     }
 
     QGraphicsView::mouseReleaseEvent(event);
+
+    // Fallback: if a palette-tool drag was active but the QGraphicsScene
+    // grabber was already gone (stolen by an interactive field), the
+    // PaletteToolItem::mouseReleaseEvent never fires.  Handle the drop here.
+    if (event->button() == Qt::LeftButton && m_dragActive
+        && m_dropPreview->m_movingNodeId == 0
+        && !m_dropPreview->m_tool.isEmpty()
+        && !m_dropPreview->m_finishing) {
+        const QString tool = m_dropPreview->m_tool;
+        finishDropPreview();
+        handleToolDrop(tool, mapToScene(event->pos()));
+    }
 }
 
 void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
@@ -1272,7 +1301,19 @@ void SceneTreeGraphicsWidget::wheelEvent(QWheelEvent *event)
 }
 
 void SceneTreeGraphicsWidget::updateToolbarOverlay()
-{ m_overlay->updateToolbarOverlay(); }
+{
+    // During an active palette-tool drag, m_dragActive is true and the
+    // PaletteToolItem is the QGraphicsScene mouse grabber.  A full
+    // updateToolbarOverlay() would call clearToolbar() → removeItem(grabber),
+    // which releases the grab and stops mouseMoveEvent delivery, causing the
+    // drag ghost to freeze or disappear.  A cheap reposition is safe here and
+    // keeps the toolbar visually in the right place until the drag ends.
+    if (m_dragActive) {
+        repositionToolbarItemsSync();
+        return;
+    }
+    m_overlay->updateToolbarOverlay();
+}
 
 void SceneTreeGraphicsWidget::repositionToolbarItems()
 { m_overlay->repositionToolbarItems(); }
@@ -1727,6 +1768,12 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         || node.operation == SceneDocument::TreeNode::Union
         || node.operation == SceneDocument::TreeNode::Intersection)
         childrenHeight = qMax(childrenHeight, DifferenceMinContentHeight);
+    // Vertical-header nodes (Translate/Rotate/Scale/Mirror/Color) paint 3 parameter
+    // rows; the bottom of row Z/B sits at rect.top() + 51.  The group height equals
+    // GroupPadding*2 + childrenHeight (= 18 + childrenHeight), so childrenHeight must
+    // be at least 37 to keep the last row from clipping (51 - 18 + 4px margin = 37).
+    if (verticalHeaderGroup && !collapsedGroup)
+        childrenHeight = qMax(childrenHeight, 37.0);
 
     // Parameter headers can be wider than the children. Measure them so the
     // card is never narrower than the rendered expression.

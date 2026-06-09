@@ -25,6 +25,7 @@ public:
 
 protected:
     bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void addCube();

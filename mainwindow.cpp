@@ -15,6 +15,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDockWidget>
@@ -24,6 +25,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPixmap>
+#include <QScreen>
 #include <QSettings>
 #include <QVBoxLayout>
 
@@ -93,6 +95,31 @@ MainWindow::MainWindow(QWidget *parent)
     refreshOpenScadCode();
     refreshCsgStatus();
     refreshProperties();
+
+    // Restore saved geometry so the window reappears on the same monitor and at
+    // the same size/position as when it was last closed.  Without this, Windows
+    // places the window at a "cascade" position that can land on a secondary
+    // monitor with a different DPI; DWM then briefly reconfigures that monitor's
+    // composition buffer, which is visible as screen-wide flickering.
+    const QByteArray savedGeometry = m_settings->value(QStringLiteral("window/geometry")).toByteArray();
+    if (!savedGeometry.isEmpty()) {
+        restoreGeometry(savedGeometry);
+    } else {
+        // First launch: explicitly centre on the primary screen instead of
+        // relying on Windows' cascade algorithm.
+        resize(1200, 800);
+        if (QScreen *screen = QApplication::primaryScreen()) {
+            const QRect sg = screen->availableGeometry();
+            move(sg.center() - QPoint(600, 400));
+        }
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (m_settings)
+        m_settings->setValue(QStringLiteral("window/geometry"), saveGeometry());
+    QMainWindow::closeEvent(event);
 }
 
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result)
