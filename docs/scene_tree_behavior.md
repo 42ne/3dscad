@@ -80,6 +80,16 @@ Deletion rules:
   treated as deletion; dropping over a root block without a valid slot is
   cancelled without deleting the node.
 
+Invalid drop feedback:
+
+- while dragging, an invalid target keeps the structure unchanged and shows a
+  blinking red line in the tree hover hint;
+- the hint explains the broad reason, such as `VAR` requiring the `scene` block
+  or a module parameter/body lane, `CALL` requiring a group body, or a group
+  move targeting itself, a descendant, or another invalid container;
+- the warning disappears when the cursor returns to a valid drop target or the
+  drag is cancelled/finished.
+
 ## 4. Variables And Modules
 
 `VAR` has only two valid locations:
@@ -231,7 +241,8 @@ After changes to the tree, manually verify:
 7. Reorder a child inside `difference`. The first slot must remain the base and
    later slots must remain cuts.
 8. Attempt to drag `VAR` into an ordinary group or transform zone. Such a drop
-   must not create invalid nesting.
+   must not create invalid nesting, and the hover hint must show a blinking red
+   invalid-drop warning while the cursor remains over the rejected target.
 9. Select a node and press `Delete`, then `Undo`. Structure and code must be
    restored correctly.
 

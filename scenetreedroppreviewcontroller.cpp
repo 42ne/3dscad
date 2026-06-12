@@ -4,6 +4,7 @@
 #include "scenetreepreviewrenderer.h"
 #include "nodethumbnailcache.h"
 #include "groupthumbnailcache.h"
+#include "scenetreehovermanager.h"
 
 #include <QTimer>
 #include <QtGlobal>
@@ -189,6 +190,32 @@ SceneTreeLayout::DropTarget interpolatedDropTarget(const SceneTreeLayout::DropTa
     return t;
 }
 
+QString invalidDropReason(const SceneDocument *scene,
+                          const SceneTreeLayout::DropTarget &target,
+                          const QString &previewTool,
+                          int movingNodeId)
+{
+    if (target.hasTarget)
+        return QString();
+
+    if (previewTool == QStringLiteral("var") || previewTool == QStringLiteral("par"))
+        return QStringLiteral("Cannot drop VAR here: use the scene block or a module parameter/body lane.");
+
+    if (previewTool == QStringLiteral("call"))
+        return QStringLiteral("Cannot drop CALL here: use the scene block or a group body, not a parameter lane.");
+
+    if (movingNodeId > 0 && scene) {
+        const SceneDocument::TreeNode *node = scene->treeNodeById(movingNodeId);
+        if (node && node->type == SceneDocument::TreeNode::Group)
+            return QStringLiteral("Cannot move this group here: groups cannot be dropped into themselves or invalid containers.");
+    }
+
+    if (target.zoneRect.isValid())
+        return QStringLiteral("Cannot drop here: this zone does not accept this block.");
+
+    return QStringLiteral("Cannot drop here: move over a valid tree slot or group body.");
+}
+
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -216,6 +243,9 @@ void SceneTreeDropPreviewController::show(const QPointF &scenePosition,
 
     const DropTarget target = m_widget->dropTargetForToolAt(
         scenePosition, previewSize, previewTool, movingNodeId, movingNodeId <= 0);
+    if (m_widget->m_hoverManager)
+        m_widget->m_hoverManager->updateInvalidDropHint(
+            invalidDropReason(m_widget->m_scene, target, previewTool, movingNodeId));
     emit m_widget->dropPreviewChanged(previewTool, movingNodeId, target, scenePosition);
     startAnimation(target, previewTool, movingNodeId, LiveDropPreviewDurationMs);
 }
@@ -229,6 +259,8 @@ void SceneTreeDropPreviewController::finish()
 
 void SceneTreeDropPreviewController::clear()
 {
+    if (m_widget->m_hoverManager)
+        m_widget->m_hoverManager->clearInvalidDropHint();
     m_animTimer->stop();
     m_widget->m_dragActive = false;
     m_active = m_finishing = false;

@@ -19,6 +19,7 @@
 #include <QGraphicsTextItem>
 #include <QPainterPath>
 #include <QTextDocument>
+#include <QTimer>
 #include <QPen>
 #include <QBrush>
 #include <QColor>
@@ -77,6 +78,17 @@ SceneTreeHoverManager::SceneTreeHoverManager(SceneTreeGraphicsWidget *widget)
     : QObject(widget)
     , m_widget(widget)
 {
+    m_invalidDropBlinkTimer = new QTimer(this);
+    m_invalidDropBlinkTimer->setInterval(360);
+    connect(m_invalidDropBlinkTimer, &QTimer::timeout, this, [this]() {
+        if (m_invalidDropHintText.isEmpty()) {
+            m_invalidDropBlinkTimer->stop();
+            m_invalidDropBlinkOn = true;
+            return;
+        }
+        m_invalidDropBlinkOn = !m_invalidDropBlinkOn;
+        applyHintTextStyle();
+    });
 }
 
 void SceneTreeHoverManager::clearHighlightOverlay()
@@ -135,10 +147,7 @@ void SceneTreeHoverManager::drawHintOverlay()
         return;
 
     m_hintTextItem.clear();
-    const QString baseHint = m_hoverHintText.trimmed().isEmpty()
-                                 ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
-                                 : m_hoverHintText;
-    const QString hint = hintOverlayText(baseHint);
+    const QString hint = displayHintText();
 
     const QPointF viewportTopLeft = m_widget->mapToScene(QPoint(0, 0));
     const qreal viewportWidth = m_widget->viewport()->width();
@@ -207,6 +216,14 @@ void SceneTreeHoverManager::drawHintOverlay()
     text->setData(0, QStringLiteral("glass_hint"));
     m_widget->m_overlay->m_items.append(text);
     m_hintTextItem = text;
+    applyHintTextStyle();
+}
+
+QString SceneTreeHoverManager::baseHintText() const
+{
+    return m_hoverHintText.trimmed().isEmpty()
+               ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
+               : m_hoverHintText;
 }
 
 QString SceneTreeHoverManager::hintOverlayText(const QString &baseHint) const
@@ -223,6 +240,40 @@ QString SceneTreeHoverManager::hintOverlayText(const QString &baseHint) const
                   : QStringLiteral("OFF"));
 }
 
+QString SceneTreeHoverManager::displayHintText() const
+{
+    QString text = hintOverlayText(baseHintText());
+    if (!m_invalidDropHintText.trimmed().isEmpty())
+        text += QStringLiteral("\n") + m_invalidDropHintText.trimmed();
+    return text;
+}
+
+void SceneTreeHoverManager::applyHintTextStyle()
+{
+    if (!m_hintTextItem)
+        return;
+
+    const qreal textWidth = m_hintTextItem->textWidth();
+    const QString base = hintOverlayText(baseHintText());
+    const QString warning = m_invalidDropHintText.trimmed();
+    if (warning.isEmpty()) {
+        m_hintTextItem->setPlainText(base);
+        m_hintTextItem->setTextWidth(textWidth);
+        return;
+    }
+
+    const QString warningColor = m_invalidDropBlinkOn
+        ? QStringLiteral("#ff4b4b")
+        : QStringLiteral("#7d1f1f");
+    const QString html = QStringLiteral("<div style=\"white-space: pre-wrap;\">%1</div>"
+                                        "<div style=\"margin-top: 4px; color: %2; font-weight: 700;\">%3</div>")
+                             .arg(base.toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>")),
+                                  warningColor,
+                                  warning.toHtmlEscaped());
+    m_hintTextItem->setHtml(html);
+    m_hintTextItem->setTextWidth(textWidth);
+}
+
 void SceneTreeHoverManager::updateZoomFpsHintThrottled(bool force)
 {
     if (!m_widget->m_canvasController || !m_widget->m_canvasController->isZoomAnimating())
@@ -236,10 +287,7 @@ void SceneTreeHoverManager::updateZoomFpsHintThrottled(bool force)
     if (!m_hintTextItem)
         return;
 
-    const QString baseHint = m_hoverHintText.trimmed().isEmpty()
-                                 ? QStringLiteral("Scene tree\nHover blocks, values, gaps, or handles to see available actions.")
-                                 : m_hoverHintText;
-    m_hintTextItem->setPlainText(hintOverlayText(baseHint));
+    applyHintTextStyle();
 }
 
 void SceneTreeHoverManager::updateTooltip(const QPoint &globalPosition,
@@ -271,6 +319,29 @@ void SceneTreeHoverManager::updateHoverHint(const QString &key, const QString &t
     }
 
     m_widget->updateToolbarOverlay();
+}
+
+void SceneTreeHoverManager::updateInvalidDropHint(const QString &text)
+{
+    const QString next = text.trimmed();
+    if (m_invalidDropHintText == next)
+        return;
+
+    m_invalidDropHintText = next;
+    m_invalidDropBlinkOn = true;
+    if (m_invalidDropHintText.isEmpty()) {
+        if (m_invalidDropBlinkTimer)
+            m_invalidDropBlinkTimer->stop();
+    } else if (m_invalidDropBlinkTimer && !m_invalidDropBlinkTimer->isActive()) {
+        m_invalidDropBlinkTimer->start();
+    }
+
+    applyHintTextStyle();
+}
+
+void SceneTreeHoverManager::clearInvalidDropHint()
+{
+    updateInvalidDropHint(QString());
 }
 
 QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosition,

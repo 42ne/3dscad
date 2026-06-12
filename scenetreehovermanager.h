@@ -14,6 +14,7 @@
 
 class QGraphicsItem;
 class QGraphicsTextItem;
+class QTimer;
 
 class SceneTreeHoverManager : public QObject
 {
@@ -31,6 +32,8 @@ public:
     void drawHintOverlay();
     void updateZoomFpsHintThrottled(bool force = false);
     void updateHoverHint(const QString &key, const QString &text);
+    void updateInvalidDropHint(const QString &text);
+    void clearInvalidDropHint();
     const QString &hoverHintKey() const { return m_hoverHintKey; }
     bool hoverRenameZoneAt(const QPointF &scenePosition, int *nodeId, QRectF *zoneRect) const;
     void updateActiveTransformControl(const QPointF &scenePosition, bool enabled);
@@ -47,6 +50,9 @@ private:
     QRectF hoverScrollZoneRect(const QPointF &scenePosition) const;
     QString hoverHintTextForPosition(const QPointF &scenePosition, bool controlDown, QString *key) const;
     QString hintOverlayText(const QString &baseHint) const;
+    QString baseHintText() const;
+    QString displayHintText() const;
+    void applyHintTextStyle();
 
     SceneTreeGraphicsWidget *m_widget;
 
@@ -72,8 +78,11 @@ private:
     int m_activeModuleCallNumberStart = -1;
     QString m_hoverHintKey;
     QString m_hoverHintText;
+    QString m_invalidDropHintText;
     QPointer<QGraphicsTextItem> m_hintTextItem;
+    QTimer *m_invalidDropBlinkTimer = nullptr;
     qint64 m_lastZoomFpsHintMs = 0;
+    bool m_invalidDropBlinkOn = true;
     QRectF m_hoveredScrollRect;
     QRectF m_hoveredRenameRect;
     QRectF m_hoveredExpressionRect;

@@ -99,6 +99,12 @@ drop lands in a valid inner zone.</p>
 <li>the <code>scene</code> block and internal root cannot be deleted;</li>
 <li>dragging an existing non-module node into truly empty canvas space is also treated as deletion; dropping over a root block without a valid slot is cancelled without deleting the node.</li>
 </ul>
+<p><strong>Invalid drop feedback:</strong></p>
+<ul>
+<li>while dragging, an invalid target keeps the structure unchanged and shows a blinking red line in the tree hover hint;</li>
+<li>the hint explains the broad reason, such as <code>VAR</code> requiring the <code>scene</code> block or a module parameter/body lane, <code>CALL</code> requiring a group body, or a group move targeting itself, a descendant, or another invalid container;</li>
+<li>the warning disappears when the cursor returns to a valid drop target or the drag is cancelled/finished.</li>
+</ul>
 
 <h2>4. Variables And Modules</h2>
 <p><code>VAR</code> has only two valid locations:</p>
@@ -209,7 +215,7 @@ expressions for unaffected axes are preserved.</p>
 <li>Add a separate root block and slowly bring the cluster near it. Snap must occur only against that external block.</li>
 <li>Quickly drag a block out of a connected cluster. After the detach threshold, only the selected block must keep moving.</li>
 <li>Reorder a child inside <code>difference</code>. The first slot must remain the base and later slots must remain cuts.</li>
-<li>Attempt to drag <code>VAR</code> into an ordinary group or transform zone. Such a drop must not create invalid nesting.</li>
+<li>Attempt to drag <code>VAR</code> into an ordinary group or transform zone. Such a drop must not create invalid nesting, and the hover hint must show a blinking red invalid-drop warning while the cursor remains over the rejected target.</li>
 <li>Select a node and press <code>Delete</code>, then <code>Undo</code>. Structure and code must be restored correctly.</li>
 </ol>
 

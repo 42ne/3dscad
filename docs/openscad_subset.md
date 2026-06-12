@@ -14,6 +14,7 @@ Supported at top level:
 - special variables `$fn`, `$fa`, `$fs` (with defaults 0, 12, 2; settable via `$fn = 64;`)
 - variable assignments, for example `flange_r = 52;`
 - vector variable assignments (stored for primitive lookup, not shown in tree), for example `body_size = [28, 28, 4];`
+- function declarations, for example `function area(r) = PI * r * r;` (see [Function Declarations](#function-declarations))
 - top-level module declarations, for example `module peg(r = 6) { ... }`
 - explicit module calls, for example `peg(r = 12);`
 - supported groups, transforms, for loops, and primitives
@@ -51,6 +52,10 @@ intersection() {
 For `difference()`, the first child is the base and all following children are
 cuts. For `intersection()`, all children are masks.
 
+`color()` accepts a CSS/SVG named string, an `[r, g, b]` vector, or an
+`[r, g, b, a]` vector with alpha (0–1 range). A second positional argument
+sets alpha on a named colour: `color("red", 0.5)`.
+
 Other block groups:
 
 ```openscad
@@ -66,6 +71,18 @@ minkowski() {
 
 color("red") {
     sphere(r=10);
+}
+
+color("blue", 0.5) {
+    cube([10, 10, 10]);
+}
+
+color([0.2, 0.8, 0.4]) {
+    sphere(r=5);
+}
+
+color([0.2, 0.8, 0.4, 0.7]) {
+    sphere(r=5);
 }
 
 linear_extrude(height = 15) {
@@ -202,6 +219,17 @@ for (i = [0 : 2 : 10]) {
 }
 ```
 
+The range may also be a **comma-separated list of values** instead of a
+`start : end` range:
+
+```openscad
+for (angle = [0, 45, 90, 135, 180, 225, 270, 315]) {
+    rotate([0, 0, angle]) {
+        translate([10, 0, 0]) sphere(r=2);
+    }
+}
+```
+
 **Multi-variable for** (creates nested iteration):
 ```openscad
 for (i = [0 : 3], j = [0 : 2]) {
@@ -220,10 +248,18 @@ intersection_for (k = [0 : 3]) {
 }
 ```
 
-**`let` — scoped variable bindings:**
+**`let` / `assign` — scoped variable bindings:**
+
+Both keywords are equivalent. `assign` is the deprecated OpenSCAD spelling
+of `let`; the parser accepts both.
+
 ```openscad
 let (r = x * 2, h = r * 3) {
     cylinder(h=h, r=r, center=true);
+}
+
+assign (d = wall * 4) {
+    cylinder(h=10, r=d / 2);
 }
 ```
 
@@ -285,7 +321,9 @@ cylinder(h=wall * 5, r=inner_r, center=true);
 Additional accepted forms for each primitive:
 
 **Cube:**
-- `cube([x, y, z])` — `center=true` is optional; ignored by the parser
+- `cube([x, y, z])` — `center=true` is optional
+- `cube(size=[x, y, z])` — named `size=` argument accepted
+- `cube(size=[x, y, z], center=true)` — combined named form
 - `cube(body_size)` or `cube(body_size, center=true)` — where `body_size` is a
   previously-declared vector variable (`body_size = [28, 28, 4];`)
 - `cube(n)` with a single scalar numeric argument — creates an `n × n × n` cube
@@ -318,7 +356,16 @@ Additional accepted forms for each primitive:
 **Polyhedron:**
 - `polyhedron(points=[...], faces=[...])` imports as an editable `Polyhedron`
   group with point and face rows.
-- Point coordinates and face indices are currently parsed as numeric literals.
+- Point coordinates may be numeric literals **or expressions** using
+  previously-declared variables and functions:
+  ```openscad
+  r = 10;
+  polyhedron(
+      points=[[r, 0, 0], [0, r, 0], [0, 0, r], [0, 0, 0]],
+      faces=[[0,1,2],[0,3,1],[1,3,2],[2,3,0]]
+  );
+  ```
+- Face indices are parsed as integer literals.
 - Face winding is preserved from the OpenSCAD source; the editor does not
   auto-flip faces for concave polyhedra.
 - `AutoFace` detects simple two-layer extrusions with one inner loop and builds
@@ -345,7 +392,9 @@ Supported expression syntax:
   - numeric: `abs(x)`, `ceil(x)`, `floor(x)`, `round(x)`, `sign(x)`, `sqrt(x)`
   - power/exponential: `pow(x, y)`, `exp(x)`, `log(x)` (natural log), `ln(x)` (alias for `log`)
   - aggregation: `min(a, b, ...)`, `max(a, b, ...)` — accept one or more arguments
-- constants (case-insensitive): `PI` (π), `true` (1.0), `false` (0.0)
+  - random: `rands(min, max)` or `rands(min, max, count)` — returns one value in `[min, max)` for preview
+  - stubs (accepted, return numeric approximation): `str(...)`, `concat(...)`, `lookup(key, ...)`
+- constants (case-insensitive): `PI` (π), `true` (1.0), `false` (0.0), `undef` (0.0)
 
 Examples:
 
@@ -399,6 +448,39 @@ Variable support is intentionally smaller than full OpenSCAD:
 The current evaluator is meant for editor controls and preview. It is not a
 complete OpenSCAD lexical-scope implementation.
 
+## Function Declarations
+
+User-defined functions are declared with `function name(params) = expr;` and
+may appear at top level or inside module bodies. Declarations may span multiple
+lines — the parser accumulates until it finds a closing `;`.
+
+```openscad
+function area(r) = PI * r * r;
+
+function chamfer(h, ratio) = h * ratio;
+
+function clamp(v, lo, hi) = v < lo ? lo : (v > hi ? hi : v);
+
+// Multi-line is accepted
+function hypotenuse(a, b) =
+    sqrt(a * a + b * b);
+```
+
+Functions may call other previously-declared functions and use all expression
+syntax including ternary, comparisons, and built-in math functions. Recursion is
+supported up to the depth limit of the evaluator stack.
+
+```openscad
+function vol(r) = (4/3) * PI * pow(r, 3);
+function rscale(base, factor) = base * factor;
+
+sphere(r = rscale(10, 0.5));
+cylinder(h = chamfer(20, 0.15), r = sqrt(area(5) / PI));
+```
+
+> **Note:** Function declarations inside module bodies are scoped to that module
+> body and do not affect the global function table.
+
 ## Module Calls
 
 Supported locations for real module calls:
@@ -450,14 +532,13 @@ These constructs are outside the current round-trippable subset:
 
 - `use` and `include`
 - nested module declarations
-- function declarations
-- list comprehensions and general vector/list expressions
-- `children()`
+- list comprehensions and general vector/list expressions — `[for (i = [0:n]) expr]`
+- `children()` and `$children`
 - positional module arguments in the visual editor workflow
 - `offset`, `projection`
 - `import`, `surface`, `text`
-- `render()`
-- arbitrary named arguments on primitives beyond the generated forms
+- `render()` — recognized and flattened; the `convexity` hint is silently dropped
+- `norm()`, `cross()` — require vector arguments which the scalar evaluator cannot accept
 - `if` inside modules always takes the true branch (parse-time limitation — module parameter values are only known at call time)
 
 For reliable tree reconstruction, keep generated block structure and one

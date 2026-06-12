@@ -24,6 +24,7 @@ struct ParserState
     bool insideModuleBody = false;
     QHash<QString, qreal>    variableValues;
     QHash<QString, QVector3D> vectorVariableValues; // e.g. body_size = [28, 28, 4]
+    QHash<QString, ExpressionSyntax::FunctionDef> functionDefs;
     QVector<ShapeNode> shapes;
 };
 
@@ -61,7 +62,8 @@ static bool parseVector3Value(const QString &text, QVector3D *vector)
 
 // Splits "a+1, b, max(c,d)" on commas at parenthesis/bracket depth 0.
 
-static bool parseVector3WithExpressions(const QString &text, const QHash<QString, qreal> &varValues, QVector3D *vector, QStringList *expressions = nullptr)
+static bool parseVector3WithExpressions(const QString &text, const QHash<QString, qreal> &varValues, QVector3D *vector, QStringList *expressions = nullptr,
+                                        const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr)
 {
     if (!vector)
         return false;
@@ -80,7 +82,7 @@ static bool parseVector3WithExpressions(const QString &text, const QHash<QString
             exprs.append(trimmed);
         } else {
             qreal exprVal = 0.0;
-            if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal))
+            if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal, nullptr, fns))
                 return false;
             vals[i] = exprVal;
             exprs.append(trimmed);
@@ -118,16 +120,39 @@ static bool parseColorArgument(const QString &text, QColor *color)
         if (parts.size() < 3)
             return false;
 
-        qreal channels[3] = {0.0, 0.0, 0.0};
-        for (int i = 0; i < 3; ++i) {
+        qreal channels[4] = {0.0, 0.0, 0.0, 1.0};
+        const int nChannels = qMin(parts.size(), 4);
+        for (int i = 0; i < nChannels; ++i) {
             if (!parseReal(parts[i].trimmed(), &channels[i]))
                 return false;
         }
 
-        *color = QColor(qBound(0, qRound(channels[0] * 255.0), 255),
-                        qBound(0, qRound(channels[1] * 255.0), 255),
-                        qBound(0, qRound(channels[2] * 255.0), 255));
+        QColor c(qBound(0, qRound(channels[0] * 255.0), 255),
+                 qBound(0, qRound(channels[1] * 255.0), 255),
+                 qBound(0, qRound(channels[2] * 255.0), 255));
+        if (parts.size() >= 4)
+            c.setAlphaF(qBound(0.0, channels[3], 1.0));
+        *color = c;
         return true;
+    }
+
+    // color("name", alpha) — named color with optional second alpha argument
+    {
+        const QStringList allArgs = splitAtTopLevelCommas(text);
+        if (allArgs.size() >= 2) {
+            QString nameLit = allArgs[0].trimmed();
+            if ((nameLit.startsWith('"') && nameLit.endsWith('"'))
+                || (nameLit.startsWith('\'') && nameLit.endsWith('\'')))
+                nameLit = nameLit.mid(1, nameLit.size() - 2).trimmed();
+            QColor nc(nameLit);
+            if (nc.isValid()) {
+                qreal alpha = 1.0;
+                parseReal(allArgs[1].trimmed(), &alpha);
+                nc.setAlphaF(qBound(0.0, alpha, 1.0));
+                *color = nc;
+                return true;
+            }
+        }
     }
 
     return false;
@@ -256,7 +281,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         QStringLiteral("rotate_extrude"),
         QStringLiteral("polyhedron"),
         QStringLiteral("echo"),
-        QStringLiteral("assert")
+        QStringLiteral("assert"),
+        QStringLiteral("assign")
     };
     if (reservedCalls.contains(callName))
         return false;
@@ -284,7 +310,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
     return true;
 }
 
-static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression);
+static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression,
+                                  const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr);
 
 static bool parseOperationLine(const QString &line,
                                SceneDocument::TreeNode::Operation *operation,
@@ -296,7 +323,8 @@ static bool parseOperationLine(const QString &line,
                                QColor *color = nullptr,
                                QStringList *forExtraPairs = nullptr,
                                bool *extraLinearExtrudeCenter = nullptr,
-                               int *extraLinearExtrudeSlices = nullptr)
+                               int *extraLinearExtrudeSlices = nullptr,
+                               const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr)
 {
     static const QRegularExpression unionRegex("^union\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression differenceRegex("^difference\\s*\\(\\s*\\)\\s*\\{\\s*$");
@@ -388,7 +416,7 @@ static bool parseOperationLine(const QString &line,
         const QString heightExpr = args.value(QStringLiteral("height"), QStringLiteral("20"));
         qreal height = 20.0;
         QString heightExprStr;
-        if (!parseParamExpression(heightExpr, varValues, &height, &heightExprStr))
+        if (!parseParamExpression(heightExpr, varValues, &height, &heightExprStr, fns))
             return false;
 
         const QString centerExpr = args.value(QStringLiteral("center"), QStringLiteral("false"));
@@ -397,19 +425,19 @@ static bool parseOperationLine(const QString &line,
         const QString twistExpr = args.value(QStringLiteral("twist"), QStringLiteral("0"));
         qreal twist = 0.0;
         QString twistExprStr;
-        if (!parseParamExpression(twistExpr, varValues, &twist, &twistExprStr))
+        if (!parseParamExpression(twistExpr, varValues, &twist, &twistExprStr, fns))
             return false;
 
         const QString slicesExpr = args.value(QStringLiteral("slices"), QStringLiteral("0"));
         qreal slices = 0.0;
         QString slicesExprStr;
-        if (!parseParamExpression(slicesExpr, varValues, &slices, &slicesExprStr))
+        if (!parseParamExpression(slicesExpr, varValues, &slices, &slicesExprStr, fns))
             return false;
 
         const QString scaleExpr = args.value(QStringLiteral("scale"), QStringLiteral("1.0"));
         qreal scaleVal = 1.0;
         QString scaleExprStr;
-        if (!parseParamExpression(scaleExpr, varValues, &scaleVal, &scaleExprStr))
+        if (!parseParamExpression(scaleExpr, varValues, &scaleVal, &scaleExprStr, fns))
             return false;
 
         *operation = SceneDocument::TreeNode::LinearExtrude;
@@ -431,7 +459,7 @@ static bool parseOperationLine(const QString &line,
         const QString angleExpr = args.value(QStringLiteral("angle"), QStringLiteral("360"));
         qreal angle = 360.0;
         QString angleExprStr;
-        if (!parseParamExpression(angleExpr, varValues, &angle, &angleExprStr))
+        if (!parseParamExpression(angleExpr, varValues, &angle, &angleExprStr, fns))
             return false;
         *operation = SceneDocument::TreeNode::RotateExtrude;
         if (vector)
@@ -450,7 +478,7 @@ static bool parseOperationLine(const QString &line,
         QString autoStr;
         if (parts.size() >= 2 && parts[1].trimmed().startsWith(QStringLiteral("auto="), Qt::CaseInsensitive))
             autoStr = parts[1].trimmed().mid(5).trimmed();
-        if (!parseVector3WithExpressions(vectorStr, varValues, vector, expressions))
+        if (!parseVector3WithExpressions(vectorStr, varValues, vector, expressions, fns))
             return false;
         if (expressions) {
             while (expressions->size() < 4)
@@ -463,22 +491,22 @@ static bool parseOperationLine(const QString &line,
     QRegularExpressionMatch match = translateRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Translate;
-        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions, fns);
     }
     match = rotateRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Rotate;
-        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions, fns);
     }
     match = scaleRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Scale;
-        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions, fns);
     }
     match = mirrorRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Mirror;
-        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions, fns);
     }
 
     return false;
@@ -507,7 +535,8 @@ static bool parseVariableLine(const QString &line, QString *name, QString *expre
     return true;
 }
 
-static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression)
+static bool parseParamExpression(const QString &text, const QHash<QString, qreal> &varValues, qreal *value, QString *expression,
+                                  const QHash<QString, ExpressionSyntax::FunctionDef> *fns)
 {
     const QString trimmed = text.trimmed();
     if (trimmed.isEmpty())
@@ -521,7 +550,7 @@ static bool parseParamExpression(const QString &text, const QHash<QString, qreal
     }
 
     qreal exprVal = 0.0;
-    if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal))
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &exprVal, nullptr, fns))
         return false;
 
     *value = exprVal;
@@ -550,16 +579,22 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
                                QString *errorMessage)
 {
     QString argsStr;
+    const QHash<QString, ExpressionSyntax::FunctionDef> *fns = &state->functionDefs;
 
     // ── Cube ────────────────────────────────────────────────────────────────
     if (extractCallArgs(line, "cube", &argsStr) && line.endsWith(';')) {
-        // Accept cube([x, y, z]), cube([x, y, z], center=...), cube(N), cube(N, center=...)
+        // Accept cube([x, y, z]), cube(size=[x,y,z]), cube(N), cube(N, center=...)
         const QStringList allArgs = splitAtTopLevelCommas(argsStr);
+        // If named arg "size=" is present, rewrite argsStr to just the vector part.
+        const auto namedCubeArgs = parseNamedArgs(argsStr, {"size", "center"});
+        QString effectiveArgsStr = argsStr;
+        if (namedCubeArgs.contains(QStringLiteral("size")))
+            effectiveArgsStr = namedCubeArgs[QStringLiteral("size")];
         const QString firstArg = allArgs.value(0).trimmed();
         static const QRegularExpression vecRe("^\\[([^\\]]+)\\]");
-        QRegularExpressionMatch m = vecRe.match(argsStr);
+        QRegularExpressionMatch m = vecRe.match(effectiveArgsStr);
         if (m.hasMatch()) {
-            const QString vecInner = m.captured(1);
+            const QString vecInner = m.captured(1); // inner content of [...]
             const QStringList parts = splitAtTopLevelCommas(vecInner);
             if (parts.size() != 3) {
                 if (errorMessage)
@@ -568,9 +603,9 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
             }
             qreal x = 0.0, y = 0.0, z = 0.0;
             QString xe, ye, ze;
-            if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
-                || !parseParamExpression(parts[1], state->variableValues, &y, &ye)
-                || !parseParamExpression(parts[2], state->variableValues, &z, &ze)) {
+            if (!parseParamExpression(parts[0], state->variableValues, &x, &xe, fns)
+                || !parseParamExpression(parts[1], state->variableValues, &y, &ye, fns)
+                || !parseParamExpression(parts[2], state->variableValues, &z, &ze, fns)) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("cube on line %1: could not parse dimensions");
                 return false;
@@ -598,7 +633,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         // Single scalar: cube(10) → 10×10×10
         qreal scalar = 0.0;
         QString scalarExpr;
-        if (parseParamExpression(firstArg, state->variableValues, &scalar, &scalarExpr)) {
+        if (parseParamExpression(firstArg, state->variableValues, &scalar, &scalarExpr, fns)) {
             shape->id = state->nextShapeId++;
             shape->type = ShapeNode::Cube;
             shape->name = QStringLiteral("Cube %1").arg(shape->id);
@@ -625,7 +660,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         }
         qreal val = 0.0;
         QString valExpr;
-        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr)) {
+        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr, fns)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("sphere on line %1: could not parse radius");
             return false;
@@ -650,7 +685,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         }
         qreal val = 0.0;
         QString valExpr;
-        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr)) {
+        if (!parseParamExpression(paramStr, state->variableValues, &val, &valExpr, fns)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("circle on line %1: could not parse radius");
             return false;
@@ -682,8 +717,8 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         }
         qreal x = 0.0, y = 0.0;
         QString xe, ye;
-        if (!parseParamExpression(parts[0], state->variableValues, &x, &xe)
-            || !parseParamExpression(parts[1], state->variableValues, &y, &ye)) {
+        if (!parseParamExpression(parts[0], state->variableValues, &x, &xe, fns)
+            || !parseParamExpression(parts[1], state->variableValues, &y, &ye, fns)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("square on line %1: could not parse size");
             return false;
@@ -740,8 +775,8 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
             }
             qreal x = 0.0, y = 0.0;
             QString xe, ye;
-            if (!parseParamExpression(coords[0], state->variableValues, &x, &xe)
-                || !parseParamExpression(coords[1], state->variableValues, &y, &ye)) {
+            if (!parseParamExpression(coords[0], state->variableValues, &x, &xe, fns)
+                || !parseParamExpression(coords[1], state->variableValues, &y, &ye, fns)) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("polygon on line %1: could not parse point");
                 return false;
@@ -800,7 +835,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         }
         qreal h = 0.0;
         QString he;
-        if (!parseParamExpression(args["h"], state->variableValues, &h, &he)) {
+        if (!parseParamExpression(args["h"], state->variableValues, &h, &he, fns)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("cylinder on line %1: could not parse h");
             return false;
@@ -818,8 +853,8 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
                                         : args.value("r2", QStringLiteral("0"));
             qreal v1 = 0.0, v2 = 0.0;
             QString e1, e2;
-            if (!parseParamExpression(p1Str, state->variableValues, &v1, &e1)
-                || !parseParamExpression(p2Str, state->variableValues, &v2, &e2)) {
+            if (!parseParamExpression(p1Str, state->variableValues, &v1, &e1, fns)
+                || !parseParamExpression(p2Str, state->variableValues, &v2, &e2, fns)) {
                 if (errorMessage)
                     *errorMessage = QStringLiteral("cylinder on line %1: could not parse r1/d1 or r2/d2");
                 return false;
@@ -848,7 +883,7 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         }
         qreal rVal = 0.0;
         QString rExpr;
-        if (!parseParamExpression(rStr, state->variableValues, &rVal, &rExpr)) {
+        if (!parseParamExpression(rStr, state->variableValues, &rVal, &rExpr, fns)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("cylinder on line %1: could not parse r or d");
             return false;
@@ -874,7 +909,9 @@ struct PolyhedronData
     QVector<QVector<int>> faces;
 };
 
-static bool parsePolyhedron(const QString &line, PolyhedronData *data, QString *errorMessage)
+static bool parsePolyhedron(const QString &line, PolyhedronData *data, QString *errorMessage,
+                            const QHash<QString, qreal> *varValues = nullptr,
+                            const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr)
 {
     QString argsStr;
     if (!extractCallArgs(line, "polyhedron", &argsStr) || !line.endsWith(';'))
@@ -912,8 +949,18 @@ static bool parsePolyhedron(const QString &line, PolyhedronData *data, QString *
             return false;
         }
         float f[3];
-        if (!parseFloat(coords[0], &f[0]) || !parseFloat(coords[1], &f[1]) || !parseFloat(coords[2], &f[2]))
-            return false;
+        if (varValues) {
+            static const QHash<QString, qreal> emptyVars;
+            qreal rv = 0.0; QString re;
+            for (int ci = 0; ci < 3; ++ci) {
+                if (!parseParamExpression(coords[ci].trimmed(), *varValues, &rv, &re, fns))
+                    return false;
+                f[ci] = static_cast<float>(rv);
+            }
+        } else {
+            if (!parseFloat(coords[0], &f[0]) || !parseFloat(coords[1], &f[1]) || !parseFloat(coords[2], &f[2]))
+                return false;
+        }
         points.append(QVector3D(f[0], f[1], f[2]));
     }
 
@@ -986,7 +1033,8 @@ static bool parseBraceFreeOperationLine(const QString &line,
                                         SceneDocument::TreeNode::Operation *operation,
                                         QVector3D *vector,
                                         const QHash<QString, qreal> &varValues,
-                                        QStringList *expressions)
+                                        QStringList *expressions,
+                                        const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr)
 {
     static const QRegularExpression translateRe("^translate\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
     static const QRegularExpression rotateRe("^rotate\\s*\\((?:a\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
@@ -996,22 +1044,22 @@ static bool parseBraceFreeOperationLine(const QString &line,
     QRegularExpressionMatch m = translateRe.match(line);
     if (m.hasMatch()) {
         *operation = SceneDocument::TreeNode::Translate;
-        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions, fns);
     }
     m = rotateRe.match(line);
     if (m.hasMatch()) {
         *operation = SceneDocument::TreeNode::Rotate;
-        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions, fns);
     }
     m = scaleRe.match(line);
     if (m.hasMatch()) {
         *operation = SceneDocument::TreeNode::Scale;
-        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions, fns);
     }
     m = mirrorRe.match(line);
     if (m.hasMatch()) {
         *operation = SceneDocument::TreeNode::Mirror;
-        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions);
+        return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions, fns);
     }
     return false;
 }
@@ -1022,7 +1070,7 @@ static bool startsWithKnownKeyword(const QString &line)
 {
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
-        "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "if", "else", "color", "linear_extrude", "rotate_extrude",
+        "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "assign", "if", "else", "color", "linear_extrude", "rotate_extrude",
         "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
@@ -1115,6 +1163,36 @@ static bool parseBlock(ParserState *state,
             continue;
         }
 
+        // ── function name(params) = expr; — store for evaluator ─────────────
+        {
+            static const QRegularExpression funcRe(
+                "^function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*=\\s*(.+)\\s*;\\s*$");
+            static const QRegularExpression funcStartRe(
+                "^function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*=");
+            QString funcLine = line;
+            if (!funcRe.match(funcLine).hasMatch() && funcStartRe.match(funcLine).hasMatch()) {
+                while (state->index < state->lines.size()) {
+                    const QString &next = state->lines[state->index].text;
+                    ++state->index;
+                    funcLine += QLatin1Char(' ') + next;
+                    if (next.trimmed().endsWith(QLatin1Char(';')))
+                        break;
+                }
+            }
+            const QRegularExpressionMatch fm = funcRe.match(funcLine);
+            if (fm.hasMatch()) {
+                ExpressionSyntax::FunctionDef def;
+                const QStringList rawParams = splitAtTopLevelCommas(fm.captured(2));
+                for (const QString &p : rawParams) {
+                    const QString pt = p.trimmed();
+                    if (!pt.isEmpty()) def.params.append(pt);
+                }
+                def.body = fm.captured(3).trimmed();
+                state->functionDefs[fm.captured(1)] = def;
+                continue;
+            }
+        }
+
         QString callName, callArgs;
         if (parseModuleCallLine(line, &callName, &callArgs)) {
             parent->children.append(makeModuleCallNode(0, callName, callArgs, state));
@@ -1154,7 +1232,7 @@ static bool parseBlock(ParserState *state,
                 return false;
             }
             qreal evaluatedValue = 0.0;
-            if (ExpressionSyntax::evaluate(variableExpression, state->variableValues, &evaluatedValue))
+            if (ExpressionSyntax::evaluate(variableExpression, state->variableValues, &evaluatedValue, nullptr, &state->functionDefs))
                 variableValue = evaluatedValue;
             state->variableValues[variableName] = variableValue;
             parent->children.append(makeVariableNode(variableName, variableExpression, variableValue, state));
@@ -1166,9 +1244,9 @@ static bool parseBlock(ParserState *state,
             return false;
         }
 
-        // ── let (x = expr) { ... } ── scoped variables, no tree node ──────
+        // ── let/assign (x = expr) { ... } ── scoped variables, no tree node ─
         {
-            static const QRegularExpression letRe("^let\\s*\\((.+)\\)\\s*\\{\\s*$");
+            static const QRegularExpression letRe("^(?:let|assign)\\s*\\((.+)\\)\\s*\\{\\s*$");
             QRegularExpressionMatch lm = letRe.match(line);
             if (lm.hasMatch()) {
                 const QStringList pairs = splitAtTopLevelCommas(lm.captured(1));
@@ -1179,7 +1257,7 @@ static bool parseBlock(ParserState *state,
                     const QString var = pair.left(eq).trimmed();
                     const QString expr = pair.mid(eq + 1).trimmed();
                     qreal val = 0.0;
-                    if (ExpressionSyntax::evaluate(expr, state->variableValues, &val)) {
+                    if (ExpressionSyntax::evaluate(expr, state->variableValues, &val, nullptr, &state->functionDefs)) {
                         const bool hadPrev = state->variableValues.contains(var);
                         letScope.append({var, hadPrev ? state->variableValues[var] : qQNaN()});
                         state->variableValues[var] = val;
@@ -1207,7 +1285,7 @@ static bool parseBlock(ParserState *state,
             if (im.hasMatch()) {
                 qreal condVal = 0.0;
                 bool condTrue = state->insideModuleBody
-                    || (ExpressionSyntax::evaluate(im.captured(1), state->variableValues, &condVal) && (condVal != 0.0));
+                    || (ExpressionSyntax::evaluate(im.captured(1), state->variableValues, &condVal, nullptr, &state->functionDefs) && (condVal != 0.0));
 
                 auto skipBlock = [state](QString *errMsg) -> bool {
                     SceneDocument::TreeNode _d;
@@ -1231,7 +1309,7 @@ static bool parseBlock(ParserState *state,
                     if (eif.hasMatch()) {
                         ++state->index;
                         qreal eifVal = 0.0;
-                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state->variableValues, &eifVal) && (eifVal != 0.0);
+                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state->variableValues, &eifVal, nullptr, &state->functionDefs) && (eifVal != 0.0);
                         if (!condTrue && eifTrue) {
                             if (!parseBlock(state, parent, true, errorMessage))
                                 return false;
@@ -1269,7 +1347,7 @@ static bool parseBlock(ParserState *state,
         int extrudeSlices = 0;
         if (parseOperationLine(line, &operation, &transformVector, state->variableValues,
                                &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs,
-                               &extrudeCenter, &extrudeSlices)) {
+                               &extrudeCenter, &extrudeSlices, &state->functionDefs)) {
             SceneDocument::TreeNode group = makeGroupNode(operation, state);
             if (operation == SceneDocument::TreeNode::Translate)
                 group.position = transformVector;
@@ -1402,7 +1480,7 @@ static bool parseBlock(ParserState *state,
 
             PolyhedronData polyData;
             QString polyError;
-            if (!parsePolyhedron(polyLine, &polyData, &polyError)) {
+            if (!parsePolyhedron(polyLine, &polyData, &polyError, &state->variableValues, &state->functionDefs)) {
                 if (polyError.isEmpty())
                     polyError = QStringLiteral("malformed polyhedron call");
                 if (errorMessage)
@@ -1427,7 +1505,7 @@ static bool parseBlock(ParserState *state,
             SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
             QVector3D bfVec;
             QStringList bfExprs;
-            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state->variableValues, &bfExprs)) {
+            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state->variableValues, &bfExprs, &state->functionDefs)) {
                 SceneDocument::TreeNode bfGroup = makeGroupNode(bfOp, state);
                 if (bfOp == SceneDocument::TreeNode::Translate) bfGroup.position = bfVec;
                 else if (bfOp == SceneDocument::TreeNode::Rotate)  bfGroup.rotation = bfVec;
@@ -1442,7 +1520,7 @@ static bool parseBlock(ParserState *state,
                     SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
                     QVector3D chainVec;
                     QStringList chainExprs;
-                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state->variableValues, &chainExprs))
+                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state->variableValues, &chainExprs, &state->functionDefs))
                         break;
                     ++state->index;
                     SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, state);
@@ -1483,7 +1561,7 @@ static bool parseBlock(ParserState *state,
                             int childExtrudeSlices = 0;
                             if (parseOperationLine(ct, &childOp, &childVec, state->variableValues,
                                                    &childExprs, &childLoopVar, &childLoopRange, &childColor,
-                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices)) {
+                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices, &state->functionDefs)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;
@@ -1728,7 +1806,7 @@ static bool parseModuleParams(const QString &paramsStr,
         }
 
         qreal value = 0.0;
-        if (!ExpressionSyntax::evaluate(expr, *varValues, &value)) {
+        if (!ExpressionSyntax::evaluate(expr, *varValues, &value, nullptr, &state->functionDefs)) {
             if (errorMessage)
                 *errorMessage = QStringLiteral("Could not evaluate module parameter %1 = %2").arg(name, expr);
             return false;
@@ -1895,7 +1973,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         if (parseVariableLine(line, &variableName, &variableExpression, &variableValue, &variableError)) {
             ++state.index;
             qreal evaluatedValue = 0.0;
-            if (ExpressionSyntax::evaluate(variableExpression, state.variableValues, &evaluatedValue))
+            if (ExpressionSyntax::evaluate(variableExpression, state.variableValues, &evaluatedValue, nullptr, &state.functionDefs))
                 variableValue = evaluatedValue;
             state.variableValues[variableName] = variableValue;
             sceneNode.children.append(makeVariableNode(variableName, variableExpression, variableValue, &state));
@@ -1910,7 +1988,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
         // ── let (x = expr) { ... } at top scope ──────────────────────────
         {
-            static const QRegularExpression letRe("^let\\s*\\((.+)\\)\\s*\\{\\s*$");
+            static const QRegularExpression letRe("^(?:let|assign)\\s*\\((.+)\\)\\s*\\{\\s*$");
             QRegularExpressionMatch lm = letRe.match(line);
             if (lm.hasMatch()) {
                 ++state.index;
@@ -1922,7 +2000,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                     const QString var = pair.left(eq).trimmed();
                     const QString expr = pair.mid(eq + 1).trimmed();
                     qreal val = 0.0;
-                    if (ExpressionSyntax::evaluate(expr, state.variableValues, &val)) {
+                    if (ExpressionSyntax::evaluate(expr, state.variableValues, &val, nullptr, &state.functionDefs)) {
                         const bool hadPrev = state.variableValues.contains(var);
                         letScope.append({var, hadPrev ? state.variableValues[var] : qQNaN()});
                         state.variableValues[var] = val;
@@ -1959,7 +2037,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             if (im.hasMatch()) {
                 ++state.index;
                 qreal condVal = 0.0;
-                bool condTrue = ExpressionSyntax::evaluate(im.captured(1), state.variableValues, &condVal) && (condVal != 0.0);
+                bool condTrue = ExpressionSyntax::evaluate(im.captured(1), state.variableValues, &condVal, nullptr, &state.functionDefs) && (condVal != 0.0);
 
                 auto skipBlock = [&state](QString *errMsg) -> bool {
                     SceneDocument::TreeNode _d;
@@ -1984,7 +2062,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                     if (eif.hasMatch()) {
                         ++state.index;
                         qreal eifVal = 0.0;
-                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state.variableValues, &eifVal) && (eifVal != 0.0);
+                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state.variableValues, &eifVal, nullptr, &state.functionDefs) && (eifVal != 0.0);
                         if (!condTrue && eifTrue) {
                             if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
                                 if (errorLine) *errorLine = state.errorLine;
@@ -2026,7 +2104,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         int extrudeSlices = 0;
         if (parseOperationLine(line, &operation, &transformVector, state.variableValues,
                                &transformExpressions, &loopVariable, &loopRangeExpression, &operationColor, &forExtraPairs,
-                               &extrudeCenter, &extrudeSlices)) {
+                               &extrudeCenter, &extrudeSlices, &state.functionDefs)) {
             ++state.index;
             SceneDocument::TreeNode group = makeGroupNode(operation, &state);
             if (operation == SceneDocument::TreeNode::Translate)
@@ -2160,7 +2238,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
             PolyhedronData polyData;
             QString polyError;
-            if (!parsePolyhedron(polyLine, &polyData, &polyError)) {
+            if (!parsePolyhedron(polyLine, &polyData, &polyError, &state.variableValues, &state.functionDefs)) {
                 if (polyError.isEmpty())
                     polyError = QStringLiteral("malformed polyhedron call");
                 if (errorMessage)
@@ -2184,12 +2262,44 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             continue;
         }
 
+        // ── function name(params) = expr; at top level — store for evaluator ─
+        {
+            static const QRegularExpression funcRe(
+                "^function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*=\\s*(.+)\\s*;\\s*$");
+            static const QRegularExpression funcStartRe(
+                "^function\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(([^)]*)\\)\\s*=");
+            ++state.index;
+            QString funcLine = line;
+            if (!funcRe.match(funcLine).hasMatch() && funcStartRe.match(funcLine).hasMatch()) {
+                while (state.index < state.lines.size()) {
+                    const QString &next = state.lines[state.index].text;
+                    ++state.index;
+                    funcLine += QLatin1Char(' ') + next;
+                    if (next.trimmed().endsWith(QLatin1Char(';')))
+                        break;
+                }
+            }
+            const QRegularExpressionMatch fm = funcRe.match(funcLine);
+            if (fm.hasMatch()) {
+                ExpressionSyntax::FunctionDef def;
+                const QStringList rawParams = splitAtTopLevelCommas(fm.captured(2));
+                for (const QString &p : rawParams) {
+                    const QString pt = p.trimmed();
+                    if (!pt.isEmpty()) def.params.append(pt);
+                }
+                def.body = fm.captured(3).trimmed();
+                state.functionDefs[fm.captured(1)] = def;
+                continue;
+            }
+            --state.index; // not a function line, put index back
+        }
+
         // Brace-free single-child transform at top level.
         {
             SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
             QVector3D bfVec;
             QStringList bfExprs;
-            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state.variableValues, &bfExprs)) {
+            if (parseBraceFreeOperationLine(line, &bfOp, &bfVec, state.variableValues, &bfExprs, &state.functionDefs)) {
                 ++state.index;
                 SceneDocument::TreeNode bfGroup = makeGroupNode(bfOp, &state);
                 if (bfOp == SceneDocument::TreeNode::Translate) bfGroup.position = bfVec;
@@ -2204,7 +2314,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                     SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
                     QVector3D chainVec;
                     QStringList chainExprs;
-                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state.variableValues, &chainExprs))
+                    if (!parseBraceFreeOperationLine(peek.text, &chainOp, &chainVec, state.variableValues, &chainExprs, &state.functionDefs))
                         break;
                     ++state.index;
                     SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, &state);
@@ -2242,7 +2352,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                             int childExtrudeSlices = 0;
                             if (parseOperationLine(ct, &childOp, &childVec, state.variableValues,
                                                    &childExprs, &childLoopVar, &childLoopRange, &childColor,
-                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices)) {
+                                                   nullptr, &childExtrudeCenter, &childExtrudeSlices, &state.functionDefs)) {
                                 SceneDocument::TreeNode childGroup = makeGroupNode(childOp, &state);
                                 if (childOp == SceneDocument::TreeNode::Translate)
                                     childGroup.position = childVec;

@@ -2,6 +2,7 @@
 #define EXPRESSION_H
 
 #include <QHash>
+#include <QRandomGenerator>
 #include <QString>
 #include <QtMath>
 #include <cmath>
@@ -11,6 +12,11 @@
 class ExpressionSyntax
 {
 public:
+    struct FunctionDef {
+        QStringList params;
+        QString body;
+    };
+
     static bool validate(const QString &text, QString *errorMessage = nullptr)
     {
         Parser parser(text);
@@ -290,9 +296,10 @@ public:
     static bool evaluate(const QString &text,
                          const QHash<QString, qreal> &variableValues,
                          qreal *value,
-                         QString *errorMessage = nullptr)
+                         QString *errorMessage = nullptr,
+                         const QHash<QString, FunctionDef> *functions = nullptr)
     {
-        Evaluator ev(text, variableValues);
+        Evaluator ev(text, variableValues, functions);
         qreal result = 0.0;
         if (!ev.evalExpression(&result)) {
             if (errorMessage)
@@ -316,8 +323,9 @@ private:
     class Evaluator
     {
     public:
-        explicit Evaluator(QString text, const QHash<QString, qreal> &vars)
-            : m_text(std::move(text)), m_vars(vars)
+        explicit Evaluator(QString text, const QHash<QString, qreal> &vars,
+                           const QHash<QString, FunctionDef> *fns = nullptr)
+            : m_text(std::move(text)), m_vars(vars), m_fns(fns)
         {
         }
 
@@ -587,6 +595,10 @@ private:
                 *result = m_vars.value(name, 2.0);
                 return true;
             }
+            if (name.compare(QStringLiteral("undef"), Qt::CaseInsensitive) == 0) {
+                *result = 0.0;
+                return true;
+            }
             if (!m_vars.contains(name))
                 return false;
             *result = m_vars.value(name);
@@ -702,6 +714,46 @@ private:
                 *result = *std::max_element(args.begin(), args.end());
                 return true;
             }
+            if (name.compare(QStringLiteral("rands"), Qt::CaseInsensitive) == 0) {
+                if (args.size() < 2) return setError(QStringLiteral("rands() expects at least 2 arguments"));
+                const qreal lo = a0, hi = a1;
+                if (hi <= lo) { *result = lo; return true; }
+                *result = lo + QRandomGenerator::global()->generateDouble() * (hi - lo);
+                return true;
+            }
+            if (name.compare(QStringLiteral("str"), Qt::CaseInsensitive) == 0) {
+                // str() converts values to string — in our scalar evaluator,
+                // return the first numeric arg (used mainly inside echo() which we ignore).
+                *result = args.isEmpty() ? 0.0 : a0;
+                return true;
+            }
+            if (name.compare(QStringLiteral("concat"), Qt::CaseInsensitive) == 0) {
+                // concat() joins lists — in our scalar evaluator, return arg count.
+                *result = static_cast<qreal>(args.size());
+                return true;
+            }
+            if (name.compare(QStringLiteral("lookup"), Qt::CaseInsensitive) == 0) {
+                // lookup(key, table) — interpolation; return key as-is for preview.
+                *result = a0;
+                return true;
+            }
+            if (m_fns) {
+                auto it = m_fns->find(name);
+                if (it != m_fns->end()) {
+                    const FunctionDef &fn = it.value();
+                    if (args.size() != fn.params.size())
+                        return setError(QStringLiteral("Function '%1' expects %2 argument(s), got %3")
+                                        .arg(name).arg(fn.params.size()).arg(args.size()));
+                    QHash<QString, qreal> localVars = m_vars;
+                    for (int i = 0; i < fn.params.size(); ++i)
+                        localVars[fn.params[i]] = args[i];
+                    qreal fnResult = 0.0;
+                    if (!ExpressionSyntax::evaluate(fn.body, localVars, &fnResult, nullptr, m_fns))
+                        return setError(QStringLiteral("Error evaluating function '%1'").arg(name));
+                    *result = fnResult;
+                    return true;
+                }
+            }
 
             return setError(QStringLiteral("Unknown function '%1'.").arg(name));
         }
@@ -806,6 +858,7 @@ private:
         int m_pos = 0;
         QString m_error;
         const QHash<QString, qreal> &m_vars;
+        const QHash<QString, FunctionDef> *m_fns = nullptr;
     };
 };
 

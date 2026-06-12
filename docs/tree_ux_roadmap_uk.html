@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Roadmap UX-покращень дерева сцени</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2em auto; padding: 0 1em; background: #fafafa; color: #222; line-height: 1.5; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: .3em; }
+h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #2c3e50; padding-left: .6em; }
+h3 { color: #34495e; margin-top: 1.5em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f5f5f5; }
+tr:hover { background: #e8ecf0; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .9em; }
+ul, ol { padding-left: 1.5em; }
+li { margin: .3em 0; }
+.tag-critical { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-high { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-medium { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-low { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+.tag-done { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-notstarted { display: inline-block; background: #e74c3c; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.tag-partial { display: inline-block; background: #f39c12; color: white; border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+.note { background: #eef5fb; border-left: 4px solid #3d7fa9; padding: .8em 1em; }
+</style>
+</head>
+<body>
+
+<h1>Roadmap UX-покращень дерева сцени</h1>
+<p><em>Станом на: 2026-06-11. HTML-roadmap оновлено після локального перегляду коду. Markdown-версію навмисно залишено старою.</em></p>
+<p>Заплановані покращення зручності для <code>SceneTreeGraphicsWidget</code> — графічного дерева сцени.</p>
+
+<p class="note"><strong>Нотатка після аналізу:</strong> навігація з клавіатури, контекстне меню, пошук/фільтр, підсвітка батьків, reset/focus масштабу, scroll/focus до вибраної ноди, invalid-drop feedback і clipboard-дії вже були представлені в roadmap. У цій HTML-версії ці пункти уточнено, а відсутні пропозиції додано окремо: видимі кнопки дій на активній ноді, автоматичний focus при виборі з інших view, і точні команди переміщення без drag/drop.</p>
+
+<hr>
+
+<h2><span class="tag-critical">Критично</span></h2>
+
+<h3>1. Навігація з клавіатури</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — <code>keyPressEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Зараз обробляються переважно <code>Delete</code>/<code>Backspace</code> і кілька mode-клавіш. Додати <code>Up/Down</code> для переходу по видимих сусідах, <code>Left/Right</code> для collapse/expand або переходу parent/child, <code>Enter</code>/<code>F2</code> для rename, <code>Escape</code> для cancel, <code>Ctrl+0</code> для reset zoom, <code>F</code>/<code>Space</code> для focus вибраної ноди.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Новий сценарій testrunner: вибір нод клавіатурою, collapse/expand і focus-команда.</td></tr>
+</table>
+
+<h3>2. Collapse / Expand груп</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-partial">Частково</span> — у поточному коді вже є стан collapsed-груп і click-handling; старий roadmap тут застарів.</td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenecanvasdraghandler.cpp</code>, <code>scenetreegraphicswidget.cpp</code>, <code>scenetreenoderenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Зберегти наявний click по chevron, але покращити discoverability, keyboard access, анімацію зміни розміру і, за потреби, persistence collapsed-стану.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Сценарій testrunner: згорнути групу, додати дітей, розгорнути, перевірити структуру і layout.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-high">Високий пріоритет</span></h2>
+
+<h3>3. Контекстне меню по правому кліку</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — <code>contextMenuEvent</code> / <code>mousePressEvent</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Додати Delete, Rename, Copy, Cut, Paste, Duplicate, Wrap in group, Select Parent, Collapse/Expand, Focus/Fit to node, а також точні Move Before/After/Into команди. Меню має зробити видимими дії, які зараз здебільшого треба вгадувати через hover-підказки або drag.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Synthetic right-click у testrunner для базових команд; ручна перевірка layout меню.</td></tr>
+</table>
+
+<h3>4. Multi-select</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.h</code> — <code>m_selectedTreeNodeId</code> зараз scalar <code>int</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Замінити на <code>QSet&lt;int&gt; m_selectedNodeIds</code>. Ctrl+click перемикає вибір, Shift+click вибирає діапазон видимих sibling-ноди, bulk-команди працюють через контекстне меню.</td></tr>
+</table>
+
+<h3>5. Пошук / фільтр</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td>Новий floating overlay або embedded <code>QLineEdit</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Шукати за назвою, типом, id, номером shape, назвою module і variable. Підсвічувати збіги, приглушувати non-matches, дати next/previous navigation без руйнування контексту дерева.</td></tr>
+</table>
+
+<h3>6. Copy / Cut / Paste / Duplicate</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td>Нові сигнали + clipboard serialization</td></tr>
+<tr><td><strong>Опис</strong></td><td>Ctrl+C/X/V/D. Серіалізувати subtree у JSON/MIME для clipboard. Врахувати module-call references, унікальність variable names і правила валідного nesting/drop.</td></tr>
+</table>
+
+<h3>16. Видимі кнопки дій на активній ноді</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreenoderenderer.cpp</code>, <code>scenetreegraphicsitems.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Коли нода selected або hovered, показувати компактну смужку дій з іконками Rename, Delete, Duplicate, Collapse/Expand і Focus. Смужка має бути контекстною, щоб дерево не стало візуально перевантаженим.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Ручна перевірка primitive, group, module, variable і module-call карток; кнопки не мають перекривати drag handles або expression fields.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-medium">Середній пріоритет</span></h2>
+
+<h3>7. Підсвітка батьківського ланцюжка</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreenoderenderer.cpp</code> — <code>GroupCardItem::paint</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Коли вибрана дочірня нода, підсвічувати border батьківських груп вторинним кольором і, можливо, показувати компактний breadcrumb на canvas. Це допоможе орієнтуватися у глибоких сценах.</td></tr>
+</table>
+
+<h3>8. Zoom reset (Ctrl+0) + Fit to node + плавний zoom</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-partial">Частково</span> — smooth zoom і animated focus helper вже є; reset і повна інтеграція з keyboard/menu ще потребують роботи.</td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code>, <code>scenetreecanvascontroller.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Зберегти smooth zoom. Додати <code>Ctrl+0</code> reset, Fit to selected node і відкрити Fit через keyboard/context menu. Де можливо, використати наявний шлях <code>focusSelectedNodeAnimated()</code>.</td></tr>
+</table>
+
+<h3>9. Auto-focus selected при програмному виборі</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-partial">Частково</span> — <code>focusSelectedNodeAnimated()</code> існує, але автоматична маршрутизація ще не завершена.</td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — <code>setSelectedTreeNodeId()</code> і callers синхронізації selection</td></tr>
+<tr><td><strong>Опис</strong></td><td>Коли вибір приходить з viewport, code editor або classic tree, розкрити потрібну ноду в graphics tree, розгорнути collapsed ancestors і анімовано підвести canvas до цілі. Не красти focus під час drag, inline edit або color edit mode.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Сценарій: вибрати глибоко вкладений об'єкт з іншого view і перевірити, що graphics tree сам до нього pan/zoom.</td></tr>
+</table>
+
+<h3>10. Візуальний feedback для undo/redo</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — <code>refresh()</code> або post-refresh</td></tr>
+<tr><td><strong>Опис</strong></td><td>Після undo/redo коротко pulse-ити border зміненої ноди або insertion slot, щоб користувач бачив, що саме змінилося.</td></tr>
+</table>
+
+<h3>11. Feedback для invalid drop zone</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — <code>dropTargetForToolAt</code> / drop preview rendering</td></tr>
+<tr><td><strong>Опис</strong></td><td>Показувати червонуватий overlay, no-entry icon і коротку причину, коли drop відхилено. Важливі випадки: root drops, <code>VAR</code> в ordinary group, <code>CALL</code> у parameter lane, drop групи у саму себе або descendant.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Новий testrunner сценарій для invalid drops; ручна перевірка зрозумілості повідомлень.</td></tr>
+</table>
+
+<h3>14. Pan inertia</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-done">Готово (2026-05-25)</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreecanvascontroller.cpp</code>, <code>scenetreegraphicswidget.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Відстежувати швидкість pan і плавно сповільнювати після release. Новий press або scroll одразу зупиняє inertia.</td></tr>
+</table>
+
+<h3>17. Точні команди переміщення без drag/drop</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td>Context menu actions + наявний шлях tree move command</td></tr>
+<tr><td><strong>Опис</strong></td><td>Дати menu/keyboard альтернативи для точних структурних змін: Move Before, Move After, Move Into Selected Group, Move Out, Wrap in Union/Difference/Translate. Drag лишається швидким шляхом, команди стають точним шляхом.</td></tr>
+<tr><td><strong>Тест</strong></td><td>Новий testrunner сценарій: викликати move-команди і перевірити структуру дерева, generated code та undo/redo.</td></tr>
+</table>
+
+<hr>
+
+<h2><span class="tag-low">Низький пріоритет</span></h2>
+
+<h3>12. Affordance для порожньої групи ("+" button)</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreenoderenderer.cpp</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Dashed border + plus icon у порожніх групах для швидкого додавання child-ноди.</td></tr>
+</table>
+
+<h3>13. Overlay зі shortcut-підказками</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreegraphicswidget.cpp</code> — новий <code>?</code> handler</td></tr>
+<tr><td><strong>Опис</strong></td><td>Popup overlay зі списком клавіатурних скорочень і mouse gestures.</td></tr>
+</table>
+
+<h3>15. Різні іконки для VAR / PAR</h3>
+<table>
+<tr><td><strong>Статус</strong></td><td><span class="tag-notstarted">Не почато</span></td></tr>
+<tr><td><strong>Файл</strong></td><td><code>scenetreenoderenderer.cpp</code> — <code>VariableCardItem::paint</code></td></tr>
+<tr><td><strong>Опис</strong></td><td>Візуально відрізнити parameters і local variables, наприклад <code>@</code> для parameters і <code>$</code> для local variables, не лише текстом.</td></tr>
+</table>
+
+<hr>
+
+<h2>Рекомендований порядок реалізації</h2>
+<ol>
+<li><strong>Pan inertia (#14)</strong> — готово.</li>
+<li><strong>Polish collapse/expand (#2)</strong> — вже є база, потрібні discoverability і keyboard access.</li>
+<li><strong>Навігація з клавіатури (#1)</strong> — робить дерево схожим на справжній редактор.</li>
+<li><strong>Контекстне меню (#3)</strong> — відкриває приховані дії з низьким ризиком.</li>
+<li><strong>Auto-focus selected (#9)</strong> — великий виграш для sync між viewport/code/tree.</li>
+<li><strong>Видимі кнопки дій (#16)</strong> — роблять базові операції очевидними.</li>
+<li><strong>Zoom reset / fit (#8)</strong> — маленьке, але корисне завершення наявної focus-логіки.</li>
+<li><strong>Підсвітка батьків (#7)</strong> — орієнтація в глибоких деревах.</li>
+<li><strong>Invalid drop feedback (#11)</strong> — замінює мовчазну відмову зрозумілим поясненням.</li>
+<li><strong>Точні move-команди (#17)</strong> — дають структурне редагування без mouse gymnastics.</li>
+<li><strong>Multi-select (#4)</strong> — база для bulk operations.</li>
+<li><strong>Copy/cut/paste (#6)</strong> — clipboard infrastructure.</li>
+<li><strong>Empty group affordance (#12)</strong> — quick add.</li>
+<li><strong>Undo/redo feedback (#10)</strong> — polish.</li>
+<li><strong>Search/filter (#5)</strong> — advanced feature для великих сцен.</li>
+<li><strong>Shortcut overlay (#13)</strong> — після появи самих shortcut-ів.</li>
+<li><strong>VAR/PAR icons (#15)</strong> — невелике покращення читабельності.</li>
+</ol>
+
+</body>
+</html>
