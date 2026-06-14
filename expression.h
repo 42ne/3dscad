@@ -397,10 +397,11 @@ public:
                          const QHash<QString, qreal> &variableValues,
                          qreal *value,
                          QString *errorMessage = nullptr,
-                         const QHash<QString, FunctionDef> *functions = nullptr)
+                         const QHash<QString, FunctionDef> *functions = nullptr,
+                         const QHash<QString, Value> *vectorVariables = nullptr)
     {
         Value result;
-        if (!evaluateValue(text, variableValues, &result, errorMessage, functions))
+        if (!evaluateValue(text, variableValues, &result, errorMessage, functions, vectorVariables))
             return false;
         if (value)
             *value = result.toScalar();
@@ -408,13 +409,16 @@ public:
     }
 
     // Vector-aware evaluation. Returns the full Value (scalar or vector).
+    // vectorVariables, when provided, supplies variables bound to vector (or
+    // scalar) Values and takes precedence over the scalar variableValues map.
     static bool evaluateValue(const QString &text,
                               const QHash<QString, qreal> &variableValues,
                               Value *value,
                               QString *errorMessage = nullptr,
-                              const QHash<QString, FunctionDef> *functions = nullptr)
+                              const QHash<QString, FunctionDef> *functions = nullptr,
+                              const QHash<QString, Value> *vectorVariables = nullptr)
     {
-        Evaluator ev(text, variableValues, functions);
+        Evaluator ev(text, variableValues, functions, vectorVariables);
         Value result;
         if (!ev.evalExpression(&result)) {
             if (errorMessage)
@@ -441,8 +445,9 @@ private:
         using Value = ExpressionSyntax::Value;
 
         explicit Evaluator(QString text, const QHash<QString, qreal> &vars,
-                           const QHash<QString, FunctionDef> *fns = nullptr)
-            : m_text(std::move(text)), m_vars(vars), m_fns(fns)
+                           const QHash<QString, FunctionDef> *fns = nullptr,
+                           const QHash<QString, Value> *vectorVars = nullptr)
+            : m_text(std::move(text)), m_vars(vars), m_fns(fns), m_vectorVars(vectorVars)
         {
         }
 
@@ -678,6 +683,8 @@ private:
                     if (consume(QLatin1Char('('))) {
                         if (!evalFunctionCall(name, &value))
                             return false;
+                    } else if (m_vectorVars && m_vectorVars->contains(name)) {
+                        value = m_vectorVars->value(name);
                     } else {
                         qreal scalar = 0.0;
                         if (!resolveIdentifier(name, &scalar)) {
@@ -1128,7 +1135,7 @@ private:
                     for (int i = 0; i < fn.params.size(); ++i)
                         localVars[fn.params[i]] = args[i].toScalar();
                     Value fnResult;
-                    if (!ExpressionSyntax::evaluateValue(fn.body, localVars, &fnResult, nullptr, m_fns))
+                    if (!ExpressionSyntax::evaluateValue(fn.body, localVars, &fnResult, nullptr, m_fns, m_vectorVars))
                         return setError(QStringLiteral("Error evaluating function '%1'").arg(name));
                     *result = fnResult;
                     return true;
@@ -1253,6 +1260,7 @@ private:
         QString m_error;
         const QHash<QString, qreal> &m_vars;
         const QHash<QString, FunctionDef> *m_fns = nullptr;
+        const QHash<QString, Value> *m_vectorVars = nullptr;
     };
 };
 

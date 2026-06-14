@@ -35,6 +35,23 @@ static void checkFail(const QString &expr, const QHash<QString, qreal> &vars = {
     }
 }
 
+static void checkVec(const QString &expr, qreal expected,
+                     const QHash<QString, ExpressionSyntax::Value> &vecVars,
+                     const QHash<QString, qreal> &vars = {})
+{
+    qreal v = 0.0;
+    QString err;
+    bool ok = ExpressionSyntax::evaluate(expr, vars, &v, &err, nullptr, &vecVars);
+    const bool pass = ok && std::abs(v - expected) < 1e-6;
+    if (!pass) {
+        ++g_fail;
+        std::printf("FAIL  %-28s -> ok=%d val=%g err=%s (expected %g)\n",
+                    expr.toUtf8().constData(), ok, v, err.toUtf8().constData(), expected);
+    } else {
+        std::printf("ok    %-28s = %g\n", expr.toUtf8().constData(), v);
+    }
+}
+
 int main()
 {
     // Scalars still work
@@ -81,6 +98,32 @@ int main()
     // concat
     check("len(concat([1,2],[3,4,5]))", 5);
     check("concat([1,2],[3,4])[2]", 3);
+
+    // ── Vector variables ──────────────────────────────────────────────
+    {
+        using V = ExpressionSyntax::Value;
+        // points = [[0,0],[10,5],[20,0]]
+        V points = V::vector({
+            V::vector({ V(0.0),  V(0.0) }),
+            V::vector({ V(10.0), V(5.0) }),
+            V::vector({ V(20.0), V(0.0) }),
+        });
+        // sizes = [3, 4, 5]
+        V sizes = V::vector({ V(3.0), V(4.0), V(5.0) });
+        QHash<QString, ExpressionSyntax::Value> vv;
+        vv.insert("points", points);
+        vv.insert("sizes", sizes);
+
+        checkVec("len(points)", 3, vv);
+        checkVec("points[1][0]", 10, vv);
+        checkVec("points[2][1]", 0, vv);
+        checkVec("norm(points[1])", std::sqrt(125.0), vv);
+        checkVec("sizes[0] + sizes[2]", 8, vv);
+        checkVec("len(sizes)", 3, vv);
+        checkVec("max(sizes)", 5, vv);
+        checkVec("points[1][0] * 2 + sizes[1]", 24, vv);
+        checkVec("sizes[5]", 0, vv);          // out of range -> 0
+    }
 
     // Errors
     checkFail("[1,2] + [1,2,3]");     // length mismatch

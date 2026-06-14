@@ -3,6 +3,7 @@
 
 #include "shapenode.h"
 #include "scenetree.h"
+#include "expression.h"
 
 #include <QHash>
 #include <QString>
@@ -90,7 +91,8 @@ private:
     QString uniqueParameterName() const;
     void reEvaluateDependentVariables(int changedId);
     void reEvaluateDependentExpressions();
-    void reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues);
+    void reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues,
+                                              const QHash<QString, ExpressionSyntax::Value> *vectorValues = nullptr);
 
 private:
     QVector<ShapeNode> m_shapes;

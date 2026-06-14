@@ -23,6 +23,31 @@ void collectVariableValues(const SceneDocument::TreeNode &node, QHash<QString, q
         collectVariableValues(child, values, excludedNodeId);
 }
 
+void collectVariableValueMaps(const SceneDocument::TreeNode &node,
+                              QHash<QString, qreal> *scalars,
+                              QHash<QString, ExpressionSyntax::Value> *vectors,
+                              int excludedNodeId = 0)
+{
+    if (!scalars || !vectors)
+        return;
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        if (node.id != excludedNodeId) {
+            ExpressionSyntax::Value v;
+            if (!node.variableExpression.trimmed().isEmpty()
+                && ExpressionSyntax::evaluateValue(node.variableExpression, *scalars, &v,
+                                                   nullptr, nullptr, vectors)) {
+                (*vectors)[node.variableName] = v;
+                (*scalars)[node.variableName] = v.toScalar();
+            } else {
+                (*scalars)[node.variableName] = node.variableValue;
+            }
+        }
+        return;
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectVariableValueMaps(child, scalars, vectors, excludedNodeId);
+}
+
 }
 
 SceneTreeInlineEditor::SceneTreeInlineEditor(SceneTreeGraphicsWidget *widget)
@@ -88,12 +113,13 @@ bool SceneTreeInlineEditor::validateInlineExpression(const SceneTreeGraphicsWidg
     }
 
     QHash<QString, qreal> values;
+    QHash<QString, ExpressionSyntax::Value> vectorValues;
     if (m_widget->m_scene)
-        collectVariableValues(m_widget->m_scene->treeRoot(), &values,
-                              target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Variable ? target.nodeId : 0);
+        collectVariableValueMaps(m_widget->m_scene->treeRoot(), &values, &vectorValues,
+                                 target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Variable ? target.nodeId : 0);
 
     qreal value = 0.0;
-    return ExpressionSyntax::evaluate(trimmed, values, &value, errorMessage);
+    return ExpressionSyntax::evaluate(trimmed, values, &value, errorMessage, nullptr, &vectorValues);
 }
 
 void SceneTreeInlineEditor::startInlineExpressionEdit(const SceneTreeGraphicsWidget::ExpressionEditTarget &target)

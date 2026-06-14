@@ -35,6 +35,33 @@ void collectAllVariableValues(const SceneDocument::TreeNode &node, QHash<QString
         collectAllVariableValues(child, values);
 }
 
+// Builds both the scalar map and the vector-aware Value map for all variables,
+// in tree order so that forward references (a later variable using an earlier
+// one) resolve. Vector variables are evaluated from their expressions, since
+// the cached node value is scalar-only.
+void collectVariableValueMaps(const SceneDocument::TreeNode &node,
+                              QHash<QString, qreal> *scalars,
+                              QHash<QString, ExpressionSyntax::Value> *vectors)
+{
+    if (!scalars || !vectors)
+        return;
+    if (node.type == SceneDocument::TreeNode::Variable) {
+        ExpressionSyntax::Value v;
+        if (!node.variableExpression.trimmed().isEmpty()
+            && ExpressionSyntax::evaluateValue(node.variableExpression, *scalars, &v,
+                                               nullptr, nullptr, vectors)) {
+            (*vectors)[node.variableName] = v;
+            (*scalars)[node.variableName] = v.toScalar();
+        } else {
+            // Fall back to the cached scalar when the expression cannot be evaluated.
+            (*scalars)[node.variableName] = node.variableValue;
+        }
+        return;
+    }
+    for (const SceneDocument::TreeNode &child : node.children)
+        collectVariableValueMaps(child, scalars, vectors);
+}
+
 QString buildNamedArgumentExpressions(const QHash<QString, QString> &arguments, const QStringList &order)
 {
     QStringList parts;
@@ -373,10 +400,17 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
     // Recurse the whole tree so module-local variables and scene-container
     // variables are all in scope (mirrors collectVariableValues in the inline editor).
     QHash<QString, qreal> varValues;
+    QHash<QString, ExpressionSyntax::Value> vectorValues;
     std::function<void(const TreeNode &)> collectVars = [&](const TreeNode &n) {
         if (n.type == TreeNode::Variable) {
-            if (n.id != variableId)
+            if (n.id != variableId) {
                 varValues[n.variableName] = n.variableValue;
+                ExpressionSyntax::Value v;
+                if (!n.variableExpression.trimmed().isEmpty()
+                    && ExpressionSyntax::evaluateValue(n.variableExpression, varValues, &v,
+                                                       nullptr, nullptr, &vectorValues))
+                    vectorValues[n.variableName] = v;
+            }
             return;
         }
         for (const TreeNode &child : n.children)
@@ -385,7 +419,7 @@ bool SceneDocument::updateVariableExpression(int variableId, const QString &expr
     collectVars(m_tree.root());
 
     qreal value = 0.0;
-    if (!ExpressionSyntax::evaluate(trimmed, varValues, &value))
+    if (!ExpressionSyntax::evaluate(trimmed, varValues, &value, nullptr, nullptr, &vectorValues))
         return false;
 
     if (node->variableExpression == trimmed && node->variableValue == value)
@@ -488,14 +522,22 @@ void SceneDocument::reEvaluateDependentVariables(int changedId)
             continue;
 
         // Build context from the current (progressively updated) values, excluding self.
+        // The vector map lets scalar variables derive from vector ones (e.g. n = len(points)).
         QHash<QString, qreal> varValues;
+        QHash<QString, ExpressionSyntax::Value> vectorValues;
         for (const TreeNode &child : m_tree.root().children) {
-            if (child.type == TreeNode::Variable && child.id != varId)
+            if (child.type == TreeNode::Variable && child.id != varId) {
                 varValues[child.variableName] = child.variableValue;
+                ExpressionSyntax::Value v;
+                if (!child.variableExpression.trimmed().isEmpty()
+                    && ExpressionSyntax::evaluateValue(child.variableExpression, varValues, &v,
+                                                       nullptr, nullptr, &vectorValues))
+                    vectorValues[child.variableName] = v;
+            }
         }
 
         qreal value = 0.0;
-        if (ExpressionSyntax::evaluate(node->variableExpression, varValues, &value))
+        if (ExpressionSyntax::evaluate(node->variableExpression, varValues, &value, nullptr, nullptr, &vectorValues))
             node->variableValue = value;
         // If evaluation fails (e.g. unresolved reference), keep the previous value.
     }
@@ -504,8 +546,11 @@ void SceneDocument::reEvaluateDependentVariables(int changedId)
 void SceneDocument::reEvaluateDependentExpressions()
 {
     // Collect variable values from the entire tree (global scope + module parameters).
+    // Both the scalar map and the vector-aware map so that expressions referencing
+    // vector variables (e.g. points[i], len(points)) resolve.
     QHash<QString, qreal> varValues;
-    collectAllVariableValues(m_tree.root(), &varValues);
+    QHash<QString, ExpressionSyntax::Value> vectorValues;
+    collectVariableValueMaps(m_tree.root(), &varValues, &vectorValues);
 
     for (ShapeNode &shape : m_shapes) {
         if (shape.parameterExpressions.isEmpty())
@@ -515,7 +560,7 @@ void SceneDocument::reEvaluateDependentExpressions()
             if (expr.isEmpty())
                 continue;
             qreal val = 0.0;
-            if (!ExpressionSyntax::evaluate(expr, varValues, &val))
+            if (!ExpressionSyntax::evaluate(expr, varValues, &val, nullptr, nullptr, &vectorValues))
                 continue;
             shape.applyParameterValue(i, val);
         }
@@ -523,10 +568,11 @@ void SceneDocument::reEvaluateDependentExpressions()
 
     TreeNode *root = m_tree.nodeById(m_tree.root().id);
     if (root)
-        reEvaluateTransformExpressionsInNode(root, varValues);
+        reEvaluateTransformExpressionsInNode(root, varValues, &vectorValues);
 }
 
-void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues)
+void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const QHash<QString, qreal> &varValues,
+                                                         const QHash<QString, ExpressionSyntax::Value> *vectorValues)
 {
     if (!node)
         return;
@@ -540,7 +586,7 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
             if (expr.isEmpty())
                 continue;
             qreal val = 0.0;
-            if (!ExpressionSyntax::evaluate(expr, varValues, &val))
+            if (!ExpressionSyntax::evaluate(expr, varValues, &val, nullptr, nullptr, vectorValues))
                 continue;
             if (node->operation == TreeNode::Translate) {
                 if (i == 0)      node->position.setX(static_cast<float>(val));
@@ -558,7 +604,7 @@ void SceneDocument::reEvaluateTransformExpressionsInNode(TreeNode *node, const Q
         }
     }
     for (TreeNode &child : node->children)
-        reEvaluateTransformExpressionsInNode(&child, varValues);
+        reEvaluateTransformExpressionsInNode(&child, varValues, vectorValues);
 }
 
 bool SceneDocument::moveTreeNode(int nodeId, int parentGroupId, int insertIndex, bool moduleParameterZone)
