@@ -12,6 +12,10 @@
 #include <QMutex>
 #include <QStringList>
 #include <QtMath>
+#include <QFont>
+#include <QFontMetricsF>
+#include <QPainterPath>
+#include <QPolygonF>
 #include <algorithm>
 
 // Manifold is not re-entrant: serialise all calls with this process-wide lock.
@@ -71,7 +75,62 @@ static Manifold manifoldFromSceneMesh(const SceneMesh &mesh)
     return Manifold(meshGl);
 }
 
-static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
+// Build manifold Polygons from a Polygon2D shape, respecting paths= holes.
+// paths[0] = outer contour, paths[1..] = hole contours (counter-wound).
+// When no paths are given, all points form a single outer contour.
+static Polygons polygonPolygons(const ShapeNode &shape)
+{
+    Polygons out;
+    if (shape.polyhedronPoints.size() < 3)
+        return out;
+
+    if (shape.polyhedronFaces.isEmpty()) {
+        SimplePolygon sp;
+        sp.reserve(shape.polyhedronPoints.size());
+        for (const QVector3D &pt : shape.polyhedronPoints)
+            sp.push_back({pt.x(), pt.y()});
+        out.push_back(sp);
+    } else {
+        for (const QVector<int> &path : shape.polyhedronFaces) {
+            if (path.size() < 3) continue;
+            SimplePolygon sp;
+            sp.reserve(path.size());
+            for (int idx : path)
+                if (idx >= 0 && idx < shape.polyhedronPoints.size())
+                    sp.push_back({shape.polyhedronPoints[idx].x(),
+                                  shape.polyhedronPoints[idx].y()});
+            if (sp.size() >= 3)
+                out.push_back(sp);
+        }
+    }
+    return out;
+}
+
+// Converts a Text shape's glyph contours to manifold Polygons. Reads the
+// contours cached on the GUI thread (ShapeNode::textContours) to avoid touching
+// QFont/QPainterPath off the GUI thread; falls back to computing them if the
+// cache is empty. Holes come out as separate sub-contours — feed the result to
+// a CrossSection with the EvenOdd fill rule so they are subtracted.
+static Polygons textPolygons(const ShapeNode &shape)
+{
+    Polygons out;
+    QVector<QVector<QVector3D>> contours = shape.textContours;
+    if (contours.isEmpty())
+        contours = buildGlyphContours(shape);
+
+    for (const QVector<QVector3D> &contour : contours) {
+        if (contour.size() < 3)
+            continue;
+        SimplePolygon sp;
+        sp.reserve(contour.size());
+        for (const QVector3D &pt : contour)
+            sp.push_back({pt.x(), pt.y()});
+        out.push_back(sp);
+    }
+    return out;
+}
+
+static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     Manifold result;
 
@@ -79,7 +138,10 @@ static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
         || shape.type == ShapeNode::Face3D)
         return {}; // polyhedron data components are handled by their group
 
-    const int circularSegments = fn > 0 ? qMax(3, fn) : 32;
+    const double r = (shape.type == ShapeNode::Sphere || shape.type == ShapeNode::Circle)
+                     ? shape.radius
+                     : qMax(shape.radius, shape.radius2);
+    const int circularSegments = computeCircularSegments(fn, r, fa, fs);
 
     if (shape.type == ShapeNode::Cube) {
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), shape.size.z()), shape.center);
@@ -95,16 +157,31 @@ static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0)
         localShape.rotation = QVector3D();
         result = manifoldFromSceneMesh(buildShapeMesh(localShape));
     } else if (shape.type == ShapeNode::Polygon2D) {
-        ShapeNode localShape = shape;
-        localShape.position = QVector3D();
-        localShape.rotation = QVector3D();
-        result = manifoldFromSceneMesh(buildShapeMesh(localShape));
+        {
+            const Polygons polys = polygonPolygons(shape);
+            if (!polys.empty()) {
+                const manifold::CrossSection cs(polys, manifold::CrossSection::FillRule::EvenOdd);
+                const Polygons filled = cs.ToPolygons();
+                if (!filled.empty())
+                    result = Manifold::Extrude(filled, 0.1);
+            }
+        }
     } else if (shape.type == ShapeNode::Sphere) {
         result = Manifold::Sphere(shape.radius, circularSegments);
     } else if (shape.type == ShapeNode::Cone) {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius2, circularSegments, shape.center);
     } else if (shape.type == ShapeNode::Circle) {
-        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, fn > 0 ? circularSegments : 64, false);
+        result = Manifold::Cylinder(0.1f, shape.radius, shape.radius, circularSegments, false);
+    } else if (shape.type == ShapeNode::Text) {
+        const Polygons polys = textPolygons(shape);
+        if (polys.empty())
+            return {};
+        // EvenOdd so counter-wound inner contours become holes.
+        const manifold::CrossSection cs(polys, manifold::CrossSection::FillRule::EvenOdd);
+        const Polygons filled = cs.ToPolygons();
+        if (filled.empty())
+            return {};
+        result = Manifold::Extrude(filled, 0.1); // 2D-as-thin-solid convention
     } else {
         result = Manifold::Cylinder(shape.height, shape.radius, shape.radius, circularSegments, shape.center);
     }
@@ -145,8 +222,29 @@ static void collectRotateExtrudePolygons(
                     { hx + cx,  hy + cy},
                     {-hx + cx,  hy + cy}};
         } else if (ev.type == ShapeNode::Polygon2D) {
-            for (const QVector3D &pt : ev.polyhedronPoints)
-                poly.push_back({pt.x(), pt.y()});
+            if (ev.polyhedronFaces.isEmpty()) {
+                for (const QVector3D &pt : ev.polyhedronPoints)
+                    poly.push_back({pt.x(), pt.y()});
+            } else {
+                for (const QVector<int> &path : ev.polyhedronFaces) {
+                    if (path.size() < 3) continue;
+                    SimplePolygon sp;
+                    for (int idx : path)
+                        if (idx >= 0 && idx < ev.polyhedronPoints.size())
+                            sp.push_back({ev.polyhedronPoints[idx].x(),
+                                          ev.polyhedronPoints[idx].y()});
+                    if (sp.size() >= 3)
+                        out.push_back(sp);
+                }
+                return;
+            }
+        } else if (ev.type == ShapeNode::Text) {
+            // Text yields multiple contours (incl. holes); append them all.
+            const Polygons glyphs = textPolygons(ev);
+            for (const SimplePolygon &g : glyphs)
+                if (g.size() >= 3)
+                    out.push_back(g);
+            return;
         }
         if (static_cast<int>(poly.size()) >= 3)
             out.push_back(poly);
@@ -254,7 +352,9 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
             return {};
 
         const int fn = static_cast<int>(variables.value(QStringLiteral("$fn"), 0.0));
-        return manifoldFromShape(shapeWithEvaluatedParameters(*shape, variables), fn);
+        const double fa = variables.value(QStringLiteral("$fa"), 12.0);
+        const double fs = variables.value(QStringLiteral("$fs"), 2.0);
+        return manifoldFromShape(shapeWithEvaluatedParameters(*shape, variables), fn, fa, fs);
     }
 
     if (node.type == SceneDocument::TreeNode::Variable)
@@ -396,6 +496,8 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::LinearExtrude) {
         const int fn     = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
+        const double fa  = localVariables.value(QStringLiteral("$fa"), 12.0);
+        const double fs  = localVariables.value(QStringLiteral("$fs"), 2.0);
         const float height = qMax(0.01f, evaluatedNode.scale.x());
         const float twist  = evaluatedNode.linearExtrudeTwist;
         const int slices   = evaluatedNode.linearExtrudeSlices > 0
@@ -403,7 +505,7 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
                                  : (qAbs(twist) > 0.001f ? qMax(2, fn > 0 ? fn : 20) : 0);
         const float es = evaluatedNode.linearExtrudeScaleVal > 0.01f
                              ? evaluatedNode.linearExtrudeScaleVal : 1.0f;
-        const int profileSegs = fn > 0 ? qMax(3, fn) : 32;
+        const int profileSegs = computeCircularSegments(fn, 10.0, fa, fs);
 
         Polygons polygons;
         for (const SceneDocument::TreeNode *child : geometryChildren)
@@ -411,7 +513,15 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (polygons.empty())
             return {};
 
-        Manifold extruded = Manifold::Extrude(polygons, static_cast<double>(height),
+        // Normalise winding/holes via CrossSection (EvenOdd, like OpenSCAD's 2D
+        // fill) so glyph outlines and overlapping profiles extrude cleanly
+        // instead of failing Manifold's strict triangulator.
+        const Polygons profile = manifold::CrossSection(
+            polygons, manifold::CrossSection::FillRule::EvenOdd).ToPolygons();
+        if (profile.empty())
+            return {};
+
+        Manifold extruded = Manifold::Extrude(profile, static_cast<double>(height),
                                               slices,
                                               static_cast<double>(twist),
                                               vec2(es, es));
@@ -422,8 +532,10 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::RotateExtrude) {
         const int fn = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
+        const double fa = localVariables.value(QStringLiteral("$fa"), 12.0);
+        const double fs = localVariables.value(QStringLiteral("$fs"), 2.0);
         const float angle = qBound(0.1f, evaluatedNode.scale.x(), 360.0f);
-        const int segs = fn > 0 ? qMax(3, fn) : 32;
+        const int segs = computeCircularSegments(fn, 10.0, fa, fs);
         Polygons polygons;
         for (const SceneDocument::TreeNode *child : geometryChildren)
             collectRotateExtrudePolygons(*child, scene, localVariables, segs, polygons);
@@ -435,7 +547,9 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
     if (evaluatedNode.operation == SceneDocument::TreeNode::Offset) {
         using manifold::CrossSection;
         const int fn = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
-        const int segs = fn > 0 ? qMax(3, fn) : 32;
+        const double fa = localVariables.value(QStringLiteral("$fa"), 12.0);
+        const double fs = localVariables.value(QStringLiteral("$fs"), 2.0);
+        const int segs = computeCircularSegments(fn, 10.0, fa, fs);
         Polygons polygons;
         for (const SceneDocument::TreeNode *child : geometryChildren)
             collectRotateExtrudePolygons(*child, scene, localVariables, segs, polygons);
@@ -455,6 +569,23 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
             return {};
         // Keep the 2D-as-thin-solid convention (z 0..0.1) used elsewhere.
         return applyNodeTransform(Manifold::Extrude(result, 0.1), evaluatedNode);
+    }
+
+    if (evaluatedNode.operation == SceneDocument::TreeNode::Projection) {
+        // Evaluate the first (only) geometry child as a 3D Manifold, then
+        // collapse to 2D: cut=true → slice at z=0, cut=false → full XY projection.
+        if (geometryChildren.isEmpty())
+            return {};
+        const Manifold childMesh = evaluateNode(*geometryChildren.first(), scene, localVariables);
+        if (childMesh.IsEmpty())
+            return {};
+        const Polygons projected = evaluatedNode.projectionCut
+                                       ? childMesh.Slice(0.0)
+                                       : childMesh.Project();
+        if (projected.empty())
+            return {};
+        // 2D-as-thin-solid convention (z 0..0.1).
+        return applyNodeTransform(Manifold::Extrude(projected, 0.1), evaluatedNode);
     }
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::Minkowski) {

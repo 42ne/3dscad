@@ -337,6 +337,10 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handleForLoopRangeAdjusted);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::conditionExpressionEdited,
             m_controller, &SceneController::handleConditionExpressionEdited);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::rawCodeEdited,
+            m_controller, &SceneController::handleRawCodeEdited);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::textContentEdited,
+            m_controller, &SceneController::handleTextContentEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::ctrlReleased,
             m_controller, &SceneController::handleCtrlReleased);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleRenameRequested,

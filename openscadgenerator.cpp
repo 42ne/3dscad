@@ -463,6 +463,46 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::Projection) {
+        const QString cutStr = node.projectionCut ? QStringLiteral("true") : QStringLiteral("false");
+        *code += QString("%1projection(cut=%2) {\n").arg(indent, cutStr);
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    // ── intersection_for — flatten Intersection{For{…}} into one line ──
+    if (node.operation == SceneDocument::TreeNode::RawCode) {
+        const QStringList lines = node.rawCode.split(QLatin1Char('\n'));
+        for (const QString &line : lines)
+            *code += indent + line + QLatin1Char('\n');
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    if (node.operation == SceneDocument::TreeNode::Intersection
+        && node.children.size() == 1
+        && node.children.first().operation == SceneDocument::TreeNode::For) {
+        const SceneDocument::TreeNode &forChild = node.children.first();
+        const QString var = forChild.loopVariable.trimmed().isEmpty()
+                                ? QStringLiteral("i")
+                                : forChild.loopVariable.trimmed();
+        const QString range = forChild.loopRangeExpression.trimmed().isEmpty()
+                                  ? QStringLiteral("[0 : 1 : 3]")
+                                  : forChild.loopRangeExpression.trimmed();
+        *code += QString("%1intersection_for (%2 = %3) {\n").arg(indent, var, range);
+        for (const SceneDocument::TreeNode &child : forChild.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     appendTreeGroup(code, SceneTreeGraphics::labelForOperation(node.operation), node, scene, indent, ranges);
     if (ranges)
         ranges->append({node.id, start, code->size() - start});
@@ -521,8 +561,35 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
         QStringList ptsList;
         for (const QVector3D &pt : shape.polyhedronPoints)
             ptsList.append(QString("[%1,%2]").arg(pt.x(), 0, 'g').arg(pt.y(), 0, 'g'));
-        return QString("polygon(points=[%1]);\n")
-            .arg(ptsList.join(QLatin1Char(',')));
+        QString out = QString("polygon(points=[%1]").arg(ptsList.join(QLatin1Char(',')));
+        if (!shape.polyhedronFaces.isEmpty()) {
+            QStringList pathsList;
+            for (const QVector<int> &path : shape.polyhedronFaces) {
+                QStringList idxList;
+                for (int idx : path)
+                    idxList.append(QString::number(idx));
+                pathsList.append(QString("[%1]").arg(idxList.join(QLatin1Char(','))));
+            }
+            out += QString(", paths=[%1]").arg(pathsList.join(QLatin1Char(',')));
+        }
+        out += QStringLiteral(");\n");
+        return out;
+    }
+    if (shape.type == ShapeNode::Text) {
+        QString esc = shape.textValue;
+        esc.replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
+           .replace(QLatin1Char('"'), QStringLiteral("\\\""));
+        QString out = QString("text(\"%1\", size=%2").arg(esc, paramExpr(0, shape.textSize));
+        if (!shape.fontName.isEmpty())
+            out += QString(", font=\"%1\"").arg(shape.fontName);
+        if (shape.textHalign != QStringLiteral("left"))
+            out += QString(", halign=\"%1\"").arg(shape.textHalign);
+        if (shape.textValign != QStringLiteral("baseline"))
+            out += QString(", valign=\"%1\"").arg(shape.textValign);
+        if (qAbs(shape.textSpacing - 1.0f) > 1e-4f)
+            out += QString(", spacing=%1").arg(paramExpr(1, shape.textSpacing));
+        out += QStringLiteral(");\n");
+        return out;
     }
     if (shape.type == ShapeNode::Cylinder) {
         // parameterExpressions: index 0 = R or D (radius/diameter), index 1 = H

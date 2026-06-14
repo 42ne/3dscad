@@ -244,6 +244,25 @@ AddGroupCommand::AddGroupCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
+AddRawCodeCommand::AddRawCodeCommand(SceneDocument *scene,
+                                     const QString &code,
+                                     int parentGroupId,
+                                     int insertIndex,
+                                     std::function<void()> onChanged)
+    : SnapshotCommand("Add raw OpenSCAD block", scene, std::move(onChanged))
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    const int nodeId = m_scene->addRawCode(code, parentGroupId, insertIndex);
+    m_valid = nodeId > 0;
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
 AddPolyhedronGroupCommand::AddPolyhedronGroupCommand(SceneDocument *scene,
                                                      int parentGroupId,
                                                      int insertIndex,
@@ -449,6 +468,40 @@ UpdateConditionExpressionCommand::UpdateConditionExpressionCommand(SceneDocument
 
     m_oldSnapshot = m_scene->snapshot();
     m_valid = m_scene->updateConditionExpression(groupId, conditionExpression);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+UpdateRawCodeCommand::UpdateRawCodeCommand(SceneDocument *scene,
+                                           int groupId,
+                                           const QString &code,
+                                           std::function<void()> onChanged)
+    : SnapshotCommand("Edit raw OpenSCAD block", scene, std::move(onChanged))
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateRawCode(groupId, code);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
+UpdateTextContentCommand::UpdateTextContentCommand(SceneDocument *scene,
+                                                   int shapeId,
+                                                   const QString &text,
+                                                   std::function<void()> onChanged)
+    : SnapshotCommand("Edit text", scene, std::move(onChanged))
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateTextContent(shapeId, text);
     if (m_valid)
         m_newSnapshot = m_scene->snapshot();
 

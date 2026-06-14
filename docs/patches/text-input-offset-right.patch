@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@example.local>
+Date: Sun, 14 Jun 2026 00:00:00 +0300
+Subject: [PATCH] Move Text content edit field to the right of the icon card
+
+This patch is prepared for future use and is not applied.
+
+Problem:
+- The Text primitive content field is drawn from `rect.left() + 8`.
+- On text primitives this lower edit field overlaps the icon/thumbnail area and
+  any badge drawn over the icon.
+
+Fix:
+- Position the Text content field after `PrimitiveCardWidth`.
+- Adjust Text primitive preview width calculation so the content field still has
+  enough horizontal room after the left offset.
+
+diff --git a/scenetreepreviewgeometry.cpp b/scenetreepreviewgeometry.cpp
+--- a/scenetreepreviewgeometry.cpp
++++ b/scenetreepreviewgeometry.cpp
+@@
+     if (shape.type == ShapeNode::Text) {
+         const QFontMetricsF metrics(sceneTreeValueFont());
+         const QString content = shape.textValue.isEmpty() ? QStringLiteral("Text") : shape.textValue;
+         qreal maxExprWidth = 0.0;
+         for (const auto &control : shapeParameterControls(shape))
+             maxExprWidth = qMax(maxExprWidth, expressionVisualWidth(control.expression, metrics));
+         const qreal paramsW = PrimitiveCardWidth + 4.0 + PrimitiveParamLabelArea + maxExprWidth + 8.0;
+-        const qreal contentW = metrics.horizontalAdvance(content) + 30.0;
++        // The editable text strip is drawn to the right of the icon card so it
++        // cannot overlap the primitive icon or numeric badge.
++        const qreal contentW = PrimitiveCardWidth + 8.0
++                               + metrics.horizontalAdvance(content)
++                               + 18.0;
+         const qreal width = qMax<qreal>(PrimitiveWidth, qMax(paramsW, contentW));
+         return QSizeF(width, PrimitiveHeight + 26.0); // extra strip for the content field
+     }
+diff --git a/scenetreegraphicswidget.cpp b/scenetreegraphicswidget.cpp
+--- a/scenetreegraphicswidget.cpp
++++ b/scenetreegraphicswidget.cpp
+@@
+     if (shape && shape->type == ShapeNode::Text) {
+         const qreal fieldH = 20.0;
+-        const QRectF fieldRect(rect.left() + 8.0, rect.top() + PrimitiveHeight + 2.0,
+-                               rect.width() - 16.0, fieldH);
++        const qreal fieldLeft = rect.left() + PrimitiveCardWidth + 8.0;
++        const qreal fieldRight = rect.right() - 8.0;
++        const QRectF fieldRect(fieldLeft, rect.top() + PrimitiveHeight + 2.0,
++                               qMax<qreal>(24.0, fieldRight - fieldLeft), fieldH);
+         QPainterPath fieldPath;
+         fieldPath.addRoundedRect(fieldRect, 4.0, 4.0);
+         auto *bg = m_graphicsScene->addPath(fieldPath, QPen(QColor(255, 255, 255, 55), 1.0),
+                                             QBrush(QColor(255, 255, 255, 20)));
+-- 
+2.45.0

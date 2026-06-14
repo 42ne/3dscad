@@ -52,6 +52,11 @@ QString toolbarToolTip(const QString &tool)
                 "If / else block\n"
                 "Drop into the scene, groups, loops, or module bodies; then drop objects into the true or else branch.");
         }
+        if (operation == SceneDocument::TreeNode::RawCode) {
+            return QStringLiteral(
+                "Raw OpenSCAD code\n"
+                "Drop into the tree to preserve OpenSCAD syntax that has no visual block yet.");
+        }
         if (operation == SceneDocument::TreeNode::Color) {
             return QStringLiteral(
                 "Color group\n"
@@ -92,6 +97,8 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
         return ShapeNode::Cylinder;
     if (normalized.contains("polyhedron"))
         return ShapeNode::Polyhedron;
+    if (normalized == "text")
+        return ShapeNode::Text;
     if (normalized == "point_3d")
         return ShapeNode::Point3D;
     if (normalized == "face_3d")
@@ -115,6 +122,8 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
         return QStringLiteral("cone");
     if (type == ShapeNode::Polyhedron)
         return QStringLiteral("polyhedron");
+    if (type == ShapeNode::Text)
+        return QStringLiteral("text");
     if (type == ShapeNode::Point3D)
         return QStringLiteral("point_3d");
     if (type == ShapeNode::Face3D)
@@ -200,6 +209,16 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Offset;
         return true;
     }
+    if (normalized == QStringLiteral("projection")) {
+        *operation = SceneDocument::TreeNode::Projection;
+        return true;
+    }
+    if (normalized == QStringLiteral("raw")
+        || normalized == QStringLiteral("raw_code")
+        || normalized == QStringLiteral("rawcode")) {
+        *operation = SceneDocument::TreeNode::RawCode;
+        return true;
+    }
     return false;
 }
 
@@ -225,6 +244,8 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
     {SceneDocument::TreeNode::Conditional, "if", QColor(232, 228, 248), GroupWideMinWidth},
     {SceneDocument::TreeNode::Offset, "offset", QColor(216, 240, 224), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Projection, "projection", QColor(225, 220, 245), GroupWideMinWidth},
+    {SceneDocument::TreeNode::RawCode, "raw code", QColor(238, 230, 212), 260.0},
 };
 
 } // namespace

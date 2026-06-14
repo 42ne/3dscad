@@ -610,10 +610,10 @@ static QVector<Box> subtractBox(const Box &source, const Box &cutter)
     return result;
 }
 
-static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex, int treeNodeId = 0, int fn = 0)
+static CsgRenderItem renderItemFromShape(const ShapeNode &shape, int shapeIndex, int treeNodeId = 0, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     CsgRenderItem item;
-    item.mesh = buildShapeMesh(shape, fn);
+    item.mesh = buildShapeMesh(shape, fn, fa, fs);
     item.shapeIndex = shapeIndex;
     item.treeNodeId = treeNodeId;
     item.booleanMode = shape.booleanMode;
@@ -712,10 +712,12 @@ static void appendTreeHelpers(CsgPreview *preview,
 
         const ShapeNode evaluatedShape = shapeWithEvaluatedParameters(*shape, variables);
         const int fn = static_cast<int>(variables.value(QStringLiteral("$fn"), 0.0));
+        const double fa = variables.value(QStringLiteral("$fa"), 12.0);
+        const double fs = variables.value(QStringLiteral("$fs"), 2.0);
         CsgRenderItem helper = renderItemFromShape(evaluatedShape,
                                                    scene.indexOfShapeId(shape->id),
                                                    ownerTreeNodeId > 0 ? ownerTreeNodeId : node.id,
-                                                   fn);
+                                                   fn, fa, fs);
         helper.mesh = transformedMesh(helper.mesh, groupStack);
         helper.booleanMode = inheritedMode;
         helper.color = inheritedColor;
@@ -953,14 +955,14 @@ static bool appendClippedCubeSubtractCutFaces(CsgRenderItem *item,
     return item->mesh.triangles.size() > originalTriangleCount;
 }
 
-static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0)
+static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     for (int i = 0; i < shapes.size(); ++i) {
         const ShapeNode &shape = shapes[i];
         if (shape.booleanMode != ShapeNode::Subtract)
             continue;
 
-        const SceneMesh cutterMesh = buildShapeMesh(shape, fn);
+        const SceneMesh cutterMesh = buildShapeMesh(shape, fn, fa, fs);
         CsgRenderItem item;
         item.shapeIndex = i;
         item.booleanMode = ShapeNode::Subtract;
@@ -994,19 +996,19 @@ static void appendSubtractCutFaceItems(CsgPreview *preview, const QVector<ShapeN
     }
 }
 
-static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0)
+static void appendHelpers(CsgPreview *preview, const QVector<ShapeNode> &shapes, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     for (int i = 0; i < shapes.size(); ++i) {
         if (shapes[i].booleanMode == ShapeNode::Add)
             continue;
 
-        CsgRenderItem helper = renderItemFromShape(shapes[i], i, 0, fn);
+        CsgRenderItem helper = renderItemFromShape(shapes[i], i, 0, fn, fa, fs);
         helper.helper = true;
         preview->items.append(helper);
     }
 }
 
-static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes, int fn = 0)
+static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     CsgPreview preview;
     preview.mode = CsgPreview::MeshApproximate;
@@ -1026,7 +1028,7 @@ static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes
         if (shape.booleanMode != ShapeNode::Add)
             continue;
 
-        const SceneMesh sourceMesh = buildShapeMesh(shape, fn);
+        const SceneMesh sourceMesh = buildShapeMesh(shape, fn, fa, fs);
         CsgRenderItem item;
         item.shapeIndex = i;
         item.booleanMode = ShapeNode::Add;
@@ -1075,7 +1077,7 @@ static CsgPreview buildMeshApproximationPreview(const QVector<ShapeNode> &shapes
     return preview;
 }
 
-CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn)
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn, double fa, double fs)
 {
     CsgPreview preview;
     bool hasBoolean = false;
@@ -1115,11 +1117,11 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn)
         preview.mode = CsgPreview::BoxComputed;
 
     if (preview.mode == CsgPreview::MeshApproximate)
-        return buildMeshApproximationPreview(shapes, fn);
+        return buildMeshApproximationPreview(shapes, fn, fa, fs);
 
     if (preview.mode != CsgPreview::BoxComputed) {
         for (int i = 0; i < shapes.size(); ++i)
-            preview.items.append(renderItemFromShape(shapes[i], i, 0, fn));
+            preview.items.append(renderItemFromShape(shapes[i], i, 0, fn, fa, fs));
 
         preview.statusText = preview.mode == CsgPreview::Plain
                                  ? "CSG preview: plain mesh"
@@ -1149,7 +1151,7 @@ CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn)
 
     preview.items = buildSurfaceItems(result, shapes.size());
 
-    appendHelpers(&preview, shapes, fn);
+    appendHelpers(&preview, shapes, fn, fa, fs);
 
     preview.statusText = "CSG preview: box mode";
     return preview;
@@ -1226,6 +1228,7 @@ static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCap
         case SceneDocument::TreeNode::LinearExtrude:
         case SceneDocument::TreeNode::Resize:
         case SceneDocument::TreeNode::Offset:
+        case SceneDocument::TreeNode::Projection:
             caps.hasTransform = true;
             break;
         default:
@@ -1294,10 +1297,20 @@ CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId)
         }
     }
 
-    if ((hasColorOperation || hasPolyhedron) && !hasTreeBoolean && !hasModuleDeclaration && !shapes.isEmpty())
+    // Text needs the Manifold path (CrossSection) for correct holes, even when
+    // it is the only thing in the scene (the lightweight mesh fan-fills holes).
+    bool hasTextShape = false;
+    for (const ShapeNode &shape : shapes) {
+        if (shape.type == ShapeNode::Text) {
+            hasTextShape = true;
+            break;
+        }
+    }
+
+    if ((hasColorOperation || hasPolyhedron) && !hasTreeBoolean && !hasModuleDeclaration && !hasTextShape && !shapes.isEmpty())
         return buildColoredTreePreview(scene);
 
-    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasConditional || hasModuleCall || hasModuleDeclaration || hasColorOperation || hasPolyhedron) && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasConditional || hasModuleCall || hasModuleDeclaration || hasColorOperation || hasPolyhedron || hasTextShape) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {
@@ -1362,6 +1375,9 @@ CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId)
         return preview;
     }
 
-    const int fn = static_cast<int>(topLevelVariables(scene.treeRoot()).value(QStringLiteral("$fn"), 0.0));
-    return buildCsgPreview(shapes, fn);
+    const auto vars = topLevelVariables(scene.treeRoot());
+    const int fn = static_cast<int>(vars.value(QStringLiteral("$fn"), 0.0));
+    const double fa = vars.value(QStringLiteral("$fa"), 12.0);
+    const double fs = vars.value(QStringLiteral("$fs"), 2.0);
+    return buildCsgPreview(shapes, fn, fa, fs);
 }

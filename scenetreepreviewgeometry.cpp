@@ -15,6 +15,20 @@ QSizeF primitivePreviewSize(const ShapeNode &shape)
         return QSizeF(190.0, PrimitiveHeight + 10.0 + 22.0 + points * 21.0 + 24.0);
     }
 
+    if (shape.type == ShapeNode::Text) {
+        const QFontMetricsF metrics(sceneTreeValueFont());
+        const QString content = shape.textValue.isEmpty() ? QStringLiteral("Text") : shape.textValue;
+        qreal maxExprWidth = 0.0;
+        for (const auto &control : shapeParameterControls(shape))
+            maxExprWidth = qMax(maxExprWidth, expressionVisualWidth(control.expression, metrics));
+        const qreal paramsW = PrimitiveCardWidth + 4.0 + PrimitiveParamLabelArea + maxExprWidth + 8.0;
+        const qreal contentW = PrimitiveCardWidth + 8.0
+                               + metrics.horizontalAdvance(content)
+                               + 18.0;
+        const qreal width = qMax<qreal>(PrimitiveWidth, qMax(paramsW, contentW));
+        return QSizeF(width, PrimitiveHeight + 26.0); // extra strip for the content field
+    }
+
     const QFontMetricsF metrics(sceneTreeValueFont());
     const QVector<ShapeParameterControl> controls = shapeParameterControls(shape);
     qreal maxExprWidth = 0.0;

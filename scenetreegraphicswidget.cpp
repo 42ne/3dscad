@@ -13,6 +13,7 @@
 #include "scenetreecoloreditmode.h"
 #include "scenetreehovermanager.h"
 #include "scenetreeinlineeditor.h"
+#include "scenetreerawcodeeditor.h"
 #include "scenecanvasdraghandler.h"
 #include "scenetreeoverlaycontroller.h"
 #include "scenetreedroppreviewcontroller.h"
@@ -140,6 +141,7 @@ SceneTreeGraphicsWidget::SceneTreeGraphicsWidget(QWidget *parent)
 
     m_hoverManager      = new SceneTreeHoverManager(this);
     m_inlineEditor      = new SceneTreeInlineEditor(this);
+    m_rawCodeEditor     = new SceneTreeRawCodeEditor(this);
     m_canvasDragHandler = new SceneCanvasDragHandler(this);
     m_overlay           = new SceneTreeOverlayController(this);
     m_dropPreview       = new SceneTreeDropPreviewController(this);
@@ -599,6 +601,8 @@ void SceneTreeGraphicsWidget::resetGraphicsScene()
     m_treeLayout.clear();
     m_treeItems.clear();
     m_renameZones.clear();
+    m_textEditZones.clear();
+    m_rawCodeEditZones.clear();
     m_overlay->m_items.clear();
     m_overlay->m_itemOffsets.clear();
     m_hoverManager->m_hoverHighlightItems.clear();
@@ -1184,6 +1188,20 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
+        for (const TextEditZone &zone : m_textEditZones) {
+            if (zone.rect.contains(scenePos)) {
+                m_inlineEditor->startInlineTextEdit(zone.shapeId, zone.rect, zone.currentText);
+                event->accept();
+                return;
+            }
+        }
+        for (const RawCodeEditZone &zone : m_rawCodeEditZones) {
+            if (zone.rect.contains(scenePos)) {
+                m_rawCodeEditor->startEditing(zone.nodeId, zone.rect, zone.currentCode);
+                event->accept();
+                return;
+            }
+        }
         int renameNodeId = 0;
         QRectF renameRect;
         if (m_hoverManager->hoverRenameZoneAt(scenePos, &renameNodeId, &renameRect)) {
@@ -1225,6 +1243,7 @@ void SceneTreeGraphicsWidget::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
     m_inlineEditor->updateInlineInputGeometry();
+    m_rawCodeEditor->updateGeometry();
     // Clear hover state when the canvas scrolls (positions shift under the cursor).
     const bool changed = m_hoverManager->m_hoveredScrollRect.isValid() || m_hoverManager->m_hoveredRenameRect.isValid()
                          || m_hoverManager->m_hoveredExpressionRect.isValid();
@@ -1278,6 +1297,7 @@ void SceneTreeGraphicsWidget::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
     m_inlineEditor->updateInlineInputGeometry();
+    m_rawCodeEditor->updateGeometry();
     updateToolbarOverlay();
 }
 
@@ -1587,6 +1607,34 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
         m_treeItems.append(tableItem);
     }
 
+    if (shape && shape->type == ShapeNode::Text) {
+        const qreal fieldH = 20.0;
+        const qreal fieldLeft = rect.left() + PrimitiveCardWidth + 8.0;
+        const qreal fieldRight = rect.right() - 8.0;
+        const QRectF fieldRect(fieldLeft, rect.top() + PrimitiveHeight + 2.0,
+                               qMax<qreal>(24.0, fieldRight - fieldLeft), fieldH);
+        QPainterPath fieldPath;
+        fieldPath.addRoundedRect(fieldRect, 4.0, 4.0);
+        auto *bg = m_graphicsScene->addPath(fieldPath, QPen(QColor(255, 255, 255, 55), 1.0),
+                                            QBrush(QColor(255, 255, 255, 20)));
+        bg->setZValue(6.0);
+        m_treeItems.append(bg);
+
+        auto *txt = m_graphicsScene->addSimpleText(QString());
+        QFont f = txt->font();
+        f.setPointSizeF(9.0);
+        txt->setFont(f);
+        const QString content = shape->textValue.isEmpty() ? QStringLiteral("(empty)") : shape->textValue;
+        const QFontMetricsF fm(f);
+        txt->setText(fm.elidedText(content, Qt::ElideRight, fieldRect.width() - 12.0));
+        txt->setBrush(shape->textValue.isEmpty() ? QColor(170, 180, 195) : QColor(222, 230, 242));
+        txt->setPos(fieldRect.left() + 6.0, fieldRect.top() + (fieldH - fm.height()) * 0.5);
+        txt->setZValue(6.1);
+        m_treeItems.append(txt);
+
+        m_textEditZones.append({fieldRect, node.shapeId, shape->textValue});
+    }
+
     addNodeDragHandle(node.id, label, rect, rect, size);
     return rect;
 }
@@ -1826,6 +1874,8 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     // be at least 37 to keep the last row from clipping (51 - 18 + 4px margin = 37).
     if (verticalHeaderGroup && !collapsedGroup)
         childrenHeight = qMax(childrenHeight, 37.0);
+    if (node.operation == SceneDocument::TreeNode::RawCode && !collapsedGroup)
+        childrenHeight = qMax(childrenHeight, 120.0);
 
     // Parameter headers can be wider than the children. Measure them so the
     // card is never narrower than the rendered expression.
@@ -1905,6 +1955,14 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         .setTheme(m_treeTheme)
         .setHighlightedVariableReference(m_hoveredVariableReferenceName, m_variableReferenceBlinkOn)
         .renderGroup(node, rect, depth, cutSeparatorY, groupThumbnail, collapsedGroup);
+
+    if (node.operation == SceneDocument::TreeNode::RawCode && !collapsedGroup) {
+        const QRectF codeRect = rect.adjusted(GroupPadding,
+                                              GroupHeaderHeight + GroupPadding,
+                                              -GroupPadding,
+                                              -GroupPadding);
+        m_rawCodeEditZones.append({codeRect, node.id, node.rawCode});
+    }
 
     // ── Polyhedron table ──────────────────────────────────
     if (isPolyhedron && !collapsedGroup && m_scene) {

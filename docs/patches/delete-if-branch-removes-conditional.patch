@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@example.local>
+Date: Sun, 14 Jun 2026 00:00:00 +0300
+Subject: [PATCH] Treat deleting if/else branch cards as deleting the whole if
+
+This patch is prepared for future use and is not applied.
+
+Problem:
+- Conditional nodes are structural wrappers.
+- The visible cards in the tree are their child branch containers:
+  children[0] = the `if (...)` branch, children[1] = the `else` branch.
+- If the user deletes one of those visible branch cards directly, the current
+  generic group deletion path can detach only that Union branch and leave a
+  malformed Conditional with one or zero branches.
+
+Expected behavior:
+- Delete the outer Conditional when the user deletes:
+  - the structural Conditional node itself;
+  - the visible `if (...)` branch container;
+  - the visible `else` branch container;
+  - a nested else-if branch container.
+
+What this patch does:
+- Adds a private helper that maps a branch-container id back to its parent
+  Conditional id.
+- Makes removeGroupById() resolve the deletion target before detaching.
+- Keeps ordinary Union groups removable/promotable as before.
+
+Manual cases to verify after applying:
+1. Fresh `if`: delete the visible `if (...)` branch -> the entire if/else pair disappears.
+2. Fresh `if`: delete the visible `else` branch -> the entire if/else pair disappears.
+3. Selected structural Conditional id: delete -> the entire pair disappears.
+4. `if (...) { A } else { B }`: delete either branch -> both A and B are removed from tree with the Conditional.
+5. `if (...) { A } else if (...) { B } else { C }`: delete the nested visible `if (...)` branch -> only the nested Conditional disappears from the outer else branch; deleting the outer branch removes the outer Conditional.
+
+diff --git a/scenetree.h b/scenetree.h
+--- a/scenetree.h
++++ b/scenetree.h
+@@
+     bool containsPrimitiveShapeId(const TreeNode &node, int shapeId) const;
+     void collectPrimitiveShapeIds(const TreeNode &node, QVector<int> *shapeIds) const;
+     bool parentWorldPositionForNode(const TreeNode &node, int id, const QVector3D &worldPosition, QVector3D *parentWorldPosition) const;
+     void offsetMovedNode(TreeNode *node, const QVector3D &offset);
++    bool conditionalIdForBranchNode(const TreeNode &node, int branchNodeId, int *conditionalId) const;
+     bool detachNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
+     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
+     bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);
+     void pruneEmptyGroups(TreeNode *node);
+diff --git a/scenetree.cpp b/scenetree.cpp
+--- a/scenetree.cpp
++++ b/scenetree.cpp
+@@
+-bool SceneTree::removeGroupById(int groupId)
++bool SceneTree::removeGroupById(int groupId)
+ {
+     if (groupId <= 0 || m_root.id == groupId)
+         return false;
+ 
+     // The Scene container is permanent; it cannot be deleted.
+     const TreeNode *sn = sceneNode();
+     if (sn && sn->id == groupId)
+         return false;
+ 
++    int effectiveGroupId = groupId;
++    int conditionalId = 0;
++    if (conditionalIdForBranchNode(m_root, groupId, &conditionalId))
++        effectiveGroupId = conditionalId;
++
++    if (effectiveGroupId <= 0 || m_root.id == effectiveGroupId)
++        return false;
++    if (sn && sn->id == effectiveGroupId)
++        return false;
++
+     // Check if this is a Module before detaching, so we can clean up its call node.
+-    const TreeNode *node = nodeById(groupId);
++    const TreeNode *node = nodeById(effectiveGroupId);
+     const bool wasModule = node && node->type == TreeNode::Group && node->operation == TreeNode::Module;
+     const bool wasConditional = node && node->type == TreeNode::Group && node->operation == TreeNode::Conditional;
+ 
+     TreeNode removedModule;
+     const bool removed = (wasModule || wasConditional)
+-                             ? detachNodeById(&m_root, groupId, &removedModule)
+-                             : detachNodeById(&m_root, groupId);
++                             ? detachNodeById(&m_root, effectiveGroupId, &removedModule)
++                             : detachNodeById(&m_root, effectiveGroupId);
+     if (removed) {
+         if (wasModule)
+-            removeModuleCallForModule(groupId);
++            removeModuleCallForModule(effectiveGroupId);
+         pruneEmptyGroups(&m_root);
+     }
+ 
+     return removed;
+ }
+@@
+ void SceneTree::offsetMovedNode(TreeNode *node, const QVector3D &offset)
+ {
+     if (!node)
+         return;
+ 
+     if (node->type == TreeNode::Group) {
+         node->position += offset;
+     }
+ }
++
++bool SceneTree::conditionalIdForBranchNode(const TreeNode &node,
++                                           int branchNodeId,
++                                           int *conditionalId) const
++{
++    if (node.type != TreeNode::Group)
++        return false;
++
++    if (node.operation == TreeNode::Conditional) {
++        for (int i = 0; i < node.children.size(); ++i) {
++            const TreeNode &child = node.children[i];
++            if (child.id != branchNodeId)
++                continue;
++
++            const bool isBranchContainer = child.type == TreeNode::Group
++                                           && child.operation == TreeNode::Union
++                                           && (i == 0 || child.isElseBranch);
++            if (!isBranchContainer)
++                return false;
++
++            if (conditionalId)
++                *conditionalId = node.id;
++            return true;
++        }
++    }
++
++    for (const TreeNode &child : node.children) {
++        if (conditionalIdForBranchNode(child, branchNodeId, conditionalId))
++            return true;
++    }
++
++    return false;
++}
+ 
+ bool SceneTree::detachNodeById(TreeNode *node, int id, TreeNode *detachedNode)
+ {
+-- 
+2.45.0

@@ -235,3 +235,57 @@
 24. **Індикатор меж зуму (#25)** — незначний зворотній зв'язок
 25. **LOD (#22)** — продуктивність для великих сцен
 26. **VR (#23)** — новинка
+
+---
+
+## OpenSCAD import/export: повна сумісність дерева
+
+Окремий напрямок, не прив'язаний напряму до в'юпорту: код OpenSCAD має втягуватися в дерево без втрат і генеруватися назад із дерева настільки повно, наскільки це можливо. Поточна реалізація підтримує корисний subset, але не є lossless round-trip.
+
+### Критичні прогалини
+
+1. **Raw/Unknown вузли для збереження непідтриманого коду**
+   - **Статус:** ❌ Не розпочато
+   - **Файли:** `scenetree.h`, `openscadparser.cpp`, `openscadgenerator.cpp`
+   - **Опис:** Додати типи на кшталт `RawStatement`, `RawBlock`, `UnsupportedCall`, щоб parser не викидав незнайомі конструкції. UI може не редагувати такі вузли візуально, але generator має віддати їх назад без втрат.
+
+2. **Збереження коментарів, форматування і debug/background modifiers**
+   - **Статус:** ❌ Не розпочато
+   - **Файли:** `openscadparser.cpp`, `openscadgenerator.cpp`
+   - **Опис:** Коментарі, whitespace, `#`, `%`, `!`, `*` зараз не є повноцінною частиною дерева. Для round-trip треба зберігати trivia/metadata або raw fragments навколо вузлів.
+
+3. **`include<>` / `use<>`**
+   - **Статус:** ❌ Не розпочато
+   - **Файли:** `scenetree.h`, `openscadparser.cpp`, `openscadgenerator.cpp`
+   - **Опис:** Додати AST-вузли або raw-preserved directives для зовнішніх бібліотек. Без цього імпорт реальних OpenSCAD-проєктів втрачає залежності.
+
+4. **Повніші декларації `function` і `module`**
+   - **Статус:** ⚠️ Частково
+   - **Файли:** `expression.h`, `openscadparser.cpp`, `openscadgenerator.cpp`
+   - **Опис:** Модулі та виклики вже є частково, але потрібне повне збереження користувацьких `function name(...) = ...;`, nested module/function declarations, positional/default args і `children()`.
+
+5. **Повна модель OpenSCAD expressions**
+   - **Статус:** ⚠️ Частково
+   - **Файли:** `expression.h`, `scenestringutils.h`, `openscadparser.cpp`
+   - **Опис:** Потрібні first-class vectors/lists/ranges, comprehensions, indexing/slicing, `undef` semantics, string operations і OpenSCAD truthiness. Інакше умови, цикли та параметри можуть імпортуватися з підміною або втратою.
+
+6. **Непідтримані або частково підтримані statements**
+   - **Статус:** ❌ Не розпочато / ⚠️ Частково
+   - **Файли:** `openscadparser.cpp`, `openscadgenerator.cpp`, `manifoldcsg.cpp`
+   - **Опис:** Перевірити й додати round-trip для `echo`, `assert`, `render`, `children()`, `let(...)`, `assign`, `surface`, `import`, `multmatrix`, `search`, `lookup`, `each` та інших OpenSCAD-конструкцій. Якщо немає editable-моделі, зберігати як raw.
+
+7. **Повні параметри операторів**
+   - **Статус:** ⚠️ Частково
+   - **Файли:** `scenetree.h`, `openscadparser.cpp`, `openscadgenerator.cpp`
+   - **Опис:** Не губити `convexity`, локальні `$fn/$fa/$fs`, `resize(auto=...)`, параметри `linear_extrude`, `rotate_extrude`, `projection`, `offset`, `polyhedron` та інші аргументи, які зараз або не моделюються, або генеруються в нормалізованому вигляді.
+
+8. **Polygon/polyhedron round-trip**
+   - **Статус:** ⚠️ Частково
+   - **Файли:** `shapenode.h`, `openscadparser.cpp`, `openscadgenerator.cpp`, `manifoldcsg.cpp`
+   - **Опис:** Зберігати `polygon(paths=...)`, holes, winding, `convexity`; для `polyhedron` зберігати початкові points/faces/convexity без нормалізації індексів, якщо користувач не редагував їх у UI.
+
+### Рекомендована стратегія
+
+- **Editable subset:** конструкції, які дерево реально розуміє і може редагувати візуально.
+- **Preserved subset:** усе інше зберігати як raw OpenSCAD, показувати в дереві як read-only/unsupported вузол і генерувати назад без змін.
+- **Round-trip тести:** для кожного класу конструкцій додати сценарій `OpenSCAD input -> tree -> generated OpenSCAD`, де перевіряється, що непідтриманий код не зникає, а підтриманий код лишається семантично еквівалентним.

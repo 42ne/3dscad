@@ -245,6 +245,53 @@ static SceneDocument::TreeNode makePrimitiveNode(const ShapeNode &shape, ParserS
     return node;
 }
 
+static SceneDocument::TreeNode makeRawCodeNode(const QString &code, ParserState *state)
+{
+    SceneDocument::TreeNode node = makeGroupNode(SceneDocument::TreeNode::RawCode, state);
+    node.rawCode = code.trimmed();
+    return node;
+}
+
+static QString consumeRawOpenScadSnippet(ParserState *state, const QString &firstLine = QString())
+{
+    if (!state)
+        return QString();
+
+    QString snippet;
+    int depth = 0;
+    auto appendLine = [&](const QString &line) {
+        if (!snippet.isEmpty())
+            snippet += QLatin1Char('\n');
+        snippet += line;
+        for (const QChar ch : line) {
+            if (ch == QLatin1Char('{'))
+                ++depth;
+            else if (ch == QLatin1Char('}'))
+                --depth;
+        }
+    };
+
+    bool consumedAny = !firstLine.isEmpty();
+    if (!firstLine.isEmpty()) {
+        appendLine(firstLine);
+        if (depth <= 0 && (firstLine.endsWith(QLatin1Char(';'))
+                           || firstLine.endsWith(QLatin1Char('}'))))
+            return snippet.trimmed();
+    }
+
+    while (state->index < state->lines.size()) {
+        const ParsedLine &line = state->lines[state->index++];
+        appendLine(line.text);
+        consumedAny = true;
+
+        if (depth <= 0 && (line.text.endsWith(QLatin1Char(';'))
+                           || line.text.endsWith(QLatin1Char('}'))))
+            break;
+    }
+
+    return consumedAny ? snippet.trimmed() : QString();
+}
+
 // Matches: module <name>(<optional params>) {
 // Captures: [1]=name, [2]=params content (may be empty)
 static bool isModuleDefinitionLine(const QString &line, QString *name, QString *params)
@@ -280,6 +327,8 @@ static bool parseModuleCallLine(const QString &line, QString *name = nullptr, QS
         QStringLiteral("linear_extrude"),
         QStringLiteral("rotate_extrude"),
         QStringLiteral("polyhedron"),
+        QStringLiteral("text"),
+        QStringLiteral("offset"),
         QStringLiteral("echo"),
         QStringLiteral("assert"),
         QStringLiteral("assign")
@@ -343,6 +392,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression rotateExtrudeRegex("^rotate_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression resizeRegex("^resize\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression offsetRegex("^offset\\s*\\((.*)\\)\\s*\\{\\s*$");
+    static const QRegularExpression projectionRegex("^projection\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     // intersection_for → intersection() { for() { ... } }
     {
@@ -508,6 +558,17 @@ static bool parseOperationLine(const QString &line,
         *operation = SceneDocument::TreeNode::Offset;
         if (vector)
             *vector = QVector3D(float(amount), useDelta ? 1.0f : 0.0f, chamfer ? 1.0f : 0.0f);
+        return true;
+    }
+
+    QRegularExpressionMatch projectionMatch = projectionRegex.match(line);
+    if (projectionMatch.hasMatch()) {
+        const auto args = parseNamedArgs(projectionMatch.captured(1), {"cut"});
+        const QString cutStr = args.value(QStringLiteral("cut"));
+        const bool cut = (cutStr.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0);
+        *operation = SceneDocument::TreeNode::Projection;
+        if (vector)
+            *vector = QVector3D(cut ? 1.0f : 0.0f, 0.0f, 0.0f);
         return true;
     }
 
@@ -1123,6 +1184,78 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
         return true;
     }
 
+    if (extractCallArgs(line, "text", &argsStr) && line.endsWith(';')) {
+        QString work = argsStr.trimmed();
+        // Optional leading "text=".
+        static const QRegularExpression textKeyRe("^text\\s*=\\s*");
+        work.remove(textKeyRe);
+
+        QString textStr;
+        if (work.startsWith(QLatin1Char('"'))) {
+            int endq = -1;
+            for (int i = 1; i < work.size(); ++i) {
+                if (work[i] == QLatin1Char('\\')) { ++i; continue; }
+                if (work[i] == QLatin1Char('"')) { endq = i; break; }
+            }
+            if (endq < 0) {
+                if (errorMessage)
+                    *errorMessage = QStringLiteral("text on line %1: unterminated string");
+                return false;
+            }
+            textStr = work.mid(1, endq - 1);
+            textStr.replace(QStringLiteral("\\\""), QStringLiteral("\""))
+                   .replace(QStringLiteral("\\\\"), QStringLiteral("\\"));
+            work = work.mid(endq + 1).trimmed();
+            if (work.startsWith(QLatin1Char(',')))
+                work = work.mid(1).trimmed();
+        } else {
+            const QStringList parts = splitAtTopLevelCommas(work);
+            const QString textExpr = parts.value(0).trimmed();
+            QString evaluatedText;
+            if (!textExpr.isEmpty()
+                && ExpressionSyntax::evaluateString(textExpr, state->variableValues,
+                                                    &evaluatedText, nullptr, fns)) {
+                textStr = evaluatedText;
+                work = parts.mid(1).join(QStringLiteral(", ")).trimmed();
+            }
+        }
+
+        const auto args = parseNamedArgs(work, {"size", "font", "halign", "valign",
+                                                "spacing", "direction", "language", "script"});
+        auto unquote = [](QString s) {
+            s = s.trimmed();
+            if (s.size() >= 2 && s.startsWith(QLatin1Char('"')) && s.endsWith(QLatin1Char('"')))
+                s = s.mid(1, s.size() - 2);
+            return s;
+        };
+
+        qreal sizeVal = 10.0;
+        QString sizeExpr;
+        const QString sizeArg = args.value(QStringLiteral("size"), QStringLiteral("10"));
+        if (!parseParamExpression(sizeArg, state->variableValues, &sizeVal, &sizeExpr, fns))
+            sizeVal = 10.0;
+
+        qreal spacingVal = 1.0;
+        QString spacingExpr = QStringLiteral("1");
+        const QString spacingArg = args.value(QStringLiteral("spacing"));
+        if (!spacingArg.isEmpty())
+            parseParamExpression(spacingArg, state->variableValues, &spacingVal, &spacingExpr, fns);
+
+        shape->id = state->nextShapeId++;
+        shape->type = ShapeNode::Text;
+        shape->textValue = textStr;
+        shape->textSize = static_cast<float>(qMax<qreal>(0.1, sizeVal));
+        shape->textSpacing = static_cast<float>(qMax<qreal>(0.0, spacingVal));
+        shape->fontName = unquote(args.value(QStringLiteral("font")));
+        const QString h = unquote(args.value(QStringLiteral("halign")));
+        const QString v = unquote(args.value(QStringLiteral("valign")));
+        if (!h.isEmpty()) shape->textHalign = h;
+        if (!v.isEmpty()) shape->textValign = v;
+        shape->name = QStringLiteral("Text %1").arg(shape->id);
+        shape->parameterExpressions = QStringList({sizeExpr, spacingExpr});
+        return true;
+    }
+
     if (extractCallArgs(line, "polygon", &argsStr) && line.endsWith(';')) {
         // Helper: find matching ']' for an '[' at position start.
         auto findMatchingBracket = [](const QString &s, int start) -> int {
@@ -1475,7 +1608,7 @@ static bool startsWithKnownKeyword(const QString &line)
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
         "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "assign", "if", "else", "color", "linear_extrude", "rotate_extrude",
-        "resize", "offset",
+        "resize", "offset", "projection",
         "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
@@ -1828,6 +1961,8 @@ static bool parseBlock(ParserState *state,
                 group.offsetAmount = transformVector.x();
                 group.offsetUseDelta = transformVector.y() > 0.5f;
                 group.offsetChamfer = transformVector.z() > 0.5f;
+            } else if (operation == SceneDocument::TreeNode::Projection) {
+                group.projectionCut = transformVector.x() > 0.5f;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
@@ -2177,11 +2312,9 @@ static bool parseBlock(ParserState *state,
         // ── Completely unknown statement — skip transparently ─────────────
         // If it opens a block, parse children into the current parent (flatten),
         // so primitives inside unsupported wrappers (e.g. color(){...}) are preserved.
-        if (line.endsWith('{')) {
-            if (!parseBlock(state, parent, true, errorMessage))
-                return false;
-        }
-        // Single-line unknown statement: silently skip.
+        const QString rawSnippet = consumeRawOpenScadSnippet(state, line);
+        if (!rawSnippet.isEmpty())
+            parent->children.append(makeRawCodeNode(rawSnippet, state));
     }
 
     if (stopAtBrace) {
@@ -2694,6 +2827,8 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.offsetAmount = transformVector.x();
                 group.offsetUseDelta = transformVector.y() > 0.5f;
                 group.offsetChamfer = transformVector.z() > 0.5f;
+            } else if (operation == SceneDocument::TreeNode::Projection) {
+                group.projectionCut = transformVector.x() > 0.5f;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
@@ -3036,10 +3171,9 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
 
         // Completely unknown at top level — skip transparently (same as parseBlock).
         ++state.index;
-        if (line.endsWith('{')) {
-            SceneDocument::TreeNode dummy = makeGroupNode(SceneDocument::TreeNode::Union, &state);
-            parseBlock(&state, &dummy, true, errorMessage);
-        }
+        const QString rawSnippet = consumeRawOpenScadSnippet(&state, line);
+        if (!rawSnippet.isEmpty())
+            sceneNode.children.append(makeRawCodeNode(rawSnippet, &state));
     }
 
     // Build a name→moduleNode map for fast lookup.

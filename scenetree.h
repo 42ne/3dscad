@@ -46,7 +46,9 @@ public:
             Resize,     // resize([x,y,z]) or resize([x,y,z], auto=[x,y,z]); newsize in scale
             Scene, // top-level container; flattened in code generation, never emitted as a block
             Conditional, // if/else; conditionExpression holds condition; children[0]=true branch, children[1]=else branch (isElseBranch=true)
-            Offset // offset(r=) rounded or offset(delta=, chamfer=); grows/shrinks a 2D outline
+            Offset, // offset(r=) rounded or offset(delta=, chamfer=); grows/shrinks a 2D outline
+            Projection, // projection(cut=); collapses 3D children to 2D (cut=true → slice at z=0)
+            RawCode // verbatim OpenSCAD snippet without a structured tree equivalent
         };
 
         int id = 0;
@@ -73,11 +75,15 @@ public:
         QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
         QString conditionExpression;  // for Conditional nodes
         bool isElseBranch = false;    // marks the else-child of a Conditional node
+        QString rawCode;              // for RawCode nodes
 
         // Offset parameters
         float offsetAmount = 1.0f;   // r (rounded join) or delta, per offsetUseDelta
         bool  offsetUseDelta = false; // false = r= (rounded), true = delta=
         bool  offsetChamfer = false;  // chamfered corners (only with delta)
+
+        // Projection parameters
+        bool projectionCut = true;  // cut=true → cross-section at z=0; cut=false → full XY projection
 
         // Resize parameters
         QVector3D resizeAuto = QVector3D(0, 0, 0); // auto=[x,y,z], 0 means not set
@@ -100,7 +106,9 @@ public:
     bool removeModuleCallForModule(int moduleGroupId);
 
     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
+    int addRawCode(const QString &code, int parentNodeId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
+    bool updateRawCode(int groupId, const QString &code);
     int addVariable(const QString &name, const QString &expression = QStringLiteral("0"), qreal value = 0.0,
                     int parentGroupId = 0, bool isParameter = false, int insertIndex = -1);
     bool removeVariableById(int variableId);
@@ -144,6 +152,7 @@ private:
     void collectPrimitiveShapeIds(const TreeNode &node, QVector<int> *shapeIds) const;
     bool parentWorldPositionForNode(const TreeNode &node, int id, const QVector3D &worldPosition, QVector3D *parentWorldPosition) const;
     void offsetMovedNode(TreeNode *node, const QVector3D &offset);
+    bool conditionalIdForBranchNode(const TreeNode &node, int branchNodeId, int *conditionalId) const;
     bool detachNodeById(TreeNode *node, int id, TreeNode *detachedNode = nullptr);
     bool removePrimitiveFromTree(TreeNode *node, int shapeId, TreeNode *removedNode = nullptr);
     bool appendPrimitiveToOperation(TreeNode::Operation operation, const TreeNode &primitiveNode);

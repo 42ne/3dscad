@@ -49,6 +49,10 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
                 {QStringLiteral("H"), shape.height, expr(2, shape.height)}};
     }
 
+    if (shape.type == ShapeNode::Text)
+        return {{QStringLiteral("Sz"), shape.textSize, expr(0, shape.textSize)},
+                {QStringLiteral("Sp"), shape.textSpacing, expr(1, shape.textSpacing)}};
+
     if (shape.type == ShapeNode::Polyhedron || shape.type == ShapeNode::Polygon2D)
         return {};
 

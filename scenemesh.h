@@ -5,6 +5,7 @@
 
 #include <QVector>
 #include <QVector3D>
+#include <QtMath>
 
 struct MeshTriangle
 {
@@ -21,8 +22,24 @@ struct SceneMesh
     QVector<QVector3D> shadowPoints;
 };
 
-// fn: $fn override (0 = use default segment count).
-SceneMesh buildShapeMesh(const ShapeNode &shape, int fn = 0);
+// Follows OpenSCAD's get_fragments_from_r() logic.
+inline int computeCircularSegments(int fn, double r, double fa = 12.0, double fs = 2.0)
+{
+    if (fn > 0) return qMax(3, fn);
+    if (r <= 0.0) return 24;
+    const int fromAngle = static_cast<int>(qCeil(360.0 / fa));
+    const int fromSize  = static_cast<int>(qCeil(2.0 * M_PI * r / fs));
+    return qMax(3, qMax(fromAngle, fromSize));
+}
+
+// fn: $fn override (0 = auto, uses $fa/$fs). fa=$fa default 12°, fs=$fs default 2mm.
+SceneMesh buildShapeMesh(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0);
 SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum);
+
+// Builds 2D glyph contours for a Text shape in model space (Y up, z=0), scaled
+// to textSize and aligned per halign/valign. Holes come out as separate
+// sub-contours. Uses QFont/QPainterPath, so call it on the GUI thread (it is
+// cached into ShapeNode::textContours by SceneDocument::snapshot()).
+QVector<QVector<QVector3D>> buildGlyphContours(const ShapeNode &shape);
 
 #endif

@@ -61,6 +61,30 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         for (const QPointF &pt : poly) drawNode(painter, pt);
         return;
     }
+    if (type == ShapeNode::Text) {
+        // Bold "A" letterform on a baseline.
+        painter->setPen(Qt::NoPen);
+        QPen pen(QColor(221, 235, 248), rect.width() * 0.10);
+        pen.setCapStyle(Qt::RoundCap);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(pen);
+        const qreal cx = rect.center().x();
+        const QPointF apex(cx, rect.top() + rect.height() * 0.16);
+        const QPointF bl(rect.left() + rect.width() * 0.22, rect.bottom() - rect.height() * 0.26);
+        const QPointF br(rect.right() - rect.width() * 0.22, rect.bottom() - rect.height() * 0.26);
+        painter->drawLine(apex, bl);
+        painter->drawLine(apex, br);
+        const qreal t = 0.58;
+        painter->drawLine(apex + (bl - apex) * t, apex + (br - apex) * t);
+        QPen blp(QColor(150, 185, 224), rect.height() * 0.05);
+        blp.setCapStyle(Qt::RoundCap);
+        painter->setPen(blp);
+        const qreal by = rect.bottom() - rect.height() * 0.10;
+        painter->drawLine(QPointF(rect.left() + rect.width() * 0.16, by),
+                          QPointF(rect.right() - rect.width() * 0.16, by));
+        return;
+    }
+
     if (type == ShapeNode::Sphere) {
         const QRectF sr = rect.adjusted(3.0, 3.0, -3.0, -3.0);
         painter->setBrush(face);
@@ -217,32 +241,6 @@ namespace {
 // ── Future-tool glyphs (not yet backed by an Operation/primitive) ───────────
 // Coordinates are relative to the glyph rect, so these scale to any icon size.
 
-void paintFutureText(QPainter *p, const QRectF &g)
-{
-    // Bold "A" letterform on a baseline — text/font marker. Stroked (not
-    // drawText) so it stays crisp at small sizes and renders without fonts.
-    p->save();
-    QPen pen(QColor(221, 235, 248), g.width() * 0.10);
-    pen.setCapStyle(Qt::RoundCap);
-    pen.setJoinStyle(Qt::RoundJoin);
-    p->setPen(pen);
-    const qreal cx = g.center().x();
-    const QPointF apex(cx, g.top() + g.height() * 0.10);
-    const QPointF bl(g.left() + g.width() * 0.20, g.bottom() - g.height() * 0.22);
-    const QPointF br(g.right() - g.width() * 0.20, g.bottom() - g.height() * 0.22);
-    p->drawLine(apex, bl);
-    p->drawLine(apex, br);
-    const qreal t = 0.58;
-    p->drawLine(apex + (bl - apex) * t, apex + (br - apex) * t);
-    QPen blp(QColor(150, 185, 224), g.height() * 0.045);
-    blp.setCapStyle(Qt::RoundCap);
-    p->setPen(blp);
-    const qreal by = g.bottom() - g.height() * 0.06;
-    p->drawLine(QPointF(g.left() + g.width() * 0.14, by),
-                QPointF(g.right() - g.width() * 0.14, by));
-    p->restore();
-}
-
 void paintFutureOffset(QPainter *p, const QRectF &g)
 {
     // Inner solid rounded shape + outer dashed offset outline + distance tick.
@@ -338,11 +336,11 @@ void paintFutureImport(QPainter *p, const QRectF &g)
 
 bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect)
 {
-    // offset is now a real Operation (see paintOperationIcon); the remaining
-    // entries stay here until their features are wired.
+    // offset is a real Operation (paintOperationIcon), projection is a real
+    // Operation (paintOperationIcon), and text is a real primitive
+    // (paintPrimitiveIcon); the remaining entries stay here until their
+    // features are wired.
     const QString n = toolName.toLower();
-    if (n == QStringLiteral("text"))       { paintFutureText(painter, rect);       return true; }
-    if (n == QStringLiteral("projection")) { paintFutureProjection(painter, rect); return true; }
     if (n == QStringLiteral("import"))     { paintFutureImport(painter, rect);     return true; }
     return false;
 }
@@ -599,6 +597,17 @@ void paintOperationIcon(QPainter *painter,
                                     symbolRect.height() * 0.22));
     } else if (operation == SceneDocument::TreeNode::Offset) {
         paintFutureOffset(painter, symbolRect);
+    } else if (operation == SceneDocument::TreeNode::Projection) {
+        paintFutureProjection(painter, symbolRect);
+    } else if (operation == SceneDocument::TreeNode::RawCode) {
+        QFont rawFont = painter->font();
+        rawFont.setBold(true);
+        rawFont.setPointSizeF(qMax<qreal>(9.0, rawFont.pointSizeF() + 2.0));
+        painter->setFont(rawFont);
+        painter->setPen(accent.darker(165));
+        painter->drawText(symbolRect.adjusted(-1.0, -1.0, 1.0, 1.0),
+                          Qt::AlignCenter,
+                          QStringLiteral("R"));
     } else if (operation == SceneDocument::TreeNode::Scene) {
         // Draw a small grid of dots to represent the top-level scene container.
         painter->setPen(Qt::NoPen);

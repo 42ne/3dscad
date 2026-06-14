@@ -32,7 +32,21 @@ hr { border:none; border-top:1px solid #ddd; margin:2em 0; }
 <body>
 
 <h1>Дорожня карта підтримки функцій OpenSCAD</h1>
-<p class="meta">Стан: 12 червня 2026 &nbsp;·&nbsp; Проєкт: 3DScad візуальний редактор</p>
+<p class="meta">Стан: 14 червня 2026 &nbsp;·&nbsp; Проєкт: 3DScad візуальний редактор</p>
+
+<div class="info-box" style="border-left-color:#27ae60;background:#eafaf1;">
+<strong>Реалізовано після написання roadmap (14 червня 2026):</strong>
+<ul style="margin:.4em 0 0 0;">
+<li><span class="tag-done">✓</span> <code>if / else</code> — повноцінний вузол Conditional (включно з ланцюгами else-if), парсер/codegen/рендер, кнопка та іконка в тулбарі.</li>
+<li><span class="tag-done">✓</span> Тернарний <code>?:</code> і математичні функції; <code>log()</code> виправлено на основу 10; час анімації <code>$t</code>.</li>
+<li><span class="tag-done">✓</span> Вектор-аумний обчислювач виразів: векторні/діапазонні літерали, індексація <code>v[i]</code>, векторна арифметика, справжні <code>len()</code> / <code>norm()</code> / <code>cross()</code> та <strong>векторні змінні</strong> (<code>points[i]</code>, <code>len(points)</code>), протягнуті крізь модель документа.</li>
+<li><span class="tag-done">✓</span> <code>offset(r= / delta=, chamfer=)</code> — вузол-операція через Manifold <code>CrossSection</code> (Round/Miter/Square), парсер/codegen, тулбар.</li>
+<li><span class="tag-done">✓</span> <code>text()</code> 2D-примітив — контури гліфів Qt → <code>CrossSection</code> (з дірками), <code>size</code>/<code>font</code>/<code>halign</code>/<code>valign</code>/<code>spacing</code>, працює всередині <code>linear_extrude</code>/<code>offset</code>; на картці пілюлі <code>Sz</code>/<code>Sp</code> та редаговане поле вмісту.</li>
+<li><span class="tag-done">✓</span> Кнопку <code>resize()</code> увімкнено; намальовано іконки на майбутнє для <code>projection</code> / <code>import</code>.</li>
+<li><span class="tag-done">✓</span> <code>projection(cut=true/false)</code> — вузол-операція через Manifold <code>CrossSection</code> (зріз на z=0 або повна XY-проєкція), парсер/codegen, тулбар + іконка.</li>
+<li><span class="tag-partial">~</span> Ще відкрито: <code>import()</code>, <code>surface()</code>, <code>children()</code>, list comprehensions, <code>include</code>/<code>use</code>. Manifold тепер збирається з <code>MANIFOLD_CROSS_SECTION=ON</code> (Clipper2), що розблоковує 2D-бекенд.</li>
+</ul>
+</div>
 
 <p>Цей документ відстежує кожну конструкцію мови OpenSCAD і показує поточний рівень підтримки
 на трьох рівнях: <strong>парсер</strong> (чи може текст бути прочитаний?),
@@ -227,9 +241,9 @@ if (show_base) {            // → Conditional, conditionExpression = "show_base
     <td>Тільки 2D; два режими: закруглений (<code>r=</code>) і зрізаний (<code>delta=</code>).
         Основний елемент 2D-процесу: square → offset → linear_extrude.</td></tr>
 <tr><td><code>projection(cut=)</code></td>
-    <td><span class="tag-no">✗</span></td>
-    <td><span class="tag-no">✗</span></td>
-    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-done">✓</span></td>
+    <td><span class="tag-done">✓</span></td>
+    <td><span class="tag-done">✓</span></td>
     <td>Проєктує 3D-тіло на 2D-площину; <code>cut=true</code> дає переріз.</td></tr>
 <tr><td><code>multmatrix(m)</code></td>
     <td><span class="tag-no">✗</span></td>
@@ -380,7 +394,7 @@ if (show_base) {            // → Conditional, conditionExpression = "show_base
 <tr><td>7</td><td>Примітив <code>import()</code></td><td>2</td>
     <td>Потрібен для інтеграції наявних STL-деталей</td></tr>
 <tr><td>8</td><td>Група <code>projection()</code></td><td>3</td>
-    <td>Вмикає процес експорту в DXF</td></tr>
+    <td><span class="tag-done">✓ Є</span> — повноцінний вузол Operation, парсер/codegen, тулбар + іконка, Manifold slice/project</td></tr>
 <tr><td>9</td><td>Генератори списків</td><td>6</td>
     <td>Необхідні для коректного парсингу бібліотек шестерень/різьб/пружин</td></tr>
 <tr><td>10</td><td>Директиви <code>use / include</code></td><td>4</td>

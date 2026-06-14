@@ -45,11 +45,14 @@ QStringList paletteTools()
         QStringLiteral("var"),
         QStringLiteral("for"),
         QStringLiteral("if"),
+        QStringLiteral("raw_code"),
         // ── 2-D splines → extrusions ──────────────────────────────────────────
         QStringLiteral("circle"),
         QStringLiteral("square"),
         QStringLiteral("polygon"),
+        QStringLiteral("text"),
         QStringLiteral("offset"),
+        QStringLiteral("projection"),
         QStringLiteral("linear_extrude"),
         QStringLiteral("rotate_extrude"),
     };

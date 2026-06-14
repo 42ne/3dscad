@@ -245,6 +245,31 @@ void SceneTreeInlineEditor::startInlineRename(int nodeId,
         });
 }
 
+void SceneTreeInlineEditor::startInlineTextEdit(int shapeId,
+                                                const QRectF &sceneRect,
+                                                const QString &currentText)
+{
+    if (!m_inlineInput)
+        return;
+
+    m_inlineInputActive = true;
+    m_inlineInputSceneRect = sceneRect;
+
+    m_inlineInput->startEditing(
+        m_widget->mapFromScene(sceneRect).boundingRect(),
+        currentText,
+        [this, shapeId](const QString &newText) {
+            m_inlineInputActive = false;
+            m_inlineInputSceneRect = QRectF();
+            emit m_widget->textContentEdited(shapeId, newText);
+            return true;
+        },
+        [this]() {
+            m_inlineInputActive = false;
+            m_inlineInputSceneRect = QRectF();
+        });
+}
+
 void SceneTreeInlineEditor::updateInlineInputGeometry()
 {
     if (!m_inlineInput || !m_inlineInputActive || !m_inlineInputSceneRect.isValid())

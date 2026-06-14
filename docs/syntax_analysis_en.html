@@ -35,7 +35,20 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
 <body>
 
 <h1>OpenSCAD Syntax Analysis — Tree Implementation Effort</h1>
-<p class="meta">Updated: 12 June 2026</p>
+<p class="meta">Updated: 14 June 2026</p>
+
+<div style="background:#eafaf1;border-left:4px solid #27ae60;padding:10px 14px;margin:1em 0;border-radius:3px;font-size:13.5px;">
+<strong>Implemented since this analysis (14 June 2026):</strong>
+<code>if / else</code> conditional node, ternary <code>?:</code>, base-10 <code>log()</code>, <code>$t</code>,
+a vector-aware evaluator (vector/range literals, <code>v[i]</code>, vector math, <code>len</code>/<code>norm</code>/<code>cross</code>)
+with vector variables, <code>offset()</code> (Manifold CrossSection), the <code>text()</code> 2-D primitive
+(Qt glyph outlines, holes, <code>size</code>/<code>font</code>/<code>halign</code>/<code>valign</code>/<code>spacing</code>,
+editable content field), <code>projection(cut=)</code> (Manifold slice/project),
+block comments <code>/*…*/</code>, <code>echo()</code>/<code>assert()</code> (skipped in parser),
+<code>concat()</code>/<code>lookup()</code>, <code>$fn</code> wired through to mesh builders,
+and <code>$fa</code>/<code>$fs</code> segment computation.
+Manifold is now built with CrossSection (Clipper2) enabled.
+</div>
 
 <div class="ref-box">
 This document classifies constructs by <em>architectural layer</em>: expression/parser-only
@@ -75,29 +88,29 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
     <td>openscadparser.cpp</td>
     <td>Treated identically to <code>assign</code>; proper scoping requires a context stack</td></tr>
 <tr><td>Block comments <code>/* … */</code></td>
-    <td>—</td>
-    <td>Lexer / parser</td>
-    <td>Pure tokenization — no tree impact</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>openscadparser.cpp — <code>normalizedLines()</code></td>
+    <td>Stripped via regex before line processing; unclosed <code>/*</code> discards remainder</td></tr>
 <tr><td><code>$fn</code></td>
     <td><span class="tag-done">✓ Done</span></td>
     <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
     <td>Fully wired: stored as a Variable node → read by <code>topLevelVariables()</code> → passed as <code>fn</code> to all mesh builders (sphere, cylinder, cone, circle, rotate_extrude, linear_extrude). 0 means use default segment count.</td></tr>
 <tr><td><code>$fa</code>, <code>$fs</code></td>
-    <td><span class="tag-partial">~ Partial</span></td>
-    <td>expression.h</td>
-    <td>Recognised in expressions with correct defaults (12°, 2mm). Not yet used in mesh builders — when <code>$fn=0</code>, fallback uses hardcoded defaults instead of computing segments from <code>$fa</code>/<code>$fs</code>.</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
+    <td>Recognised in expressions with correct defaults (12°, 2mm). When <code>$fn=0</code>, mesh builders compute segment count from <code>$fa</code>/<code>$fs</code> via OpenSCAD's <code>get_fragments_from_r()</code> logic.</td></tr>
 <tr><td><code>$t</code> (animation)</td>
     <td><span class="tag-done">✓ Done</span></td>
     <td>expression.h — <code>resolveIdentifier</code></td>
     <td>Resolves to 0.0 by default; can be set via <code>m_vars</code> for animation playback</td></tr>
 <tr><td><code>echo()</code></td>
-    <td>—</td>
-    <td>parser</td>
-    <td>Print or ignore; add to <code>startsWithKnownKeyword</code></td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Lines starting with <code>echo(</code> are skipped silently in <code>parseBlock()</code> and top-level loop</td></tr>
 <tr><td><code>assert()</code></td>
-    <td>—</td>
-    <td>parser</td>
-    <td>Same as <code>echo</code>; error if condition is false</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Same skip mechanism as <code>echo()</code></td></tr>
 <tr><td><code>undef</code></td>
     <td><span class="tag-done">✓ Done</span></td>
     <td>expression.h</td>
@@ -107,25 +120,25 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
     <td>expression.h</td>
     <td>Returns a real random value via QRandomGenerator in [lo, hi)</td></tr>
 <tr><td><code>len()</code></td>
-    <td><span class="tag-stub">Stub 0</span></td>
-    <td>expression.h</td>
-    <td>Recognised, returns 0; full implementation requires a vector type</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>Returns vector size; works with vector-aware evaluator</td></tr>
 <tr><td><code>norm()</code>, <code>cross()</code></td>
-    <td><span class="tag-stub">Stub 0</span></td>
-    <td>expression.h</td>
-    <td>Recognised, return 0</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>Vector magnitude and 3-D cross product fully implemented</td></tr>
 <tr><td>Array subscript <code>arr[i]</code></td>
-    <td><span class="tag-stub">Stub 0</span></td>
-    <td>expression.h</td>
-    <td>Syntax parsed, returns 0; full lookup requires a vector symbol table</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalVectorOrRange()</code></td>
+    <td>Indexes into vector variables; <code>i</code> out of range returns 0</td></tr>
 <tr><td><code>concat()</code>, <code>lookup()</code></td>
-    <td>—</td>
-    <td>expression.h</td>
-    <td>Limited value without list comprehensions</td></tr>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td><code>concat</code> flattens values into a vector; <code>lookup</code> returns key as-is (numeric context)</td></tr>
 <tr><td><code>str()</code>, <code>chr()</code></td>
-    <td>—</td>
-    <td>expression.h</td>
-    <td>Number/string concatenation; required by <code>text()</code></td></tr>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td><code>str()</code> stub returns the first numeric arg; full string type requires Value extension</td></tr>
 <tr><td><code>color()</code> with alpha and named strings</td>
     <td><span class="tag-done">✓ Done</span></td>
     <td>parser</td>
@@ -147,18 +160,17 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
 </thead>
 <tbody>
 <tr><td><code>if(cond) { … } else { … }</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><code>Op::Conditional</code> + <code>conditionExpression</code> field</td>
-    <td>Parser evaluates the condition and executes the branch, but no node is created or
-        preserved in the tree. Toolbar icon needed (diamond shape)</td></tr>
+    <td>Evaluates condition at parse time, creates Conditional node with active branch + toolbar icon</td></tr>
 <tr><td><code>offset(r= / delta=)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><code>Op::Offset</code></td>
-    <td>2D contour transform; two modes: rounded (<code>r=</code>) and chamfered (<code>delta=</code>)</td></tr>
+    <td>2D contour transform via Manifold CrossSection (Clipper2); <code>r=</code> and <code>delta=</code> modes</td></tr>
 <tr><td><code>projection(cut=)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><code>Op::Projection</code></td>
-    <td>3D→2D; needs rendering pipeline</td></tr>
+    <td>3D→2D via Manifold Slice/Project → CrossSection → thin solid; <code>cut=true</code> slices at z=0</td></tr>
 <tr><td><code>intersection_for()</code></td>
     <td>—</td>
     <td><code>Op::IntersectionFor</code></td>
@@ -189,9 +201,9 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
 </thead>
 <tbody>
 <tr><td><code>text(text, size, font, …)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><code>ShapeNode::Text</code></td>
-    <td>Font library + mesh generation; parameters: size, font, halign, valign, direction</td></tr>
+    <td>Qt glyph outlines → Manifold CrossSection; size, font, halign, valign, spacing, editable content</td></tr>
 <tr><td><code>import("file")</code></td>
     <td>—</td>
     <td><code>ShapeNode::ImportedMesh</code></td>
@@ -281,30 +293,30 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
     <td><span class="tag-med">Medium</span></td>
     <td>Unlocks parametric design</td></tr>
 <tr><td>Block comments <code>/* */</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot high"></span>High</td>
     <td><span class="tag-low">Low</span></td>
-    <td>Removes a common parse failure</td></tr>
+    <td>Stripped via regex in <code>normalizedLines()</code></td></tr>
 <tr><td><code>$fn</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot high"></span>High</td>
     <td><span class="tag-low">Low</span></td>
-    <td>Better curved-surface preview quality</td></tr>
+    <td>Wired through to all mesh builders; 0 = default segments</td></tr>
 <tr><td><code>echo</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot medium"></span>Medium</td>
     <td><span class="tag-low">Low</span></td>
-    <td>Debug output</td></tr>
+    <td>Lines skipped silently in parser</td></tr>
 <tr><td><code>len</code> (full)</td>
-    <td><span class="tag-stub">Stub</span></td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot medium"></span>Medium</td>
     <td><span class="tag-med">Medium</span></td>
-    <td>Vector introspection; requires vector type</td></tr>
+    <td>Vector-aware; returns element count</td></tr>
 <tr><td><code>str</code> / <code>concat</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span> / <span class="tag-partial">~ Partial</span></td>
     <td><span class="freq-dot low"></span>Low</td>
     <td><span class="tag-med">Medium</span></td>
-    <td>String ops; required by <code>text()</code></td></tr>
+    <td><code>concat</code> fully implemented; <code>str()</code> stub returns first numeric arg</td></tr>
 </tbody>
 </table>
 
@@ -315,15 +327,15 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
 </thead>
 <tbody>
 <tr><td><code>if / else</code> node + toolbar</td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot very-high"></span>Very high</td>
     <td><span class="tag-med">Medium</span></td>
-    <td>Present in almost every file; currently silently dropped from the tree</td></tr>
+    <td>Conditional node with active branch + toolbar icon</td></tr>
 <tr><td><code>offset()</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot high"></span>High</td>
     <td><span class="tag-med">Medium</span></td>
-    <td>Core 2D workflow: square → offset → linear_extrude</td></tr>
+    <td>Manifold CrossSection (Clipper2) with <code>r=</code>/<code>delta=</code></td></tr>
 <tr><td><code>rotate_extrude</code></td>
     <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot high"></span>High</td>
@@ -335,10 +347,15 @@ No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</
     <td><span class="tag-low">Low</span></td>
     <td>Implemented</td></tr>
 <tr><td><code>text</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Done</span></td>
     <td><span class="freq-dot medium"></span>Medium</td>
     <td><span class="tag-high">High</span></td>
-    <td>Labelling and engraving</td></tr>
+    <td>Qt glyph outlines + Manifold CrossSection; editable content field</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><span class="freq-dot low"></span>Low</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Manifold Slice/Project → CrossSection → thin solid</td></tr>
 <tr><td><code>linear_extrude</code> full params</td>
     <td><span class="tag-partial">~ Partial</span></td>
     <td><span class="freq-dot medium"></span>Medium</td>

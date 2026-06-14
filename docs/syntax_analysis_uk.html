@@ -35,7 +35,21 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
 <body>
 
 <h1>Аналіз синтаксису OpenSCAD — оцінка реалізації в дереві</h1>
-<p class="meta">Оновлено: 12 червня 2026</p>
+<p class="meta">Оновлено: 14 червня 2026</p>
+
+<div style="background:#eafaf1;border-left:4px solid #27ae60;padding:10px 14px;margin:1em 0;border-radius:3px;font-size:13.5px;">
+<strong>Реалізовано після цього аналізу (14 червня 2026):</strong>
+<code>if / else</code> умовний вузол, тернарний <code>?:</code>, <code>log()</code> з основою 10, <code>$t</code>,
+вектор-аумний обчислювач (векторні/діапазонні літерали, <code>v[i]</code>, векторна математика,
+<code>len</code>/<code>norm</code>/<code>cross</code>) з векторними змінними, <code>offset()</code> (Manifold CrossSection)
+та <code>text()</code> 2D-примітив (контури гліфів Qt, дірки,
+<code>size</code>/<code>font</code>/<code>halign</code>/<code>valign</code>/<code>spacing</code>,
+редаговане поле вмісту), <code>projection(cut=)</code> (Manifold slice/project),
+блочні коментарі <code>/*…*/</code>, <code>echo()</code>/<code>assert()</code> (пропускаються в парсері),
+<code>concat()</code>/<code>lookup()</code>, <code>$fn</code> підключений до mesh-будівельників,
+та обчислення сегментів через <code>$fa</code>/<code>$fs</code>.
+Manifold тепер збирається з CrossSection (Clipper2).
+</div>
 
 <div class="ref-box">
 Цей документ класифікує конструкції за <em>архітектурним рівнем</em> реалізації:
@@ -75,29 +89,29 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
     <td>openscadparser.cpp</td>
     <td>Ідентично <code>assign</code>; правильний scoping потребує стека контекстів</td></tr>
 <tr><td>Блочні коментарі <code>/* … */</code></td>
-    <td>—</td>
-    <td>Лексер / parser</td>
-    <td>Чисто токенізація — дерево не змінюється</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>openscadparser.cpp — <code>normalizedLines()</code></td>
+    <td>Видаляються регулярним виразом перед обробкою рядків; незакритий <code>/*</code> викидає все далі</td></tr>
 <tr><td><code>$fn</code></td>
     <td><span class="tag-done">✓ Є</span></td>
     <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
     <td>Повністю підключено: зберігається як Variable-вузол → читається через <code>topLevelVariables()</code> → передається як <code>fn</code> у всі mesh-builders (sphere, cylinder, cone, circle, rotate_extrude, linear_extrude). 0 = стандартна кількість сегментів.</td></tr>
 <tr><td><code>$fa</code>, <code>$fs</code></td>
-    <td><span class="tag-partial">~ Частково</span></td>
-    <td>expression.h</td>
-    <td>Розпізнаються у виразах з правильними дефолтами (12°, 2mm). В mesh-builders не використовуються — при <code>$fn=0</code> кількість сегментів береться з hardcoded дефолтів, а не обчислюється через <code>$fa</code>/<code>$fs</code>.</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
+    <td>Розпізнаються у виразах з правильними дефолтами (12°, 2mm). При <code>$fn=0</code> mesh-будівельники обчислюють кількість сегментів з <code>$fa</code>/<code>$fs</code> за алгоритмом OpenSCAD <code>get_fragments_from_r()</code>.</td></tr>
 <tr><td><code>$t</code> (анімація)</td>
     <td><span class="tag-done">✓ Є</span></td>
     <td>expression.h — <code>resolveIdentifier</code></td>
     <td>Повертає 0.0 за замовчуванням; можна задати через <code>m_vars</code> для анімаційного відтворення</td></tr>
 <tr><td><code>echo()</code></td>
-    <td>—</td>
-    <td>parser</td>
-    <td>Вивести або ігнорувати; додати в <code>startsWithKnownKeyword</code></td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Рядки, що починаються з <code>echo(</code>, пропускаються в <code>parseBlock()</code> та в top-level циклі</td></tr>
 <tr><td><code>assert()</code></td>
-    <td>—</td>
-    <td>parser</td>
-    <td>Аналогічно <code>echo</code>; помилка якщо умова false</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Той самий механізм пропуску, що й для <code>echo()</code></td></tr>
 <tr><td><code>undef</code></td>
     <td><span class="tag-done">✓ Є</span></td>
     <td>expression.h</td>
@@ -107,25 +121,25 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
     <td>expression.h</td>
     <td>Повертає справжнє випадкове число через QRandomGenerator у діапазоні [lo, hi)</td></tr>
 <tr><td><code>len()</code></td>
-    <td><span class="tag-stub">Заглушка 0</span></td>
-    <td>expression.h</td>
-    <td>Розпізнається, повертає 0; правильна реалізація потребує векторного типу</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>Повертає кількість елементів вектора; працює з векторним обчислювачем</td></tr>
 <tr><td><code>norm()</code>, <code>cross()</code></td>
-    <td><span class="tag-stub">Заглушка 0</span></td>
-    <td>expression.h</td>
-    <td>Розпізнаються, повертають 0</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>Довжина вектора та 3D векторний добуток повністю реалізовані</td></tr>
 <tr><td>Індексування масиву <code>arr[i]</code></td>
-    <td><span class="tag-stub">Заглушка 0</span></td>
-    <td>expression.h</td>
-    <td>Синтаксис розпізнається, повертає 0; повна реалізація потребує векторної таблиці символів</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalVectorOrRange()</code></td>
+    <td>Індексація векторних змінних; при виході за межі повертає 0</td></tr>
 <tr><td><code>concat()</code>, <code>lookup()</code></td>
-    <td>—</td>
-    <td>expression.h</td>
-    <td>Обмежена корисність без list comprehensions</td></tr>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td><code>concat</code> об'єднує значення у вектор; <code>lookup</code> повертає ключ як є (числовий контекст)</td></tr>
 <tr><td><code>str()</code>, <code>chr()</code></td>
-    <td>—</td>
-    <td>expression.h</td>
-    <td>Конкатенація чисел/рядків; потрібна для <code>text()</code></td></tr>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td><code>str()</code> заглушка повертає перший числовий аргумент; потрібен рядковий тип у Value</td></tr>
 <tr><td><code>color()</code> з альфою і рядками імен</td>
     <td><span class="tag-done">✓ Є</span></td>
     <td>parser</td>
@@ -147,17 +161,17 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
 </thead>
 <tbody>
 <tr><td><code>if(cond) { … } else { … }</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><code>Op::Conditional</code> + поле <code>conditionExpression</code></td>
-    <td>Парсер обчислює умову і виконує гілку, але вузол не створюється і не зберігається в дереві. Потрібна іконка toolbar (ромб)</td></tr>
+    <td>Обчислює умову на етапі парсингу, створює Conditional-вузол з активною гілкою + іконка toolbar</td></tr>
 <tr><td><code>offset(r= / delta=)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><code>Op::Offset</code></td>
-    <td>2D трансформація контуру; r= (закруглений) / delta= (зрізаний)</td></tr>
+    <td>2D трансформація контуру через Manifold CrossSection (Clipper2); режими <code>r=</code> та <code>delta=</code></td></tr>
 <tr><td><code>projection(cut=)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><code>Op::Projection</code></td>
-    <td>3D→2D; потребує рендеру</td></tr>
+    <td>3D→2D через Manifold Slice/Project → CrossSection → тонке тіло; <code>cut=true</code> зрізає по z=0</td></tr>
 <tr><td><code>intersection_for()</code></td>
     <td>—</td>
     <td><code>Op::IntersectionFor</code></td>
@@ -188,9 +202,9 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
 </thead>
 <tbody>
 <tr><td><code>text(text, size, font, …)</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><code>ShapeNode::Text</code></td>
-    <td>Бібліотека шрифтів + генерація mesh; параметри: size, font, halign, valign, direction</td></tr>
+    <td>Qt контури гліфів → Manifold CrossSection; size, font, halign, valign, spacing, редагований вміст</td></tr>
 <tr><td><code>import("file")</code></td>
     <td>—</td>
     <td><code>ShapeNode::ImportedMesh</code></td>
@@ -281,30 +295,30 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
     <td><span class="tag-med">Середня</span></td>
     <td>Відкриває параметричний дизайн</td></tr>
 <tr><td>Блочні коментарі <code>/* */</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot high"></span>Висока</td>
     <td><span class="tag-low">Низька</span></td>
-    <td>Прибирає часту проблему парсингу</td></tr>
+    <td>Видаляються регулярним виразом у <code>normalizedLines()</code></td></tr>
 <tr><td><code>$fn</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot high"></span>Висока</td>
     <td><span class="tag-low">Низька</span></td>
-    <td>Краща якість preview кривих поверхонь</td></tr>
+    <td>Підключено до всіх mesh-будівельників; 0 = стандартна кількість сегментів</td></tr>
 <tr><td><code>echo</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot medium"></span>Середня</td>
     <td><span class="tag-low">Низька</span></td>
-    <td>Відлагодження</td></tr>
+    <td>Рядки пропускаються в парсері</td></tr>
 <tr><td><code>len</code> (повна реалізація)</td>
-    <td><span class="tag-stub">Заглушка</span></td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot medium"></span>Середня</td>
     <td><span class="tag-med">Середня</span></td>
-    <td>Базова інтроспекція векторів; потребує векторного типу</td></tr>
+    <td>Вектор-аумне; повертає кількість елементів</td></tr>
 <tr><td><code>str</code> / <code>concat</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span> / <span class="tag-partial">~ Частково</span></td>
     <td><span class="freq-dot low"></span>Низька</td>
     <td><span class="tag-med">Середня</span></td>
-    <td>Рядкові операції; потрібні для <code>text()</code></td></tr>
+    <td><code>concat</code> повністю реалізовано; <code>str()</code> заглушка повертає перший числовий аргумент</td></tr>
 </tbody>
 </table>
 
@@ -315,15 +329,15 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
 </thead>
 <tbody>
 <tr><td><code>if / else</code> вузол + toolbar</td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot very-high"></span>Дуже висока</td>
     <td><span class="tag-med">Середня</span></td>
-    <td>Присутній майже в кожному файлі; наразі тихо зникає з дерева</td></tr>
+    <td>Conditional-вузол з активною гілкою + іконка toolbar</td></tr>
 <tr><td><code>offset()</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot high"></span>Висока</td>
     <td><span class="tag-med">Середня</span></td>
-    <td>Основний 2D-процес: square → offset → linear_extrude</td></tr>
+    <td>Manifold CrossSection (Clipper2) з <code>r=</code>/<code>delta=</code></td></tr>
 <tr><td><code>rotate_extrude</code></td>
     <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot high"></span>Висока</td>
@@ -335,10 +349,15 @@ code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88
     <td><span class="tag-low">Низька</span></td>
     <td>Реалізовано</td></tr>
 <tr><td><code>text</code></td>
-    <td>—</td>
+    <td><span class="tag-done">✓ Є</span></td>
     <td><span class="freq-dot medium"></span>Середня</td>
     <td><span class="tag-high">Висока</span></td>
-    <td>Маркування/гравіювання</td></tr>
+    <td>Qt контури гліфів + Manifold CrossSection; редаговане поле вмісту</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><span class="freq-dot low"></span>Низька</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Manifold Slice/Project → CrossSection → тонке тіло</td></tr>
 <tr><td><code>linear_extrude</code> повні параметри</td>
     <td><span class="tag-partial">~ Частково</span></td>
     <td><span class="freq-dot medium"></span>Середня</td>

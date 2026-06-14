@@ -34,6 +34,7 @@ class QVariantAnimation;
 class GroupThumbnailCache;
 class NodeThumbnailCache;
 class SceneTreeInlineTextInput;
+class SceneTreeRawCodeEditor;
 class SceneTreeColorEditMode;
 class SceneTreeHoverManager;
 class SceneTreeInlineEditor;
@@ -103,6 +104,8 @@ signals:
     void moduleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void forLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
     void conditionExpressionEdited(int nodeId, const QString &expression);
+    void rawCodeEdited(int nodeId, const QString &code);
+    void textContentEdited(int shapeId, const QString &text);
     void ctrlReleased();
     void moduleRenameRequested(int groupId, const QString &newName);
     void variableRenameRequested(int variableId, const QString &newName);
@@ -149,6 +152,7 @@ private:
     friend class SceneTreeColorEditMode;
     friend class SceneTreeHoverManager;
     friend class SceneTreeInlineEditor;
+    friend class SceneTreeRawCodeEditor;
     friend class SceneCanvasDragHandler;
     friend class SceneTreeOverlayController;
     friend class SceneTreeDropPreviewController;
@@ -248,6 +252,21 @@ private:
     };
     QVector<RenameZone> m_renameZones;
 
+    // ── Text-content edit zones (Text primitive card field) ────────────────────
+    struct TextEditZone {
+        QRectF  rect;
+        int     shapeId = 0;
+        QString currentText;
+    };
+    QVector<TextEditZone> m_textEditZones;
+
+    struct RawCodeEditZone {
+        QRectF rect;
+        int nodeId = 0;
+        QString currentCode;
+    };
+    QVector<RawCodeEditZone> m_rawCodeEditZones;
+
     int m_treeTheme = 1;    // SceneTreePalette::Theme cast to int; 1 = second tree theme
     int m_canvasBackgroundTheme = 0;
     int m_selectedTreeNodeId = 0;
@@ -257,6 +276,7 @@ private:
     // ── Subsystem controllers ─────────────────────────────────────────────────
     SceneTreeHoverManager          *m_hoverManager      = nullptr;
     SceneTreeInlineEditor          *m_inlineEditor      = nullptr;
+    SceneTreeRawCodeEditor         *m_rawCodeEditor     = nullptr;
     SceneCanvasDragHandler         *m_canvasDragHandler = nullptr;
     SceneTreeColorEditMode         *m_colorEdit         = nullptr;
     SceneTreeOverlayController     *m_overlay           = nullptr;

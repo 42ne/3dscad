@@ -32,7 +32,21 @@ hr { border:none; border-top:1px solid #ddd; margin:2em 0; }
 <body>
 
 <h1>OpenSCAD Feature Support Roadmap</h1>
-<p class="meta">Status: 2026-06-12 &nbsp;·&nbsp; Project: 3DScad visual editor</p>
+<p class="meta">Status: 2026-06-14 &nbsp;·&nbsp; Project: 3DScad visual editor</p>
+
+<div class="info-box" style="border-left-color:#27ae60;background:#eafaf1;">
+<strong>Implemented since this roadmap was written (2026-06-14):</strong>
+<ul style="margin:.4em 0 0 0;">
+<li><span class="tag-done">✓</span> <code>if / else</code> — full Conditional tree node (incl. else-if chains), parser/codegen/render, toolbar button + icon.</li>
+<li><span class="tag-done">✓</span> Ternary <code>?:</code> and math functions; <code>log()</code> fixed to base-10; <code>$t</code> animation time.</li>
+<li><span class="tag-done">✓</span> Vector-aware expression evaluator: vector/range literals, subscript <code>v[i]</code>, vector arithmetic, real <code>len()</code> / <code>norm()</code> / <code>cross()</code>, and <strong>vector variables</strong> (<code>points[i]</code>, <code>len(points)</code>) threaded through the document model.</li>
+<li><span class="tag-done">✓</span> <code>offset(r= / delta=, chamfer=)</code> — Operation node via Manifold <code>CrossSection</code> (Round/Miter/Square), parser/codegen, toolbar.</li>
+<li><span class="tag-done">✓</span> <code>text()</code> 2-D primitive — Qt glyph outlines → <code>CrossSection</code> (holes), <code>size</code>/<code>font</code>/<code>halign</code>/<code>valign</code>/<code>spacing</code>, works inside <code>linear_extrude</code>/<code>offset</code>; card has <code>Sz</code>/<code>Sp</code> pills and an editable content field.</li>
+<li><span class="tag-done">✓</span> <code>resize()</code> toolbar button enabled; future-tool icons drawn for <code>projection</code> / <code>import</code>.</li>
+<li><span class="tag-done">✓</span> <code>projection(cut=true/false)</code> — Operation node via Manifold <code>CrossSection</code> (slice at z=0 or full XY projection), parser/codegen, toolbar + icon.</li>
+<li><span class="tag-partial">~</span> Still open: <code>import()</code>, <code>surface()</code>, <code>children()</code>, list comprehensions, <code>include</code>/<code>use</code>. Manifold now built with <code>MANIFOLD_CROSS_SECTION=ON</code> (Clipper2), unblocking the 2-D backend.</li>
+</ul>
+</div>
 
 <p>This document tracks every OpenSCAD language construct and maps it to its current support level
 across three layers: <strong>parser</strong> (can the text be read?), <strong>tree node</strong>
@@ -229,9 +243,9 @@ if (show_base) {            // → Conditional, conditionExpression = "show_base
     <td>2D only; two modes: rounded (<code>r=</code>) and chamfered (<code>delta=</code>).
         Essential companion to polygon/square/text in 2D workflows.</td></tr>
 <tr><td><code>projection(cut=)</code></td>
-    <td><span class="tag-no">✗</span></td>
-    <td><span class="tag-no">✗</span></td>
-    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-done">✓</span></td>
+    <td><span class="tag-done">✓</span></td>
+    <td><span class="tag-done">✓</span></td>
     <td>Collapses a 3D solid to 2D; <code>cut=true</code> gives a cross-section.</td></tr>
 <tr><td><code>multmatrix(m)</code></td>
     <td><span class="tag-no">✗</span></td>
@@ -381,7 +395,7 @@ linear_extrude) is a very common pattern; this has high practical value.</div>
 <tr><td>7</td><td><code>import()</code> primitive</td><td>2</td>
     <td>Needed to integrate existing STL parts</td></tr>
 <tr><td>8</td><td><code>projection()</code> group</td><td>3</td>
-    <td>Enables 2D DXF export workflow</td></tr>
+    <td><span class="tag-done">✓ Done</span> — full Operation node, parser/codegen, toolbar + icon, Manifold slice/project</td></tr>
 <tr><td>9</td><td>List comprehensions</td><td>6</td>
     <td>Required to parse gear/thread/spring libraries correctly</td></tr>
 <tr><td>10</td><td><code>use / include</code> directives</td><td>4</td>

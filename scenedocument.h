@@ -56,7 +56,9 @@ public:
     bool removeSelectedShape();
     bool takeShapeById(int id, ShapeNode *removedShape, int *removedIndex);
     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
+    int addRawCode(const QString &code = QString(), int parentGroupId = 0, int insertIndex = -1);
     bool removeGroupById(int groupId);
+    bool updateRawCode(int groupId, const QString &code);
     int addModuleCall(int moduleGroupId, int parentGroupId = 0, int insertIndex = -1, const QString &arguments = QString());
     bool removeModuleCallById(int moduleCallId);
     int addVariable(int insertIndex = -1);
@@ -68,6 +70,7 @@ public:
     bool updateModuleCallArgument(int moduleCallId, const QString &parameterName, const QString &expression);
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
     bool updateConditionExpression(int groupId, const QString &conditionExpression);
+    bool updateTextContent(int shapeId, const QString &text);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
     bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,

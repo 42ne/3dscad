@@ -274,10 +274,15 @@ const ShapeNode *shapeForPrimitiveNode(const SceneDocument *scene, const SceneDo
 
 SceneMesh interactionMeshForShape(const SceneDocument *scene, const ShapeNode &shape)
 {
-    const int fn = scene
-        ? static_cast<int>(topLevelVariables(scene->treeRoot()).value(QStringLiteral("$fn"), 0.0))
-        : 0;
-    SceneMesh mesh = buildShapeMesh(shape, fn);
+    double fa = 12.0, fs = 2.0;
+    int fn = 0;
+    if (scene) {
+        const auto vars = topLevelVariables(scene->treeRoot());
+        fn = static_cast<int>(vars.value(QStringLiteral("$fn"), 0.0));
+        fa = vars.value(QStringLiteral("$fa"), 12.0);
+        fs = vars.value(QStringLiteral("$fs"), 2.0);
+    }
+    SceneMesh mesh = buildShapeMesh(shape, fn, fa, fs);
     if (!scene)
         return mesh;
 

@@ -35,7 +35,7 @@ struct CsgPreview
     QString statusText;
 };
 
-CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn = 0);
+CsgPreview buildCsgPreview(const QVector<ShapeNode> &shapes, int fn = 0, double fa = 12.0, double fs = 2.0);
 CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId = 0);
 
 #endif

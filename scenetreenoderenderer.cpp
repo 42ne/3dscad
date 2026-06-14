@@ -1067,6 +1067,7 @@ public:
                   bool collapsed = false,
                   bool linearExtrudeCenter = false,
                   int linearExtrudeSlices = 0,
+                  const QString &rawCode = QString(),
                   const QString &highlightedVariableReference = QString(),
                   bool variableReferenceBlinkOn = false)
         : m_rect(rect)
@@ -1095,6 +1096,7 @@ public:
         , m_collapsed(collapsed)
         , m_linearExtrudeCenter(linearExtrudeCenter)
         , m_linearExtrudeSlices(linearExtrudeSlices)
+        , m_rawCode(rawCode)
         , m_highlightedVariableReference(highlightedVariableReference)
         , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
@@ -1152,6 +1154,24 @@ public:
                 : QPointF(m_rect.left() + GroupPadding + PrimitiveIconSize + 8.0,
                           m_rect.top() + GroupHeaderHeight + GroupPadding + 10.0);
             paintLabel(painter, QStringLiteral("empty"), emptyPosition, cTextMuted);
+        }
+
+        if (m_operation == SceneDocument::TreeNode::RawCode && !m_collapsed) {
+            const QRectF codeRect = m_rect.adjusted(GroupPadding,
+                                                    GroupHeaderHeight + GroupPadding,
+                                                    -GroupPadding,
+                                                    -GroupPadding);
+            painter->save();
+            painter->setClipRect(codeRect);
+            QFont mono = painter->font();
+            mono.setFamily(QStringLiteral("Consolas"));
+            mono.setPointSizeF(qMax<qreal>(8.0, mono.pointSizeF() - 1.0));
+            painter->setFont(mono);
+            painter->setPen(cTextPrimary);
+            painter->drawText(codeRect.adjusted(6.0, 4.0, -6.0, -4.0),
+                              Qt::AlignLeft | Qt::AlignTop,
+                              m_rawCode.trimmed().isEmpty() ? QStringLiteral("// raw OpenSCAD") : m_rawCode);
+            painter->restore();
         }
 
         if (m_operation != SceneDocument::TreeNode::Difference || m_cutSeparatorY <= 0.0)
@@ -1665,6 +1685,7 @@ private:
     bool        m_collapsed = false;
     bool        m_linearExtrudeCenter = false;
     int         m_linearExtrudeSlices = 0;
+    QString     m_rawCode;
     QString     m_highlightedVariableReference;
     bool        m_variableReferenceBlinkOn = false;
 };
@@ -1956,6 +1977,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
     const bool showEmptyText = !collapsed
                                && node.operation != SceneDocument::TreeNode::Module
                                && node.operation != SceneDocument::TreeNode::Scene
+                               && node.operation != SceneDocument::TreeNode::RawCode
                                && node.children.isEmpty();
     m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0),
                                        node.id == m_selectedNodeId, showEmptyText, true, true, false,
@@ -1966,6 +1988,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                         node.color, thumbnail, node.moduleName,
                                         depth, m_theme, collapsed,
                                         node.linearExtrudeCenter, node.linearExtrudeSlices,
+                                        node.rawCode,
                                         m_highlightedVariableReference, m_variableReferenceBlinkOn));
     m_scene->addItem(createTreeNodeSelectionItem(node.id,
                                                  rect,

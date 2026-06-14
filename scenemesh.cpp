@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <QVector2D>
 #include <QtMath>
+#include <QFont>
+#include <QFontMetricsF>
+#include <QPainterPath>
+#include <QPolygonF>
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
 {
@@ -176,11 +180,11 @@ SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum)
     return mesh;
 }
 
-static SceneMesh buildSphereMesh(const ShapeNode &shape, int fn = 0)
+static SceneMesh buildSphereMesh(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     SceneMesh mesh;
-    const int sectors = fn > 0 ? qMax(3, fn)     : 24;
-    const int stacks  = fn > 0 ? qMax(2, fn / 2) : 12;
+    const int sectors = computeCircularSegments(fn, shape.radius, fa, fs);
+    const int stacks  = sectors / 2;
 
     for (int i = 0; i < sectors; ++i) {
         const float angle = 2.0f * M_PI * i / sectors;
@@ -220,12 +224,12 @@ static SceneMesh buildSphereMesh(const ShapeNode &shape, int fn = 0)
     return mesh;
 }
 
-static SceneMesh buildCylinderMesh(const ShapeNode &shape, int fn = 0)
+static SceneMesh buildCylinderMesh(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = fn > 0 ? qMax(3, fn) : 24;
+    const int sectors = computeCircularSegments(fn, shape.radius, fa, fs);
 
     const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
     const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
@@ -250,13 +254,13 @@ static SceneMesh buildCylinderMesh(const ShapeNode &shape, int fn = 0)
     return mesh;
 }
 
-static SceneMesh buildConeMesh(const ShapeNode &shape, int fn = 0)
+static SceneMesh buildConeMesh(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     // Frustum/cone: bottom radius = shape.radius (r1), top radius = shape.radius2 (r2)
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = fn > 0 ? qMax(3, fn) : 24;
+    const int sectors = computeCircularSegments(fn, qMax(shape.radius, shape.radius2), fa, fs);
 
     const float zBottom = shape.center ? -shape.height * 0.5f : 0.0f;
     const float zTop    = shape.center ?  shape.height * 0.5f : shape.height;
@@ -294,12 +298,12 @@ static SceneMesh buildConeMesh(const ShapeNode &shape, int fn = 0)
     return mesh;
 }
 
-static SceneMesh buildCircleMesh(const ShapeNode &shape, int fn = 0)
+static SceneMesh buildCircleMesh(const ShapeNode &shape, int fn = 0, double fa = 12.0, double fs = 2.0)
 {
     SceneMesh mesh;
     QVector<QVector3D> top;
     QVector<QVector3D> bottom;
-    const int sectors = fn > 0 ? qMax(3, fn) : 48;
+    const int sectors = computeCircularSegments(fn, shape.radius, fa, fs);
     constexpr float thickness = 0.1f;
 
     for (int i = 0; i < sectors; ++i) {
@@ -368,6 +372,94 @@ static SceneMesh buildSquareMesh(const ShapeNode &shape)
     }, shape);
 }
 
+QVector<QVector<QVector3D>> buildGlyphContours(const ShapeNode &shape)
+{
+    QVector<QVector<QVector3D>> contours;
+    if (shape.textValue.isEmpty())
+        return contours;
+
+    QFont font;
+    if (!shape.fontName.isEmpty()) {
+        QString family = shape.fontName;
+        const int colon = family.indexOf(QLatin1Char(':'));
+        if (colon >= 0)
+            family = family.left(colon);
+        if (!family.trimmed().isEmpty())
+            font.setFamily(family.trimmed());
+    }
+    constexpr qreal renderPx = 128.0;
+    font.setPixelSize(static_cast<int>(renderPx));
+
+    const QFontMetricsF fm(font);
+    const qreal spacing = shape.textSpacing > 0.0f ? static_cast<qreal>(shape.textSpacing) : 1.0;
+
+    // spacing scales the per-character advance (OpenSCAD semantics). At spacing=1
+    // lay out the whole string at once to keep kerning; otherwise advance the pen
+    // glyph-by-glyph.
+    QPainterPath path;
+    qreal advance = 0.0;
+    if (qAbs(spacing - 1.0) < 1e-4) {
+        path.addText(0.0, 0.0, font, shape.textValue);
+        advance = fm.horizontalAdvance(shape.textValue);
+    } else {
+        qreal penX = 0.0;
+        for (const QChar &ch : shape.textValue) {
+            path.addText(penX, 0.0, font, QString(ch));
+            penX += fm.horizontalAdvance(ch) * spacing;
+        }
+        advance = penX;
+    }
+    if (path.isEmpty())
+        return contours;
+
+    const qreal ascent  = fm.ascent();
+    const qreal descent = fm.descent();
+
+    qreal hx = 0.0;
+    if (shape.textHalign == QStringLiteral("center")) hx = -advance * 0.5;
+    else if (shape.textHalign == QStringLiteral("right")) hx = -advance;
+
+    qreal vy = 0.0;
+    if (shape.textValign == QStringLiteral("bottom")) vy = -descent;
+    else if (shape.textValign == QStringLiteral("top")) vy = ascent;
+    else if (shape.textValign == QStringLiteral("center")) vy = (ascent - descent) * 0.5;
+
+    const qreal scale = (shape.textSize > 0.01f ? shape.textSize : 10.0f) / renderPx;
+
+    const QList<QPolygonF> subPaths = path.toSubpathPolygons();
+    for (const QPolygonF &qp : subPaths) {
+        QVector<QVector3D> pts;
+        pts.reserve(qp.size());
+        for (const QPointF &p : qp)
+            pts.append(QVector3D(static_cast<float>((p.x() + hx) * scale),
+                                 static_cast<float>(-(p.y() + vy) * scale), 0.0f)); // flip Y to model space
+        if (pts.size() >= 3)
+            contours.append(pts);
+    }
+    return contours;
+}
+
+// Preview/thumbnail mesh for Text. Each glyph contour is fan-triangulated as a
+// thin slab; counter-wound holes are not subtracted here (the Manifold render
+// path handles holes correctly via CrossSection) — acceptable for previews.
+static SceneMesh buildTextMesh(const ShapeNode &shape)
+{
+    SceneMesh mesh;
+    // Prefer the contours cached on the GUI thread; compute as a fallback.
+    QVector<QVector<QVector3D>> contours = shape.textContours;
+    if (contours.isEmpty())
+        contours = buildGlyphContours(shape);
+
+    for (const QVector<QVector3D> &contour : contours) {
+        if (contour.size() < 3)
+            continue;
+        const SceneMesh sub = buildFlatPolygonMesh(contour, shape);
+        mesh.triangles += sub.triangles;
+        mesh.shadowPoints += sub.shadowPoints;
+    }
+    return mesh;
+}
+
 static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
 {
     SceneMesh mesh;
@@ -391,13 +483,13 @@ static SceneMesh buildPolyhedronMesh(const ShapeNode &shape)
     return mesh;
 }
 
-SceneMesh buildShapeMesh(const ShapeNode &shape, int fn)
+SceneMesh buildShapeMesh(const ShapeNode &shape, int fn, double fa, double fs)
 {
     if (shape.type == ShapeNode::Polyhedron)
         return buildPolyhedronMesh(shape);
 
     if (shape.type == ShapeNode::Circle)
-        return buildCircleMesh(shape, fn);
+        return buildCircleMesh(shape, fn, fa, fs);
 
     if (shape.type == ShapeNode::Square)
         return buildSquareMesh(shape);
@@ -417,14 +509,17 @@ SceneMesh buildShapeMesh(const ShapeNode &shape, int fn)
         return buildFlatPolygonMesh(shape.polyhedronPoints, shape);
     }
 
+    if (shape.type == ShapeNode::Text)
+        return buildTextMesh(shape);
+
     if (shape.type == ShapeNode::Sphere)
-        return buildSphereMesh(shape, fn);
+        return buildSphereMesh(shape, fn, fa, fs);
 
     if (shape.type == ShapeNode::Cylinder)
-        return buildCylinderMesh(shape, fn);
+        return buildCylinderMesh(shape, fn, fa, fs);
 
     if (shape.type == ShapeNode::Cone)
-        return buildConeMesh(shape, fn);
+        return buildConeMesh(shape, fn, fa, fs);
 
     if (shape.type == ShapeNode::Point3D) {
         // Render as a small sphere (dot) at the point's position
@@ -432,7 +527,7 @@ SceneMesh buildShapeMesh(const ShapeNode &shape, int fn)
         dot.type = ShapeNode::Sphere;
         dot.radius = 0.5f;
         dot.position = shape.position;
-        return buildSphereMesh(dot);
+        return buildSphereMesh(dot, fn, fa, fs);
     }
 
     if (shape.type == ShapeNode::Face3D)

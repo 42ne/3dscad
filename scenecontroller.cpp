@@ -631,6 +631,11 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         shape.type = ShapeNode::Face3D;
         QVector<int> f; f << 0 << 1 << 2;
         shape.polyhedronFaces.append(f);
+    } else if (toolName == QStringLiteral("text")) {
+        shape.type = ShapeNode::Text;
+        shape.textValue = QStringLiteral("Text");
+        shape.textSize = 10.0f;
+        shape.parameterExpressions = QStringList({QStringLiteral("10"), QStringLiteral("1")});
     } else {
         shape.type = ShapeNode::Cube;
         shape.size = QVector3D(20, 20, 20);
@@ -1178,6 +1183,17 @@ void SceneController::handleToolDrop(const QString &toolName, int parentGroupId,
             parentGroupId = 0;
         } else if (parentGroupId <= 0 || parentGroupId == m_scene.treeRoot().id) {
             parentGroupId = m_scene.sceneNodeId();
+        }
+
+        if (operation == SceneDocument::TreeNode::RawCode) {
+            auto *command = new AddRawCodeCommand(&m_scene,
+                                                  QStringLiteral("// raw OpenSCAD"),
+                                                  parentGroupId,
+                                                  insertIndex,
+                                                  [this]() { emit sceneChanged(); });
+            if (!command->isValid()) { delete command; return; }
+            m_undoStack->push(command);
+            return;
         }
 
         auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, insertIndex,
@@ -2155,6 +2171,24 @@ void SceneController::handleConditionExpressionEdited(int nodeId, const QString 
     m_undoStack->push(command);
     m_ctrlHighlight.active = false;
     emit ctrlHighlightChanged();
+}
+
+void SceneController::handleRawCodeEdited(int nodeId, const QString &code)
+{
+    auto *command = new UpdateRawCodeCommand(&m_scene, nodeId, code,
+                                             [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
+
+void SceneController::handleTextContentEdited(int shapeId, const QString &text)
+{
+    auto *command = new UpdateTextContentCommand(&m_scene, shapeId, text,
+                                                 [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
 }
 
 void SceneController::handleCtrlReleased()

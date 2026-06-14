@@ -1,0 +1,694 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@example.local>
+Date: Sun, 14 Jun 2026 00:00:00 +0300
+Subject: [PATCH] Add raw-code fallback blocks and toolbar tool
+
+This patch is prepared for future use and is not applied.
+
+Problem:
+- When Apply Code receives OpenSCAD that has no tree equivalent, unsupported
+  lines/blocks are currently skipped or rejected.
+- That breaks round-trip editing: the code editor can contain valid OpenSCAD,
+  but the scene tree loses unsupported syntax and cannot regenerate it.
+
+Expected behavior:
+- If Apply Code meets unsupported but syntactically balanced code, insert a
+  `RawCode` tree group that stores the original snippet verbatim.
+- `RawCode` nodes regenerate their stored code exactly enough to preserve the
+  user snippet in generated OpenSCAD.
+- The tree toolbar exposes a raw-code tool with a literal `R` badge.
+- A raw-code card opens a multi-line editor with both horizontal and vertical
+  scrolling, so longer snippets are editable inside the tree.
+
+What this patch does:
+- Adds `TreeNode::RawCode` and `TreeNode::rawCode`.
+- Adds SceneTree/SceneDocument APIs for adding and updating raw-code blocks.
+- Adds undoable commands and controller handlers for raw-code add/edit.
+- Adds a `raw_code` toolbar tool rendered with a literal `R`.
+- Adds a QPlainTextEdit-backed raw-code floating editor.
+- Makes OpenSCAD generation emit raw-code snippets.
+- Adds parser fallback hooks that preserve unknown statements/blocks as
+  raw-code nodes instead of silently dropping them.
+
+Manual cases to verify after applying:
+1. Apply `surface(file="heightmap.dat");` -> tree contains one RawCode card,
+   generated code still contains `surface(file="heightmap.dat");`.
+2. Apply `render(convexity=4) { cube(10); }` -> raw-code block preserves the
+   whole balanced block.
+3. Apply mixed supported + unsupported code -> supported shapes stay normal,
+   unsupported snippets become RawCode nodes in order.
+4. Drag toolbar `R` into the scene -> an editable RawCode card appears.
+5. Double-click RawCode body -> multi-line editor opens; long lines scroll
+   horizontally, multi-line snippets scroll vertically; Ctrl+Enter commits,
+   Escape cancels.
+
+diff --git a/3DScad.pro b/3DScad.pro
+--- a/3DScad.pro
++++ b/3DScad.pro
+@@
+     scenetreegraphicswidget.cpp \
+     scenetreeinlinetextinput.cpp \
++    scenetreerawcodeeditor.cpp \
+     scenetreelayout.cpp \
+@@
+     scenetreegraphicswidget.h \
+     scenetreeinlinetextinput.h \
++    scenetreerawcodeeditor.h \
+     scenetreelayout.h \
+diff --git a/scenetree.h b/scenetree.h
+--- a/scenetree.h
++++ b/scenetree.h
+@@
+-            Projection // projection(cut=); collapses 3D children to 2D (cut=true в†’ slice at z=0)
++            Projection, // projection(cut=); collapses 3D children to 2D (cut=true в†’ slice at z=0)
++            RawCode // verbatim OpenSCAD snippet without a structured tree equivalent
+         };
+@@
+         QString conditionExpression;  // for Conditional nodes
+         bool isElseBranch = false;    // marks the else-child of a Conditional node
++        QString rawCode;              // for RawCode nodes
+@@
+     int addGroup(TreeNode::Operation operation, int parentNodeId = 0, int insertIndex = -1);
++    int addRawCode(const QString &code, int parentNodeId = 0, int insertIndex = -1);
+     bool removeGroupById(int groupId);
++    bool updateRawCode(int groupId, const QString &code);
+diff --git a/scenetree.cpp b/scenetree.cpp
+--- a/scenetree.cpp
++++ b/scenetree.cpp
+@@
+ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int insertIndex)
+ {
+@@
+     return groupId;
+ }
++
++int SceneTree::addRawCode(const QString &code, int parentNodeId, int insertIndex)
++{
++    const QString trimmed = code.trimmed();
++    if (trimmed.isEmpty())
++        return 0;
++
++    const int groupId = addGroup(TreeNode::RawCode, parentNodeId, insertIndex);
++    TreeNode *node = nodeById(groupId);
++    if (!node)
++        return 0;
++    node->rawCode = trimmed;
++    return groupId;
++}
++
++bool SceneTree::updateRawCode(int groupId, const QString &code)
++{
++    TreeNode *node = nodeById(groupId);
++    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::RawCode)
++        return false;
++
++    const QString trimmed = code.trimmed();
++    if (trimmed.isEmpty() || node->rawCode == trimmed)
++        return false;
++
++    node->rawCode = trimmed;
++    return true;
++}
+@@
+     if (operation == TreeNode::Resize) {
+         node.scale = QVector3D(10, 10, 10);
+         node.transformExpressions = QStringList({QStringLiteral("[10, 10, 10]")});
+     }
++    if (operation == TreeNode::RawCode)
++        node.rawCode = QStringLiteral("// raw OpenSCAD");
+     return node;
+ }
+diff --git a/scenedocument.h b/scenedocument.h
+--- a/scenedocument.h
++++ b/scenedocument.h
+@@
+     int addGroup(TreeNode::Operation operation, int parentGroupId = 0, int insertIndex = -1);
++    int addRawCode(const QString &code = QString(), int parentGroupId = 0, int insertIndex = -1);
+     bool removeGroupById(int groupId);
++    bool updateRawCode(int groupId, const QString &code);
+diff --git a/scenedocument.cpp b/scenedocument.cpp
+--- a/scenedocument.cpp
++++ b/scenedocument.cpp
+@@
+ int SceneDocument::addGroup(TreeNode::Operation operation, int parentGroupId, int insertIndex)
+ {
+     return m_tree.addGroup(operation, parentGroupId, insertIndex);
+ }
++
++int SceneDocument::addRawCode(const QString &code, int parentGroupId, int insertIndex)
++{
++    const QString initialCode = code.trimmed().isEmpty()
++                                    ? QStringLiteral("// raw OpenSCAD")
++                                    : code.trimmed();
++    return m_tree.addRawCode(initialCode, parentGroupId, insertIndex);
++}
+@@
+ bool SceneDocument::updateConditionExpression(int groupId, const QString &conditionExpression)
+ {
+     return m_tree.updateConditionExpression(groupId, conditionExpression);
+ }
++
++bool SceneDocument::updateRawCode(int groupId, const QString &code)
++{
++    return m_tree.updateRawCode(groupId, code);
++}
+diff --git a/scenecommands.h b/scenecommands.h
+--- a/scenecommands.h
++++ b/scenecommands.h
+@@
+ class AddGroupCommand : public SnapshotCommand
+ {
+@@
+ };
++
++class AddRawCodeCommand : public SnapshotCommand
++{
++public:
++    AddRawCodeCommand(SceneDocument *scene,
++                      const QString &code,
++                      int parentGroupId,
++                      int insertIndex,
++                      std::function<void()> onChanged);
++};
+@@
+ class UpdateConditionExpressionCommand : public SnapshotCommand
+ {
+@@
+ };
++
++class UpdateRawCodeCommand : public SnapshotCommand
++{
++public:
++    UpdateRawCodeCommand(SceneDocument *scene, int groupId, const QString &code, std::function<void()> onChanged);
++};
+diff --git a/scenecommands.cpp b/scenecommands.cpp
+--- a/scenecommands.cpp
++++ b/scenecommands.cpp
+@@
+ AddGroupCommand::AddGroupCommand(SceneDocument *scene,
+                                  SceneDocument::TreeNode::Operation operation,
+                                  int parentGroupId,
+                                  int insertIndex,
+                                  std::function<void()> onChanged)
+@@
+     m_valid = m_oldSnapshot.treeRoot.id != m_newSnapshot.treeRoot.id
+               || m_oldSnapshot.treeSnapshot.nextNodeId != m_newSnapshot.treeSnapshot.nextNodeId;
+ }
++
++AddRawCodeCommand::AddRawCodeCommand(SceneDocument *scene,
++                                     const QString &code,
++                                     int parentGroupId,
++                                     int insertIndex,
++                                     std::function<void()> onChanged)
++    : SnapshotCommand(QStringLiteral("Add raw OpenSCAD block"), scene, std::move(onChanged))
++{
++    if (!m_scene)
++        return;
++    m_oldSnapshot = m_scene->snapshot();
++    const int nodeId = m_scene->addRawCode(code, parentGroupId, insertIndex);
++    m_newSnapshot = m_scene->snapshot();
++    m_scene->restoreSnapshot(m_oldSnapshot);
++    m_valid = nodeId > 0;
++}
+@@
+ UpdateConditionExpressionCommand::UpdateConditionExpressionCommand(SceneDocument *scene, int groupId, const QString &conditionExpression, std::function<void()> onChanged)
+@@
+     m_valid = m_scene->updateConditionExpression(groupId, conditionExpression);
+     m_newSnapshot = m_scene->snapshot();
+     m_scene->restoreSnapshot(m_oldSnapshot);
+ }
++
++UpdateRawCodeCommand::UpdateRawCodeCommand(SceneDocument *scene, int groupId, const QString &code, std::function<void()> onChanged)
++    : SnapshotCommand(QStringLiteral("Edit raw OpenSCAD block"), scene, std::move(onChanged))
++{
++    if (!m_scene)
++        return;
++    m_oldSnapshot = m_scene->snapshot();
++    m_valid = m_scene->updateRawCode(groupId, code);
++    m_newSnapshot = m_scene->snapshot();
++    m_scene->restoreSnapshot(m_oldSnapshot);
++}
+diff --git a/scenecontroller.h b/scenecontroller.h
+--- a/scenecontroller.h
++++ b/scenecontroller.h
+@@
+     void handleConditionExpressionEdited(int nodeId, const QString &expression);
++    void handleRawCodeEdited(int nodeId, const QString &code);
+     void handleTextContentEdited(int shapeId, const QString &text);
+diff --git a/scenecontroller.cpp b/scenecontroller.cpp
+--- a/scenecontroller.cpp
++++ b/scenecontroller.cpp
+@@
+     if (SceneTreeGraphics::operationForToolName(toolName, &operation)) {
+         if (operation == SceneDocument::TreeNode::Module && parentGroupId <= 0) {
+             parentGroupId = 0;
+         } else if (parentGroupId <= 0) {
+             parentGroupId = m_scene.sceneNodeId();
+         }
+ 
++        if (operation == SceneDocument::TreeNode::RawCode) {
++            auto *command = new AddRawCodeCommand(&m_scene,
++                                                  QStringLiteral("// raw OpenSCAD"),
++                                                  parentGroupId,
++                                                  insertIndex,
++                                                  [this]() { emit sceneChanged(); });
++            if (!command->isValid()) { delete command; return; }
++            m_undoStack->push(command);
++            return;
++        }
++
+         auto *command = new AddGroupCommand(&m_scene, operation, parentGroupId, insertIndex,
+                                             [this]() { emit sceneChanged(); });
+@@
+ void SceneController::handleConditionExpressionEdited(int nodeId, const QString &expression)
+ {
+@@
+     emit ctrlHighlightChanged();
+ }
++
++void SceneController::handleRawCodeEdited(int nodeId, const QString &code)
++{
++    auto *command = new UpdateRawCodeCommand(&m_scene, nodeId, code,
++                                             [this]() { emit sceneChanged(); });
++    if (!command->isValid()) { delete command; return; }
++    m_undoStack->push(command);
++    m_ctrlHighlight.active = false;
++    emit ctrlHighlightChanged();
++}
+diff --git a/mainwindow.cpp b/mainwindow.cpp
+--- a/mainwindow.cpp
++++ b/mainwindow.cpp
+@@
+     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::conditionExpressionEdited,
+             m_controller, &SceneController::handleConditionExpressionEdited);
++    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::rawCodeEdited,
++            m_controller, &SceneController::handleRawCodeEdited);
+     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::textContentEdited,
+             m_controller, &SceneController::handleTextContentEdited);
+diff --git a/scenetreetoolmetadata.cpp b/scenetreetoolmetadata.cpp
+--- a/scenetreetoolmetadata.cpp
++++ b/scenetreetoolmetadata.cpp
+@@
+         if (operation == SceneDocument::TreeNode::Conditional) {
+             return QStringLiteral(
+                 "If / else block\n"
+                 "Drop into the scene, groups, loops, or module bodies; then drop objects into the true or else branch.");
+         }
++        if (operation == SceneDocument::TreeNode::RawCode) {
++            return QStringLiteral(
++                "Raw OpenSCAD code\n"
++                "Drop into the tree to preserve OpenSCAD syntax that has no visual block yet.");
++        }
+@@
+     if (normalized == QStringLiteral("projection")) {
+         *operation = SceneDocument::TreeNode::Projection;
+         return true;
+     }
++    if (normalized == QStringLiteral("raw")
++        || normalized == QStringLiteral("raw_code")
++        || normalized == QStringLiteral("rawcode")) {
++        *operation = SceneDocument::TreeNode::RawCode;
++        return true;
++    }
+     return false;
+ }
+@@
+     {SceneDocument::TreeNode::Conditional, "if", QColor(232, 228, 248), GroupWideMinWidth},
+     {SceneDocument::TreeNode::Offset, "offset", QColor(216, 240, 224), GroupWideMinWidth},
+     {SceneDocument::TreeNode::Projection, "projection", QColor(225, 220, 245), GroupWideMinWidth},
++    {SceneDocument::TreeNode::RawCode, "raw code", QColor(238, 230, 212), 260.0},
+ };
+diff --git a/scenetreetoolbarrenderer.cpp b/scenetreetoolbarrenderer.cpp
+--- a/scenetreetoolbarrenderer.cpp
++++ b/scenetreetoolbarrenderer.cpp
+@@
+         QStringLiteral("var"),
+         QStringLiteral("for"),
+         QStringLiteral("if"),
++        QStringLiteral("raw_code"),
+         // в”Ђв”Ђ 2-D splines в†’ extrusions в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+diff --git a/scenetreegraphicsitems.cpp b/scenetreegraphicsitems.cpp
+--- a/scenetreegraphicsitems.cpp
++++ b/scenetreegraphicsitems.cpp
+@@
+         if (isVariableToolName(m_label)) {
+@@
+             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
++        } else if (m_label == QStringLiteral("raw_code") || m_label == QStringLiteral("raw")) {
++            const QRectF badgeRect = glyphRect.adjusted(4.0*s, 5.0*s, -4.0*s, -5.0*s);
++            painter->setPen(QPen(QColor(255, 248, 218, 180), 1.0));
++            painter->setBrush(QColor(104, 78, 44, 220));
++            painter->drawRoundedRect(badgeRect, 5.0*s, 5.0*s);
++            QFont font = painter->font();
++            font.setBold(true);
++            font.setPointSizeF(qMax<qreal>(16.0, font.pointSizeF() + 7.0));
++            painter->setFont(font);
++            painter->setPen(QColor(255, 248, 225));
++            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("R"));
+         } else if (operationTool) {
+diff --git a/scenetreegraphicswidget.h b/scenetreegraphicswidget.h
+--- a/scenetreegraphicswidget.h
++++ b/scenetreegraphicswidget.h
+@@
+ class SceneTreeInlineTextInput;
++class SceneTreeRawCodeEditor;
+@@
+     void conditionExpressionEdited(int nodeId, const QString &expression);
++    void rawCodeEdited(int nodeId, const QString &code);
+     void textContentEdited(int shapeId, const QString &text);
+@@
+     friend class SceneTreeInlineEditor;
++    friend class SceneTreeRawCodeEditor;
+@@
+     struct TextEditZone {
+         QRectF  rect;
+         int     shapeId = 0;
+         QString currentText;
+     };
+     QVector<TextEditZone> m_textEditZones;
++
++    struct RawCodeEditZone {
++        QRectF rect;
++        int nodeId = 0;
++        QString currentCode;
++    };
++    QVector<RawCodeEditZone> m_rawCodeEditZones;
+@@
+     SceneTreeInlineEditor          *m_inlineEditor      = nullptr;
++    SceneTreeRawCodeEditor        *m_rawCodeEditor     = nullptr;
+diff --git a/scenetreegraphicswidget.cpp b/scenetreegraphicswidget.cpp
+--- a/scenetreegraphicswidget.cpp
++++ b/scenetreegraphicswidget.cpp
+@@
+ #include "scenetreeinlineeditor.h"
++#include "scenetreerawcodeeditor.h"
+@@
+     m_inlineEditor      = new SceneTreeInlineEditor(this);
++    m_rawCodeEditor     = new SceneTreeRawCodeEditor(this);
+@@
+         for (const TextEditZone &zone : m_textEditZones) {
+             if (zone.rect.contains(scenePos)) {
+                 m_inlineEditor->startInlineTextEdit(zone.shapeId, zone.rect, zone.currentText);
+                 event->accept();
+                 return;
+             }
+         }
++        for (const RawCodeEditZone &zone : m_rawCodeEditZones) {
++            if (zone.rect.contains(scenePos)) {
++                m_rawCodeEditor->startEditing(zone.nodeId, zone.rect, zone.currentCode);
++                event->accept();
++                return;
++            }
++        }
+@@
+     m_inlineEditor->updateInlineInputGeometry();
++    m_rawCodeEditor->updateGeometry();
+@@
+     m_textEditZones.clear();
++    m_rawCodeEditZones.clear();
+@@
+     if (node.type != SceneDocument::TreeNode::Primitive)
+         return labelForOperation(node.operation);
+diff --git a/scenetreerawcodeeditor.h b/scenetreerawcodeeditor.h
+new file mode 100644
+--- /dev/null
++++ b/scenetreerawcodeeditor.h
+@@
++#ifndef SCENETREERAWCODEEDITOR_H
++#define SCENETREERAWCODEEDITOR_H
++
++#include <QObject>
++#include <QRectF>
++
++class QPlainTextEdit;
++class SceneTreeGraphicsWidget;
++
++class SceneTreeRawCodeEditor : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit SceneTreeRawCodeEditor(SceneTreeGraphicsWidget *widget);
++
++    void startEditing(int nodeId, const QRectF &sceneRect, const QString &code);
++    void updateGeometry();
++    void stopEditing(bool commit);
++
++private:
++    SceneTreeGraphicsWidget *m_widget = nullptr;
++    QPlainTextEdit *m_editor = nullptr;
++    QRectF m_sceneRect;
++    int m_nodeId = 0;
++    bool m_active = false;
++};
++
++#endif // SCENETREERAWCODEEDITOR_H
+diff --git a/scenetreerawcodeeditor.cpp b/scenetreerawcodeeditor.cpp
+new file mode 100644
+--- /dev/null
++++ b/scenetreerawcodeeditor.cpp
+@@
++#include "scenetreerawcodeeditor.h"
++#include "scenetreegraphicswidget.h"
++
++#include <QEvent>
++#include <QKeyEvent>
++#include <QPlainTextEdit>
++#include <QScrollBar>
++
++namespace {
++
++class RawCodePlainTextEdit final : public QPlainTextEdit
++{
++public:
++    explicit RawCodePlainTextEdit(SceneTreeRawCodeEditor *owner, QWidget *parent = nullptr)
++        : QPlainTextEdit(parent)
++        , m_owner(owner)
++    {
++        setLineWrapMode(QPlainTextEdit::NoWrap);
++        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
++        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
++        setTabChangesFocus(false);
++    }
++
++protected:
++    void keyPressEvent(QKeyEvent *event) override
++    {
++        if (event->key() == Qt::Key_Escape) {
++            m_owner->stopEditing(false);
++            event->accept();
++            return;
++        }
++        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
++            && (event->modifiers() & Qt::ControlModifier)) {
++            m_owner->stopEditing(true);
++            event->accept();
++            return;
++        }
++        QPlainTextEdit::keyPressEvent(event);
++    }
++
++    void focusOutEvent(QFocusEvent *event) override
++    {
++        QPlainTextEdit::focusOutEvent(event);
++        m_owner->stopEditing(true);
++    }
++
++private:
++    SceneTreeRawCodeEditor *m_owner = nullptr;
++};
++
++} // namespace
++
++SceneTreeRawCodeEditor::SceneTreeRawCodeEditor(SceneTreeGraphicsWidget *widget)
++    : QObject(widget)
++    , m_widget(widget)
++{
++    m_editor = new RawCodePlainTextEdit(this, widget);
++    m_editor->hide();
++    m_editor->setStyleSheet(QStringLiteral(
++        "QPlainTextEdit {"
++        "  background: rgba(30, 34, 40, 235);"
++        "  color: #f5f0df;"
++        "  border: 1px solid rgba(255,255,255,150);"
++        "  border-radius: 6px;"
++        "  padding: 6px;"
++        "  font-family: Consolas, 'Cascadia Mono', monospace;"
++        "  font-size: 12px;"
++        "}"));
++}
++
++void SceneTreeRawCodeEditor::startEditing(int nodeId, const QRectF &sceneRect, const QString &code)
++{
++    if (!m_editor || !m_widget)
++        return;
++
++    m_nodeId = nodeId;
++    m_sceneRect = sceneRect;
++    m_active = true;
++    m_editor->setPlainText(code);
++    updateGeometry();
++    m_editor->show();
++    m_editor->raise();
++    m_editor->setFocus(Qt::MouseFocusReason);
++}
++
++void SceneTreeRawCodeEditor::updateGeometry()
++{
++    if (!m_active || !m_editor || !m_widget || !m_sceneRect.isValid())
++        return;
++
++    QRect viewRect = m_widget->mapFromScene(m_sceneRect).boundingRect();
++    viewRect = viewRect.adjusted(4, 4, -4, -4);
++    viewRect.setWidth(qMax(viewRect.width(), 260));
++    viewRect.setHeight(qMax(viewRect.height(), 120));
++    m_editor->setGeometry(viewRect);
++}
++
++void SceneTreeRawCodeEditor::stopEditing(bool commit)
++{
++    if (!m_active || !m_editor)
++        return;
++
++    const int nodeId = m_nodeId;
++    const QString code = m_editor->toPlainText();
++    m_active = false;
++    m_nodeId = 0;
++    m_sceneRect = QRectF();
++    m_editor->hide();
++
++    if (commit && m_widget)
++        emit m_widget->rawCodeEdited(nodeId, code);
++}
+diff --git a/scenetreenoderenderer.cpp b/scenetreenoderenderer.cpp
+--- a/scenetreenoderenderer.cpp
++++ b/scenetreenoderenderer.cpp
+@@
+                   int linearExtrudeSlices = 0,
++                  const QString &rawCode = QString(),
+                   const QString &highlightedVariableReference = QString(),
+@@
+         , m_linearExtrudeSlices(linearExtrudeSlices)
++        , m_rawCode(rawCode)
+@@
+         if (m_empty) {
+@@
+         }
++
++        if (m_operation == SceneDocument::TreeNode::RawCode && !m_collapsed) {
++            const QRectF codeRect = m_rect.adjusted(GroupPadding,
++                                                    GroupHeaderHeight + GroupPadding,
++                                                    -GroupPadding,
++                                                    -GroupPadding);
++            painter->save();
++            painter->setClipRect(codeRect);
++            QFont mono = painter->font();
++            mono.setFamily(QStringLiteral("Consolas"));
++            mono.setPointSizeF(qMax<qreal>(8.0, mono.pointSizeF() - 1.0));
++            painter->setFont(mono);
++            painter->setPen(SceneTreePalette::cardTextPrimary(m_operation, static_cast<SceneTreePalette::Theme>(m_theme)));
++            painter->drawText(codeRect.adjusted(6.0, 4.0, -6.0, -4.0),
++                              Qt::AlignLeft | Qt::AlignTop,
++                              m_rawCode.trimmed().isEmpty() ? QStringLiteral("// raw OpenSCAD") : m_rawCode);
++            painter->restore();
++        }
+@@
+     bool m_variableReferenceBlinkOn = false;
++    QString m_rawCode;
+ };
+@@
+     m_scene->addItem(new GroupCardItem(rect, node.operation, cutSeparatorY, zForDepth(depth, -101.0),
+@@
+-                                        node.linearExtrudeCenter, node.linearExtrudeSlices,
++                                        node.linearExtrudeCenter, node.linearExtrudeSlices,
++                                        node.rawCode,
+                                         m_highlightedVariableReference, m_variableReferenceBlinkOn));
+diff --git a/openscadgenerator.cpp b/openscadgenerator.cpp
+--- a/openscadgenerator.cpp
++++ b/openscadgenerator.cpp
+@@
+     if (node.operation == SceneDocument::TreeNode::Projection) {
+@@
+         return;
+     }
++
++    if (node.operation == SceneDocument::TreeNode::RawCode) {
++        const QStringList lines = node.rawCode.split(QLatin1Char('\n'));
++        for (const QString &line : lines)
++            *code += indent + line + QLatin1Char('\n');
++        if (ranges)
++            ranges->append({node.id, start, code->size() - start});
++        return;
++    }
+ 
+     // в”Ђв”Ђ intersection_for вЂ” flatten Intersection{For{вЂ¦}} into one line в”Ђв”Ђ
+diff --git a/openscadparser.cpp b/openscadparser.cpp
+--- a/openscadparser.cpp
++++ b/openscadparser.cpp
+@@
+ static SceneDocument::TreeNode makePrimitiveNode(const ShapeNode &shape, ParserState *state)
+ {
+@@
+     return node;
+ }
++
++static SceneDocument::TreeNode makeRawCodeNode(const QString &code, ParserState *state)
++{
++    SceneDocument::TreeNode node = makeGroupNode(SceneDocument::TreeNode::RawCode, state);
++    node.rawCode = code.trimmed();
++    return node;
++}
++
++static QString consumeRawOpenScadSnippet(ParserState *state)
++{
++    if (!state || state->index >= state->lines.size())
++        return QString();
++
++    QString snippet;
++    int depth = 0;
++    bool consumedAny = false;
++    while (state->index < state->lines.size()) {
++        const ParsedLine &line = state->lines[state->index++];
++        if (!snippet.isEmpty())
++            snippet += QLatin1Char('\n');
++        snippet += line.text;
++        consumedAny = true;
++
++        for (const QChar ch : line.text) {
++            if (ch == QLatin1Char('{'))
++                ++depth;
++            else if (ch == QLatin1Char('}'))
++                --depth;
++        }
++
++        if (depth <= 0 && (line.text.endsWith(QLatin1Char(';'))
++                           || line.text.endsWith(QLatin1Char('}'))))
++            break;
++    }
++
++    return consumedAny ? snippet.trimmed() : QString();
++}
+@@
+-        // Completely unknown at top level вЂ” skip transparently (same as parseBlock).
+-        ++state.index;
+-        if (line.endsWith('{')) {
+-            SceneDocument::TreeNode dummy = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+-            parseBlock(&state, &dummy, true, errorMessage);
+-        }
++        // Completely unknown at top level: preserve as raw OpenSCAD so Apply
++        // Code remains round-trippable even before a visual block exists.
++        const QString rawSnippet = consumeRawOpenScadSnippet(&state);
++        if (!rawSnippet.isEmpty())
++            sceneNode.children.append(makeRawCodeNode(rawSnippet, &state));
+     }
+diff --git a/docs/viewport_ux_roadmap_en.md b/docs/viewport_ux_roadmap_en.md
+--- a/docs/viewport_ux_roadmap_en.md
++++ b/docs/viewport_ux_roadmap_en.md
+@@
++### Raw OpenSCAD Fallback Blocks
++
++When `Apply Code` encounters valid OpenSCAD syntax that has no structured
++tree equivalent yet, preserve it as a `RawCode` tree block instead of dropping
++or rejecting it. Raw-code cards should regenerate the original snippet and use
++a scrollable multi-line editor. The toolbar should expose this as a compact
++`R` tool.

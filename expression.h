@@ -3,7 +3,9 @@
 
 #include <QHash>
 #include <QRandomGenerator>
+#include <QChar>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtMath>
 #include <cmath>
@@ -200,6 +202,9 @@ private:
             if (consume(QLatin1Char('[')))
                 return parseVectorOrRangeTail();
 
+            if (parseStringLiteral())
+                return true;
+
             if (parseNumber())
                 return true;
 
@@ -227,6 +232,27 @@ private:
 
             m_pos = savedPos;
             return setError(QStringLiteral("Expected number, variable, or '(' at position %1.").arg(position() + 1));
+        }
+
+        bool parseStringLiteral()
+        {
+            skipSpaces();
+            if (atEnd() || (m_text[m_pos] != QLatin1Char('"') && m_text[m_pos] != QLatin1Char('\'')))
+                return false;
+
+            const QChar quote = m_text[m_pos++];
+            while (!atEnd()) {
+                const QChar ch = m_text[m_pos++];
+                if (ch == QLatin1Char('\\')) {
+                    if (atEnd())
+                        return setError(QStringLiteral("Unterminated escape sequence at position %1.").arg(position() + 1));
+                    ++m_pos;
+                    continue;
+                }
+                if (ch == quote)
+                    return true;
+            }
+            return setError(QStringLiteral("Unterminated string literal."));
         }
 
         // '[' already consumed. Accepts vector literal [a, b, ...], range [a:b],
@@ -362,11 +388,14 @@ public:
     struct Value
     {
         bool isVector = false;
+        bool isString = false;
         qreal scalar = 0.0;
+        QString string;
         QVector<Value> items; // valid when isVector
 
         Value() = default;
         explicit Value(qreal s) : scalar(s) {}
+        explicit Value(QString s) : isString(true), string(std::move(s)) {}
 
         static Value vector(QVector<Value> v)
         {
@@ -381,14 +410,32 @@ public:
         // element, recursively; an empty vector collapses to 0.
         qreal toScalar() const
         {
+            if (isString)
+                return 0.0;
             if (!isVector)
                 return scalar;
             return items.isEmpty() ? 0.0 : items.first().toScalar();
         }
 
+        QString toString() const
+        {
+            if (isString)
+                return string;
+            if (isVector) {
+                QStringList parts;
+                parts.reserve(items.size());
+                for (const Value &item : items)
+                    parts.append(item.toString());
+                return QStringLiteral("[") + parts.join(QStringLiteral(", ")) + QStringLiteral("]");
+            }
+            return QString::number(scalar, 'g', 12);
+        }
+
         // OpenSCAD truthiness: non-empty vector is true; empty vector is false.
         bool truthy() const
         {
+            if (isString)
+                return !string.isEmpty();
             return isVector ? !items.isEmpty() : (scalar != 0.0);
         }
     };
@@ -435,6 +482,21 @@ public:
 
         if (value)
             *value = result;
+        return true;
+    }
+
+    static bool evaluateString(const QString &text,
+                               const QHash<QString, qreal> &variableValues,
+                               QString *value,
+                               QString *errorMessage = nullptr,
+                               const QHash<QString, FunctionDef> *functions = nullptr,
+                               const QHash<QString, Value> *vectorVariables = nullptr)
+    {
+        Value result;
+        if (!evaluateValue(text, variableValues, &result, errorMessage, functions, vectorVariables))
+            return false;
+        if (value)
+            *value = result.toString();
         return true;
     }
 
@@ -660,6 +722,12 @@ private:
                 ++m_pos; // consume '['
                 if (!evalVectorOrRange(&value))
                     return false;
+            } else if (m_pos < m_text.size()
+                       && (m_text[m_pos] == QLatin1Char('"') || m_text[m_pos] == QLatin1Char('\''))) {
+                QString literal;
+                if (!evalStringLiteral(&literal))
+                    return false;
+                value = Value(literal);
             } else {
                 qreal num = 0.0;
                 if (evalNumber(&num)) {
@@ -722,6 +790,39 @@ private:
                 value = negated(value);
             *result = value;
             return true;
+        }
+
+        bool evalStringLiteral(QString *result)
+        {
+            skipSpaces();
+            if (atEnd() || (m_text[m_pos] != QLatin1Char('"') && m_text[m_pos] != QLatin1Char('\'')))
+                return false;
+
+            const QChar quote = m_text[m_pos++];
+            QString out;
+            while (!atEnd()) {
+                const QChar ch = m_text[m_pos++];
+                if (ch == quote) {
+                    if (result)
+                        *result = out;
+                    return true;
+                }
+                if (ch == QLatin1Char('\\')) {
+                    if (atEnd())
+                        return setError(QStringLiteral("Unterminated escape sequence at position %1.").arg(m_pos + 1));
+                    const QChar esc = m_text[m_pos++];
+                    if (esc == QLatin1Char('n')) out += QLatin1Char('\n');
+                    else if (esc == QLatin1Char('t')) out += QLatin1Char('\t');
+                    else if (esc == QLatin1Char('r')) out += QLatin1Char('\r');
+                    else if (esc == QLatin1Char('"')) out += QLatin1Char('"');
+                    else if (esc == QLatin1Char('\'')) out += QLatin1Char('\'');
+                    else if (esc == QLatin1Char('\\')) out += QLatin1Char('\\');
+                    else out += esc;
+                    continue;
+                }
+                out += ch;
+            }
+            return setError(QStringLiteral("Unterminated string literal."));
         }
 
         // '[' already consumed. Parses a vector literal or a range and stores
@@ -811,6 +912,8 @@ private:
 
         static Value negated(const Value &v)
         {
+            if (v.isString)
+                return Value(0.0);
             if (!v.isVector)
                 return Value(-v.scalar);
             QVector<Value> out;
@@ -822,6 +925,8 @@ private:
 
         static bool valuesEqual(const Value &a, const Value &b)
         {
+            if (a.isString || b.isString)
+                return a.isString && b.isString && a.string == b.string;
             if (a.isVector != b.isVector)
                 return false;
             if (!a.isVector)
@@ -837,6 +942,13 @@ private:
         // Elementwise +/- for matching shapes; scalar +/- scalar otherwise.
         bool combineAddSub(const Value &a, const Value &b, bool add, Value *out)
         {
+            if (a.isString || b.isString) {
+                if (add) {
+                    *out = Value(a.toString() + b.toString());
+                    return true;
+                }
+                return setError(QStringLiteral("Cannot subtract string values."));
+            }
             if (!a.isVector && !b.isVector) {
                 *out = Value(add ? a.scalar + b.scalar : a.scalar - b.scalar);
                 return true;
@@ -862,6 +974,8 @@ private:
         // scalar*scalar; vector*scalar / scalar*vector (scale); vector*vector (dot).
         bool combineMul(const Value &a, const Value &b, Value *out)
         {
+            if (a.isString || b.isString)
+                return setError(QStringLiteral("Cannot multiply string values."));
             if (!a.isVector && !b.isVector) {
                 *out = Value(a.scalar * b.scalar);
                 return true;
@@ -886,6 +1000,8 @@ private:
 
         bool combineDiv(const Value &a, const Value &b, Value *out)
         {
+            if (a.isString || b.isString)
+                return setError(QStringLiteral("Cannot divide string values."));
             if (b.isVector)
                 return setError(QStringLiteral("Cannot divide by a vector."));
             if (b.scalar == 0.0)
@@ -900,6 +1016,8 @@ private:
 
         static Value scaled(const Value &v, qreal factor)
         {
+            if (v.isString)
+                return Value(0.0);
             if (!v.isVector)
                 return Value(v.scalar * factor);
             QVector<Value> out;
@@ -1072,7 +1190,21 @@ private:
             if (name.compare(QStringLiteral("str"), Qt::CaseInsensitive) == 0) {
                 // str() converts values to string — in our numeric evaluator,
                 // return the first numeric arg (used mainly inside echo() which we ignore).
-                *result = Value(args.isEmpty() ? 0.0 : a0);
+                QString out;
+                for (const Value &arg : args)
+                    out += arg.toString();
+                *result = Value(out);
+                return true;
+            }
+            if (name.compare(QStringLiteral("chr"), Qt::CaseInsensitive) == 0) {
+                QString out;
+                for (const Value &arg : args) {
+                    const uint codePoint = static_cast<uint>(qRound(arg.toScalar()));
+                    if (codePoint > 0x10ffff)
+                        return setError(QStringLiteral("chr() code point out of range"));
+                    out += QString::fromUcs4(&codePoint, 1);
+                }
+                *result = Value(out);
                 return true;
             }
             if (name.compare(QStringLiteral("concat"), Qt::CaseInsensitive) == 0) {
@@ -1094,7 +1226,10 @@ private:
             }
             if (name.compare(QStringLiteral("len"), Qt::CaseInsensitive) == 0) {
                 if (args.size() != 1) return setError(QStringLiteral("len() expects 1 argument"));
-                *result = Value(args[0].isVector ? static_cast<qreal>(args[0].items.size()) : 0.0);
+                if (args[0].isString)
+                    *result = Value(static_cast<qreal>(args[0].string.size()));
+                else
+                    *result = Value(args[0].isVector ? static_cast<qreal>(args[0].items.size()) : 0.0);
                 return true;
             }
             if (name.compare(QStringLiteral("norm"), Qt::CaseInsensitive) == 0) {
@@ -1149,7 +1284,9 @@ private:
         {
             QVector<qreal> out;
             for (const Value &arg : args) {
-                if (arg.isVector) {
+                if (arg.isString) {
+                    out.append(0.0);
+                } else if (arg.isVector) {
                     for (const Value &item : arg.items)
                         out.append(item.toScalar());
                 } else {

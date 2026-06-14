@@ -1,6 +1,7 @@
 #include "scenedocument.h"
 #include "expression.h"
 #include "scenestringutils.h"
+#include "scenemesh.h"
 
 #include <QHash>
 #include <QSet>
@@ -246,6 +247,12 @@ SceneDocument::Snapshot SceneDocument::snapshot() const
 {
     Snapshot snapshot;
     snapshot.shapes = m_shapes;
+    // Compute glyph contours here, on the (GUI) thread that calls snapshot(),
+    // so the CSG/thumbnail workers never touch QFont off the GUI thread.
+    for (ShapeNode &shape : snapshot.shapes) {
+        if (shape.type == ShapeNode::Text)
+            shape.textContours = buildGlyphContours(shape);
+    }
     snapshot.treeRoot = m_tree.root();
     snapshot.treeSnapshot = m_tree.snapshot();
     snapshot.selectedShapeId = m_selectedShapeId;
@@ -321,6 +328,14 @@ bool SceneDocument::removeSelectedShape()
 int SceneDocument::addGroup(TreeNode::Operation operation, int parentGroupId, int insertIndex)
 {
     return m_tree.addGroup(operation, parentGroupId, insertIndex);
+}
+
+int SceneDocument::addRawCode(const QString &code, int parentGroupId, int insertIndex)
+{
+    const QString initialCode = code.trimmed().isEmpty()
+                                    ? QStringLiteral("// raw OpenSCAD")
+                                    : code.trimmed();
+    return m_tree.addRawCode(initialCode, parentGroupId, insertIndex);
 }
 
 bool SceneDocument::removeGroupById(int groupId)
@@ -502,6 +517,25 @@ bool SceneDocument::updateForLoop(int groupId, const QString &loopVariable, cons
 bool SceneDocument::updateConditionExpression(int groupId, const QString &conditionExpression)
 {
     return m_tree.updateConditionExpression(groupId, conditionExpression);
+}
+
+bool SceneDocument::updateRawCode(int groupId, const QString &code)
+{
+    return m_tree.updateRawCode(groupId, code);
+}
+
+bool SceneDocument::updateTextContent(int shapeId, const QString &text)
+{
+    for (ShapeNode &shape : m_shapes) {
+        if (shape.id == shapeId && shape.type == ShapeNode::Text) {
+            if (shape.textValue == text)
+                return false;
+            shape.textValue = text;
+            shape.textContours.clear(); // recomputed on next snapshot()
+            return true;
+        }
+    }
+    return false;
 }
 
 void SceneDocument::reEvaluateDependentVariables(int changedId)

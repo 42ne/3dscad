@@ -18,7 +18,8 @@ struct ShapeNode
         Polygon2D,
         Polyhedron,
         Point3D,
-        Face3D
+        Face3D,
+        Text
     };
 
     enum BooleanMode {
@@ -43,6 +44,18 @@ struct ShapeNode
     // Polyhedron geometry — empty for all other types.
     QVector<QVector3D>    polyhedronPoints;
     QVector<QVector<int>> polyhedronFaces;
+
+    // Text parameters (type == Text). textSize is the font size (OpenSCAD size=).
+    QString textValue = QStringLiteral("Text");
+    QString fontName;                               // empty = default font
+    QString textHalign = QStringLiteral("left");    // left | center | right
+    QString textValign = QStringLiteral("baseline");// baseline | bottom | center | top
+    float   textSize = 10.0f;
+    float   textSpacing = 1.0f;
+    // Cached glyph contours (model space, z=0), computed on the main thread by
+    // SceneDocument::snapshot(). The geometry backends read this instead of
+    // calling QFont/QPainterPath off the GUI thread. Derived — not in operator==.
+    QVector<QVector<QVector3D>> textContours;
 
     // One expression string per parameter, in shapeParameterControls() order.
     // Empty list = plain numeric mode (use size/radius/height directly).
@@ -80,6 +93,10 @@ struct ShapeNode
             break;
         case Polyhedron:
         case Polygon2D:
+            break;
+        case Text:
+            if      (paramIndex == 0) textSize = static_cast<float>(qMax<qreal>(0.1, rawValue));
+            else if (paramIndex == 1) textSpacing = static_cast<float>(qMax<qreal>(0.0, rawValue));
             break;
         case Point3D:
             if      (paramIndex == 0) position.setX(static_cast<float>(rawValue));
@@ -129,7 +146,8 @@ struct ShapeNode
             || toolName == QLatin1String("cone")
             || toolName == QLatin1String("circle")
             || toolName == QLatin1String("square")
-            || toolName == QLatin1String("polygon");
+            || toolName == QLatin1String("polygon")
+            || toolName == QLatin1String("text");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
@@ -141,6 +159,7 @@ struct ShapeNode
         if (toolName == QLatin1String("circle"))   return Circle;
         if (toolName == QLatin1String("square"))   return Square;
         if (toolName == QLatin1String("polygon"))  return Polygon2D;
+        if (toolName == QLatin1String("text"))     return Text;
         return Cube;
     }
 };
@@ -163,7 +182,13 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.usesD1 == right.usesD1
            && left.usesD2 == right.usesD2
            && left.polyhedronPoints == right.polyhedronPoints
-           && left.polyhedronFaces == right.polyhedronFaces;
+           && left.polyhedronFaces == right.polyhedronFaces
+           && left.textValue == right.textValue
+           && left.fontName == right.fontName
+           && left.textHalign == right.textHalign
+           && left.textValign == right.textValign
+           && left.textSize == right.textSize
+           && left.textSpacing == right.textSpacing;
 }
 
 inline bool operator!=(const ShapeNode &left, const ShapeNode &right)

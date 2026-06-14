@@ -106,6 +106,21 @@ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int ins
     return groupId;
 }
 
+int SceneTree::addRawCode(const QString &code, int parentNodeId, int insertIndex)
+{
+    const QString trimmed = code.trimmed();
+    if (trimmed.isEmpty())
+        return 0;
+
+    const int groupId = addGroup(TreeNode::RawCode, parentNodeId, insertIndex);
+    TreeNode *node = nodeById(groupId);
+    if (!node)
+        return 0;
+
+    node->rawCode = trimmed;
+    return groupId;
+}
+
 bool SceneTree::removeGroupById(int groupId)
 {
     if (groupId <= 0 || m_root.id == groupId)
@@ -116,22 +131,46 @@ bool SceneTree::removeGroupById(int groupId)
     if (sn && sn->id == groupId)
         return false;
 
+    int effectiveGroupId = groupId;
+    int conditionalId = 0;
+    if (conditionalIdForBranchNode(m_root, groupId, &conditionalId))
+        effectiveGroupId = conditionalId;
+
+    if (effectiveGroupId <= 0 || m_root.id == effectiveGroupId)
+        return false;
+    if (sn && sn->id == effectiveGroupId)
+        return false;
+
     // Check if this is a Module before detaching, so we can clean up its call node.
-    const TreeNode *node = nodeById(groupId);
+    const TreeNode *node = nodeById(effectiveGroupId);
     const bool wasModule = node && node->type == TreeNode::Group && node->operation == TreeNode::Module;
     const bool wasConditional = node && node->type == TreeNode::Group && node->operation == TreeNode::Conditional;
 
     TreeNode removedModule;
     const bool removed = (wasModule || wasConditional)
-                             ? detachNodeById(&m_root, groupId, &removedModule)
-                             : detachNodeById(&m_root, groupId);
+                             ? detachNodeById(&m_root, effectiveGroupId, &removedModule)
+                             : detachNodeById(&m_root, effectiveGroupId);
     if (removed) {
         if (wasModule)
-            removeModuleCallForModule(groupId);
+            removeModuleCallForModule(effectiveGroupId);
         pruneEmptyGroups(&m_root);
     }
 
     return removed;
+}
+
+bool SceneTree::updateRawCode(int groupId, const QString &code)
+{
+    TreeNode *node = nodeById(groupId);
+    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::RawCode)
+        return false;
+
+    const QString trimmed = code.trimmed();
+    if (trimmed.isEmpty() || node->rawCode == trimmed)
+        return false;
+
+    node->rawCode = trimmed;
+    return true;
 }
 
 int SceneTree::addVariable(const QString &name, const QString &expression, qreal value,
@@ -612,6 +651,39 @@ void SceneTree::offsetMovedNode(TreeNode *node, const QVector3D &offset)
     }
 }
 
+bool SceneTree::conditionalIdForBranchNode(const TreeNode &node,
+                                           int branchNodeId,
+                                           int *conditionalId) const
+{
+    if (node.type != TreeNode::Group)
+        return false;
+
+    if (node.operation == TreeNode::Conditional) {
+        for (int i = 0; i < node.children.size(); ++i) {
+            const TreeNode &child = node.children[i];
+            if (child.id != branchNodeId)
+                continue;
+
+            const bool isBranchContainer = child.type == TreeNode::Group
+                                           && child.operation == TreeNode::Union
+                                           && (i == 0 || child.isElseBranch);
+            if (!isBranchContainer)
+                return false;
+
+            if (conditionalId)
+                *conditionalId = node.id;
+            return true;
+        }
+    }
+
+    for (const TreeNode &child : node.children) {
+        if (conditionalIdForBranchNode(child, branchNodeId, conditionalId))
+            return true;
+    }
+
+    return false;
+}
+
 bool SceneTree::detachNodeById(TreeNode *node, int id, TreeNode *detachedNode)
 {
     if (!node)
@@ -733,6 +805,7 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
             && !child.isElseBranch
             && child.operation != TreeNode::Scene
             && child.operation != TreeNode::Polyhedron
+            && child.operation != TreeNode::RawCode
             && child.children.isEmpty())
             node->children.removeAt(i);
     }
@@ -773,6 +846,8 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
         node.scale = QVector3D(10, 10, 10);
         node.transformExpressions = QStringList({QStringLiteral("[10, 10, 10]")});
     }
+    if (operation == TreeNode::RawCode)
+        node.rawCode = QStringLiteral("// raw OpenSCAD");
     return node;
 }
 

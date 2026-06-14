@@ -42,6 +42,7 @@ public:
     explicit SceneTreeInlineEditor(SceneTreeGraphicsWidget *widget);
 
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
+    void startInlineTextEdit(int shapeId, const QRectF &sceneRect, const QString &currentText);
     void startInlineExpressionEdit(const ExpressionEditTarget &target);
     bool validateInlineExpression(const ExpressionEditTarget &target,
                                   const QString &expression, QString *errorMessage) const;

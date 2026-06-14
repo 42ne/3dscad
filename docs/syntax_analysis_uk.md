@@ -60,6 +60,37 @@
 | **`polyhedron()`** з виразами в `points`/`faces` | Парсер зараз читає тільки літерали |
 | **`cube(size, center=true)`** | `center` ігнорується; можна додати параметр або продовжити ігнорувати |
 
+## Прогалини round-trip / збереження синтаксису
+
+Це потрібно для повної сумісності OpenSCAD у сценарії:
+`OpenSCAD source -> tree -> generated OpenSCAD` без втрати непідтриманого синтаксису.
+Це окремо від геометричної підтримки: конструкція може бути read-only у UI, але все одно має зберігатися.
+
+| Синтаксис / конструкція | Потрібна зміна | Чому |
+|---|---|---|
+| **Невідомі statements / непідтримані calls** | Додати `RawStatement`, `RawBlock` або `UnsupportedCall` вузли дерева | Поточний parser може пропускати або flatten-ити невідомий код, тому generator не може відновити його |
+| **Коментарі й whitespace trivia** | Зберігати leading/trailing comments і форматування як metadata або raw-фрагменти біля вузлів | Потрібно для lossless round-trip і читабельного згенерованого коду |
+| **Debug/background/root/disable modifiers** `#`, `%`, `!`, `*` | Зберігати modifier metadata на вузлах або весь raw statement | Вони змінюють preview/debug semantics і не мають зникати мовчки |
+| **Директиви `include <file>` / `use <file>`** | Додати directive nodes або raw-preserved top-level записи | Реальні проєкти залежать від зовнішніх модулів/функцій; втрата директив ламає згенерований код |
+| **Function/module declarations, які дерево не редагує** | Зберігати оригінальний source декларації, якщо повного AST-вузла ще немає | Щоб nested modules/functions або незвичні signatures не випадали з коду |
+| **Expression text, який не вдалося обчислити** | Зберігати оригінальні expression strings навіть при помилці eval | UI може показати unresolved value, але codegen не має підміняти це fallback-числом |
+| **Порядок globals/modules/body/calls** | Зберігати початковий top-level order або order groups | Поточний generator нормалізує категорії, що змінює layout і іноді semantics |
+| **Source ranges для непідтриманого синтаксису** | Розширити source map на raw/preserved вузли | Потрібно для selection, diagnostics і майбутнього безпечного редагування |
+
+### Набір round-trip тестів
+
+Додати тести для:
+
+- коментарів перед/всередині/після блоків;
+- modifiers `#`, `%`, `!`, `*` на primitives і groups;
+- unknown wrapper з відомими children;
+- `include` / `use`;
+- function declaration + function call у параметрах;
+- nested module declaration;
+- unsupported expression, який має лишитися текстом;
+- `polygon(paths=...)` і `polyhedron(..., convexity=...)`;
+- import/export ordering: variables, modules, body statements і calls.
+
 ## Пріоритетна матриця (без tree)
 
 | Функція | Частота | Складність | Користь |

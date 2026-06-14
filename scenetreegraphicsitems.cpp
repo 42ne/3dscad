@@ -333,6 +333,17 @@ public:
             painter->setFont(font);
             painter->setPen(QColor(55, 38, 12));
             painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("VAR"));
+        } else if (m_label == QStringLiteral("raw_code") || m_label == QStringLiteral("raw")) {
+            const QRectF badgeRect = glyphRect.adjusted(4.0*s, 5.0*s, -4.0*s, -5.0*s);
+            painter->setPen(QPen(QColor(255, 248, 218, 180), 1.0));
+            painter->setBrush(QColor(104, 78, 44, 220));
+            painter->drawRoundedRect(badgeRect, 5.0*s, 5.0*s);
+            QFont font = painter->font();
+            font.setBold(true);
+            font.setPointSizeF(qMax<qreal>(16.0, font.pointSizeF() + 7.0));
+            painter->setFont(font);
+            painter->setPen(QColor(255, 248, 225));
+            painter->drawText(badgeRect, Qt::AlignCenter, QStringLiteral("R"));
         } else if (operationTool) {
             const QColor operationIconAccent = operation == SceneDocument::TreeNode::For
                                                    || operation == SceneDocument::TreeNode::Minkowski

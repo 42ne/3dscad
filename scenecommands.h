@@ -109,6 +109,16 @@ public:
                     std::function<void()> onChanged);
 };
 
+class AddRawCodeCommand : public SnapshotCommand
+{
+public:
+    AddRawCodeCommand(SceneDocument *scene,
+                      const QString &code,
+                      int parentGroupId,
+                      int insertIndex,
+                      std::function<void()> onChanged);
+};
+
 class AddPolyhedronGroupCommand : public SnapshotCommand
 {
 public:
@@ -184,6 +194,18 @@ class UpdateConditionExpressionCommand : public SnapshotCommand
 {
 public:
     UpdateConditionExpressionCommand(SceneDocument *scene, int groupId, const QString &conditionExpression, std::function<void()> onChanged);
+};
+
+class UpdateRawCodeCommand : public SnapshotCommand
+{
+public:
+    UpdateRawCodeCommand(SceneDocument *scene, int groupId, const QString &code, std::function<void()> onChanged);
+};
+
+class UpdateTextContentCommand : public SnapshotCommand
+{
+public:
+    UpdateTextContentCommand(SceneDocument *scene, int shapeId, const QString &text, std::function<void()> onChanged);
 };
 
 class UpdateGroupColorCommand : public SnapshotCommand
