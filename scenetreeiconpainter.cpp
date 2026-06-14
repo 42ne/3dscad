@@ -212,6 +212,140 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
     painter->drawPolygon(topFace);
 }
 
+namespace {
+
+// ── Future-tool glyphs (not yet backed by an Operation/primitive) ───────────
+// Coordinates are relative to the glyph rect, so these scale to any icon size.
+
+void paintFutureText(QPainter *p, const QRectF &g)
+{
+    // Bold "A" letterform on a baseline — text/font marker. Stroked (not
+    // drawText) so it stays crisp at small sizes and renders without fonts.
+    p->save();
+    QPen pen(QColor(221, 235, 248), g.width() * 0.10);
+    pen.setCapStyle(Qt::RoundCap);
+    pen.setJoinStyle(Qt::RoundJoin);
+    p->setPen(pen);
+    const qreal cx = g.center().x();
+    const QPointF apex(cx, g.top() + g.height() * 0.10);
+    const QPointF bl(g.left() + g.width() * 0.20, g.bottom() - g.height() * 0.22);
+    const QPointF br(g.right() - g.width() * 0.20, g.bottom() - g.height() * 0.22);
+    p->drawLine(apex, bl);
+    p->drawLine(apex, br);
+    const qreal t = 0.58;
+    p->drawLine(apex + (bl - apex) * t, apex + (br - apex) * t);
+    QPen blp(QColor(150, 185, 224), g.height() * 0.045);
+    blp.setCapStyle(Qt::RoundCap);
+    p->setPen(blp);
+    const qreal by = g.bottom() - g.height() * 0.06;
+    p->drawLine(QPointF(g.left() + g.width() * 0.14, by),
+                QPointF(g.right() - g.width() * 0.14, by));
+    p->restore();
+}
+
+void paintFutureOffset(QPainter *p, const QRectF &g)
+{
+    // Inner solid rounded shape + outer dashed offset outline + distance tick.
+    p->save();
+    const QColor stroke(205, 220, 240);
+    const qreal r = g.width() * 0.16;
+    const QRectF inner = g.adjusted(g.width() * 0.26, g.height() * 0.26,
+                                    -g.width() * 0.26, -g.height() * 0.26);
+    const QRectF outer = g.adjusted(g.width() * 0.08, g.height() * 0.08,
+                                    -g.width() * 0.08, -g.height() * 0.08);
+    p->setBrush(QColor(255, 255, 255, 60));
+    p->setPen(QPen(stroke, g.width() * 0.035));
+    p->drawRoundedRect(inner, r * 0.7, r * 0.7);
+    QPen dashed(QColor(160, 195, 232), g.width() * 0.030);
+    dashed.setStyle(Qt::DashLine);
+    p->setBrush(Qt::NoBrush);
+    p->setPen(dashed);
+    p->drawRoundedRect(outer, r, r);
+    p->setPen(QPen(stroke, g.width() * 0.030));
+    const qreal ax = g.center().x();
+    p->drawLine(QPointF(ax, outer.top()), QPointF(ax, inner.top()));
+    p->restore();
+}
+
+void paintFutureProjection(QPainter *p, const QRectF &g)
+{
+    // Iso cube up top casting a flat footprint outline below, dotted droplines.
+    p->save();
+    const QColor stroke(214, 224, 244);
+    const qreal w = g.width(), h = g.height();
+    const QPointF c(g.center().x(), g.top() + h * 0.26);
+    const qreal s = w * 0.28;
+    QPolygonF top;
+    top << QPointF(c.x(), c.y() - s * 0.55)
+        << QPointF(c.x() + s, c.y())
+        << QPointF(c.x(), c.y() + s * 0.55)
+        << QPointF(c.x() - s, c.y());
+    p->setPen(QPen(stroke, w * 0.030));
+    p->setBrush(QColor(255, 255, 255, 70));
+    p->drawPolygon(top);
+    p->drawLine(top[3], top[3] + QPointF(0, s * 0.7));
+    p->drawLine(top[1], top[1] + QPointF(0, s * 0.7));
+    p->drawLine(top[2], top[2] + QPointF(0, s * 0.7));
+    p->drawLine(top[3] + QPointF(0, s * 0.7), top[2] + QPointF(0, s * 0.7));
+    p->drawLine(top[1] + QPointF(0, s * 0.7), top[2] + QPointF(0, s * 0.7));
+    QPolygonF foot;
+    const qreal fy = g.bottom() - h * 0.16;
+    foot << QPointF(c.x(), fy - s * 0.42)
+         << QPointF(c.x() + s, fy)
+         << QPointF(c.x(), fy + s * 0.42)
+         << QPointF(c.x() - s, fy);
+    p->setBrush(QColor(150, 195, 240, 90));
+    p->setPen(QPen(QColor(170, 205, 240), w * 0.028));
+    p->drawPolygon(foot);
+    QPen dp(QColor(150, 180, 220), w * 0.022);
+    dp.setStyle(Qt::DotLine);
+    p->setPen(dp);
+    p->drawLine(top[0] + QPointF(0, s * 0.7), foot[0]);
+    p->drawLine(top[3] + QPointF(0, s * 0.7), foot[3]);
+    p->drawLine(top[1] + QPointF(0, s * 0.7), foot[1]);
+    p->restore();
+}
+
+void paintFutureImport(QPainter *p, const QRectF &g)
+{
+    // Open tray with an arrow descending into it = import a file.
+    p->save();
+    const QColor stroke(214, 224, 244);
+    const qreal w = g.width(), h = g.height();
+    QPen ap(stroke, w * 0.075);
+    ap.setCapStyle(Qt::RoundCap);
+    ap.setJoinStyle(Qt::RoundJoin);
+    p->setPen(ap);
+    const qreal ax = g.center().x();
+    const qreal aTop = g.top() + h * 0.10;
+    const qreal aBot = g.center().y() + h * 0.10;
+    p->drawLine(QPointF(ax, aTop), QPointF(ax, aBot));
+    p->drawLine(QPointF(ax - w * 0.16, aBot - h * 0.16), QPointF(ax, aBot));
+    p->drawLine(QPointF(ax + w * 0.16, aBot - h * 0.16), QPointF(ax, aBot));
+    QPen tp(QColor(170, 200, 234), w * 0.055);
+    tp.setCapStyle(Qt::RoundCap);
+    tp.setJoinStyle(Qt::RoundJoin);
+    p->setPen(tp);
+    const qreal tl = g.left() + w * 0.16, tr = g.right() - w * 0.16;
+    const qreal ty = g.bottom() - h * 0.20, tb = g.bottom() - h * 0.06;
+    p->drawLine(QPointF(tl, ty), QPointF(tl, tb));
+    p->drawLine(QPointF(tr, ty), QPointF(tr, tb));
+    p->drawLine(QPointF(tl, tb), QPointF(tr, tb));
+    p->restore();
+}
+
+} // namespace
+
+bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect)
+{
+    const QString n = toolName.toLower();
+    if (n == QStringLiteral("text"))       { paintFutureText(painter, rect);       return true; }
+    if (n == QStringLiteral("offset"))     { paintFutureOffset(painter, rect);     return true; }
+    if (n == QStringLiteral("projection")) { paintFutureProjection(painter, rect); return true; }
+    if (n == QStringLiteral("import"))     { paintFutureImport(painter, rect);     return true; }
+    return false;
+}
+
 QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected)
 {
     constexpr qreal kOuterRadius = 8.0;   // corner radius of the dark mat

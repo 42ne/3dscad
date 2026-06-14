@@ -339,6 +339,8 @@ public:
                                                    ? iconAccent
                                                    : iconAccent.lighter(130);
             paintOperationIcon(painter, operation, glyphRect, operationIconAccent);
+        } else if (paintFutureToolIcon(painter, m_label, glyphRect)) {
+            // Glyph for an upcoming tool (text/offset/projection/import) drawn.
         } else {
             paintPrimitiveIcon(painter, primitiveTypeForTool(m_label), glyphRect);
         }
