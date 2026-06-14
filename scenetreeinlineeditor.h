@@ -16,7 +16,8 @@ struct ExpressionEditTarget {
         Variable,
         ModuleCallArgument,
         PolyhedronParticipation,
-        Polygon2DPoint
+        Polygon2DPoint,
+        Condition
     };
     Kind kind = None;
     QRectF hoverRect;

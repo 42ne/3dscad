@@ -333,6 +333,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression minkowskiRegex("^minkowski\\s*\\(\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression translateRegex("^translate\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression rotateRegex("^rotate\\s*\\((?:a\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
+    static const QRegularExpression scalarRotateBlockRegex("^rotate\\s*\\((?:a\\s*=\\s*)?([^\\[\\]]+?)\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression scaleRegex("^scale\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression mirrorRegex("^mirror\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*\\{\\s*$");
     static const QRegularExpression forRegex("^for\\s*\\((.+?)\\)\\s*\\{\\s*$");
@@ -498,6 +499,17 @@ static bool parseOperationLine(const QString &line,
         *operation = SceneDocument::TreeNode::Rotate;
         return parseVector3WithExpressions(match.captured(1), varValues, vector, expressions, fns);
     }
+    match = scalarRotateBlockRegex.match(line);
+    if (match.hasMatch()) {
+        qreal angle = 0.0;
+        const QString angleExpr = match.captured(1).trimmed();
+        if (!ExpressionSyntax::evaluate(angleExpr, varValues, &angle, nullptr, fns))
+            return false;
+        *operation = SceneDocument::TreeNode::Rotate;
+        *vector = QVector3D(0, 0, static_cast<float>(angle));
+        if (expressions) *expressions = QStringList() << QStringLiteral("0") << QStringLiteral("0") << angleExpr;
+        return true;
+    }
     match = scaleRegex.match(line);
     if (match.hasMatch()) {
         *operation = SceneDocument::TreeNode::Scale;
@@ -572,6 +584,347 @@ static bool centerFromArgs(const QString &argsStr, bool *centerOut)
     return false;
 }
 
+// ── Vector/Scalar unified expression evaluator ────────────────────────────
+// Evaluates expressions that may produce either a scalar or a 3-vector.
+// Handles: number literals, scalar vars, vector vars, [a,b,c] literals,
+//          +, -, *, / operators, unary -, and parentheses.
+struct VecOrScalar {
+    bool isVec = false;
+    qreal s = 0.0;
+    QVector3D v;
+    static VecOrScalar fromScalar(qreal x) { VecOrScalar r; r.s = x; return r; }
+    static VecOrScalar fromVec(float x, float y, float z) { VecOrScalar r; r.isVec = true; r.v = QVector3D(x,y,z); return r; }
+    static VecOrScalar fromVec(QVector3D u) { VecOrScalar r; r.isVec = true; r.v = u; return r; }
+};
+
+class VecExprEvaluator {
+public:
+    VecExprEvaluator(const QString &text,
+                     const QHash<QString, qreal> &sVars,
+                     const QHash<QString, QVector3D> &vVars,
+                     const QHash<QString, ExpressionSyntax::FunctionDef> *fns)
+        : m_text(text), m_pos(0), m_sVars(sVars), m_vVars(vVars), m_fns(fns) {}
+
+    bool eval(VecOrScalar *result) {
+        if (!evalAddSub(result)) return false;
+        skipSpaces();
+        return atEnd();
+    }
+
+    QString error() const { return m_error; }
+
+private:
+    QString m_text;
+    int m_pos;
+    const QHash<QString, qreal> &m_sVars;
+    const QHash<QString, QVector3D> &m_vVars;
+    const QHash<QString, ExpressionSyntax::FunctionDef> *m_fns;
+    QString m_error;
+
+    bool atEnd() const { return m_pos >= m_text.size(); }
+    void skipSpaces() { while (!atEnd() && m_text[m_pos].isSpace()) ++m_pos; }
+    bool consume(QChar c) {
+        skipSpaces();
+        if (atEnd() || m_text[m_pos] != c) return false;
+        ++m_pos; return true;
+    }
+
+    VecOrScalar addVOS(const VecOrScalar &a, const VecOrScalar &b, bool sub) const {
+        if (!a.isVec && !b.isVec) return VecOrScalar::fromScalar(a.s + (sub ? -b.s : b.s));
+        QVector3D av = a.isVec ? a.v : QVector3D(a.s, a.s, a.s);
+        QVector3D bv = b.isVec ? b.v : QVector3D(b.s, b.s, b.s);
+        return VecOrScalar::fromVec(sub ? av - bv : av + bv);
+    }
+    VecOrScalar mulVOS(const VecOrScalar &a, const VecOrScalar &b) const {
+        if (!a.isVec && !b.isVec) return VecOrScalar::fromScalar(a.s * b.s);
+        if (a.isVec && !b.isVec)  return VecOrScalar::fromVec(a.v * static_cast<float>(b.s));
+        if (!a.isVec && b.isVec)  return VecOrScalar::fromVec(b.v * static_cast<float>(a.s));
+        return VecOrScalar::fromVec(a.v.x()*b.v.x(), a.v.y()*b.v.y(), a.v.z()*b.v.z());
+    }
+
+    bool evalAddSub(VecOrScalar *result) {
+        VecOrScalar left;
+        if (!evalMul(&left)) return false;
+        while (true) {
+            skipSpaces();
+            if (consume(QLatin1Char('+'))) {
+                VecOrScalar right; if (!evalMul(&right)) return false;
+                left = addVOS(left, right, false);
+            } else if (consume(QLatin1Char('-'))) {
+                VecOrScalar right; if (!evalMul(&right)) return false;
+                left = addVOS(left, right, true);
+            } else break;
+        }
+        *result = left; return true;
+    }
+
+    bool evalMul(VecOrScalar *result) {
+        VecOrScalar left;
+        if (!evalUnary(&left)) return false;
+        while (true) {
+            skipSpaces();
+            if (consume(QLatin1Char('*'))) {
+                VecOrScalar right; if (!evalUnary(&right)) return false;
+                left = mulVOS(left, right);
+            } else if (consume(QLatin1Char('/'))) {
+                VecOrScalar right; if (!evalUnary(&right)) return false;
+                if (!right.isVec && right.s == 0.0) { m_error = QStringLiteral("Division by zero"); return false; }
+                if (right.isVec) { m_error = QStringLiteral("Cannot divide by a vector"); return false; }
+                left = left.isVec ? VecOrScalar::fromVec(left.v / static_cast<float>(right.s))
+                                  : VecOrScalar::fromScalar(left.s / right.s);
+            } else break;
+        }
+        *result = left; return true;
+    }
+
+    bool evalUnary(VecOrScalar *result) {
+        skipSpaces();
+        bool neg = false;
+        while (!atEnd() && m_text[m_pos] == QLatin1Char('-')) { neg = !neg; ++m_pos; skipSpaces(); }
+        VecOrScalar val; if (!evalPrimary(&val)) return false;
+        if (neg) { val = val.isVec ? VecOrScalar::fromVec(-val.v) : VecOrScalar::fromScalar(-val.s); }
+        *result = val; return true;
+    }
+
+    bool evalPrimary(VecOrScalar *result) {
+        skipSpaces();
+
+        if (consume(QLatin1Char('('))) {
+            if (!evalAddSub(result)) return false;
+            if (!consume(QLatin1Char(')'))) { m_error = QStringLiteral("Expected ')'"); return false; }
+            return true;
+        }
+
+        if (!atEnd() && m_text[m_pos] == QLatin1Char('[')) {
+            ++m_pos;
+            QStringList parts;
+            int depth = 1, start = m_pos;
+            for (; m_pos < m_text.size(); ++m_pos) {
+                if (m_text[m_pos] == QLatin1Char('['))      ++depth;
+                else if (m_text[m_pos] == QLatin1Char(']')) { if (--depth == 0) break; }
+                else if (m_text[m_pos] == QLatin1Char(',') && depth == 1) {
+                    parts.append(m_text.mid(start, m_pos - start).trimmed());
+                    start = m_pos + 1;
+                }
+            }
+            if (depth != 0) { m_error = QStringLiteral("Unclosed '['"); return false; }
+            parts.append(m_text.mid(start, m_pos - start).trimmed());
+            ++m_pos;
+            if (parts.size() != 3) { m_error = QStringLiteral("Vector must have 3 components"); return false; }
+            qreal x = 0, y = 0, z = 0;
+            if (!ExpressionSyntax::evaluate(parts[0], m_sVars, &x, nullptr, m_fns)
+                || !ExpressionSyntax::evaluate(parts[1], m_sVars, &y, nullptr, m_fns)
+                || !ExpressionSyntax::evaluate(parts[2], m_sVars, &z, nullptr, m_fns))
+            { m_error = QStringLiteral("Bad vector component"); return false; }
+            *result = VecOrScalar::fromVec(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+            return true;
+        }
+
+        // Number literal
+        {
+            const int start = m_pos;
+            bool hasDigit = false;
+            while (!atEnd() && m_text[m_pos].isDigit()) { hasDigit = true; ++m_pos; }
+            if (!atEnd() && m_text[m_pos] == QLatin1Char('.')) {
+                ++m_pos;
+                while (!atEnd() && m_text[m_pos].isDigit()) { hasDigit = true; ++m_pos; }
+            }
+            if (hasDigit) {
+                bool ok = false;
+                qreal val = m_text.mid(start, m_pos - start).toDouble(&ok);
+                if (!ok) { m_pos = start; } else { *result = VecOrScalar::fromScalar(val); return true; }
+            }
+        }
+
+        // Identifier: variable or function call
+        if (!atEnd() && (m_text[m_pos].isLetter() || m_text[m_pos] == QLatin1Char('_') || m_text[m_pos] == QLatin1Char('$'))) {
+            const int start = m_pos++;
+            while (!atEnd() && (m_text[m_pos].isLetterOrNumber() || m_text[m_pos] == QLatin1Char('_') || m_text[m_pos] == QLatin1Char('$')))
+                ++m_pos;
+            const QString name = m_text.mid(start, m_pos - start);
+            skipSpaces();
+            if (!atEnd() && m_text[m_pos] == QLatin1Char('(')) {
+                // function call: delegate fully to scalar evaluator
+                int depth = 0, callStart = start;
+                int i = m_pos;
+                for (; i < m_text.size(); ++i) {
+                    if (m_text[i] == QLatin1Char('(')) ++depth;
+                    else if (m_text[i] == QLatin1Char(')')) { if (--depth == 0) { ++i; break; } }
+                }
+                const QString callStr = m_text.mid(callStart, i - callStart);
+                qreal val = 0.0;
+                if (!ExpressionSyntax::evaluate(callStr, m_sVars, &val, nullptr, m_fns))
+                { m_error = QStringLiteral("Unknown function '%1'").arg(name); return false; }
+                m_pos = i;
+                *result = VecOrScalar::fromScalar(val);
+                return true;
+            }
+            if (m_vVars.contains(name)) { *result = VecOrScalar::fromVec(m_vVars[name]); return true; }
+            qreal val = 0.0;
+            if (!ExpressionSyntax::evaluate(name, m_sVars, &val, nullptr, m_fns))
+            { m_error = QStringLiteral("Unknown identifier '%1'").arg(name); return false; }
+            *result = VecOrScalar::fromScalar(val);
+            return true;
+        }
+
+        m_error = QStringLiteral("Unexpected token at position %1").arg(m_pos + 1);
+        return false;
+    }
+};
+
+// Evaluates expr as a 3-vector. Returns false if it can't be resolved to a vector.
+static bool evaluateVectorExpression(const QString &expr,
+                                     const QHash<QString, qreal> &sVars,
+                                     const QHash<QString, QVector3D> &vVars,
+                                     QVector3D *result,
+                                     const QHash<QString, ExpressionSyntax::FunctionDef> *fns = nullptr)
+{
+    VecExprEvaluator ev(expr, sVars, vVars, fns);
+    VecOrScalar r;
+    if (!ev.eval(&r) || !r.isVec) return false;
+    *result = r.v;
+    return true;
+}
+
+// If line = "transform(...)child..." (no '{' suffix), splits into *tfPart and *childPart.
+static bool trySplitInlineTransformChild(const QString &line, QString *tfPart, QString *childPart)
+{
+    static const QStringList kws = {
+        QStringLiteral("translate"), QStringLiteral("rotate"),
+        QStringLiteral("scale"),     QStringLiteral("mirror"),
+        QStringLiteral("color")
+    };
+    for (const QString &kw : kws) {
+        if (!line.startsWith(kw)) continue;
+        int i = kw.size();
+        while (i < line.size() && line[i].isSpace()) ++i;
+        if (i >= line.size() || line[i] != QLatin1Char('(')) continue;
+        int depth = 0;
+        for (; i < line.size(); ++i) {
+            if (line[i] == QLatin1Char('('))      ++depth;
+            else if (line[i] == QLatin1Char(')')) { if (--depth == 0) break; }
+        }
+        if (depth != 0 || i >= line.size()) continue;
+        ++i; // past ')'
+        int j = i;
+        while (j < line.size() && line[j].isSpace()) ++j;
+        if (j >= line.size() || line[j] == QLatin1Char('{')) continue; // block form, not inline
+        *tfPart   = line.left(i).trimmed();
+        *childPart = line.mid(j);
+        return true;
+    }
+    return false;
+}
+
+// Splits "if(cond)child_stmt" into condition and child (brace-free form).
+// Returns false for block-form "if(...){" or lines that don't start with "if".
+static bool splitBraceFreeIfStatement(const QString &line, QString *condStr, QString *childStr)
+{
+    if (!line.startsWith(QStringLiteral("if"))) return false;
+    int i = 2;
+    while (i < line.size() && line[i].isSpace()) ++i;
+    if (i >= line.size() || line[i] != QLatin1Char('(')) return false;
+    int depth = 0, condStart = i + 1;
+    for (; i < line.size(); ++i) {
+        if (line[i] == QLatin1Char('('))      ++depth;
+        else if (line[i] == QLatin1Char(')')) { if (--depth == 0) break; }
+    }
+    if (depth != 0 || i >= line.size()) return false;
+    *condStr = line.mid(condStart, i - condStart).trimmed();
+    int j = i + 1;
+    while (j < line.size() && line[j].isSpace()) ++j;
+    if (j < line.size() && line[j] == QLatin1Char('{')) return false; // block form
+    *childStr = (j < line.size()) ? line.mid(j).trimmed() : QString();
+    return !condStr->isEmpty();
+}
+
+// Forward declarations needed by parseSingleStatementString
+static bool parsePrimitiveLine(const QString &, ShapeNode *, ParserState *, QString *);
+static bool parseModuleCallLine(const QString &, QString *, QString *);
+static SceneDocument::TreeNode makeGroupNode(SceneDocument::TreeNode::Operation, ParserState *);
+static SceneDocument::TreeNode makeModuleCallNode(int, const QString &, const QString &, ParserState *);
+static SceneDocument::TreeNode makePrimitiveNode(const ShapeNode &, ParserState *);
+static bool parseBraceFreeOperationLine(const QString &, SceneDocument::TreeNode::Operation *,
+                                        QVector3D *, const QHash<QString, qreal> &,
+                                        QStringList *, const QHash<QString, ExpressionSyntax::FunctionDef> *);
+static bool trySplitInlineTransformChild(const QString &, QString *, QString *);
+
+// Parses a single statement string (module call, inline transform chain, or primitive).
+// Used for brace-free if/else bodies.
+static void parseSingleStatementString(const QString &stmt,
+                                        SceneDocument::TreeNode *parent,
+                                        ParserState *state,
+                                        int lineNumber,
+                                        QString *errorMessage)
+{
+    if (stmt.isEmpty()) return;
+
+    QString ifCond, ifChild;
+    if (splitBraceFreeIfStatement(stmt, &ifCond, &ifChild)) {
+        SceneDocument::TreeNode condNode = makeGroupNode(SceneDocument::TreeNode::Conditional, state);
+        condNode.conditionExpression = ifCond;
+        SceneDocument::TreeNode trueBr = makeGroupNode(SceneDocument::TreeNode::Union, state);
+        if (!ifChild.isEmpty())
+            parseSingleStatementString(ifChild, &trueBr, state, lineNumber, errorMessage);
+        condNode.children.append(trueBr);
+        parent->children.append(condNode);
+        return;
+    }
+
+    QString tfPart, remaining;
+    if (trySplitInlineTransformChild(stmt, &tfPart, &remaining)) {
+        SceneDocument::TreeNode::Operation op = SceneDocument::TreeNode::Union;
+        QVector3D vec; QStringList exprs;
+        if (parseBraceFreeOperationLine(tfPart, &op, &vec, state->variableValues, &exprs, &state->functionDefs)) {
+            SceneDocument::TreeNode grp = makeGroupNode(op, state);
+            if (op == SceneDocument::TreeNode::Translate) grp.position = vec;
+            else if (op == SceneDocument::TreeNode::Rotate) grp.rotation = vec;
+            else if (op == SceneDocument::TreeNode::Scale)  grp.scale    = vec;
+            grp.transformExpressions = exprs;
+            parent->children.append(grp);
+            SceneDocument::TreeNode *inner = &parent->children.last();
+            while (true) {
+                QString nextTf, nextChild;
+                if (!trySplitInlineTransformChild(remaining, &nextTf, &nextChild)) break;
+                SceneDocument::TreeNode::Operation cop = SceneDocument::TreeNode::Union;
+                QVector3D cvec; QStringList cexprs;
+                if (!parseBraceFreeOperationLine(nextTf, &cop, &cvec, state->variableValues, &cexprs, &state->functionDefs)) break;
+                SceneDocument::TreeNode cgrp = makeGroupNode(cop, state);
+                if (cop == SceneDocument::TreeNode::Translate) cgrp.position = cvec;
+                else if (cop == SceneDocument::TreeNode::Rotate) cgrp.rotation = cvec;
+                else if (cop == SceneDocument::TreeNode::Scale)  cgrp.scale    = cvec;
+                cgrp.transformExpressions = cexprs;
+                inner->children.append(cgrp);
+                inner = &inner->children.last();
+                remaining = nextChild;
+            }
+            QString cc, ca;
+            if (parseModuleCallLine(remaining, &cc, &ca)) {
+                inner->children.append(makeModuleCallNode(0, cc, ca, state));
+            } else {
+                ShapeNode cs; QString cpe;
+                if (parsePrimitiveLine(remaining, &cs, state, &cpe)) {
+                    state->shapes.append(cs);
+                    inner->children.append(makePrimitiveNode(cs, state));
+                } else if (!cpe.isEmpty() && errorMessage && errorMessage->isEmpty()) {
+                    *errorMessage = cpe.arg(lineNumber);
+                }
+            }
+            return;
+        }
+    }
+    QString cc, ca;
+    if (parseModuleCallLine(stmt, &cc, &ca)) {
+        parent->children.append(makeModuleCallNode(0, cc, ca, state));
+        return;
+    }
+    ShapeNode cs; QString cpe;
+    if (parsePrimitiveLine(stmt, &cs, state, &cpe)) {
+        state->shapes.append(cs);
+        parent->children.append(makePrimitiveNode(cs, state));
+    }
+}
+
 // Returns true and fills shape if this line is a cube/sphere/cylinder call (flexible args).
 // Returns false if the line is not a primitive call at all.
 // Sets *errorMessage and returns false if the line IS a primitive call but has invalid args.
@@ -641,6 +994,22 @@ static bool parsePrimitiveLine(const QString &line, ShapeNode *shape, ParserStat
             shape->parameterExpressions = QStringList({scalarExpr, scalarExpr, scalarExpr});
             centerFromArgs(argsStr, &shape->center);
             return true;
+        }
+        // Vector arithmetic expression: size-2*[d,d,0], v1+v2, etc.
+        {
+            QVector3D vecResult;
+            if (evaluateVectorExpression(effectiveArgsStr, state->variableValues, state->vectorVariableValues, &vecResult, fns)) {
+                shape->id   = state->nextShapeId++;
+                shape->type = ShapeNode::Cube;
+                shape->name = QStringLiteral("Cube %1").arg(shape->id);
+                shape->size = vecResult;
+                shape->parameterExpressions = QStringList({
+                    QString::number(vecResult.x()),
+                    QString::number(vecResult.y()),
+                    QString::number(vecResult.z())});
+                centerFromArgs(argsStr, &shape->center);
+                return true;
+            }
         }
         if (errorMessage)
             *errorMessage = QStringLiteral("cube on line %1: expected [x, y, z], size variable, or number");
@@ -1040,6 +1409,8 @@ static bool parseBraceFreeOperationLine(const QString &line,
     static const QRegularExpression rotateRe("^rotate\\s*\\((?:a\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
     static const QRegularExpression scaleRe("^scale\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
     static const QRegularExpression mirrorRe("^mirror\\s*\\((?:v\\s*=\\s*)?\\[([^\\]]+)\\]\\s*\\)\\s*$");
+    // scalar rotate: rotate(expr) or rotate(a=expr) — rotates around Z
+    static const QRegularExpression scalarRotateRe("^rotate\\s*\\((?:a\\s*=\\s*)?([^\\[\\]]+?)\\s*\\)\\s*$");
 
     QRegularExpressionMatch m = translateRe.match(line);
     if (m.hasMatch()) {
@@ -1050,6 +1421,17 @@ static bool parseBraceFreeOperationLine(const QString &line,
     if (m.hasMatch()) {
         *operation = SceneDocument::TreeNode::Rotate;
         return parseVector3WithExpressions(m.captured(1), varValues, vector, expressions, fns);
+    }
+    m = scalarRotateRe.match(line);
+    if (m.hasMatch()) {
+        qreal angle = 0.0;
+        const QString angleExpr = m.captured(1).trimmed();
+        if (!ExpressionSyntax::evaluate(angleExpr, varValues, &angle, nullptr, fns))
+            return false;
+        *operation = SceneDocument::TreeNode::Rotate;
+        *vector = QVector3D(0, 0, static_cast<float>(angle));
+        if (expressions) *expressions = QStringList() << QStringLiteral("0") << QStringLiteral("0") << angleExpr;
+        return true;
     }
     m = scaleRe.match(line);
     if (m.hasMatch()) {
@@ -1218,6 +1600,45 @@ static bool parseBlock(ParserState *state,
             }
         }
 
+        // ── Brace-free assign/let: strip "assign(x=expr)..." prefix, bind vars ──
+        {
+            bool stripped = true;
+            while (stripped) {
+                stripped = false;
+                const QString kw = line.startsWith(QStringLiteral("assign")) ? QStringLiteral("assign")
+                                 : line.startsWith(QStringLiteral("let"))    ? QStringLiteral("let")
+                                 : QString();
+                if (kw.isEmpty() || line.trimmed().endsWith(QLatin1Char('{'))) break;
+                QString assignArgs;
+                if (!extractCallArgs(line, kw, &assignArgs)) break;
+                // Find the end position of "kw(...)" in line
+                int pos = kw.size();
+                while (pos < line.size() && line[pos].isSpace()) ++pos;
+                int depth = 0;
+                for (; pos < line.size(); ++pos) {
+                    if (line[pos] == QLatin1Char('('))      ++depth;
+                    else if (line[pos] == QLatin1Char(')')) { if (--depth == 0) { ++pos; break; } }
+                }
+                for (const QString &pair : splitAtTopLevelCommas(assignArgs)) {
+                    const int eq = pair.indexOf(QLatin1Char('='));
+                    if (eq <= 0) continue;
+                    const QString vn = pair.left(eq).trimmed();
+                    const QString ve = pair.mid(eq + 1).trimmed();
+                    qreal val = 0.0;
+                    ExpressionSyntax::evaluate(ve, state->variableValues, &val, nullptr, &state->functionDefs);
+                    state->variableValues[vn] = val;
+                }
+                const QString rest = line.mid(pos).trimmed();
+                if (rest.isEmpty()) {
+                    if (state->index >= state->lines.size()) break;
+                    line = state->lines[state->index++].text;
+                } else {
+                    line = rest;
+                }
+                stripped = true;
+            }
+        }
+
         // ── Variable assignment ───────────────────────────────────────────
         QString variableName, variableExpression, variableError;
         qreal variableValue = 0.0;
@@ -1276,62 +1697,70 @@ static bool parseBlock(ParserState *state,
             }
         }
 
-        // ── if (cond) { ... } else { ... } ── parse-time evaluation ──────
+        // ── if (cond) { ... } else { ... } ── tree-preserving ──────────────
         {
             static const QRegularExpression ifRe("^if\\s*\\((.+)\\)\\s*\\{\\s*$");
             static const QRegularExpression elseRe("^else\\s*\\{\\s*$");
             static const QRegularExpression elseIfRe("^else\\s+if\\s*\\((.+)\\)\\s*\\{\\s*$");
             QRegularExpressionMatch im = ifRe.match(line);
             if (im.hasMatch()) {
-                qreal condVal = 0.0;
-                bool condTrue = state->insideModuleBody
-                    || (ExpressionSyntax::evaluate(im.captured(1), state->variableValues, &condVal, nullptr, &state->functionDefs) && (condVal != 0.0));
+                // Collect all if / else-if / else clauses, then assemble nested Conditional nodes.
+                struct IfClause { QString cond; SceneDocument::TreeNode trueBlock; };
+                QVector<IfClause> clauses;
+                SceneDocument::TreeNode elseBlock;
+                bool hasElse = false;
 
-                auto skipBlock = [state](QString *errMsg) -> bool {
-                    SceneDocument::TreeNode _d;
-                    _d.type = SceneDocument::TreeNode::Group;
-                    _d.operation = SceneDocument::TreeNode::Union;
-                    return parseBlock(state, &_d, true, errMsg);
-                };
+                IfClause initClause;
+                initClause.cond = im.captured(1).trimmed();
+                initClause.trueBlock = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                if (!parseBlock(state, &initClause.trueBlock, true, errorMessage))
+                    return false;
+                clauses.append(initClause);
 
-                if (condTrue) {
-                    if (!parseBlock(state, parent, true, errorMessage))
-                        return false;
-                } else {
-                    if (!skipBlock(nullptr))
-                        return false;
-                }
-
-                // Check for else / else-if chain
                 while (state->index < state->lines.size()) {
-                    const QString next = state->lines[state->index].text;
-                    QRegularExpressionMatch eif = elseIfRe.match(next);
+                    const QString nxt = state->lines[state->index].text;
+                    const QRegularExpressionMatch eif = elseIfRe.match(nxt);
                     if (eif.hasMatch()) {
                         ++state->index;
-                        qreal eifVal = 0.0;
-                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state->variableValues, &eifVal, nullptr, &state->functionDefs) && (eifVal != 0.0);
-                        if (!condTrue && eifTrue) {
-                            if (!parseBlock(state, parent, true, errorMessage))
-                                return false;
-                            condTrue = true; // prevents further else branches
-                        } else {
-                            if (!skipBlock(nullptr))
-                                return false;
-                        }
+                        IfClause c;
+                        c.cond = eif.captured(1).trimmed();
+                        c.trueBlock = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                        if (!parseBlock(state, &c.trueBlock, true, errorMessage))
+                            return false;
+                        clauses.append(c);
                         continue;
                     }
-                    if (elseRe.match(next).hasMatch()) {
+                    if (elseRe.match(nxt).hasMatch()) {
                         ++state->index;
-                        if (!condTrue) {
-                            if (!parseBlock(state, parent, true, errorMessage))
-                                return false;
-                        } else {
-                            if (!skipBlock(nullptr))
-                                return false;
-                        }
+                        elseBlock = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                        elseBlock.isElseBranch = true;
+                        if (!parseBlock(state, &elseBlock, true, errorMessage))
+                            return false;
+                        hasElse = true;
                     }
                     break;
                 }
+
+                // Assemble nested Conditional nodes bottom-up.
+                // if(a){A} else if(b){B} else {C}
+                // → Cond(a, trueBr(A), elseBr( Cond(b, trueBr(B), elseBr(C)) ))
+                SceneDocument::TreeNode assembled;
+                for (int ci = clauses.size() - 1; ci >= 0; --ci) {
+                    SceneDocument::TreeNode cond = makeGroupNode(SceneDocument::TreeNode::Conditional, state);
+                    cond.conditionExpression = clauses[ci].cond;
+                    cond.children.append(clauses[ci].trueBlock);
+                    if (ci == clauses.size() - 1) {
+                        if (hasElse)
+                            cond.children.append(elseBlock);
+                    } else {
+                        SceneDocument::TreeNode elseBr = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                        elseBr.isElseBranch = true;
+                        elseBr.children.append(assembled);
+                        cond.children.append(elseBr);
+                    }
+                    assembled = cond;
+                }
+                parent->children.append(assembled);
                 continue;
             }
         }
@@ -1498,10 +1927,109 @@ static bool parseBlock(ParserState *state,
             continue;
         }
 
+        // ── Brace-free if(cond)statement ────────────────────────────────────
+        {
+            QString bfCond, bfChild;
+            if (splitBraceFreeIfStatement(line, &bfCond, &bfChild)) {
+                SceneDocument::TreeNode condNode = makeGroupNode(SceneDocument::TreeNode::Conditional, state);
+                condNode.conditionExpression = bfCond;
+                SceneDocument::TreeNode trueBr = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                if (!bfChild.isEmpty())
+                    parseSingleStatementString(bfChild, &trueBr, state, current.number, errorMessage);
+                condNode.children.append(trueBr);
+
+                // Look ahead for else / else-if (brace-free or block form)
+                while (state->index < state->lines.size()) {
+                    const QString nextLine = state->lines[state->index].text;
+                    if (!nextLine.startsWith(QStringLiteral("else"))) break;
+                    ++state->index;
+                    const QString afterElse = nextLine.mid(4).trimmed();
+
+                    SceneDocument::TreeNode elseBr = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                    elseBr.isElseBranch = true;
+                    static const QRegularExpression inlineElseIfBlockRe("^if\\s*\\((.+)\\)\\s*\\{\\s*$");
+                    const QRegularExpressionMatch inlineElseIfBlock = inlineElseIfBlockRe.match(afterElse);
+                    if (inlineElseIfBlock.hasMatch()) {
+                        SceneDocument::TreeNode nestedCond = makeGroupNode(SceneDocument::TreeNode::Conditional, state);
+                        nestedCond.conditionExpression = inlineElseIfBlock.captured(1).trimmed();
+                        SceneDocument::TreeNode nestedTrue = makeGroupNode(SceneDocument::TreeNode::Union, state);
+                        if (!parseBlock(state, &nestedTrue, true, errorMessage)) return false;
+                        nestedCond.children.append(nestedTrue);
+                        elseBr.children.append(nestedCond);
+                    } else if (afterElse.endsWith(QLatin1Char('{'))) {
+                        if (!parseBlock(state, &elseBr, true, errorMessage)) return false;
+                    } else if (!afterElse.isEmpty()) {
+                        parseSingleStatementString(afterElse, &elseBr, state, current.number, errorMessage);
+                    }
+                    condNode.children.append(elseBr);
+                    break;
+                }
+                parent->children.append(condNode);
+                continue;
+            }
+        }
+
         // ── Brace-free single-child transform (OpenSCAD shorthand) ──────────
         // e.g.  translate([x, y, 0])
         //         cylinder(h=1, r=2, center=true);
+        // Also handles inline: translate([x,y,0])cube(...);
         {
+            // Inline chain: transform(...)transform(...)...primitive(...) on one line
+            {
+                QString tfPart, childPart;
+                if (trySplitInlineTransformChild(line, &tfPart, &childPart)) {
+                    SceneDocument::TreeNode::Operation inlineOp = SceneDocument::TreeNode::Union;
+                    QVector3D inlineVec;
+                    QStringList inlineExprs;
+                    if (parseBraceFreeOperationLine(tfPart, &inlineOp, &inlineVec, state->variableValues, &inlineExprs, &state->functionDefs)) {
+                        SceneDocument::TreeNode inlineGroup = makeGroupNode(inlineOp, state);
+                        if (inlineOp == SceneDocument::TreeNode::Translate) inlineGroup.position = inlineVec;
+                        else if (inlineOp == SceneDocument::TreeNode::Rotate) inlineGroup.rotation = inlineVec;
+                        else if (inlineOp == SceneDocument::TreeNode::Scale)  inlineGroup.scale    = inlineVec;
+                        inlineGroup.transformExpressions = inlineExprs;
+                        parent->children.append(inlineGroup);
+                        SceneDocument::TreeNode *inlineInner = &parent->children.last();
+
+                        // Consume additional transforms chained inline on the same line
+                        QString remaining = childPart;
+                        while (true) {
+                            QString nextTf, nextChild;
+                            if (!trySplitInlineTransformChild(remaining, &nextTf, &nextChild)) break;
+                            SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
+                            QVector3D chainVec;
+                            QStringList chainExprs;
+                            if (!parseBraceFreeOperationLine(nextTf, &chainOp, &chainVec, state->variableValues, &chainExprs, &state->functionDefs))
+                                break;
+                            SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, state);
+                            if (chainOp == SceneDocument::TreeNode::Translate) chainGroup.position = chainVec;
+                            else if (chainOp == SceneDocument::TreeNode::Rotate) chainGroup.rotation = chainVec;
+                            else if (chainOp == SceneDocument::TreeNode::Scale)  chainGroup.scale    = chainVec;
+                            chainGroup.transformExpressions = chainExprs;
+                            inlineInner->children.append(chainGroup);
+                            inlineInner = &inlineInner->children.last();
+                            remaining = nextChild;
+                        }
+
+                        QString cc, ca;
+                        if (parseModuleCallLine(remaining, &cc, &ca)) {
+                            inlineInner->children.append(makeModuleCallNode(0, cc, ca, state));
+                        } else {
+                            ShapeNode cs;
+                            QString cpe;
+                            if (parsePrimitiveLine(remaining, &cs, state, &cpe)) {
+                                state->shapes.append(cs);
+                                inlineInner->children.append(makePrimitiveNode(cs, state));
+                            } else if (!cpe.isEmpty()) {
+                                if (errorMessage) *errorMessage = cpe.arg(current.number);
+                                state->errorLine = current.number;
+                                return false;
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+
             SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
             QVector3D bfVec;
             QStringList bfExprs;
@@ -2028,7 +2556,7 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             }
         }
 
-        // ── if (cond) { ... } else { ... } at top scope ──────────────────
+        // ── if (cond) { ... } else { ... } at top scope — tree-preserving ──
         {
             static const QRegularExpression ifRe("^if\\s*\\((.+)\\)\\s*\\{\\s*$");
             static const QRegularExpression elseRe("^else\\s*\\{\\s*$");
@@ -2036,59 +2564,64 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
             QRegularExpressionMatch im = ifRe.match(line);
             if (im.hasMatch()) {
                 ++state.index;
-                qreal condVal = 0.0;
-                bool condTrue = ExpressionSyntax::evaluate(im.captured(1), state.variableValues, &condVal, nullptr, &state.functionDefs) && (condVal != 0.0);
+                struct IfClause { QString cond; SceneDocument::TreeNode trueBlock; };
+                QVector<IfClause> clauses;
+                SceneDocument::TreeNode elseBlock;
+                bool hasElse = false;
 
-                auto skipBlock = [&state](QString *errMsg) -> bool {
-                    SceneDocument::TreeNode _d;
-                    _d.type = SceneDocument::TreeNode::Group;
-                    _d.operation = SceneDocument::TreeNode::Union;
-                    return parseBlock(&state, &_d, true, errMsg);
-                };
-
-                if (condTrue) {
-                    if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
-                        if (errorLine) *errorLine = state.errorLine;
-                        return false;
-                    }
-                } else {
-                    if (!skipBlock(nullptr))
-                        return false;
+                IfClause initClause;
+                initClause.cond = im.captured(1).trimmed();
+                initClause.trueBlock = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+                if (!parseBlock(&state, &initClause.trueBlock, true, errorMessage)) {
+                    if (errorLine) *errorLine = state.errorLine;
+                    return false;
                 }
+                clauses.append(initClause);
 
                 while (state.index < state.lines.size()) {
-                    const QString next = state.lines[state.index].text;
-                    QRegularExpressionMatch eif = elseIfRe.match(next);
+                    const QString nxt = state.lines[state.index].text;
+                    const QRegularExpressionMatch eif = elseIfRe.match(nxt);
                     if (eif.hasMatch()) {
                         ++state.index;
-                        qreal eifVal = 0.0;
-                        bool eifTrue = ExpressionSyntax::evaluate(eif.captured(1), state.variableValues, &eifVal, nullptr, &state.functionDefs) && (eifVal != 0.0);
-                        if (!condTrue && eifTrue) {
-                            if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
-                                if (errorLine) *errorLine = state.errorLine;
-                                return false;
-                            }
-                            condTrue = true;
-                        } else {
-                            if (!skipBlock(nullptr))
-                                return false;
+                        IfClause c;
+                        c.cond = eif.captured(1).trimmed();
+                        c.trueBlock = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+                        if (!parseBlock(&state, &c.trueBlock, true, errorMessage)) {
+                            if (errorLine) *errorLine = state.errorLine;
+                            return false;
                         }
+                        clauses.append(c);
                         continue;
                     }
-                    if (elseRe.match(next).hasMatch()) {
+                    if (elseRe.match(nxt).hasMatch()) {
                         ++state.index;
-                        if (!condTrue) {
-                            if (!parseBlock(&state, &sceneNode, true, errorMessage)) {
-                                if (errorLine) *errorLine = state.errorLine;
-                                return false;
-                            }
-                        } else {
-                            if (!skipBlock(nullptr))
-                                return false;
+                        elseBlock = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+                        elseBlock.isElseBranch = true;
+                        if (!parseBlock(&state, &elseBlock, true, errorMessage)) {
+                            if (errorLine) *errorLine = state.errorLine;
+                            return false;
                         }
+                        hasElse = true;
                     }
                     break;
                 }
+
+                SceneDocument::TreeNode assembled;
+                for (int ci = clauses.size() - 1; ci >= 0; --ci) {
+                    SceneDocument::TreeNode cond = makeGroupNode(SceneDocument::TreeNode::Conditional, &state);
+                    cond.conditionExpression = clauses[ci].cond;
+                    cond.children.append(clauses[ci].trueBlock);
+                    if (ci == clauses.size() - 1) {
+                        if (hasElse) cond.children.append(elseBlock);
+                    } else {
+                        SceneDocument::TreeNode elseBr = makeGroupNode(SceneDocument::TreeNode::Union, &state);
+                        elseBr.isElseBranch = true;
+                        elseBr.children.append(assembled);
+                        cond.children.append(elseBr);
+                    }
+                    assembled = cond;
+                }
+                sceneNode.children.append(assembled);
                 continue;
             }
         }
@@ -2295,7 +2828,65 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         }
 
         // Brace-free single-child transform at top level.
+        // Also handles inline: translate([x,y,0])cube(...);
         {
+            // Inline chain: transform(...)transform(...)...primitive(...) on one line
+            {
+                QString tfPart, childPart;
+                if (trySplitInlineTransformChild(line, &tfPart, &childPart)) {
+                    SceneDocument::TreeNode::Operation inlineOp = SceneDocument::TreeNode::Union;
+                    QVector3D inlineVec;
+                    QStringList inlineExprs;
+                    if (parseBraceFreeOperationLine(tfPart, &inlineOp, &inlineVec, state.variableValues, &inlineExprs, &state.functionDefs)) {
+                        ++state.index;
+                        SceneDocument::TreeNode inlineGroup = makeGroupNode(inlineOp, &state);
+                        if (inlineOp == SceneDocument::TreeNode::Translate) inlineGroup.position = inlineVec;
+                        else if (inlineOp == SceneDocument::TreeNode::Rotate) inlineGroup.rotation = inlineVec;
+                        else if (inlineOp == SceneDocument::TreeNode::Scale)  inlineGroup.scale    = inlineVec;
+                        inlineGroup.transformExpressions = inlineExprs;
+                        sceneNode.children.append(inlineGroup);
+                        SceneDocument::TreeNode *inlineInner = &sceneNode.children.last();
+
+                        // Consume additional transforms chained inline on the same line
+                        QString remaining = childPart;
+                        while (true) {
+                            QString nextTf, nextChild;
+                            if (!trySplitInlineTransformChild(remaining, &nextTf, &nextChild)) break;
+                            SceneDocument::TreeNode::Operation chainOp = SceneDocument::TreeNode::Union;
+                            QVector3D chainVec;
+                            QStringList chainExprs;
+                            if (!parseBraceFreeOperationLine(nextTf, &chainOp, &chainVec, state.variableValues, &chainExprs, &state.functionDefs))
+                                break;
+                            SceneDocument::TreeNode chainGroup = makeGroupNode(chainOp, &state);
+                            if (chainOp == SceneDocument::TreeNode::Translate) chainGroup.position = chainVec;
+                            else if (chainOp == SceneDocument::TreeNode::Rotate) chainGroup.rotation = chainVec;
+                            else if (chainOp == SceneDocument::TreeNode::Scale)  chainGroup.scale    = chainVec;
+                            chainGroup.transformExpressions = chainExprs;
+                            inlineInner->children.append(chainGroup);
+                            inlineInner = &inlineInner->children.last();
+                            remaining = nextChild;
+                        }
+
+                        QString cc, ca;
+                        if (parseModuleCallLine(remaining, &cc, &ca)) {
+                            inlineInner->children.append(makeModuleCallNode(0, cc, ca, &state));
+                        } else {
+                            ShapeNode cs;
+                            QString cpe;
+                            if (parsePrimitiveLine(remaining, &cs, &state, &cpe)) {
+                                state.shapes.append(cs);
+                                inlineInner->children.append(makePrimitiveNode(cs, &state));
+                            } else if (!cpe.isEmpty()) {
+                                if (errorMessage) *errorMessage = cpe.arg(current.number);
+                                if (errorLine) *errorLine = current.number;
+                                return false;
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+
             SceneDocument::TreeNode::Operation bfOp = SceneDocument::TreeNode::Union;
             QVector3D bfVec;
             QStringList bfExprs;

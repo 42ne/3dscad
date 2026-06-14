@@ -4,6 +4,7 @@
 
 #include <QColor>
 #include <QStringList>
+#include <functional>
 
 void OpenScadGenerator::appendShape(QString *code, const ShapeNode &shape, const QString &indent)
 {
@@ -223,6 +224,58 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         for (const SceneDocument::TreeNode &child : node.children)
             appendTreeNode(code, child, scene, indent, ranges);
         if (ranges && code->size() > start)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
+    if (node.operation == SceneDocument::TreeNode::Conditional) {
+        auto appendBranch = [&](const SceneDocument::TreeNode *branch, const QString &branchIndent) {
+            if (!branch)
+                return;
+            const bool branchContainer = branch->type == SceneDocument::TreeNode::Group
+                                         && branch->operation == SceneDocument::TreeNode::Union;
+            if (branchContainer) {
+                for (const SceneDocument::TreeNode &child : branch->children)
+                    appendTreeNode(code, child, scene, branchIndent, ranges);
+            } else {
+                appendTreeNode(code, *branch, scene, branchIndent, ranges);
+            }
+        };
+
+        std::function<void(const SceneDocument::TreeNode &, const QString &, bool)> appendConditional;
+        appendConditional = [&](const SceneDocument::TreeNode &conditionalNode,
+                                const QString &conditionalIndent,
+                                bool inlineAfterElse) {
+            const QString cond = conditionalNode.conditionExpression.trimmed().isEmpty()
+                                     ? QStringLiteral("true")
+                                     : conditionalNode.conditionExpression.trimmed();
+            const SceneDocument::TreeNode *trueBranch = conditionalNode.children.size() > 0
+                                                            ? &conditionalNode.children[0] : nullptr;
+            const SceneDocument::TreeNode *elseBranch = conditionalNode.children.size() > 1
+                                                            ? &conditionalNode.children[1] : nullptr;
+            *code += QString("%1if (%2) {\n").arg(inlineAfterElse ? QString() : conditionalIndent, cond);
+            appendBranch(trueBranch, conditionalIndent + "    ");
+
+            const bool elseIf = elseBranch
+                                && elseBranch->type == SceneDocument::TreeNode::Group
+                                && elseBranch->operation == SceneDocument::TreeNode::Union
+                                && elseBranch->children.size() == 1
+                                && elseBranch->children.first().type == SceneDocument::TreeNode::Group
+                                && elseBranch->children.first().operation == SceneDocument::TreeNode::Conditional;
+            if (elseIf) {
+                *code += conditionalIndent + "} else ";
+                appendConditional(elseBranch->children.first(), conditionalIndent, true);
+            } else if (elseBranch) {
+                *code += conditionalIndent + "} else {\n";
+                appendBranch(elseBranch, conditionalIndent + "    ");
+                *code += conditionalIndent + "}\n";
+            } else {
+                *code += conditionalIndent + "}\n";
+            }
+        };
+
+        appendConditional(node, indent, false);
+        if (ranges)
             ranges->append({node.id, start, code->size() - start});
         return;
     }

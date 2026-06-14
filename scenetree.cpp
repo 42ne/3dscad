@@ -90,6 +90,13 @@ int SceneTree::addGroup(TreeNode::Operation operation, int parentNodeId, int ins
         parent = &m_root;
 
     TreeNode group = makeGroupNode(operation);
+    if (operation == TreeNode::Conditional) {
+        group.conditionExpression = QStringLiteral("true");
+        group.children.append(makeConditionalBranchNode(false));
+        group.children.append(makeConditionalBranchNode(true));
+    }
+    if (parent->operation == TreeNode::Conditional && !parent->children.isEmpty())
+        parent = &parent->children.first();
     const int groupId = group.id;
     const int boundedIndex = insertIndex < 0
                                  ? parent->children.size()
@@ -112,9 +119,10 @@ bool SceneTree::removeGroupById(int groupId)
     // Check if this is a Module before detaching, so we can clean up its call node.
     const TreeNode *node = nodeById(groupId);
     const bool wasModule = node && node->type == TreeNode::Group && node->operation == TreeNode::Module;
+    const bool wasConditional = node && node->type == TreeNode::Group && node->operation == TreeNode::Conditional;
 
     TreeNode removedModule;
-    const bool removed = wasModule
+    const bool removed = (wasModule || wasConditional)
                              ? detachNodeById(&m_root, groupId, &removedModule)
                              : detachNodeById(&m_root, groupId);
     if (removed) {
@@ -145,6 +153,8 @@ int SceneTree::addVariable(const QString &name, const QString &expression, qreal
         parent = &m_root;
     }
     if (!parent || parent->type != TreeNode::Group)
+        return 0;
+    if (parent->operation == TreeNode::Conditional)
         return 0;
 
     TreeNode variable = makeVariableNode(name.trimmed(), expression.trimmed(), value);
@@ -206,6 +216,22 @@ bool SceneTree::setVariableIsParameter(int variableId, bool isParameter)
     return true;
 }
 
+bool SceneTree::updateConditionExpression(int groupId, const QString &conditionExpression)
+{
+    TreeNode *node = nodeById(groupId);
+    if (!node || node->type != TreeNode::Group || node->operation != TreeNode::Conditional)
+        return false;
+
+    const QString trimmed = conditionExpression.trimmed().isEmpty()
+                                ? QStringLiteral("true")
+                                : conditionExpression.trimmed();
+    if (node->conditionExpression == trimmed)
+        return false;
+
+    node->conditionExpression = trimmed;
+    return true;
+}
+
 bool SceneTree::removeVariableById(int variableId)
 {
     if (variableId <= 0)
@@ -225,6 +251,8 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool mo
 
     TreeNode *targetParent = parentGroupId > 0 ? nodeById(&m_root, parentGroupId) : &m_root;
     if (!targetParent || targetParent->type != TreeNode::Group)
+        return false;
+    if (targetParent->operation == TreeNode::Conditional)
         return false;
 
     const TreeNode *node = nodeById(&m_root, nodeId);
@@ -254,6 +282,10 @@ bool SceneTree::moveNode(int nodeId, int parentGroupId, int insertIndex, bool mo
     if (!targetParent || targetParent->type != TreeNode::Group) {
         if (m_root.id <= 0)
             m_root = makeGroupNode(TreeNode::Module);
+        m_root.children.append(movedNode);
+        return false;
+    }
+    if (targetParent->operation == TreeNode::Conditional) {
         m_root.children.append(movedNode);
         return false;
     }
@@ -339,6 +371,8 @@ bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int par
     TreeNode *parent = nodeById(&m_root, parentGroupId);
     if (!parent || parent->type != TreeNode::Group)
         return false;
+    if (parent->operation == TreeNode::Conditional && !parent->children.isEmpty())
+        parent = &parent->children.first();
 
     if (containsPrimitiveShapeId(m_root, shapeId))
         return false;
@@ -695,7 +729,9 @@ void SceneTree::pruneEmptyGroups(TreeNode *node)
             continue;
         pruneEmptyGroups(&child);
         // Never remove the Scene container or Polyhedron groups (they show template buttons when empty).
-        if (child.operation != TreeNode::Scene
+        if (node->operation != TreeNode::Conditional
+            && !child.isElseBranch
+            && child.operation != TreeNode::Scene
             && child.operation != TreeNode::Polyhedron
             && child.children.isEmpty())
             node->children.removeAt(i);
@@ -737,6 +773,13 @@ SceneTree::TreeNode SceneTree::makeGroupNode(TreeNode::Operation operation)
         node.scale = QVector3D(10, 10, 10);
         node.transformExpressions = QStringList({QStringLiteral("[10, 10, 10]")});
     }
+    return node;
+}
+
+SceneTree::TreeNode SceneTree::makeConditionalBranchNode(bool elseBranch)
+{
+    TreeNode node = makeGroupNode(TreeNode::Union);
+    node.isElseBranch = elseBranch;
     return node;
 }
 

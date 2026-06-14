@@ -8,138 +8,362 @@ body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2e
 h1 { border-bottom: 2px solid #4a90d9; padding-bottom: .3em; }
 h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #4a90d9; padding-left: .6em; }
 h3 { color: #34495e; margin-top: 1.5em; }
+p.meta { color: #666; font-size: .9em; margin-top: -.4em; }
 table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
 th { background: #4a90d9; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
-td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
 tr:nth-child(even) { background: #f5f8fc; }
 tr:hover { background: #eaf1f9; }
-.tag-tree { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
-.tag-no-tree { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
-.tag-low { background: #27ae60; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-med { background: #e67e22; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-high { background: #e74c3c; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-vhigh { background: #8e44ad; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.freq-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.freq-dot.very-high { background: #8e44ad; }
-.freq-dot.high { background: #e74c3c; }
-.freq-dot.medium { background: #e67e22; }
-.freq-dot.low { background: #27ae60; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88em; white-space: nowrap; }
+.tag-tree    { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-no-tree { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-done    { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-stub    { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-partial { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-low     { background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-med     { background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-high    { background:#e74c3c; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-vhigh   { background:#8e44ad; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.freq-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
+.freq-dot.very-high { background:#8e44ad; }
+.freq-dot.high      { background:#e74c3c; }
+.freq-dot.medium    { background:#e67e22; }
+.freq-dot.low       { background:#27ae60; }
+.ref-box { background:#eaf1f9; border-left:4px solid #4a90d9; padding:9px 13px; margin:1.2em 0; border-radius:3px; font-size:13.5px; }
 </style>
 </head>
 <body>
 
 <h1>OpenSCAD Syntax Analysis — Tree Implementation Effort</h1>
+<p class="meta">Updated: 12 June 2026</p>
 
+<div class="ref-box">
+This document classifies constructs by <em>architectural layer</em>: expression/parser-only
+versus tree changes required.
+For the phased implementation plan with priorities and toolbar coverage, see
+<a href="openscad_feature_roadmap_en.html">openscad_feature_roadmap_en.html</a>.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Without Tree Changes <span class="tag-no-tree">parse-time / pure eval</span></h2>
-<p>Implemented in <code>expression.h</code> (evaluator) and/or <code>openscadparser.cpp</code> (parser). No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</code> required.</p>
+<p>Implemented in <code>expression.h</code> (evaluator) and/or <code>openscadparser.cpp</code> (parser).
+No new <code>Operation</code>, <code>ShapeNode</code>, or <code>TreeNode::Type</code> required.</p>
 
 <table>
 <thead>
-<tr><th>Syntax</th><th>Where</th><th>Notes</th></tr>
+<tr><th>Syntax</th><th>Status</th><th>Where</th><th>Notes</th></tr>
 </thead>
 <tbody>
-<tr><td><code>assign()</code> inline</td><td>expression.h</td><td>Same as <code>let</code>, in <code>()</code> not <code>{}</code>. Handle at expression parse level</td></tr>
-<tr><td><code>function f(x)=expr;</code></td><td>expression.h + parser</td><td>Store in <code>QHash&lt;QString, FunctionDef&gt;</code>, call on eval. Produces no geometry</td></tr>
-<tr><td>Block comments <code>/* */</code></td><td>lexer / parser</td><td>Pure tokenization — no tree impact</td></tr>
-<tr><td><code>$fn</code>, <code>$fa</code>, <code>$fs</code></td><td>expression.h</td><td>Add as special variables with defaults; preview returns high <code>$fn</code></td></tr>
-<tr><td><code>echo()</code></td><td>parser</td><td>Print or ignore; add to <code>startsWithKnownKeyword</code></td></tr>
-<tr><td><code>assert()</code></td><td>parser</td><td>Same as <code>echo</code>, error if condition false</td></tr>
-<tr><td><code>undef</code></td><td>expression.h</td><td>Treat as <code>NaN</code> or <code>0</code> in arithmetic</td></tr>
-<tr><td><code>rands()</code></td><td>expression.h</td><td>Single random value for preview</td></tr>
-<tr><td><code>norm()</code>, <code>cross()</code></td><td>expression.h</td><td>Vector functions — add to function mapping</td></tr>
-<tr><td><code>len()</code></td><td>expression.h</td><td><code>len([1,2,3]) = 3</code>, <code>len("abc") = 3</code></td></tr>
-<tr><td><code>concat()</code>, <code>lookup()</code></td><td>expression.h</td><td>Limited without list comprehensions</td></tr>
-<tr><td><code>str()</code></td><td>expression.h</td><td>Number/string concatenation</td></tr>
+<tr><td>Ternary operator <code>a ? b : c</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalTernary()</code></td>
+    <td>Fully implemented — evaluates condition, returns true or false branch</td></tr>
+<tr><td>Math functions: <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>sign</code>, <code>abs</code>, <code>sqrt</code>, <code>pow</code>, <code>exp</code>, <code>ln</code>, <code>log</code> (log₁₀), <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>asin</code>, <code>acos</code>, <code>atan</code>, <code>atan2</code>, <code>min</code>, <code>max</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>All fully implemented. Trig correctly uses degrees. <code>log()</code> bug fixed (was returning ln, now log₁₀)</td></tr>
+<tr><td><code>function f(x) = expr;</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>expression.h + parser</td>
+    <td>Definitions stored in <code>functionDefs</code> and called at eval. Recursion not supported</td></tr>
+<tr><td><code>assign(x=…)</code> inline</td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Preprocessed before the main block; lexical scoping not preserved</td></tr>
+<tr><td><code>let(x=…)</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Treated identically to <code>assign</code>; proper scoping requires a context stack</td></tr>
+<tr><td>Block comments <code>/* … */</code></td>
+    <td>—</td>
+    <td>Lexer / parser</td>
+    <td>Pure tokenization — no tree impact</td></tr>
+<tr><td><code>$fn</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
+    <td>Fully wired: stored as a Variable node → read by <code>topLevelVariables()</code> → passed as <code>fn</code> to all mesh builders (sphere, cylinder, cone, circle, rotate_extrude, linear_extrude). 0 means use default segment count.</td></tr>
+<tr><td><code>$fa</code>, <code>$fs</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>expression.h</td>
+    <td>Recognised in expressions with correct defaults (12°, 2mm). Not yet used in mesh builders — when <code>$fn=0</code>, fallback uses hardcoded defaults instead of computing segments from <code>$fa</code>/<code>$fs</code>.</td></tr>
+<tr><td><code>$t</code> (animation)</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h — <code>resolveIdentifier</code></td>
+    <td>Resolves to 0.0 by default; can be set via <code>m_vars</code> for animation playback</td></tr>
+<tr><td><code>echo()</code></td>
+    <td>—</td>
+    <td>parser</td>
+    <td>Print or ignore; add to <code>startsWithKnownKeyword</code></td></tr>
+<tr><td><code>assert()</code></td>
+    <td>—</td>
+    <td>parser</td>
+    <td>Same as <code>echo</code>; error if condition is false</td></tr>
+<tr><td><code>undef</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h</td>
+    <td>Treated as 0 in arithmetic</td></tr>
+<tr><td><code>rands()</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>expression.h</td>
+    <td>Returns a real random value via QRandomGenerator in [lo, hi)</td></tr>
+<tr><td><code>len()</code></td>
+    <td><span class="tag-stub">Stub 0</span></td>
+    <td>expression.h</td>
+    <td>Recognised, returns 0; full implementation requires a vector type</td></tr>
+<tr><td><code>norm()</code>, <code>cross()</code></td>
+    <td><span class="tag-stub">Stub 0</span></td>
+    <td>expression.h</td>
+    <td>Recognised, return 0</td></tr>
+<tr><td>Array subscript <code>arr[i]</code></td>
+    <td><span class="tag-stub">Stub 0</span></td>
+    <td>expression.h</td>
+    <td>Syntax parsed, returns 0; full lookup requires a vector symbol table</td></tr>
+<tr><td><code>concat()</code>, <code>lookup()</code></td>
+    <td>—</td>
+    <td>expression.h</td>
+    <td>Limited value without list comprehensions</td></tr>
+<tr><td><code>str()</code>, <code>chr()</code></td>
+    <td>—</td>
+    <td>expression.h</td>
+    <td>Number/string concatenation; required by <code>text()</code></td></tr>
+<tr><td><code>color()</code> with alpha and named strings</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>parser</td>
+    <td>Fourth alpha parameter and CSS colour names recognised</td></tr>
+<tr><td><code>cube(size=…, center=…)</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>parser</td>
+    <td><code>size=</code> (scalar and vector) and <code>center=true</code> supported</td></tr>
 </tbody>
 </table>
 
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Require Tree Changes <span class="tag-tree">new Operation / ShapeNode</span></h2>
 
 <h3>New Operations — <code>TreeNode::Operation</code></h3>
 <table>
 <thead>
-<tr><th>Syntax</th><th>Required</th><th>Reason</th></tr>
+<tr><th>Syntax</th><th>Status</th><th>Required</th><th>Reason</th></tr>
 </thead>
 <tbody>
-<tr><td><code>resize([x,y,z])</code></td><td><code>Operation::Resize</code></td><td>Stretches AABB to target size. Simulatable with computed Scale, but inexact</td></tr>
-<tr><td><code>offset()</code></td><td><code>Operation::Offset</code></td><td>2D contour transform; needs geometry processing</td></tr>
-<tr><td><code>projection()</code></td><td><code>Operation::Projection</code></td><td>3D→2D, needs rendering pipeline</td></tr>
-<tr><td><code>rotate_extrude()</code></td><td><code>Operation::RotateExtrude</code></td><td>Different extrusion type from <code>linear_extrude</code></td></tr>
-<tr><td><code>render()</code> (convexity)</td><td><code>Operation::Render</code></td><td>Currently flattened; to preserve <code>convexity</code> needs a node</td></tr>
+<tr><td><code>if(cond) { … } else { … }</code></td>
+    <td>—</td>
+    <td><code>Op::Conditional</code> + <code>conditionExpression</code> field</td>
+    <td>Parser evaluates the condition and executes the branch, but no node is created or
+        preserved in the tree. Toolbar icon needed (diamond shape)</td></tr>
+<tr><td><code>offset(r= / delta=)</code></td>
+    <td>—</td>
+    <td><code>Op::Offset</code></td>
+    <td>2D contour transform; two modes: rounded (<code>r=</code>) and chamfered (<code>delta=</code>)</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td>—</td>
+    <td><code>Op::Projection</code></td>
+    <td>3D→2D; needs rendering pipeline</td></tr>
+<tr><td><code>intersection_for()</code></td>
+    <td>—</td>
+    <td><code>Op::IntersectionFor</code></td>
+    <td>Loop variant that intersects all iterations instead of unioning them</td></tr>
+<tr><td><code>multmatrix(m)</code></td>
+    <td>—</td>
+    <td><code>Op::Multmatrix</code> + 4×4 matrix field</td>
+    <td>Arbitrary affine transform; rarely hand-authored</td></tr>
+<tr><td><code>render(convexity=)</code></td>
+    <td>—</td>
+    <td><code>Op::Render</code></td>
+    <td>Currently flattened; to preserve <code>convexity</code> needs a node</td></tr>
+<tr><td><code>rotate_extrude()</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><code>Op::RotateExtrude</code></td>
+    <td>Already implemented</td></tr>
+<tr><td><code>resize([x,y,z])</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><code>Op::Resize</code></td>
+    <td>Already implemented</td></tr>
 </tbody>
 </table>
 
 <h3>New Primitives — <code>ShapeNode::Type</code></h3>
 <table>
 <thead>
-<tr><th>Syntax</th><th>Required</th><th>Reason</th></tr>
+<tr><th>Syntax</th><th>Status</th><th>Required</th><th>Reason</th></tr>
 </thead>
 <tbody>
-<tr><td><code>text()</code></td><td><code>ShapeNode::Text</code></td><td>Font library + mesh generation</td></tr>
-<tr><td><code>import()</code></td><td><code>ShapeNode::ImportedMesh</code></td><td>File I/O, external mesh storage</td></tr>
-<tr><td><code>surface()</code></td><td><code>ShapeNode::Surface</code></td><td>Image/heightmap → mesh</td></tr>
+<tr><td><code>text(text, size, font, …)</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::Text</code></td>
+    <td>Font library + mesh generation; parameters: size, font, halign, valign, direction</td></tr>
+<tr><td><code>import("file")</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::ImportedMesh</code></td>
+    <td>File I/O; external mesh storage (STL/DXF/SVG/AMF)</td></tr>
+<tr><td><code>surface("file.dat")</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::Surface</code></td>
+    <td>Image/heightmap → mesh</td></tr>
 </tbody>
 </table>
 
 <h3>Architectural Changes</h3>
 <table>
 <thead>
-<tr><th>Syntax</th><th>Problem</th></tr>
+<tr><th>Syntax</th><th>Status</th><th>Problem</th></tr>
 </thead>
 <tbody>
-<tr><td><code>children()</code></td><td>Module needs runtime access to its children. Changes the entire render model</td></tr>
-<tr><td>List comprehensions</td><td>Can generate nodes (like <code>for</code>). Parse-time iteration or <code>Operation::ListComprehension</code></td></tr>
-<tr><td><code>use &lt;file&gt;</code></td><td>Multi-file: separate parse + tree merge</td></tr>
-<tr><td><code>include &lt;file&gt;</code></td><td>Same + direct variable import</td></tr>
-<tr><td>Nested modules</td><td>Module-in-module hierarchy; changes <code>ModuleCall</code> resolution</td></tr>
-<tr><td><code>square()</code> with <code>center</code></td><td>Already partially supported (Z=0.1), <code>center</code> ignored; can be added without tree change</td></tr>
+<tr><td><code>children()</code> in modules</td>
+    <td>—</td>
+    <td>Module needs runtime access to passed children.
+        Requires an <code>Op::Children</code> placeholder node and changes to the entire render model</td></tr>
+<tr><td>List comprehensions <code>[for(i=r) e]</code></td>
+    <td>—</td>
+    <td>Can generate nodes (like <code>for</code>). Parse-time iteration (simpler) or
+        an explicit <code>Op::ListComprehension</code> node</td></tr>
+<tr><td><code>use &lt;file&gt;</code></td>
+    <td>—</td>
+    <td>Multi-file: separate parse + tree merge; top-level statements NOT executed</td></tr>
+<tr><td><code>include &lt;file&gt;</code></td>
+    <td>—</td>
+    <td>Same as <code>use</code>, but also imports variables and top-level statements</td></tr>
+<tr><td>Nested modules</td>
+    <td>—</td>
+    <td>Module-in-module hierarchy; changes <code>ModuleCall</code> resolution</td></tr>
 </tbody>
 </table>
 
 <h3>Parameter Extensions to Existing Operations</h3>
 <table>
 <thead>
-<tr><th>Syntax</th><th>Change</th></tr>
+<tr><th>Syntax</th><th>Status</th><th>Change</th></tr>
 </thead>
 <tbody>
-<tr><td><code>linear_extrude</code> <code>twist</code>, <code>slices</code>, <code>scale</code>, <code>center</code></td><td>Parse parameters, pass to <code>LinearExtrudeOperation</code> render</td></tr>
-<tr><td><code>color()</code> with alpha / named strings</td><td>Extend parser; no tree node change</td></tr>
-<tr><td><code>polyhedron()</code> with expressions in <code>points</code>/<code>faces</code></td><td>Parser currently reads literals only</td></tr>
-<tr><td><code>cube(size, center=true)</code></td><td><code>center</code> ignored; can add or keep ignoring</td></tr>
+<tr><td><code>linear_extrude</code>: <code>twist</code>, <code>slices</code>, <code>scale</code>, <code>center</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>Parser reads parameters; TreeNode fields exist (<code>linearExtrudeTwist</code>,
+        <code>linearExtrudeSlices</code>, <code>linearExtrudeCenter</code>); UI does not expose all of them</td></tr>
+<tr><td><code>polyhedron()</code> with expressions in <code>points</code>/<code>faces</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>Vertex expressions evaluated via <code>VecExprEvaluator</code>;
+        complex expressions in <code>faces</code> not supported</td></tr>
+<tr><td><code>polygon()</code> with <code>paths=</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>Outer contour read; inner holes (<code>paths</code>) ignored</td></tr>
+<tr><td><code>rotate_extrude(angle=)</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><code>angle</code> stored in <code>scale.x()</code>; expression in <code>transformExpressions[0]</code></td></tr>
+<tr><td><code>color()</code> with alpha and named strings</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>Implemented</td></tr>
+<tr><td><code>cube(size, center=true)</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>Implemented</td></tr>
 </tbody>
 </table>
 
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Priority Matrix — No Tree Change</h2>
 <table>
 <thead>
-<tr><th>Feature</th><th>Frequency</th><th>Difficulty</th><th>Value</th></tr>
+<tr><th>Feature</th><th>Status</th><th>Frequency</th><th>Difficulty</th><th>Value</th></tr>
 </thead>
 <tbody>
-<tr><td><code>function</code></td><td><span class="freq-dot very-high"></span>Very high</td><td><span class="tag-med">Medium</span></td><td>Unlocks parametric designs</td></tr>
-<tr><td>Block comments</td><td><span class="freq-dot high"></span>High</td><td><span class="tag-low">Low</span></td><td>Removes common annoyance</td></tr>
-<tr><td><code>$fn</code></td><td><span class="freq-dot high"></span>High</td><td><span class="tag-low">Low</span></td><td>Better preview quality</td></tr>
-<tr><td><code>echo</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-low">Low</span></td><td>Debugging</td></tr>
-<tr><td><code>len</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-low">Low</span></td><td>Basic vector introspection</td></tr>
-<tr><td><code>undef</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-low">Low</span></td><td>Closer to real OpenSCAD</td></tr>
-<tr><td><code>norm</code> / <code>cross</code></td><td><span class="freq-dot low"></span>Low</td><td><span class="tag-low">Low</span></td><td>Vector math</td></tr>
-<tr><td><code>rands</code></td><td><span class="freq-dot low"></span>Low</td><td><span class="tag-low">Low</span></td><td>Randomization</td></tr>
-<tr><td><code>str</code> / <code>concat</code></td><td><span class="freq-dot low"></span>Low</td><td><span class="tag-med">Medium</span></td><td>String ops</td></tr>
+<tr><td>Ternary <code>a ? b : c</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><span class="freq-dot very-high"></span>Very high</td>
+    <td>—</td>
+    <td>Fully implemented via <code>evalTernary()</code></td></tr>
+<tr><td>Math functions (sin/cos/floor/abs/sqrt/…)</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><span class="freq-dot very-high"></span>Very high</td>
+    <td>—</td>
+    <td>All implemented; <code>log()</code> bug fixed (log₁₀ not ln)</td></tr>
+<tr><td><code>function f(x)=expr</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td><span class="freq-dot very-high"></span>Very high</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Unlocks parametric design</td></tr>
+<tr><td>Block comments <code>/* */</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>High</td>
+    <td><span class="tag-low">Low</span></td>
+    <td>Removes a common parse failure</td></tr>
+<tr><td><code>$fn</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>High</td>
+    <td><span class="tag-low">Low</span></td>
+    <td>Better curved-surface preview quality</td></tr>
+<tr><td><code>echo</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-low">Low</span></td>
+    <td>Debug output</td></tr>
+<tr><td><code>len</code> (full)</td>
+    <td><span class="tag-stub">Stub</span></td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Vector introspection; requires vector type</td></tr>
+<tr><td><code>str</code> / <code>concat</code></td>
+    <td>—</td>
+    <td><span class="freq-dot low"></span>Low</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>String ops; required by <code>text()</code></td></tr>
 </tbody>
 </table>
 
 <h2>Priority Matrix — Tree Change Required</h2>
 <table>
 <thead>
-<tr><th>Feature</th><th>Frequency</th><th>Difficulty</th><th>Value</th></tr>
+<tr><th>Feature</th><th>Status</th><th>Frequency</th><th>Difficulty</th><th>Value</th></tr>
 </thead>
 <tbody>
-<tr><td><code>rotate_extrude</code></td><td><span class="freq-dot high"></span>High</td><td><span class="tag-med">Medium</span></td><td>Lathe-like shapes</td></tr>
-<tr><td><code>resize</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-low">Low</span></td><td>Practical transform</td></tr>
-<tr><td><code>text</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-high">High</span></td><td>Labeling/engraving</td></tr>
-<tr><td><code>linear_extrude</code> params</td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-med">Medium</span></td><td>Twisted extrusions</td></tr>
-<tr><td><code>children()</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-vhigh">Very high</span></td><td>Reusable modules</td></tr>
-<tr><td><code>use</code> / <code>include</code></td><td><span class="freq-dot high"></span>High</td><td><span class="tag-high">High</span></td><td>Multi-file projects</td></tr>
-<tr><td><code>import</code></td><td><span class="freq-dot medium"></span>Medium</td><td><span class="tag-med">Medium</span></td><td>External STL</td></tr>
+<tr><td><code>if / else</code> node + toolbar</td>
+    <td>—</td>
+    <td><span class="freq-dot very-high"></span>Very high</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Present in almost every file; currently silently dropped from the tree</td></tr>
+<tr><td><code>offset()</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>High</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Core 2D workflow: square → offset → linear_extrude</td></tr>
+<tr><td><code>rotate_extrude</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><span class="freq-dot high"></span>High</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Implemented</td></tr>
+<tr><td><code>resize</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-low">Low</span></td>
+    <td>Implemented</td></tr>
+<tr><td><code>text</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-high">High</span></td>
+    <td>Labelling and engraving</td></tr>
+<tr><td><code>linear_extrude</code> full params</td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>Twisted/scaled extrusions in toolbar</td></tr>
+<tr><td><code>children()</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-vhigh">Very high</span></td>
+    <td>Reusable parametric wrapper modules</td></tr>
+<tr><td><code>use</code> / <code>include</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>High</td>
+    <td><span class="tag-high">High</span></td>
+    <td>Multi-file projects</td></tr>
+<tr><td><code>import</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-med">Medium</span></td>
+    <td>External STL files</td></tr>
+<tr><td>List comprehensions</td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Medium</td>
+    <td><span class="tag-vhigh">Very high</span></td>
+    <td>Required for gear/thread/spring libraries</td></tr>
 </tbody>
 </table>
 

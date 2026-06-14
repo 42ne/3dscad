@@ -47,6 +47,11 @@ QString toolbarToolTip(const QString &tool)
                 "For loop\n"
                 "Drop into the scene, groups, transforms, or module bodies; then drop repeated objects inside it.");
         }
+        if (operation == SceneDocument::TreeNode::Conditional) {
+            return QStringLiteral(
+                "If / else block\n"
+                "Drop into the scene, groups, loops, or module bodies; then drop objects into the true or else branch.");
+        }
         if (operation == SceneDocument::TreeNode::Color) {
             return QStringLiteral(
                 "Color group\n"
@@ -187,6 +192,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Color;
         return true;
     }
+    if (normalized == QStringLiteral("if") || normalized == QStringLiteral("conditional")) {
+        *operation = SceneDocument::TreeNode::Conditional;
+        return true;
+    }
     return false;
 }
 
@@ -210,6 +219,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::For, "for", QColor(236, 232, 205), GroupWideMinWidth},
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
+    {SceneDocument::TreeNode::Conditional, "if", QColor(232, 228, 248), GroupWideMinWidth},
 };
 
 } // namespace

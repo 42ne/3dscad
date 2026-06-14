@@ -166,6 +166,9 @@ void SceneTreeInlineEditor::startInlineExpressionEdit(const SceneTreeGraphicsWid
                     emit m_widget->polyhedronFaceParticipationAdjusted(target.nodeId, target.secondaryId, newPos);
                 break;
             }
+            case SceneTreeGraphicsWidget::ExpressionEditTarget::Condition:
+                emit m_widget->conditionExpressionEdited(target.nodeId, newExpression);
+                break;
             case SceneTreeGraphicsWidget::ExpressionEditTarget::None:
                 break;
             }

@@ -441,6 +441,13 @@ void paintOperationIcon(QPainter *painter,
         painter->setFont(forFont);
         painter->setPen(QColor(210, 222, 238));
         painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("for"));
+    } else if (operation == SceneDocument::TreeNode::Conditional) {
+        QFont ifFont = painter->font();
+        ifFont.setBold(true);
+        ifFont.setPointSizeF(qMax<qreal>(7.5, ifFont.pointSizeF()));
+        painter->setFont(ifFont);
+        painter->setPen(QColor(180, 170, 230));
+        painter->drawText(symbolRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("if"));
     } else if (operation == SceneDocument::TreeNode::Color) {
         QLinearGradient swatch(symbolRect.topLeft(), symbolRect.bottomRight());
         swatch.setColorAt(0.0, QColor(255, 235, 126));

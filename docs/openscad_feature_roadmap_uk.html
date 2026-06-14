@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Дорожня карта підтримки функцій OpenSCAD</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1060px; margin: 2em auto; padding: 0 1.2em; background: #fafafa; color: #222; line-height: 1.55; }
+h1 { border-bottom: 2px solid #1a7a6e; padding-bottom: .35em; color: #111; }
+h2 { color: #1a5c54; margin-top: 2.2em; border-left: 4px solid #1a7a6e; padding-left: .65em; }
+h3 { color: #2c5f5a; margin-top: 1.5em; font-size: 1.05em; }
+p.meta { color: #666; margin-top: -.5em; font-size: .92em; }
+table { border-collapse: collapse; width: 100%; margin: .8em 0 2em 0; font-size: 13.5px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #1a5c54; color: white; padding: 9px 11px; text-align: left; font-weight: 600; }
+td { padding: 8px 11px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f4f9f8; }
+tr:hover { background: #e6f4f2; }
+code { background: #e6eeec; padding: 1px 5px; border-radius: 3px; font-size: .88em; white-space: nowrap; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
+pre code { background: transparent; padding: 0; white-space: pre; }
+.tag-done     { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-partial  { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-no       { display:inline-block; background:#c0392b; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-na       { display:inline-block; background:#95a5a6; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.phase-label  { display:inline-block; background:#1a5c54; color:#fff; border-radius:3px; padding:2px 10px; font-size:12px; font-weight:700; margin-right:7px; }
+.info-box  { background:#e8f5f3; border-left:4px solid #1a7a6e; padding:10px 14px; margin:1em 0; border-radius:3px; font-size:13.5px; }
+.warn-box  { background:#fef9ec; border-left:4px solid #e67e22; padding:10px 14px; margin:1em 0; border-radius:3px; font-size:13.5px; }
+ul,ol { padding-left:1.6em; }
+li { margin:.3em 0; }
+hr { border:none; border-top:1px solid #ddd; margin:2em 0; }
+</style>
+</head>
+<body>
+
+<h1>Дорожня карта підтримки функцій OpenSCAD</h1>
+<p class="meta">Стан: 12 червня 2026 &nbsp;·&nbsp; Проєкт: 3DScad візуальний редактор</p>
+
+<p>Цей документ відстежує кожну конструкцію мови OpenSCAD і показує поточний рівень підтримки
+на трьох рівнях: <strong>парсер</strong> (чи може текст бути прочитаний?),
+<strong>вузол дерева</strong> (чи є <code>TreeNode::Operation</code> або <code>ShapeNode::Type</code>?)
+та <strong>панель інструментів</strong> (чи може користувач перетягнути елемент у сцену?).</p>
+
+<div class="info-box">
+<strong>Позначення:</strong>
+<span class="tag-done">✓ Є</span> повністю реалізовано &nbsp;
+<span class="tag-partial">~ Частково</span> реалізовано неповністю &nbsp;
+<span class="tag-no">✗ Відсутнє</span> не реалізовано &nbsp;
+<span class="tag-na">—</span> не застосовується
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2>Поточна підтримка (зріз стану)</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Парсер</th><th>Вузол дерева</th><th>Toolbar</th></tr></thead>
+<tbody>
+<tr><td><code>cube()</code>, <code>sphere()</code>, <code>cylinder()</code>, <code>cone()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>circle()</code>, <code>square()</code>, <code>polygon()</code> (базовий)</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>polyhedron()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>union()</code>, <code>difference()</code>, <code>intersection()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>hull()</code>, <code>minkowski()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>translate()</code>, <code>rotate()</code>, <code>scale()</code>, <code>mirror()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>color()</code>, <code>resize()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>linear_extrude()</code>, <code>rotate_extrude()</code></td>
+    <td><span class="tag-partial">~ Частково</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>for()</code> цикл</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td>Оголошення і виклик <code>module</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td>Змінні — скалярні та векторні</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td>Ланцюжок трансформів в один рядок <code>rotate(a)translate([…])cube(…)</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-na">—</span></td></tr>
+<tr><td>Скорочений запис без дужок <code>if(c)stmt</code>, <code>assign(x=…)…</code></td>
+    <td><span class="tag-partial">~ Частково</span></td><td><span class="tag-no">✗</span></td><td><span class="tag-no">✗</span></td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 1</span> Критично важливі мовні конструкції</h2>
+<p>Ці конструкції присутні практично в кожному нетривіальному файлі OpenSCAD.
+Відсутня підтримка призводить до суттєвих прогалин у покритті парсером.</p>
+
+<!-- ─── if/else ─────────────────────────────────────────────────────── -->
+<h3>1.1 — Умовний вузол <code>if / else</code></h3>
+<table>
+<thead><tr><th>Рівень</th><th>Стан</th><th>Деталі</th></tr></thead>
+<tbody>
+<tr><td>Парсер</td><td><span class="tag-partial">~ Частково</span></td>
+    <td>Обидві форми (з дужками і без) парсяться; умова обчислюється і вибирається
+        відповідна гілка. Проте конструкція зникає з дерева — як вузол вона не зберігається.</td></tr>
+<tr><td>Вузол дерева</td><td><span class="tag-no">✗ Відсутнє</span></td>
+    <td>Немає <code>Op::Conditional</code> в перечисленні <code>SceneTree::TreeNode::Operation</code>;
+        немає поля <code>conditionExpression</code>; немає концепції else-гілки.</td></tr>
+<tr><td>Панель інструментів</td><td><span class="tag-no">✗ Відсутнє</span></td>
+    <td>Немає кнопки на toolbar; не визначені правила drag-drop-слотів.</td></tr>
+</tbody>
+</table>
+<p><strong>План реалізації:</strong></p>
+<ol>
+  <li>Додати <code>Op::Conditional</code> в перечислення <code>SceneTree::TreeNode::Operation</code>.</li>
+  <li>Додати поле <code>QString conditionExpression</code> до <code>TreeNode</code>.</li>
+  <li>Домовленість: перша дочірня група = гілка true; друга дочірня група (опціонально) = гілка else.
+      Використовувати прапорець <code>bool isElseBranch</code> на дочірньому Group-вузлі.</li>
+  <li>Парсер: замість обчислення і переходу — створювати Conditional-вузол і заповнювати
+      обидві дочірні групи з дерева розбору.</li>
+  <li>Генератор коду: виводити <code>if (cond) { … } else { … }</code>.</li>
+  <li>Рендерер дерева: відображати текст умови в заголовку картки ("if (x &gt; 0)").</li>
+  <li>Іконка toolbar: ромб — класичний символ рішення у блок-схемах.</li>
+</ol>
+<pre><code>// цільове представлення в дереві:
+if (show_base) {            // → Conditional, conditionExpression = "show_base"
+    cube([50, 50, 5]);      //   дочірня група [0] = гілка true
+} else {
+    cylinder(r=25, h=5);    //   дочірня група [1] = гілка else (опціонально)
+}
+</code></pre>
+
+<!-- ─── ternary ───────────────────────────────────────────────────── -->
+<h3>1.2 — Тернарний оператор <code>a ? b : c</code></h3>
+<table>
+<thead><tr><th>Рівень</th><th>Стан</th><th>Деталі</th></tr></thead>
+<tbody>
+<tr><td>Обчислювач виразів (<code>expression.h</code>)</td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><code>evalTernary()</code> повністю реалізовано — обчислює умову, повертає
+        відповідну гілку (true або false). Працює для будь-яких числових виразів.</td></tr>
+<tr><td>Дерево / toolbar</td><td><span class="tag-na">—</span></td>
+    <td>Вбудований у вирази; окремий вузол не потрібен.</td></tr>
+</tbody>
+</table>
+
+<!-- ─── math functions ───────────────────────────────────────────── -->
+<h3>1.3 — Повна реалізація математичних функцій</h3>
+<table>
+<thead><tr><th>Група функцій</th><th>Стан</th><th>Функції</th></tr></thead>
+<tbody>
+<tr><td>Округлення</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>floor()</code>, <code>ceil()</code>, <code>round()</code>, <code>sign()</code></td></tr>
+<tr><td>Тригонометрія (градуси)</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>sin()</code>, <code>cos()</code>, <code>tan()</code>, <code>asin()</code>,
+        <code>acos()</code>, <code>atan()</code>, <code>atan2()</code> — коректно використовують градуси</td></tr>
+<tr><td>Арифметика</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>abs()</code>, <code>sqrt()</code>, <code>pow()</code>, <code>exp()</code>,
+        <code>ln()</code> (натур. лог). <code>log()</code> виправлено — тепер log₁₀.</td></tr>
+<tr><td>Межі (варіадичні)</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>min(…)</code>, <code>max(…)</code> — приймають 2+ аргументи</td></tr>
+<tr><td>Випадкові числа</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>rands(lo, hi)</code> — справжній random через QRandomGenerator</td></tr>
+<tr><td>Анімація</td><td><span class="tag-done">✓ Є</span></td>
+    <td><code>$t</code> — повертає 0.0 за замовчуванням, можна задати через <code>m_vars</code></td></tr>
+<tr><td>Векторні</td><td><span class="tag-partial">~ Повертає 0</span></td>
+    <td><code>len()</code>, <code>norm()</code>, <code>cross()</code> — заглушки; потребують типу вектора</td></tr>
+<tr><td>Рядкові / misc заглушки</td><td><span class="tag-partial">~ Наближено</span></td>
+    <td><code>str()</code> → перший аргумент, <code>concat()</code> → кількість аргументів, <code>lookup(k,t)</code> → ключ</td></tr>
+</tbody>
+</table>
+
+<!-- ─── let scoping ──────────────────────────────────────────────── -->
+<h3>1.4 — Правильна область видимості <code>let()</code></h3>
+<table>
+<thead><tr><th>Рівень</th><th>Стан</th><th>Деталі</th></tr></thead>
+<tbody>
+<tr><td>Парсер</td><td><span class="tag-partial">~ Частково</span></td>
+    <td>Обробляється ідентично <code>assign()</code>: записує в таблицю змінних рівня модуля
+        і не відновлює значення після виходу з блоку. Лексична область видимості не зберігається.</td></tr>
+<tr><td>Дерево / toolbar</td><td><span class="tag-na">—</span></td>
+    <td>OpenSCAD <code>let</code> — конструкція рівня виразу; окремий вузол дерева не потрібен.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 2</span> Нові примітиви</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Парсер</th><th>Тип ShapeNode</th><th>Toolbar</th><th>Примітки</th></tr></thead>
+<tbody>
+<tr><td><code>text(text, size, font, …)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗ Тип Text відсутній</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>2D примітив; потребує параметрів font, size, halign, valign, direction.
+        Дуже поширений для підписів і шильдиків.</td></tr>
+<tr><td><code>import("file.stl")</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Імпорт файлів STL / DXF / SVG / AMF; шлях до файлу зберігається як рядковий параметр.</td></tr>
+<tr><td><code>surface("file.dat")</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Поверхня-висотна карта; низький пріоритет, рідко використовується інтерактивно.</td></tr>
+<tr><td><code>polygon()</code> з параметром <code>paths=</code></td>
+    <td><span class="tag-partial">~ Базово</span></td>
+    <td><span class="tag-partial">~ Без отворів</span></td>
+    <td><span class="tag-partial">~ Без paths UI</span></td>
+    <td>Параметр <code>paths</code> визначає внутрішні отвори / підконтури; поточна реалізація
+        зберігає лише зовнішній список точок.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 3</span> Нові групові операції для toolbar</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Парсер</th><th>Дерево (<code>Op::</code>)</th><th>Toolbar</th><th>Примітки</th></tr></thead>
+<tbody>
+<tr><td><code>offset(r= / delta=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Тільки 2D; два режими: закруглений (<code>r=</code>) і зрізаний (<code>delta=</code>).
+        Основний елемент 2D-процесу: square → offset → linear_extrude.</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Проєктує 3D-тіло на 2D-площину; <code>cut=true</code> дає переріз.</td></tr>
+<tr><td><code>multmatrix(m)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Трансформ через матрицю 4×4. Рідко пишеться вручну; середній пріоритет.</td></tr>
+<tr><td><code>render(convexity=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Примусове обчислення CSG; покращує точність попереднього перегляду. Низький пріоритет.</td></tr>
+<tr><td><code>intersection_for()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Різновид циклу, що перетинає всі ітерації замість об'єднання.</td></tr>
+</tbody>
+</table>
+
+<div class="warn-box"><strong>Примітка про <code>offset</code>:</strong> реалізація потребує нового
+значення <code>Op::Offset</code> в перечисленні, нового float-поля для <code>r</code>/<code>delta</code>,
+прапорця <code>round</code> та іконки toolbar. Патерн square → offset → linear_extrude зустрічається
+дуже часто — практична цінність висока.</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 4</span> Розширення системи модулів</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Парсер</th><th>Дерево</th><th>Примітки</th></tr></thead>
+<tbody>
+<tr><td><code>children()</code> всередині модуля</td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Дозволяє модулю передавати дочірні об'єкти; основа параметричних обгорток.
+        Потребує вузла-заповнювача <code>Op::Children</code>.</td></tr>
+<tr><td>Спеціальна змінна <code>$children</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-na">—</span></td>
+    <td>Ціла кількість дочірніх об'єктів модуля; використовується разом із
+        <code>for(i=[0:$children-1])</code>.</td></tr>
+<tr><td><code>use &lt;file.scad&gt;</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Імпортує визначення модулів без виконання операторів верхнього рівня.
+        Потребує доступу до файлової системи і рекурсивного парсингу.</td></tr>
+<tr><td><code>include &lt;file.scad&gt;</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Як <code>use</code>, але також виконує оператори верхнього рівня.</td></tr>
+<tr><td>Рекурсивні виклики модулів</td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Потребує обмежувача глибини рекурсії. Низький пріоритет.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 5</span> Спеціальні змінні та модифікатори налагодження</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Стан</th><th>Примітки</th></tr></thead>
+<tbody>
+<tr><td><code>$fn</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>Повністю підключено: парситься → Variable-вузол → <code>topLevelVariables()</code> → mesh-builders.
+        Сфера/циліндр/конус/коло/rotate_extrude/linear_extrude — всі підтримують <code>$fn</code>.</td></tr>
+<tr><td><code>$fa</code>, <code>$fs</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>Розпізнаються у виразах з правильними дефолтами (12°, 2mm). Mesh-builders не обчислюють
+        кількість сегментів з <code>$fa</code>/<code>$fs</code> при <code>$fn=0</code> — використовуються hardcoded дефолти.</td></tr>
+<tr><td>Анімаційна змінна <code>$t</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>Повертає 0.0 за замовчуванням через <code>resolveIdentifier</code>; може бути задано через
+        <code>m_vars</code>. Підключення до таймлайну viewport — окрема задача.</td></tr>
+<tr><td><code>$vpr</code>, <code>$vpt</code>, <code>$vpd</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Орієнтація/зміщення/відстань viewport. Рідко використовується у моделях для друку.</td></tr>
+<tr><td>Модифікатор <code>%</code> (фон)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Показує об'єкт напівпрозорим привидом; виключається з рендеру.</td></tr>
+<tr><td>Модифікатор <code>#</code> (налагодження)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Підсвічує об'єкт у попередньому перегляді незалежно від операції батьківського вузла.</td></tr>
+<tr><td>Модифікатор <code>!</code> (корінь)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Рендерить лише позначений об'єкт, ігноруючи решту файлу.</td></tr>
+<tr><td>Модифікатор <code>*</code> (вимкнення)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Виключає позначений об'єкт із рендеру.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Фаза 6</span> Розширені можливості виразів</h2>
+
+<table>
+<thead><tr><th>Функція</th><th>Стан</th><th>Примітки</th></tr></thead>
+<tbody>
+<tr><td>Генератори списків <code>[for(i=r) expr]</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Використовуються для динамічної побудови масивів точок polygon/polyhedron;
+        дуже поширені в параметричних бібліотеках шестерень і різьб.</td></tr>
+<tr><td>Векторні функції: <code>concat()</code>, <code>each</code>, <code>sum()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Потрібні для динамічного конструювання списків точок.</td></tr>
+<tr><td>Тип рядка та <code>str()</code>, <code>chr()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Потрібні для <code>text()</code> та <code>echo()</code>.</td></tr>
+<tr><td><code>assert(cond, message)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Перевірка на етапі проєктування; парсер може тихо ігнорувати або логувати.</td></tr>
+<tr><td><code>echo(…)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Налагоджувальний вивід; парсер може тихо ігнорувати.</td></tr>
+<tr><td>Індексування масиву з нелітеральним індексом</td>
+    <td><span class="tag-partial">~ Повертає 0</span></td>
+    <td><code>arr[i]</code> розпізнається і повертає 0; повний пошук у векторі потребує
+        таблиці символів для векторних значень в обчислювачі виразів.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2>Пріоритети (зведена таблиця)</h2>
+
+<table>
+<thead><tr><th>#</th><th>Функція</th><th>Фаза</th><th>Чому важливо</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Вузол <code>if / else</code> + іконка на toolbar</td><td>1</td>
+    <td>Присутній майже в кожному файлі; наразі тихо зникає з дерева</td></tr>
+<tr><td>2</td><td>Тернарний оператор <code>a ? b : c</code></td><td>1</td>
+    <td><span class="tag-done">✓ Є</span> — <code>evalTernary()</code> повністю реалізовано</td></tr>
+<tr><td>3</td><td>Математичні функції (<code>sin/cos/floor/abs/…</code>)</td><td>1</td>
+    <td><span class="tag-done">✓ Є</span> — вся тригонометрія, округлення, арифметика реалізовані; баг <code>log</code> виправлено</td></tr>
+<tr><td>4</td><td>Примітив <code>text()</code></td><td>2</td>
+    <td>Великий попит; потрібен для будь-якого друку з підписами</td></tr>
+<tr><td>5</td><td>Група <code>offset()</code></td><td>3</td>
+    <td>Основний 2D-процес: square → offset → linear_extrude</td></tr>
+<tr><td>6</td><td><code>children()</code> у модулях</td><td>4</td>
+    <td>Вмикає параметричні модулі-обгортки; наразі всі такі модулі не дають дерева</td></tr>
+<tr><td>7</td><td>Примітив <code>import()</code></td><td>2</td>
+    <td>Потрібен для інтеграції наявних STL-деталей</td></tr>
+<tr><td>8</td><td>Група <code>projection()</code></td><td>3</td>
+    <td>Вмикає процес експорту в DXF</td></tr>
+<tr><td>9</td><td>Генератори списків</td><td>6</td>
+    <td>Необхідні для коректного парсингу бібліотек шестерень/різьб/пружин</td></tr>
+<tr><td>10</td><td>Директиви <code>use / include</code></td><td>4</td>
+    <td>Багатофайлові проєкти; потребують рекурсивного парсера + доступу до ФС</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

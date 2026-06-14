@@ -745,6 +745,29 @@ static void appendTreeHelpers(CsgPreview *preview,
         return;
     }
 
+    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
+
+    if (node.operation == SceneDocument::TreeNode::Conditional) {
+        const QString cond = node.conditionExpression.trimmed();
+        qreal condVal = 0.0;
+        const bool condTrue = cond.isEmpty()
+            || (ExpressionSyntax::evaluate(cond, localVariables, &condVal, nullptr) && condVal != 0.0);
+        const SceneDocument::TreeNode *branch =
+            condTrue ? (node.children.size() > 0 ? &node.children[0] : nullptr)
+                     : (node.children.size() > 1 ? &node.children[1] : nullptr);
+        if (branch) {
+            const bool branchContainer = branch->type == SceneDocument::TreeNode::Group
+                                         && branch->operation == SceneDocument::TreeNode::Union;
+            if (branchContainer) {
+                for (const SceneDocument::TreeNode &child : branch->children)
+                    appendTreeHelpers(preview, scene, child, inheritedMode, localVariables, groupStack, {}, ownerTreeNodeId, inheritedColor, helperItems);
+            } else {
+                appendTreeHelpers(preview, scene, *branch, inheritedMode, localVariables, groupStack, {}, ownerTreeNodeId, inheritedColor, helperItems);
+            }
+        }
+        return;
+    }
+
     if (node.operation == SceneDocument::TreeNode::For) {
         QVector<qreal> values;
         const QString variableName = node.loopVariable.trimmed().isEmpty()
@@ -765,7 +788,6 @@ static void appendTreeHelpers(CsgPreview *preview,
         return;
     }
 
-    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
     groupStack.append(evaluatedNode);
 
@@ -1140,6 +1162,7 @@ struct TreeCapabilities
     bool hasBoolean    = false; // Difference or Intersection group anywhere in tree
     bool hasTransform  = false; // non-trivial Translate/Rotate/Scale/Mirror/Hull/Minkowski
     bool hasFor        = false; // For group anywhere in tree
+    bool hasConditional = false; // Conditional (if/else) group anywhere in tree
     bool hasModuleCall = false; // ModuleCall node anywhere in tree
     bool hasColor      = false; // Color group anywhere in tree
     bool hasPolyhedron = false; // Polyhedron group anywhere in tree
@@ -1160,7 +1183,7 @@ static bool hasScaleValue(const QVector3D &vector)
 static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCapabilities &caps)
 {
     // Early exit once every flag is set — no point descending further.
-    if (caps.hasBoolean && caps.hasTransform && caps.hasFor && caps.hasModuleCall && caps.hasColor && caps.hasPolyhedron)
+    if (caps.hasBoolean && caps.hasTransform && caps.hasFor && caps.hasConditional && caps.hasModuleCall && caps.hasColor && caps.hasPolyhedron)
         return;
 
     if (node.type == SceneDocument::TreeNode::ModuleCall) {
@@ -1190,6 +1213,9 @@ static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCap
             break;
         case SceneDocument::TreeNode::For:
             caps.hasFor = true;
+            break;
+        case SceneDocument::TreeNode::Conditional:
+            caps.hasConditional = true;
             break;
         case SceneDocument::TreeNode::Color:
             caps.hasColor = true;
@@ -1251,12 +1277,13 @@ CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId)
 
     TreeCapabilities caps;
     collectTreeCapabilities(scene.treeRoot(), caps);
-    const bool hasTreeBoolean    = caps.hasBoolean;
-    const bool hasGroupTransform = caps.hasTransform;
-    const bool hasForOperation   = caps.hasFor;
-    const bool hasModuleCall     = caps.hasModuleCall;
-    const bool hasColorOperation = caps.hasColor;
-    const bool hasPolyhedron     = caps.hasPolyhedron;
+    const bool hasTreeBoolean      = caps.hasBoolean;
+    const bool hasGroupTransform   = caps.hasTransform;
+    const bool hasForOperation     = caps.hasFor;
+    const bool hasConditional      = caps.hasConditional;
+    const bool hasModuleCall       = caps.hasModuleCall;
+    const bool hasColorOperation   = caps.hasColor;
+    const bool hasPolyhedron       = caps.hasPolyhedron;
 
     bool hasModuleDeclaration = false;
     for (const SceneDocument::TreeNode &child : scene.treeRoot().children) {
@@ -1269,7 +1296,7 @@ CsgPreview buildCsgPreview(const SceneDocument &scene, int selectedGroupId)
     if ((hasColorOperation || hasPolyhedron) && !hasTreeBoolean && !hasModuleDeclaration && !shapes.isEmpty())
         return buildColoredTreePreview(scene);
 
-    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasModuleCall || hasModuleDeclaration || hasColorOperation || hasPolyhedron) && !shapes.isEmpty()) {
+    if ((hasTreeBoolean || hasGroupTransform || hasForOperation || hasConditional || hasModuleCall || hasModuleDeclaration || hasColorOperation || hasPolyhedron) && !shapes.isEmpty()) {
         SceneMesh manifoldMesh;
         QString manifoldError;
         if (buildManifoldCsgMesh(scene, &manifoldMesh, &manifoldError)) {

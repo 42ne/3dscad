@@ -185,6 +185,11 @@ QSizeF previewSizeForTool(const QString &tool)
                                                  QStringLiteral("[0 : 1 : 3]"),
                                                  QFontMetricsF(sceneTreeGraphicsFont()))),
                       GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "if")
+        return QSizeF(qMax(GroupWideMinWidth,
+                           conditionHeaderMinWidth(QStringLiteral("true"),
+                                                   QFontMetricsF(sceneTreeGraphicsFont()))),
+                      GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "linear_extrude")
         return QSizeF(qMax(GroupWideMinWidth,
                            linearExtrudeHeaderMinWidth(QStringLiteral("20"),

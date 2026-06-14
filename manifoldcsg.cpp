@@ -268,6 +268,35 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return evaluateNode(*module, scene, variables, resolveModuleArguments(node.moduleCallArguments, *module));
     }
 
+    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
+
+    if (node.operation == SceneDocument::TreeNode::Conditional) {
+        const QString cond = node.conditionExpression.trimmed();
+        qreal condVal = 0.0;
+        const bool condTrue = cond.isEmpty()
+            || (ExpressionSyntax::evaluate(cond, localVariables, &condVal, nullptr) && condVal != 0.0);
+        const SceneDocument::TreeNode *branch =
+            condTrue ? (node.children.size() > 0 ? &node.children[0] : nullptr)
+                     : (node.children.size() > 1 ? &node.children[1] : nullptr);
+        if (!branch)
+            return {};
+        const bool branchContainer = branch->type == SceneDocument::TreeNode::Group
+                                     && branch->operation == SceneDocument::TreeNode::Union;
+        if (!branchContainer)
+            return evaluateNode(*branch, scene, localVariables);
+        if (branch->children.isEmpty())
+            return {};
+        Manifold result;
+        bool hasResult = false;
+        for (const SceneDocument::TreeNode &child : branch->children) {
+            if (child.type == SceneDocument::TreeNode::Variable) continue;
+            const Manifold childResult = evaluateNode(child, scene, localVariables);
+            if (!hasResult) { result = childResult; hasResult = true; }
+            else result += childResult;
+        }
+        return result;
+    }
+
     if (node.operation == SceneDocument::TreeNode::For) {
         QVector<qreal> values;
         const QString variableName = node.loopVariable.trimmed().isEmpty()
@@ -301,7 +330,6 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         return result;
     }
 
-    const QHash<QString, qreal> localVariables = variablesWithScopedVariables(node, variables, moduleArgumentOverrides);
     const SceneDocument::TreeNode evaluatedNode = nodeWithEvaluatedTransform(node, localVariables);
 
     QVector<const SceneDocument::TreeNode *> geometryChildren;

@@ -90,6 +90,9 @@ QRectF forLoopRangeTextRect(const QRectF &groupRect, const QString &variableName
 qreal forLoopHeaderMinWidth(const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionTextSpan> forLoopRangeTextSpans(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
 QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupRect, const QString &variableName, const QString &rangeExpression, const QFontMetricsF &metrics);
+QString conditionExpression(const SceneDocument::TreeNode &node);
+QRectF conditionExpressionTextRect(const QRectF &groupRect, const QString &conditionExpression, const QFontMetricsF &metrics);
+qreal conditionHeaderMinWidth(const QString &conditionExpression, const QFontMetricsF &metrics);
 QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node);
 QString linearExtrudeParam(const SceneDocument::TreeNode &node, int index, const QString &fallback);
 QString linearExtrudeExtraParams(const SceneDocument::TreeNode &node);

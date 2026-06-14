@@ -487,6 +487,36 @@ QVector<ExpressionNumberControl> forLoopRangeNumberControls(const QRectF &groupR
     return controls;
 }
 
+QString conditionExpression(const SceneDocument::TreeNode &node)
+{
+    const QString condition = node.conditionExpression.trimmed();
+    return condition.isEmpty() ? QStringLiteral("true") : condition;
+}
+
+QRectF conditionExpressionTextRect(const QRectF &groupRect,
+                                   const QString &conditionExpression,
+                                   const QFontMetricsF &metrics)
+{
+    const qreal headerIconSize = PrimitiveIconSize - 4.0;
+    const qreal textLeft = groupRect.left() + 30.0 + headerIconSize + 10.0;
+    const qreal prefixW = metrics.horizontalAdvance(QStringLiteral("if ("));
+    const QString condition = conditionExpression.trimmed().isEmpty()
+                                  ? QStringLiteral("true")
+                                  : conditionExpression.trimmed();
+    const qreal condWidth = qMax<qreal>(20.0, metrics.horizontalAdvance(condition) + 8.0);
+    return QRectF(textLeft + prefixW, groupRect.top() + 5.0, condWidth, 20.0);
+}
+
+qreal conditionHeaderMinWidth(const QString &conditionExpression, const QFontMetricsF &metrics)
+{
+    const QString condition = conditionExpression.trimmed().isEmpty()
+                                  ? QStringLiteral("true")
+                                  : conditionExpression.trimmed();
+    const QRectF measureRect(0.0, 0.0, 2048.0, GroupHeaderHeight);
+    const QRectF condRect = conditionExpressionTextRect(measureRect, condition, metrics);
+    return condRect.right() + metrics.horizontalAdvance(QStringLiteral(")")) + 36.0;
+}
+
 QString linearExtrudeHeightExpression(const SceneDocument::TreeNode &node)
 {
     if (!node.transformExpressions.isEmpty()) {

@@ -194,6 +194,8 @@ static void serializeTreeNode(QDataStream &ds, const SceneDocument::TreeNode &no
        << node.transformExpressions
        << node.loopVariable
        << node.loopRangeExpression
+       << node.conditionExpression
+       << static_cast<quint8>(node.isElseBranch)
        << node.color.rgba()
        << node.moduleName
        << node.moduleCallArguments;

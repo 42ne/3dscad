@@ -465,6 +465,11 @@ bool SceneDocument::updateForLoop(int groupId, const QString &loopVariable, cons
     return true;
 }
 
+bool SceneDocument::updateConditionExpression(int groupId, const QString &conditionExpression)
+{
+    return m_tree.updateConditionExpression(groupId, conditionExpression);
+}
+
 void SceneDocument::reEvaluateDependentVariables(int changedId)
 {
     // Collect variable ids in tree order so upstream definitions propagate forward.

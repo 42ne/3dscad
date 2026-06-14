@@ -8,138 +8,362 @@ body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 2e
 h1 { border-bottom: 2px solid #4a90d9; padding-bottom: .3em; }
 h2 { color: #2c3e50; margin-top: 2em; border-left: 4px solid #4a90d9; padding-left: .6em; }
 h3 { color: #34495e; margin-top: 1.5em; }
+p.meta { color: #666; font-size: .9em; margin-top: -.4em; }
 table { border-collapse: collapse; width: 100%; margin: 1em 0 2em 0; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
 th { background: #4a90d9; color: white; padding: 10px 12px; text-align: left; font-weight: 600; }
-td { padding: 8px 12px; border-bottom: 1px solid #ddd; }
+td { padding: 8px 12px; border-bottom: 1px solid #ddd; vertical-align: top; }
 tr:nth-child(even) { background: #f5f8fc; }
 tr:hover { background: #eaf1f9; }
-.tag-tree { display: inline-block; background: #27ae60; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
-.tag-no-tree { display: inline-block; background: #e67e22; color: white; border-radius: 3px; padding: 1px 6px; font-size: 11px; font-weight: 600; }
-.tag-low { background: #27ae60; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-med { background: #e67e22; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-high { background: #e74c3c; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.tag-vhigh { background: #8e44ad; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; }
-.freq-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-.freq-dot.very-high { background: #8e44ad; }
-.freq-dot.high { background: #e74c3c; }
-.freq-dot.medium { background: #e67e22; }
-.freq-dot.low { background: #27ae60; }
+code { background: #e8e8e8; padding: 1px 5px; border-radius: 3px; font-size: .88em; white-space: nowrap; }
+.tag-tree    { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-no-tree { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-done    { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-stub    { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-partial { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; font-weight:600; }
+.tag-low     { background:#27ae60; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-med     { background:#e67e22; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-high    { background:#e74c3c; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.tag-vhigh   { background:#8e44ad; color:#fff; border-radius:3px; padding:1px 6px; font-size:11px; }
+.freq-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
+.freq-dot.very-high { background:#8e44ad; }
+.freq-dot.high      { background:#e74c3c; }
+.freq-dot.medium    { background:#e67e22; }
+.freq-dot.low       { background:#27ae60; }
+.ref-box { background:#eaf1f9; border-left:4px solid #4a90d9; padding:9px 13px; margin:1.2em 0; border-radius:3px; font-size:13.5px; }
 </style>
 </head>
 <body>
 
 <h1>Аналіз синтаксису OpenSCAD — оцінка реалізації в дереві</h1>
+<p class="meta">Оновлено: 12 червня 2026</p>
 
+<div class="ref-box">
+Цей документ класифікує конструкції за <em>архітектурним рівнем</em> реалізації:
+<em>вираз/парсер</em> проти <em>зміни дерева</em>.
+Для фазового плану з пріоритетами та колонкою toolbar — дивіться
+<a href="openscad_feature_roadmap_uk.html">openscad_feature_roadmap_uk.html</a>.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Без змін дерева <span class="tag-no-tree">parse-time / pure eval</span></h2>
-<p>Реалізується в <code>expression.h</code> (евалюатор) та/або <code>openscadparser.cpp</code> (парсер). Не потребує нових <code>Operation</code>, <code>ShapeNode</code> або <code>TreeNode::Type</code>.</p>
+<p>Реалізується в <code>expression.h</code> (евалюатор) та/або <code>openscadparser.cpp</code> (парсер).
+Не потребує нових <code>Operation</code>, <code>ShapeNode</code> або <code>TreeNode::Type</code>.</p>
 
 <table>
 <thead>
-<tr><th>Синтаксис</th><th>Де реалізувати</th><th>Примітка</th></tr>
+<tr><th>Синтаксис</th><th>Стан</th><th>Де реалізувати</th><th>Примітка</th></tr>
 </thead>
 <tbody>
-<tr><td><code>assign()</code> inline</td><td>expression.h</td><td>Те саме що <code>let</code>, тільки в <code>()</code> а не <code>{}</code>. На рівні парсингу виразу</td></tr>
-<tr><td><code>function f(x)=expr;</code></td><td>expression.h + parser</td><td>Зберегти в <code>QHash&lt;QString, FunctionDef&gt;</code>, викликати при eval. Не створює геометрії</td></tr>
-<tr><td>Block коментарі <code>/* */</code></td><td>lexer / parser</td><td>Чисто токенізація — дерево не змінюється</td></tr>
-<tr><td><code>$fn</code>, <code>$fa</code>, <code>$fs</code></td><td>expression.h</td><td>Додати як спеціальні змінні з дефолтами; для preview повертати велике <code>$fn</code></td></tr>
-<tr><td><code>echo()</code></td><td>parser</td><td>Друкувати або ігнорувати; додати в <code>startsWithKnownKeyword</code></td></tr>
-<tr><td><code>assert()</code></td><td>parser</td><td>Аналогічно <code>echo</code>, помилка якщо умова false</td></tr>
-<tr><td><code>undef</code></td><td>expression.h</td><td>Обробляти як <code>NaN</code> або 0 в арифметиці</td></tr>
-<tr><td><code>rands()</code></td><td>expression.h</td><td>Одне випадкове значення для preview</td></tr>
-<tr><td><code>norm()</code>, <code>cross()</code></td><td>expression.h</td><td>Векторні функції — додати в маппінг</td></tr>
-<tr><td><code>len()</code></td><td>expression.h</td><td><code>len([1,2,3]) = 3</code>, <code>len("abc") = 3</code></td></tr>
-<tr><td><code>concat()</code>, <code>lookup()</code></td><td>expression.h</td><td>Обмежено без list comprehensions</td></tr>
-<tr><td><code>str()</code></td><td>expression.h</td><td>Конкатенація чисел/рядків</td></tr>
+<tr><td>Тернарний оператор <code>a ? b : c</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalTernary()</code></td>
+    <td>Повністю реалізовано — обчислює умову, повертає відповідну гілку</td></tr>
+<tr><td>Математичні функції: <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>sign</code>, <code>abs</code>, <code>sqrt</code>, <code>pow</code>, <code>exp</code>, <code>ln</code>, <code>log</code> (log₁₀), <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>asin</code>, <code>acos</code>, <code>atan</code>, <code>atan2</code>, <code>min</code>, <code>max</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>evalFunctionCall</code></td>
+    <td>Всі реалізовано. Тригонометрія коректно в градусах. Баг <code>log()</code> виправлено (було ln, стало log₁₀)</td></tr>
+<tr><td><code>function f(x) = expr;</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>expression.h + parser</td>
+    <td>Визначення зберігаються в <code>functionDefs</code> і викликаються при eval. Рекурсія не підтримується</td></tr>
+<tr><td><code>assign(x=…)</code> inline</td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Обробляється як препроцесорне розгортання перед основним блоком; лексична область видимості не зберігається</td></tr>
+<tr><td><code>let(x=…)</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>openscadparser.cpp</td>
+    <td>Ідентично <code>assign</code>; правильний scoping потребує стека контекстів</td></tr>
+<tr><td>Блочні коментарі <code>/* … */</code></td>
+    <td>—</td>
+    <td>Лексер / parser</td>
+    <td>Чисто токенізація — дерево не змінюється</td></tr>
+<tr><td><code>$fn</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h + scenemesh.cpp + manifoldcsg.cpp</td>
+    <td>Повністю підключено: зберігається як Variable-вузол → читається через <code>topLevelVariables()</code> → передається як <code>fn</code> у всі mesh-builders (sphere, cylinder, cone, circle, rotate_extrude, linear_extrude). 0 = стандартна кількість сегментів.</td></tr>
+<tr><td><code>$fa</code>, <code>$fs</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>expression.h</td>
+    <td>Розпізнаються у виразах з правильними дефолтами (12°, 2mm). В mesh-builders не використовуються — при <code>$fn=0</code> кількість сегментів береться з hardcoded дефолтів, а не обчислюється через <code>$fa</code>/<code>$fs</code>.</td></tr>
+<tr><td><code>$t</code> (анімація)</td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h — <code>resolveIdentifier</code></td>
+    <td>Повертає 0.0 за замовчуванням; можна задати через <code>m_vars</code> для анімаційного відтворення</td></tr>
+<tr><td><code>echo()</code></td>
+    <td>—</td>
+    <td>parser</td>
+    <td>Вивести або ігнорувати; додати в <code>startsWithKnownKeyword</code></td></tr>
+<tr><td><code>assert()</code></td>
+    <td>—</td>
+    <td>parser</td>
+    <td>Аналогічно <code>echo</code>; помилка якщо умова false</td></tr>
+<tr><td><code>undef</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h</td>
+    <td>Обробляється як 0 в арифметиці</td></tr>
+<tr><td><code>rands()</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>expression.h</td>
+    <td>Повертає справжнє випадкове число через QRandomGenerator у діапазоні [lo, hi)</td></tr>
+<tr><td><code>len()</code></td>
+    <td><span class="tag-stub">Заглушка 0</span></td>
+    <td>expression.h</td>
+    <td>Розпізнається, повертає 0; правильна реалізація потребує векторного типу</td></tr>
+<tr><td><code>norm()</code>, <code>cross()</code></td>
+    <td><span class="tag-stub">Заглушка 0</span></td>
+    <td>expression.h</td>
+    <td>Розпізнаються, повертають 0</td></tr>
+<tr><td>Індексування масиву <code>arr[i]</code></td>
+    <td><span class="tag-stub">Заглушка 0</span></td>
+    <td>expression.h</td>
+    <td>Синтаксис розпізнається, повертає 0; повна реалізація потребує векторної таблиці символів</td></tr>
+<tr><td><code>concat()</code>, <code>lookup()</code></td>
+    <td>—</td>
+    <td>expression.h</td>
+    <td>Обмежена корисність без list comprehensions</td></tr>
+<tr><td><code>str()</code>, <code>chr()</code></td>
+    <td>—</td>
+    <td>expression.h</td>
+    <td>Конкатенація чисел/рядків; потрібна для <code>text()</code></td></tr>
+<tr><td><code>color()</code> з альфою і рядками імен</td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>parser</td>
+    <td>Четвертий параметр альфи і рядкові імена кольорів розпізнаються</td></tr>
+<tr><td><code>cube(size=…, center=…)</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>parser</td>
+    <td>Параметри <code>size=</code> (скалярний та векторний) і <code>center=true</code> підтримуються</td></tr>
 </tbody>
 </table>
 
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Потребують змін дерева <span class="tag-tree">нові Operation / ShapeNode</span></h2>
 
 <h3>Нові операції — <code>TreeNode::Operation</code></h3>
 <table>
 <thead>
-<tr><th>Синтаксис</th><th>Потрібен</th><th>Чому</th></tr>
+<tr><th>Синтаксис</th><th>Стан</th><th>Потрібно</th><th>Чому</th></tr>
 </thead>
 <tbody>
-<tr><td><code>resize([x,y,z])</code></td><td><code>Operation::Resize</code></td><td>Розтягує AABB до цільового розміру. Можна зімітувати Scale з обчисленими факторами, але неточно</td></tr>
-<tr><td><code>offset()</code></td><td><code>Operation::Offset</code></td><td>2D трансформація контуру; потребує geometry processing</td></tr>
-<tr><td><code>projection()</code></td><td><code>Operation::Projection</code></td><td>3D→2D, потребує рендеру</td></tr>
-<tr><td><code>rotate_extrude()</code></td><td><code>Operation::RotateExtrude</code></td><td>Інший тип екструзії, відмінний від <code>linear_extrude</code></td></tr>
-<tr><td><code>render()</code> (convexity)</td><td><code>Operation::Render</code></td><td>Зараз флатенується; щоб зберігати <code>convexity</code> треба ноду</td></tr>
+<tr><td><code>if(cond) { … } else { … }</code></td>
+    <td>—</td>
+    <td><code>Op::Conditional</code> + поле <code>conditionExpression</code></td>
+    <td>Парсер обчислює умову і виконує гілку, але вузол не створюється і не зберігається в дереві. Потрібна іконка toolbar (ромб)</td></tr>
+<tr><td><code>offset(r= / delta=)</code></td>
+    <td>—</td>
+    <td><code>Op::Offset</code></td>
+    <td>2D трансформація контуру; r= (закруглений) / delta= (зрізаний)</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td>—</td>
+    <td><code>Op::Projection</code></td>
+    <td>3D→2D; потребує рендеру</td></tr>
+<tr><td><code>intersection_for()</code></td>
+    <td>—</td>
+    <td><code>Op::IntersectionFor</code></td>
+    <td>Варіант циклу з перетином ітерацій замість об'єднання</td></tr>
+<tr><td><code>multmatrix(m)</code></td>
+    <td>—</td>
+    <td><code>Op::Multmatrix</code> + 4×4 матриця</td>
+    <td>Довільний афінний трансформ; рідко пишеться вручну</td></tr>
+<tr><td><code>render(convexity=)</code></td>
+    <td>—</td>
+    <td><code>Op::Render</code></td>
+    <td>Зараз ігнорується; щоб зберігати <code>convexity</code> треба вузол</td></tr>
+<tr><td><code>rotate_extrude()</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><code>Op::RotateExtrude</code></td>
+    <td>Вже реалізовано</td></tr>
+<tr><td><code>resize([x,y,z])</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><code>Op::Resize</code></td>
+    <td>Вже реалізовано</td></tr>
 </tbody>
 </table>
 
 <h3>Нові примітиви — <code>ShapeNode::Type</code></h3>
 <table>
 <thead>
-<tr><th>Синтаксис</th><th>Потрібен</th><th>Чому</th></tr>
+<tr><th>Синтаксис</th><th>Стан</th><th>Потрібно</th><th>Чому</th></tr>
 </thead>
 <tbody>
-<tr><td><code>text()</code></td><td><code>ShapeNode::Text</code></td><td>Бібліотека шрифтів + генерація mesh</td></tr>
-<tr><td><code>import()</code></td><td><code>ShapeNode::ImportedMesh</code></td><td>Файловий ввід/вивід, зберігання зовнішньої mesh</td></tr>
-<tr><td><code>surface()</code></td><td><code>ShapeNode::Surface</code></td><td>Зображення → heightmap → mesh</td></tr>
+<tr><td><code>text(text, size, font, …)</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::Text</code></td>
+    <td>Бібліотека шрифтів + генерація mesh; параметри: size, font, halign, valign, direction</td></tr>
+<tr><td><code>import("file")</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::ImportedMesh</code></td>
+    <td>Файловий ввід; зберігання зовнішньої mesh (STL/DXF/SVG/AMF)</td></tr>
+<tr><td><code>surface("file.dat")</code></td>
+    <td>—</td>
+    <td><code>ShapeNode::Surface</code></td>
+    <td>Зображення → heightmap → mesh</td></tr>
 </tbody>
 </table>
 
 <h3>Архітектурні зміни</h3>
 <table>
 <thead>
-<tr><th>Синтаксис</th><th>Проблема</th></tr>
+<tr><th>Синтаксис</th><th>Стан</th><th>Проблема</th></tr>
 </thead>
 <tbody>
-<tr><td><code>children()</code></td><td>Модуль повинен мати доступ до своїх дітей в момент рендеру. Зміна всієї моделі рендеру</td></tr>
-<tr><td>List comprehensions</td><td>Можуть генерувати набір нод (як <code>for</code>). Або ітерувати в парсері, або додати <code>Operation::ListComprehension</code></td></tr>
-<tr><td><code>use &lt;file&gt;</code></td><td>Багатофайловість: окремий парсинг + merge дерева</td></tr>
-<tr><td><code>include &lt;file&gt;</code></td><td>Те саме + прямий імпорт змінних</td></tr>
-<tr><td>Вкладені модулі</td><td>Ієрархія module-в-module, зміна резолюції <code>ModuleCall</code></td></tr>
-<tr><td><code>square()</code> з <code>center</code></td><td>Вже частково (Z=0.1), але <code>center</code> ігнорується; можна додати без tree</td></tr>
+<tr><td><code>children()</code> в модулях</td>
+    <td>—</td>
+    <td>Модуль повинен мати доступ до переданих дітей під час рендеру.
+        Потребує вузла-заповнювача <code>Op::Children</code> і зміни всієї моделі рендеру</td></tr>
+<tr><td>List comprehensions <code>[for(i=r) e]</code></td>
+    <td>—</td>
+    <td>Генерують набір нод (як <code>for</code>). Або ітерувати в парсері (простіше),
+        або додати <code>Op::ListComprehension</code></td></tr>
+<tr><td><code>use &lt;file&gt;</code></td>
+    <td>—</td>
+    <td>Багатофайловість: окремий парсинг + merge дерева; без виконання top-level операторів</td></tr>
+<tr><td><code>include &lt;file&gt;</code></td>
+    <td>—</td>
+    <td>Те саме + прямий імпорт змінних і top-level операторів</td></tr>
+<tr><td>Вкладені модулі</td>
+    <td>—</td>
+    <td>Ієрархія module-в-module; зміна резолюції <code>ModuleCall</code></td></tr>
 </tbody>
 </table>
 
 <h3>Розширення параметрів існуючих операцій</h3>
 <table>
 <thead>
-<tr><th>Синтаксис</th><th>Зміна</th></tr>
+<tr><th>Синтаксис</th><th>Стан</th><th>Зміна</th></tr>
 </thead>
 <tbody>
-<tr><td><code>linear_extrude</code> <code>twist</code>, <code>slices</code>, <code>scale</code>, <code>center</code></td><td>Парсити параметри й передавати в рендер <code>LinearExtrudeOperation</code></td></tr>
-<tr><td><code>color()</code> з альфою / рядками імен</td><td>Розширити парсер; без зміни типів нод</td></tr>
-<tr><td><code>polyhedron()</code> з виразами в <code>points</code>/<code>faces</code></td><td>Парсер зараз читає тільки літерали</td></tr>
-<tr><td><code>cube(size, center=true)</code></td><td><code>center</code> ігнорується; можна додати параметр або продовжити ігнорувати</td></tr>
+<tr><td><code>linear_extrude</code>: <code>twist</code>, <code>slices</code>, <code>scale</code>, <code>center</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>Парсер читає параметри; поля в TreeNode існують (<code>linearExtrudeTwist</code>,
+        <code>linearExtrudeSlices</code>, <code>linearExtrudeCenter</code>); UI не показує всі параметри</td></tr>
+<tr><td><code>polyhedron()</code> з виразами в <code>points</code>/<code>faces</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>Вирази у вершинах обчислюються через <code>VecExprEvaluator</code>;
+        складні вирази в <code>faces</code> не підтримуються</td></tr>
+<tr><td><code>polygon()</code> з параметром <code>paths=</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td>Зовнішній контур читається; внутрішні отвори (<code>paths</code>) ігноруються</td></tr>
+<tr><td><code>rotate_extrude(angle=)</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>Параметр <code>angle</code> зберігається в <code>scale.x()</code>;
+        вираз — в <code>transformExpressions[0]</code></td></tr>
+<tr><td><code>color()</code> з альфою і рядками імен</td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>Реалізовано</td></tr>
+<tr><td><code>cube(size, center=true)</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td>Реалізовано</td></tr>
 </tbody>
 </table>
 
+<!-- ══════════════════════════════════════════════════════════════════════ -->
 <h2>Пріоритетна матриця — без змін дерева</h2>
 <table>
 <thead>
-<tr><th>Функція</th><th>Частота</th><th>Складність</th><th>Користь</th></tr>
+<tr><th>Функція</th><th>Стан</th><th>Частота</th><th>Складність</th><th>Користь</th></tr>
 </thead>
 <tbody>
-<tr><td><code>function</code></td><td><span class="freq-dot very-high"></span>Дуже висока</td><td><span class="tag-med">Середня</span></td><td>Відкриває параметричний дизайн</td></tr>
-<tr><td>Block коментарі</td><td><span class="freq-dot high"></span>Висока</td><td><span class="tag-low">Низька</span></td><td>Прибирає поширену проблему</td></tr>
-<tr><td><code>$fn</code></td><td><span class="freq-dot high"></span>Висока</td><td><span class="tag-low">Низька</span></td><td>Краща якість preview</td></tr>
-<tr><td><code>echo</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-low">Низька</span></td><td>Відлагодження</td></tr>
-<tr><td><code>len</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-low">Низька</span></td><td>Базова інтроспекція векторів</td></tr>
-<tr><td><code>undef</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-low">Низька</span></td><td>Ближче до реального OpenSCAD</td></tr>
-<tr><td><code>norm</code> / <code>cross</code></td><td><span class="freq-dot low"></span>Низька</td><td><span class="tag-low">Низька</span></td><td>Векторна математика</td></tr>
-<tr><td><code>rands</code></td><td><span class="freq-dot low"></span>Низька</td><td><span class="tag-low">Низька</span></td><td>Рандомізація</td></tr>
-<tr><td><code>str</code> / <code>concat</code></td><td><span class="freq-dot low"></span>Низька</td><td><span class="tag-med">Середня</span></td><td>Рядкові операції</td></tr>
+<tr><td>Тернарний <code>a ? b : c</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><span class="freq-dot very-high"></span>Дуже висока</td>
+    <td>—</td>
+    <td>Повністю реалізовано через <code>evalTernary()</code></td></tr>
+<tr><td>Мат. функції (sin/cos/floor/abs/sqrt/…)</td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><span class="freq-dot very-high"></span>Дуже висока</td>
+    <td>—</td>
+    <td>Всі реалізовані; виправлено баг <code>log()</code> (log₁₀ замість ln)</td></tr>
+<tr><td><code>function f(x)=expr</code></td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td><span class="freq-dot very-high"></span>Дуже висока</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Відкриває параметричний дизайн</td></tr>
+<tr><td>Блочні коментарі <code>/* */</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>Висока</td>
+    <td><span class="tag-low">Низька</span></td>
+    <td>Прибирає часту проблему парсингу</td></tr>
+<tr><td><code>$fn</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>Висока</td>
+    <td><span class="tag-low">Низька</span></td>
+    <td>Краща якість preview кривих поверхонь</td></tr>
+<tr><td><code>echo</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-low">Низька</span></td>
+    <td>Відлагодження</td></tr>
+<tr><td><code>len</code> (повна реалізація)</td>
+    <td><span class="tag-stub">Заглушка</span></td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Базова інтроспекція векторів; потребує векторного типу</td></tr>
+<tr><td><code>str</code> / <code>concat</code></td>
+    <td>—</td>
+    <td><span class="freq-dot low"></span>Низька</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Рядкові операції; потрібні для <code>text()</code></td></tr>
 </tbody>
 </table>
 
 <h2>Пріоритетна матриця — зі зміною дерева</h2>
 <table>
 <thead>
-<tr><th>Функція</th><th>Частота</th><th>Складність</th><th>Користь</th></tr>
+<tr><th>Функція</th><th>Стан</th><th>Частота</th><th>Складність</th><th>Користь</th></tr>
 </thead>
 <tbody>
-<tr><td><code>rotate_extrude</code></td><td><span class="freq-dot high"></span>Висока</td><td><span class="tag-med">Середня</span></td><td>Токарні форми</td></tr>
-<tr><td><code>resize</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-low">Низька</span></td><td>Практичний трансформ</td></tr>
-<tr><td><code>text</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-high">Висока</span></td><td>Маркування/гравіювання</td></tr>
-<tr><td><code>linear_extrude</code> параметри</td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-med">Середня</span></td><td>Екструзії з крутінням</td></tr>
-<tr><td><code>children()</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-vhigh">Дуже висока</span></td><td>Перевикористовувані модулі</td></tr>
-<tr><td><code>use</code> / <code>include</code></td><td><span class="freq-dot high"></span>Висока</td><td><span class="tag-high">Висока</span></td><td>Багатофайлові проєкти</td></tr>
-<tr><td><code>import</code></td><td><span class="freq-dot medium"></span>Середня</td><td><span class="tag-med">Середня</span></td><td>Зовнішні STL</td></tr>
+<tr><td><code>if / else</code> вузол + toolbar</td>
+    <td>—</td>
+    <td><span class="freq-dot very-high"></span>Дуже висока</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Присутній майже в кожному файлі; наразі тихо зникає з дерева</td></tr>
+<tr><td><code>offset()</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>Висока</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Основний 2D-процес: square → offset → linear_extrude</td></tr>
+<tr><td><code>rotate_extrude</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><span class="freq-dot high"></span>Висока</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Реалізовано</td></tr>
+<tr><td><code>resize</code></td>
+    <td><span class="tag-done">✓ Є</span></td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-low">Низька</span></td>
+    <td>Реалізовано</td></tr>
+<tr><td><code>text</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-high">Висока</span></td>
+    <td>Маркування/гравіювання</td></tr>
+<tr><td><code>linear_extrude</code> повні параметри</td>
+    <td><span class="tag-partial">~ Частково</span></td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Екструзії з twist/scale в toolbar</td></tr>
+<tr><td><code>children()</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-vhigh">Дуже висока</span></td>
+    <td>Перевикористовувані параметричні модулі</td></tr>
+<tr><td><code>use</code> / <code>include</code></td>
+    <td>—</td>
+    <td><span class="freq-dot high"></span>Висока</td>
+    <td><span class="tag-high">Висока</span></td>
+    <td>Багатофайлові проєкти</td></tr>
+<tr><td><code>import</code></td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-med">Середня</span></td>
+    <td>Зовнішні STL</td></tr>
+<tr><td>List comprehensions</td>
+    <td>—</td>
+    <td><span class="freq-dot medium"></span>Середня</td>
+    <td><span class="tag-vhigh">Дуже висока</span></td>
+    <td>Потрібні для бібліотек шестерень/різьб</td></tr>
 </tbody>
 </table>
 

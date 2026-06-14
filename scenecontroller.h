@@ -108,6 +108,7 @@ public:
                                            int start, int length, qreal delta);
     void handleModuleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void handleForLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
+    void handleConditionExpressionEdited(int nodeId, const QString &expression);
     void handleCtrlReleased();
     void handlePolyhedronAddPoint(int groupNodeId);
     void handlePolyhedronAddFace(int groupNodeId);

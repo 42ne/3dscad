@@ -2147,6 +2147,16 @@ void SceneController::handleForLoopRangeAdjusted(int nodeId, int start, int leng
 
 // ── Graphics-tree: ctrl released ─────────────────────────────────────────────
 
+void SceneController::handleConditionExpressionEdited(int nodeId, const QString &expression)
+{
+    auto *command = new UpdateConditionExpressionCommand(&m_scene, nodeId, expression,
+                                                         [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+    m_ctrlHighlight.active = false;
+    emit ctrlHighlightChanged();
+}
+
 void SceneController::handleCtrlReleased()
 {
     m_ctrlHighlight.active = false;

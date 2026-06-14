@@ -44,7 +44,8 @@ public:
             LinearExtrude,
             RotateExtrude, // rotate_extrude(angle=360); angle stored in scale.x()
             Resize,     // resize([x,y,z]) or resize([x,y,z], auto=[x,y,z]); newsize in scale
-            Scene // top-level container; flattened in code generation, never emitted as a block
+            Scene, // top-level container; flattened in code generation, never emitted as a block
+            Conditional // if/else; conditionExpression holds condition; children[0]=true branch, children[1]=else branch (isElseBranch=true)
         };
 
         int id = 0;
@@ -69,6 +70,8 @@ public:
         QStringList transformExpressions; // 3 entries (x,y,z) for Translate/Rotate/Scale
         QString loopVariable = QStringLiteral("i");
         QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
+        QString conditionExpression;  // for Conditional nodes
+        bool isElseBranch = false;    // marks the else-child of a Conditional node
 
         // Resize parameters
         QVector3D resizeAuto = QVector3D(0, 0, 0); // auto=[x,y,z], 0 means not set
@@ -98,6 +101,7 @@ public:
     bool setModuleName(int groupId, const QString &name);
     bool renameVariable(int variableId, const QString &newName);
     bool setVariableIsParameter(int variableId, bool isParameter);
+    bool updateConditionExpression(int groupId, const QString &conditionExpression);
     bool moveNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
     bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
@@ -140,6 +144,7 @@ private:
     void pruneEmptyGroups(TreeNode *node);
 
     TreeNode makeGroupNode(TreeNode::Operation operation);
+    TreeNode makeConditionalBranchNode(bool elseBranch);
     TreeNode makePrimitiveNode(int shapeId);
     TreeNode makeVariableNode(const QString &name, const QString &expression, qreal value);
     TreeNode makeModuleCallNode(int moduleGroupId, const QString &moduleName, const QString &arguments = QString());

@@ -396,6 +396,10 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
             return QStringLiteral("%1\nClick: edit whole expression\nHold Ctrl + mouse wheel: change individual numbers")
                 .arg(expressionTarget.label);
         }
+        if (expressionTarget.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Condition) {
+            return QStringLiteral("%1\nClick: edit the if condition")
+                .arg(expressionTarget.label);
+        }
         return QStringLiteral("%1 expression\nClick: edit the full value after =\nEnter: apply; Esc: cancel")
             .arg(expressionTarget.label);
     }
@@ -1320,6 +1324,56 @@ bool SceneTreeHoverManager::expressionEditTargetAt(const QPointF &scenePosition,
                     }
                     return true;
                 }
+            }
+        }
+    }
+
+    {
+        const SceneTreeLayout::GroupHitArea *bestConditional = nullptr;
+        int bestConditionalNodeId = 0;
+        QString bestConditionalExpression;
+        for (const SceneTreeLayout::GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
+            if (area.collapsed || !area.rect.contains(scenePosition)) {
+                continue;
+            }
+            int conditionalNodeId = 0;
+            QString expr;
+            const SceneDocument::TreeNode *node = m_widget->m_scene->treeNodeById(area.groupId);
+            if (node && node->operation == SceneDocument::TreeNode::Conditional) {
+                conditionalNodeId = node->id;
+                expr = conditionExpression(*node);
+            } else if (node && node->operation == SceneDocument::TreeNode::Union && !node->isElseBranch) {
+                int parentId = 0;
+                int childIndex = -1;
+                if (SceneDocument::findChildParent(m_widget->m_scene->treeRoot(), node->id, &parentId, &childIndex)
+                    && childIndex == 0) {
+                    const SceneDocument::TreeNode *parent = m_widget->m_scene->treeNodeById(parentId);
+                    if (parent && parent->operation == SceneDocument::TreeNode::Conditional) {
+                        conditionalNodeId = parent->id;
+                        expr = conditionExpression(*parent);
+                    }
+                }
+            }
+            if (conditionalNodeId == 0)
+                continue;
+            if (!bestConditional || area.depth > bestConditional->depth) {
+                bestConditional = &area;
+                bestConditionalNodeId = conditionalNodeId;
+                bestConditionalExpression = expr;
+            }
+        }
+        if (bestConditional) {
+            const QRectF editRect = conditionExpressionTextRect(bestConditional->rect, bestConditionalExpression, metrics);
+            if (editRect.adjusted(-2.0, -1.5, 2.0, 1.5).contains(scenePosition)) {
+                if (target) {
+                    target->kind = SceneTreeGraphicsWidget::ExpressionEditTarget::Condition;
+                    target->hoverRect = editRect;
+                    target->editRect = editRect;
+                    target->label = QStringLiteral("If condition");
+                    target->expression = bestConditionalExpression;
+                    target->nodeId = bestConditionalNodeId;
+                }
+                return true;
             }
         }
     }

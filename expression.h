@@ -559,6 +559,20 @@ private:
                 }
             }
 
+            // Array/vector subscript: expr[idx] — returns 0 as placeholder
+            skipSpaces();
+            while (!atEnd() && m_text[m_pos] == QLatin1Char('[')) {
+                ++m_pos; // consume '['
+                qreal idx = 0.0;
+                evalExpression(&idx); // consume index expression (result ignored)
+                skipSpaces();
+                if (atEnd() || m_text[m_pos] != QLatin1Char(']'))
+                    return setError(QStringLiteral("Expected ']'"));
+                ++m_pos; // consume ']'
+                value = 0.0; // placeholder: array element access
+                skipSpaces();
+            }
+
             if (logicalNot)
                 value = (value == 0.0) ? 1.0 : 0.0;
             if (negate)
@@ -593,6 +607,10 @@ private:
             }
             if (name == QStringLiteral("$fs")) {
                 *result = m_vars.value(name, 2.0);
+                return true;
+            }
+            if (name == QStringLiteral("$t")) {
+                *result = m_vars.value(name, 0.0); // animation time 0..1, default 0
                 return true;
             }
             if (name.compare(QStringLiteral("undef"), Qt::CaseInsensitive) == 0) {
@@ -695,7 +713,7 @@ private:
             if (name.compare(QStringLiteral("log"), Qt::CaseInsensitive) == 0) {
                 if (args.size() != 1) return setError(QStringLiteral("log() expects 1 argument"));
                 if (a0 <= 0.0) return setError(QStringLiteral("log() of non-positive number"));
-                *result = qLn(a0);
+                *result = std::log10(a0); // OpenSCAD log() is log base-10, not natural log
                 return true;
             }
             if (name.compare(QStringLiteral("ln"), Qt::CaseInsensitive) == 0) {
@@ -735,6 +753,19 @@ private:
             if (name.compare(QStringLiteral("lookup"), Qt::CaseInsensitive) == 0) {
                 // lookup(key, table) — interpolation; return key as-is for preview.
                 *result = a0;
+                return true;
+            }
+            if (name.compare(QStringLiteral("len"), Qt::CaseInsensitive) == 0) {
+                // len(v) — array/vector length; return 0 as placeholder (arrays not tracked).
+                *result = 0.0;
+                return true;
+            }
+            if (name.compare(QStringLiteral("norm"), Qt::CaseInsensitive) == 0) {
+                *result = 0.0;
+                return true;
+            }
+            if (name.compare(QStringLiteral("cross"), Qt::CaseInsensitive) == 0) {
+                *result = 0.0;
                 return true;
             }
             if (m_fns) {

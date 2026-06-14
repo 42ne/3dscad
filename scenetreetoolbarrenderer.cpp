@@ -43,6 +43,7 @@ QStringList paletteTools()
         QStringLiteral("module"),
         QStringLiteral("var"),
         QStringLiteral("for"),
+        QStringLiteral("if"),
         // ── 2-D splines → extrusions ──────────────────────────────────────────
         QStringLiteral("circle"),
         QStringLiteral("square"),

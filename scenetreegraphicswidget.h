@@ -102,6 +102,7 @@ signals:
                                     int start, int length, qreal delta);
     void moduleCallArgumentExpressionEdited(int moduleCallId, int parameterVariableId, const QString &expression);
     void forLoopRangeAdjusted(int nodeId, int start, int length, qreal delta);
+    void conditionExpressionEdited(int nodeId, const QString &expression);
     void ctrlReleased();
     void moduleRenameRequested(int groupId, const QString &newName);
     void variableRenameRequested(int variableId, const QString &newName);

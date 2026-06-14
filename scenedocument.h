@@ -66,6 +66,7 @@ public:
     bool updateVariableExpression(int variableId, const QString &expression);
     bool updateModuleCallArgument(int moduleCallId, const QString &parameterName, const QString &expression);
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
+    bool updateConditionExpression(int groupId, const QString &conditionExpression);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
     bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,

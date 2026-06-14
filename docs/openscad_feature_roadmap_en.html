@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OpenSCAD Feature Support Roadmap</title>
+<style>
+body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1060px; margin: 2em auto; padding: 0 1.2em; background: #fafafa; color: #222; line-height: 1.55; }
+h1 { border-bottom: 2px solid #1a7a6e; padding-bottom: .35em; color: #111; }
+h2 { color: #1a5c54; margin-top: 2.2em; border-left: 4px solid #1a7a6e; padding-left: .65em; }
+h3 { color: #2c5f5a; margin-top: 1.5em; font-size: 1.05em; }
+p.meta { color: #666; margin-top: -.5em; font-size: .92em; }
+table { border-collapse: collapse; width: 100%; margin: .8em 0 2em 0; font-size: 13.5px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+th { background: #1a5c54; color: white; padding: 9px 11px; text-align: left; font-weight: 600; }
+td { padding: 8px 11px; border-bottom: 1px solid #ddd; vertical-align: top; }
+tr:nth-child(even) { background: #f4f9f8; }
+tr:hover { background: #e6f4f2; }
+code { background: #e6eeec; padding: 1px 5px; border-radius: 3px; font-size: .88em; white-space: nowrap; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
+pre code { background: transparent; padding: 0; white-space: pre; }
+.tag-done     { display:inline-block; background:#27ae60; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-partial  { display:inline-block; background:#e67e22; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-no       { display:inline-block; background:#c0392b; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.tag-na       { display:inline-block; background:#95a5a6; color:#fff; border-radius:3px; padding:1px 7px; font-size:11px; font-weight:700; white-space:nowrap; }
+.phase-label  { display:inline-block; background:#1a5c54; color:#fff; border-radius:3px; padding:2px 10px; font-size:12px; font-weight:700; margin-right:7px; }
+.info-box  { background:#e8f5f3; border-left:4px solid #1a7a6e; padding:10px 14px; margin:1em 0; border-radius:3px; font-size:13.5px; }
+.warn-box  { background:#fef9ec; border-left:4px solid #e67e22; padding:10px 14px; margin:1em 0; border-radius:3px; font-size:13.5px; }
+ul,ol { padding-left:1.6em; }
+li { margin:.3em 0; }
+hr { border:none; border-top:1px solid #ddd; margin:2em 0; }
+</style>
+</head>
+<body>
+
+<h1>OpenSCAD Feature Support Roadmap</h1>
+<p class="meta">Status: 2026-06-12 &nbsp;·&nbsp; Project: 3DScad visual editor</p>
+
+<p>This document tracks every OpenSCAD language construct and maps it to its current support level
+across three layers: <strong>parser</strong> (can the text be read?), <strong>tree node</strong>
+(is there a <code>TreeNode::Operation</code> or <code>ShapeNode::Type</code>?), and
+<strong>toolbar</strong> (can the user drag it into the scene?).</p>
+
+<div class="info-box">
+<strong>Legend:</strong>
+<span class="tag-done">✓ Done</span> fully implemented &nbsp;
+<span class="tag-partial">~ Partial</span> exists but incomplete &nbsp;
+<span class="tag-no">✗ Missing</span> not implemented &nbsp;
+<span class="tag-na">—</span> not applicable for that layer
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2>Currently Supported (snapshot)</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Parser</th><th>Tree node</th><th>Toolbar</th></tr></thead>
+<tbody>
+<tr><td><code>cube()</code>, <code>sphere()</code>, <code>cylinder()</code>, <code>cone()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>circle()</code>, <code>square()</code>, <code>polygon()</code> (basic)</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>polyhedron()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>union()</code>, <code>difference()</code>, <code>intersection()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>hull()</code>, <code>minkowski()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>translate()</code>, <code>rotate()</code>, <code>scale()</code>, <code>mirror()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>color()</code>, <code>resize()</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>linear_extrude()</code>, <code>rotate_extrude()</code></td>
+    <td><span class="tag-partial">~</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>for()</code> loop</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td><code>module</code> declaration + call</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td>Variables, scalar &amp; vector</td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td></tr>
+<tr><td>Inline chained transforms <code>rotate(a)translate([…])cube(…)</code></td>
+    <td><span class="tag-done">✓</span></td><td><span class="tag-done">✓</span></td><td><span class="tag-na">—</span></td></tr>
+<tr><td>Brace-free shorthand <code>if(c)stmt</code>, <code>assign(x=…)…</code></td>
+    <td><span class="tag-partial">~</span></td><td><span class="tag-no">✗</span></td><td><span class="tag-no">✗</span></td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 1</span> High-Impact Language Features</h2>
+<p>These constructs appear in virtually every non-trivial OpenSCAD file. Missing support causes
+significant parse-coverage gaps.</p>
+
+<!-- ─── if/else ─────────────────────────────────────────────────────── -->
+<h3>1.1 — <code>if / else</code> conditional node</h3>
+<table>
+<thead><tr><th>Layer</th><th>Status</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>Parser</td><td><span class="tag-partial">~ Partial</span></td>
+    <td>Brace and brace-free forms are parsed; condition is evaluated and the true/false
+        branch is executed inline. The construct vanishes from the tree — it is not preserved
+        as a node.</td></tr>
+<tr><td>Tree node</td><td><span class="tag-no">✗ Missing</span></td>
+    <td>No <code>Op::Conditional</code> in <code>SceneTree::TreeNode::Operation</code>; no
+        <code>conditionExpression</code> field; no else-children concept.</td></tr>
+<tr><td>Toolbar</td><td><span class="tag-no">✗ Missing</span></td>
+    <td>No toolbar button; no drag-drop slot rules defined.</td></tr>
+</tbody>
+</table>
+<p><strong>Implementation sketch:</strong></p>
+<ol>
+  <li>Add <code>Op::Conditional</code> to <code>SceneTree::TreeNode::Operation</code> enum.</li>
+  <li>Add <code>QString conditionExpression</code> field to <code>TreeNode</code>.</li>
+  <li>Convention: first child group = true branch; second child group (optional) = else branch.
+      Use a marker flag <code>bool isElseBranch</code> on a Group child, or split via
+      a reserved separator node.</li>
+  <li>Parser: instead of branching on evaluation, create a Conditional node and populate
+      both child groups from the parse tree.</li>
+  <li>Code generator: emit <code>if (cond) { … } else { … }</code>.</li>
+  <li>Tree renderer: show condition text in the card header ("if (x &gt; 0)").</li>
+  <li>Toolbar icon: diamond / rhombus shape (classic flowchart decision symbol).</li>
+</ol>
+<pre><code>// target tree representation:
+if (show_base) {            // → Conditional, conditionExpression = "show_base"
+    cube([50, 50, 5]);      //   child group [0] = true branch
+} else {
+    cylinder(r=25, h=5);    //   child group [1] = else branch (optional)
+}
+</code></pre>
+
+<!-- ─── ternary ───────────────────────────────────────────────────── -->
+<h3>1.2 — Ternary operator <code>a ? b : c</code></h3>
+<table>
+<thead><tr><th>Layer</th><th>Status</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>Expression evaluator (<code>expression.h</code>)</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td><code>evalTernary()</code> is fully implemented — evaluates condition, then lazily
+        returns the true or false branch. Works for any numeric expression.</td></tr>
+<tr><td>Tree / toolbar</td><td><span class="tag-na">—</span></td>
+    <td>Inline in expressions; no dedicated node needed.</td></tr>
+</tbody>
+</table>
+
+<!-- ─── math functions ───────────────────────────────────────────── -->
+<h3>1.3 — Math function completion</h3>
+<table>
+<thead><tr><th>Function group</th><th>Status</th><th>Functions</th></tr></thead>
+<tbody>
+<tr><td>Rounding</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>floor()</code>, <code>ceil()</code>, <code>round()</code>, <code>sign()</code></td></tr>
+<tr><td>Trig (degrees)</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>sin()</code>, <code>cos()</code>, <code>tan()</code>, <code>asin()</code>,
+        <code>acos()</code>, <code>atan()</code>, <code>atan2()</code> — all correctly use degrees</td></tr>
+<tr><td>Arithmetic</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>abs()</code>, <code>sqrt()</code>, <code>pow()</code>, <code>exp()</code>,
+        <code>ln()</code> (natural log). <code>log()</code> fixed to log₁₀.</td></tr>
+<tr><td>Bounds (variadic)</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>min(…)</code>, <code>max(…)</code> — accept 2+ args</td></tr>
+<tr><td>Random</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>rands(lo, hi)</code> — returns real random via QRandomGenerator</td></tr>
+<tr><td>Animation</td><td><span class="tag-done">✓ Done</span></td>
+    <td><code>$t</code> — resolves to 0.0 by default, can be injected via <code>m_vars</code></td></tr>
+<tr><td>List/vector</td><td><span class="tag-partial">~ Returns 0</span></td>
+    <td><code>len()</code>, <code>norm()</code>, <code>cross()</code> — stubs; need vector type</td></tr>
+<tr><td>String/misc stubs</td><td><span class="tag-partial">~ Approximate</span></td>
+    <td><code>str()</code> → first arg, <code>concat()</code> → arg count, <code>lookup(k,t)</code> → key</td></tr>
+</tbody>
+</table>
+
+<!-- ─── let scoping ──────────────────────────────────────────────── -->
+<h3>1.4 — <code>let()</code> proper scoping</h3>
+<table>
+<thead><tr><th>Layer</th><th>Status</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td>Parser</td><td><span class="tag-partial">~ Partial</span></td>
+    <td>Treated identically to <code>assign()</code>: writes into the module-level variable
+        map and does not restore on scope exit. Lexical scoping is not preserved.</td></tr>
+<tr><td>Tree / toolbar</td><td><span class="tag-na">—</span></td>
+    <td>OpenSCAD <code>let</code> is expression-level; no tree node needed.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 2</span> New Primitives</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Parser</th><th>ShapeNode type</th><th>Toolbar</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>text(text, size, font, …)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗ No <code>Text</code> type</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>2D primitive; needs font, size, halign, valign, direction parameters.
+        Very common for labels and nameplates.</td></tr>
+<tr><td><code>import("file.stl")</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Imports STL / DXF / SVG / AMF files; file path stored as string parameter.</td></tr>
+<tr><td><code>surface("file.dat")</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Heightmap surface; lower priority, rarely used interactively.</td></tr>
+<tr><td><code>polygon()</code> with <code>paths=</code></td>
+    <td><span class="tag-partial">~ Basic</span></td>
+    <td><span class="tag-partial">~ No holes</span></td>
+    <td><span class="tag-partial">~ No paths UI</span></td>
+    <td>The <code>paths</code> parameter defines inner holes / sub-paths; the current
+        implementation only stores the outer point list.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 3</span> New Group Operations for Toolbar</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Parser</th><th>Tree (<code>Op::</code>)</th><th>Toolbar</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>offset(r= / delta=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>2D only; two modes: rounded (<code>r=</code>) and chamfered (<code>delta=</code>).
+        Essential companion to polygon/square/text in 2D workflows.</td></tr>
+<tr><td><code>projection(cut=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Collapses a 3D solid to 2D; <code>cut=true</code> gives a cross-section.</td></tr>
+<tr><td><code>multmatrix(m)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>4×4 affine matrix transform. Rarely hand-authored; medium priority.</td></tr>
+<tr><td><code>render(convexity=)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Forces CSG evaluation; improves preview accuracy. Low visual priority.</td></tr>
+<tr><td><code>intersection_for()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Loop variant that intersects all iterations instead of unioning them.</td></tr>
+</tbody>
+</table>
+
+<div class="warn-box"><strong>Note on <code>offset</code>:</strong> implementing <code>offset()</code>
+requires a new <code>Op::Offset</code> enum value, a new float field for <code>r</code>/<code>delta</code>,
+a boolean <code>round</code> flag, and a new toolbar icon. The 2D workflow (square → offset →
+linear_extrude) is a very common pattern; this has high practical value.</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 4</span> Module System Enhancements</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Parser</th><th>Tree</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>children()</code> inside a module</td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Allows a module to pass child objects through; fundamental for parametric wrappers.
+        Needs a dedicated <code>Op::Children</code> placeholder node.</td></tr>
+<tr><td><code>$children</code> special variable</td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-na">—</span></td>
+    <td>Integer count of children passed to a module; used with <code>for(i=[0:$children-1])</code>.</td></tr>
+<tr><td><code>use &lt;file.scad&gt;</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Imports module definitions without executing top-level statements.
+        Requires file-system access and recursive parsing.</td></tr>
+<tr><td><code>include &lt;file.scad&gt;</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Like <code>use</code> but also executes top-level statements.</td></tr>
+<tr><td>Recursive module calls</td>
+    <td><span class="tag-no">✗</span></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Requires call-depth guard to avoid infinite loops. Low priority.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 5</span> Special Variables &amp; Debug Modifiers</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>$fn</code></td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>Fully wired end-to-end: parsed → Variable node → <code>topLevelVariables()</code> → mesh builders.
+        Sphere/cylinder/cone/circle/rotate_extrude/linear_extrude all respect <code>$fn</code>.</td></tr>
+<tr><td><code>$fa</code>, <code>$fs</code></td>
+    <td><span class="tag-partial">~ Partial</span></td>
+    <td>Recognised in expressions with correct defaults (12°, 2mm). Mesh builders do not yet
+        compute segment count from <code>$fa</code>/<code>$fs</code> when <code>$fn=0</code> — hardcoded defaults used instead.</td></tr>
+<tr><td><code>$t</code> animation variable</td>
+    <td><span class="tag-done">✓ Done</span></td>
+    <td>Resolves to 0.0 by default via <code>resolveIdentifier</code>; can be injected via
+        <code>m_vars</code> to drive animation. Viewport animation timeline integration is separate.</td></tr>
+<tr><td><code>$vpr</code>, <code>$vpt</code>, <code>$vpd</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Viewport orientation/translation/distance. Rarely used in printable models.</td></tr>
+<tr><td><code>%</code> (background modifier)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Shows object as translucent ghost; excluded from renders.</td></tr>
+<tr><td><code>#</code> (debug modifier)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Highlights object in preview regardless of parent subtraction.</td></tr>
+<tr><td><code>!</code> (root modifier)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Renders only the prefixed object, ignoring the rest of the file.</td></tr>
+<tr><td><code>*</code> (disable modifier)</td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Excludes the prefixed object from rendering.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2><span class="phase-label">Phase 6</span> Advanced Expression Features</h2>
+
+<table>
+<thead><tr><th>Feature</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>List comprehensions <code>[for(i=r) expr]</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Used to build point arrays for polygon/polyhedron dynamically;
+        very common in parametric gear/thread libraries.</td></tr>
+<tr><td>Vector/array functions: <code>concat()</code>, <code>each</code>, <code>sum()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Needed for dynamic point list construction.</td></tr>
+<tr><td>String type &amp; <code>str()</code>, <code>chr()</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Required by <code>text()</code> and <code>echo()</code>.</td></tr>
+<tr><td><code>assert(cond, message)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Design-time validation; parsing can silently ignore or log.</td></tr>
+<tr><td><code>echo(…)</code></td>
+    <td><span class="tag-no">✗</span></td>
+    <td>Debug output; parsing can silently ignore.</td></tr>
+<tr><td>Array subscript with non-literal index</td>
+    <td><span class="tag-partial">~ Returns 0</span></td>
+    <td><code>arr[i]</code> is parsed and returns 0; full vector lookup requires
+        a proper vector-value symbol table in the expression evaluator.</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<h2>Priority Summary</h2>
+
+<table>
+<thead><tr><th>#</th><th>Feature</th><th>Phase</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><code>if / else</code> tree node + toolbar icon</td><td>1</td>
+    <td>Present in almost every real file; currently silently dropped from the tree</td></tr>
+<tr><td>2</td><td>Ternary <code>a ? b : c</code></td><td>1</td>
+    <td><span class="tag-done">✓ Done</span> — <code>evalTernary()</code> fully implemented</td></tr>
+<tr><td>3</td><td>Math functions (<code>sin/cos/floor/abs/…</code>)</td><td>1</td>
+    <td><span class="tag-done">✓ Done</span> — all trig, rounding, arithmetic implemented; <code>log</code> bug fixed</td></tr>
+<tr><td>4</td><td><code>text()</code> primitive</td><td>2</td>
+    <td>High demand; needed for any labelled print</td></tr>
+<tr><td>5</td><td><code>offset()</code> group</td><td>3</td>
+    <td>Core 2D workflow: square → offset → linear_extrude</td></tr>
+<tr><td>6</td><td><code>children()</code> in modules</td><td>4</td>
+    <td>Enables parametric wrapper modules; currently all such modules produce no tree</td></tr>
+<tr><td>7</td><td><code>import()</code> primitive</td><td>2</td>
+    <td>Needed to integrate existing STL parts</td></tr>
+<tr><td>8</td><td><code>projection()</code> group</td><td>3</td>
+    <td>Enables 2D DXF export workflow</td></tr>
+<tr><td>9</td><td>List comprehensions</td><td>6</td>
+    <td>Required to parse gear/thread/spring libraries correctly</td></tr>
+<tr><td>10</td><td><code>use / include</code> directives</td><td>4</td>
+    <td>Multi-file projects; requires recursive parser + file-system access</td></tr>
+</tbody>
+</table>
+
+</body>
+</html>

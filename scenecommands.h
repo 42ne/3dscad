@@ -180,6 +180,12 @@ public:
     UpdateForLoopCommand(SceneDocument *scene, int groupId, const QString &loopVariable, const QString &rangeExpression, std::function<void()> onChanged);
 };
 
+class UpdateConditionExpressionCommand : public SnapshotCommand
+{
+public:
+    UpdateConditionExpressionCommand(SceneDocument *scene, int groupId, const QString &conditionExpression, std::function<void()> onChanged);
+};
+
 class UpdateGroupColorCommand : public SnapshotCommand
 {
 public:

@@ -1057,6 +1057,8 @@ public:
                   const QString &loopVariable = QString(),
                   const QString &loopRangeExpression = QString(),
                   int activeForLoopNumberStart = -1,
+                  const QString &conditionExpression = QString(),
+                  bool isElseBranch = false,
                   const QColor &color = QColor(),
                   const QImage &thumbnail = QImage(),
                   const QString &moduleName = QString(),
@@ -1075,6 +1077,8 @@ public:
         , m_loopVariable(loopVariable)
         , m_loopRangeExpression(loopRangeExpression)
         , m_activeForLoopNumberStart(activeForLoopNumberStart)
+        , m_conditionExpression(conditionExpression)
+        , m_isElseBranch(isElseBranch)
         , m_activeTransformAxis(activeTransformAxis)
         , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_color(color)
@@ -1184,7 +1188,12 @@ private:
                                 m_rect.width(), GroupHeaderHeight);
         // Header fill clipped to the card outline: naturally follows the rounded top corners
         // and presents a flat bottom edge (no bubble-inside-card effect).
-        const QColor rawHeaderFill = SceneTreePalette::groupHeaderColor(m_operation, fill, static_cast<SceneTreePalette::Theme>(m_theme));
+        const bool isIfBranch = !m_isElseBranch
+                                && m_operation == SceneDocument::TreeNode::Union
+                                && !m_conditionExpression.trimmed().isEmpty();
+        const SceneDocument::TreeNode::Operation effectiveOp = (m_isElseBranch || isIfBranch)
+            ? SceneDocument::TreeNode::Conditional : m_operation;
+        const QColor rawHeaderFill = SceneTreePalette::groupHeaderColor(effectiveOp, fill, static_cast<SceneTreePalette::Theme>(m_theme));
         const QColor headerFill = m_insertedPreview
             ? translucent(rawHeaderFill, qMin(rawHeaderFill.alpha() + 55, 230))
             : rawHeaderFill;
@@ -1217,7 +1226,20 @@ private:
                               headerIconSize);
         const QColor iconAccent = dark ? fill.lighter(210) : fill.darker(125);
 
-        if (!m_thumbnail.isNull() && !m_empty) {
+        if (m_isElseBranch) {
+            // else-branch: draw "else" keyword label instead of operation icon
+            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
+            QFont elseFont = painter->font();
+            elseFont.setBold(true);
+            elseFont.setPointSizeF(qMax<qreal>(7.5, elseFont.pointSizeF()));
+            painter->save();
+            painter->setFont(elseFont);
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(iconRect.adjusted(-2.0, -1.0, 2.0, 1.0), Qt::AlignCenter, QStringLiteral("else"));
+            painter->restore();
+        } else if (isIfBranch) {
+            paintOperationIcon(painter, SceneDocument::TreeNode::Conditional, iconRect, iconAccent);
+        } else if (!m_thumbnail.isNull() && !m_empty) {
             // Draw the live 3-D thumbnail in place of the abstract operation icon.
             // Suppress when empty: the cached thumbnail may be from a previous non-empty
             // state and would be misleading alongside the "empty" placeholder text.
@@ -1231,7 +1253,9 @@ private:
             paintOperationIcon(painter, m_operation, iconRect, iconAccent);
         }
 
-        if (m_operation == SceneDocument::TreeNode::For) {
+        if (m_isElseBranch) {
+            // no extra text after the else label — body contents are shown as children
+        } else if (m_operation == SceneDocument::TreeNode::For) {
             painter->save();
             painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
             const QString variableName    = m_loopVariable.trimmed().isEmpty()      ? QStringLiteral("i")         : m_loopVariable.trimmed();
@@ -1270,6 +1294,29 @@ private:
                                      + expressionVisualWidth(rangeExpression, metrics);
             painter->setPen(SceneTreePalette::numLabelText(pt2));
             painter->drawText(QRectF(suffixLeft, m_rect.top() + 7.0, 10.0, 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
+            painter->restore();
+        } else if (m_operation == SceneDocument::TreeNode::Conditional || isIfBranch) {
+            painter->save();
+            painter->setClipRect(headerRect.adjusted(0.0, 0.0, -30.0, 0.0));
+            const QFontMetricsF metrics(sceneTreeGraphicsFont());
+            const auto pt2 = static_cast<SceneTreePalette::Theme>(m_theme);
+            const qreal textLeft = iconRect.right() + 10.0;
+            const QString condExpr = m_conditionExpression.trimmed().isEmpty()
+                                         ? QStringLiteral("true")
+                                         : m_conditionExpression.trimmed();
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(textLeft, m_rect.top() + 7.0,
+                                     metrics.horizontalAdvance(QStringLiteral("if (")), 16.0),
+                              Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("if ("));
+            const QRectF condRect = conditionExpressionTextRect(m_rect, condExpr, metrics);
+            paintRoundedPanel(painter, condRect, 3.0,
+                              QPen(cPillBorder, 1),
+                              QBrush(cPillFill));
+            painter->setPen(SceneTreePalette::numText(pt2));
+            painter->drawText(condRect, Qt::AlignHCenter | Qt::AlignVCenter, condExpr);
+            painter->setPen(SceneTreePalette::numLabelText(pt2));
+            painter->drawText(QRectF(condRect.right(), m_rect.top() + 7.0, 10.0, 16.0),
                               Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral(")"));
             painter->restore();
         } else if (m_operation == SceneDocument::TreeNode::LinearExtrude) {
@@ -1600,6 +1647,8 @@ private:
     QString     m_loopVariable;
     QString     m_loopRangeExpression;
     int         m_activeForLoopNumberStart   = -1;
+    QString     m_conditionExpression;
+    bool        m_isElseBranch = false;
     int         m_activeTransformAxis        = -1;
     int         m_activeTransformNumberStart = -1;
     QColor      m_color;
@@ -1913,6 +1962,7 @@ void SceneTreeNodeRenderer::renderGroup(const SceneDocument::TreeNode &node,
                                        transformValues, activeAxis, activeNumberStart,
                                        transformHeaderWidth, node.transformExpressions,
                                        node.loopVariable, node.loopRangeExpression, activeForLoopStart,
+                                       node.conditionExpression, node.isElseBranch,
                                         node.color, thumbnail, node.moduleName,
                                         depth, m_theme, collapsed,
                                         node.linearExtrudeCenter, node.linearExtrudeSlices,
@@ -1947,6 +1997,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                  QString(), QString(), -1,
+                                 QString(), false,
                                  QColor(), QImage(), QString(),
                                  0, theme, false, false, 0);
     } else {
@@ -2003,6 +2054,7 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
+                                   QString(), false,
                                    color, QImage(), QString(),
                                    depth, theme, false, false, 0);
     scene->addItem(item);

@@ -1713,12 +1713,49 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const qreal polyhedronTableHeight = polyhedronTableSize.height();
     const qreal polyhedronTableWidth  = polyhedronTableSize.width();
 
-    auto drawChild = [&](const SceneDocument::TreeNode &child) {
-        const QRectF childRect = drawNode(child, childTopLeft, depth + 1);
-        children.append({childRect, previewToolForNode(child), child.id});
+    auto drawChild = [&](const SceneDocument::TreeNode &child, const QString &branchCondition = QString()) {
+        const bool renderAsIfBranch = !child.isElseBranch
+                                      && !branchCondition.trimmed().isEmpty()
+                                      && child.operation == SceneDocument::TreeNode::Union;
+        SceneDocument::TreeNode renderNode = child;
+        if (renderAsIfBranch)
+            renderNode.conditionExpression = branchCondition;
+        const QRectF childRect = drawNode(renderNode, childTopLeft, depth + 1);
+        children.append({childRect, previewToolForNode(renderNode), child.id});
         maxChildWidth = qMax(maxChildWidth, childRect.width());
         childTopLeft.ry() += childRect.height() + ChildGap;
     };
+
+    if (node.operation == SceneDocument::TreeNode::Conditional) {
+        QPointF branchTopLeft = topLeft;
+        qreal maxBranchWidth = 0.0;
+        QRectF compositeRect(topLeft, QSizeF(horizontalHeaderMinWidth(node), PrimitiveHeight));
+        QVector<ChildLayout> branchLayouts;
+
+        if (!collapsedGroup) {
+            for (int i = 0; i < node.children.size(); ++i) {
+                SceneDocument::TreeNode branchNode = node.children.at(i);
+                if (i == 0
+                    && branchNode.operation == SceneDocument::TreeNode::Union
+                    && !branchNode.isElseBranch) {
+                    branchNode.conditionExpression = conditionExpression(node);
+                }
+
+                const QRectF branchRect = drawNode(branchNode, branchTopLeft, depth);
+                branchLayouts.append({branchRect, previewToolForNode(branchNode), branchNode.id});
+                maxBranchWidth = qMax(maxBranchWidth, branchRect.width());
+                branchTopLeft.ry() += branchRect.height() + ChildGap;
+            }
+        }
+
+        if (!branchLayouts.isEmpty()) {
+            const qreal totalHeight = branchTopLeft.y() - topLeft.y() - ChildGap;
+            compositeRect = QRectF(topLeft, QSizeF(maxBranchWidth, totalHeight));
+        }
+
+        m_treeLayout.addGroup({compositeRect, node.id, depth, node.operation, 0.0, 0.0, 0, collapsedGroup, branchLayouts});
+        return compositeRect;
+    }
 
     if (node.operation == SceneDocument::TreeNode::Module) {
         if (!collapsedGroup) {
@@ -1758,8 +1795,13 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         childTopLeft.ry() += polyhedronTableHeight;
         maxChildWidth = qMax(maxChildWidth, polyhedronTableWidth);
     } else if (!collapsedGroup) {
-        for (const SceneDocument::TreeNode &child : node.children)
-            drawChild(child);
+        for (int i = 0; i < node.children.size(); ++i) {
+            const SceneDocument::TreeNode &child = node.children.at(i);
+            const QString branchCondition = node.operation == SceneDocument::TreeNode::Conditional && i == 0
+                                                ? conditionExpression(node)
+                                                : QString();
+            drawChild(child, branchCondition);
+        }
     }
 
     qreal childrenHeight = children.isEmpty()
@@ -1792,6 +1834,12 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
         parameterHeaderMinWidth = SceneTreeGraphics::forLoopHeaderMinWidth(
             forLoopVariableName(node),
             forLoopRangeExpression(node),
+            QFontMetricsF(sceneTreeGraphicsFont()));
+    } else if (node.operation == SceneDocument::TreeNode::Conditional
+               || (node.operation == SceneDocument::TreeNode::Union
+                   && !node.conditionExpression.trimmed().isEmpty())) {
+        parameterHeaderMinWidth = SceneTreeGraphics::conditionHeaderMinWidth(
+            conditionExpression(node),
             QFontMetricsF(sceneTreeGraphicsFont()));
     } else if (node.operation == SceneDocument::TreeNode::LinearExtrude) {
         const QString centerExpr = node.linearExtrudeCenter
@@ -1975,6 +2023,17 @@ SceneTreeGraphicsWidget::dropTargetForToolAt(const QPointF &scenePosition,
                 no.zoneRect = target.zoneRect;
                 return no;
             }
+        }
+        const SceneDocument::TreeNode *targetParent = m_scene->treeNodeById(target.parentGroupId);
+        if (targetParent && targetParent->type == SceneDocument::TreeNode::Group
+            && targetParent->operation == SceneDocument::TreeNode::Conditional) {
+            DropTarget no; no.sourceGroupRect = target.sourceGroupRect;
+            no.sourceGroupOperation = target.sourceGroupOperation;
+            no.sourceCutSeparatorY = target.sourceCutSeparatorY;
+            no.sourceChildren = target.sourceChildren;
+            no.sourceRect = target.sourceRect;
+            no.zoneRect = target.zoneRect;
+            return no;
         }
     }
     if (isVariableToolName(previewTool) && m_scene) {
