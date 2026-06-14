@@ -49,6 +49,7 @@ QStringList paletteTools()
         QStringLiteral("circle"),
         QStringLiteral("square"),
         QStringLiteral("polygon"),
+        QStringLiteral("offset"),
         QStringLiteral("linear_extrude"),
         QStringLiteral("rotate_extrude"),
     };

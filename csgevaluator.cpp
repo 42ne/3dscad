@@ -1225,6 +1225,7 @@ static void collectTreeCapabilities(const SceneDocument::TreeNode &node, TreeCap
             break;
         case SceneDocument::TreeNode::LinearExtrude:
         case SceneDocument::TreeNode::Resize:
+        case SceneDocument::TreeNode::Offset:
             caps.hasTransform = true;
             break;
         default:

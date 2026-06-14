@@ -6,6 +6,7 @@
 #include "expression.h"
 
 #include <manifold/manifold.h>
+#include <manifold/cross_section.h>
 
 #include <QHash>
 #include <QMutex>
@@ -429,6 +430,31 @@ static Manifold evaluateNode(const SceneDocument::TreeNode &node,
         if (polygons.empty())
             return {};
         return applyNodeTransform(Manifold::Revolve(polygons, fn > 0 ? fn : 0, static_cast<double>(angle)), evaluatedNode);
+    }
+
+    if (evaluatedNode.operation == SceneDocument::TreeNode::Offset) {
+        using manifold::CrossSection;
+        const int fn = static_cast<int>(localVariables.value(QStringLiteral("$fn"), 0.0));
+        const int segs = fn > 0 ? qMax(3, fn) : 32;
+        Polygons polygons;
+        for (const SceneDocument::TreeNode *child : geometryChildren)
+            collectRotateExtrudePolygons(*child, scene, localVariables, segs, polygons);
+        if (polygons.empty())
+            return {};
+
+        // Union the child profiles, then grow/shrink the outline.
+        CrossSection cs(polygons, CrossSection::FillRule::NonZero);
+        CrossSection::JoinType jt = CrossSection::JoinType::Round; // r= (rounded)
+        if (evaluatedNode.offsetUseDelta)
+            jt = evaluatedNode.offsetChamfer ? CrossSection::JoinType::Square
+                                             : CrossSection::JoinType::Miter;
+        const CrossSection grown = cs.Offset(static_cast<double>(evaluatedNode.offsetAmount),
+                                             jt, 2.0, fn > 0 ? fn : 0);
+        const Polygons result = grown.ToPolygons();
+        if (result.empty())
+            return {};
+        // Keep the 2D-as-thin-solid convention (z 0..0.1) used elsewhere.
+        return applyNodeTransform(Manifold::Extrude(result, 0.1), evaluatedNode);
     }
 
     if (evaluatedNode.operation == SceneDocument::TreeNode::Minkowski) {

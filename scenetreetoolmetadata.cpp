@@ -196,6 +196,10 @@ bool operationForToolName(const QString &tool, SceneDocument::TreeNode::Operatio
         *operation = SceneDocument::TreeNode::Conditional;
         return true;
     }
+    if (normalized == QStringLiteral("offset")) {
+        *operation = SceneDocument::TreeNode::Offset;
+        return true;
+    }
     return false;
 }
 
@@ -220,6 +224,7 @@ const OperationVisual OperationVisuals[] = {
     {SceneDocument::TreeNode::Color, "color", QColor(218, 234, 248), TransformHeaderWidth + GroupPadding * 2.0 + PrimitiveWidth},
     {SceneDocument::TreeNode::Scene, "scene", QColor(210, 215, 225), GroupMinWidth},
     {SceneDocument::TreeNode::Conditional, "if", QColor(232, 228, 248), GroupWideMinWidth},
+    {SceneDocument::TreeNode::Offset, "offset", QColor(216, 240, 224), GroupWideMinWidth},
 };
 
 } // namespace

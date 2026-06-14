@@ -138,6 +138,11 @@ exists($$MANIFOLD_BUILD_DIR/src/libmanifold.a) {
     DEFINES += HAVE_MANIFOLD_CSG
     INCLUDEPATH += $$PWD/build/manifold-src/include
     LIBS += $$MANIFOLD_BUILD_DIR/src/libmanifold.a
+    # CrossSection (offset/2D ops) pulls in the bundled Clipper2 static lib.
+    # Must come after libmanifold.a so the linker resolves its references.
+    exists($$MANIFOLD_BUILD_DIR/_deps/clipper2-build/libClipper2.a) {
+        LIBS += $$MANIFOLD_BUILD_DIR/_deps/clipper2-build/libClipper2.a
+    }
 }
 
 # Default rules for deployment.

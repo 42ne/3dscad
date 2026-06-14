@@ -342,6 +342,7 @@ static bool parseOperationLine(const QString &line,
     static const QRegularExpression linearExtrudeRegex("^linear_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression rotateExtrudeRegex("^rotate_extrude\\s*\\((.*)\\)\\s*\\{\\s*$");
     static const QRegularExpression resizeRegex("^resize\\s*\\((.*)\\)\\s*\\{\\s*$");
+    static const QRegularExpression offsetRegex("^offset\\s*\\((.*)\\)\\s*\\{\\s*$");
 
     // intersection_for → intersection() { for() { ... } }
     {
@@ -486,6 +487,27 @@ static bool parseOperationLine(const QString &line,
                 expressions->append(QString());
             (*expressions)[3] = autoStr;
         }
+        return true;
+    }
+
+    QRegularExpressionMatch offsetMatch = offsetRegex.match(line);
+    if (offsetMatch.hasMatch()) {
+        const auto args = parseNamedArgs(offsetMatch.captured(1), {"r", "delta", "chamfer"});
+        const QString deltaStr = args.value(QStringLiteral("delta"));
+        const QString rStr = args.value(QStringLiteral("r"));
+        const QString chamferStr = args.value(QStringLiteral("chamfer"));
+        const bool useDelta = !deltaStr.trimmed().isEmpty();
+        const QString amtSrc = useDelta
+                                   ? deltaStr
+                                   : (rStr.trimmed().isEmpty() ? QStringLiteral("1") : rStr);
+        qreal amount = 1.0;
+        QString amtExpr;
+        if (!parseParamExpression(amtSrc, varValues, &amount, &amtExpr, fns))
+            return false;
+        const bool chamfer = (chamferStr.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0);
+        *operation = SceneDocument::TreeNode::Offset;
+        if (vector)
+            *vector = QVector3D(float(amount), useDelta ? 1.0f : 0.0f, chamfer ? 1.0f : 0.0f);
         return true;
     }
 
@@ -1453,6 +1475,7 @@ static bool startsWithKnownKeyword(const QString &line)
     static const QStringList known = {
         "translate", "rotate", "scale", "mirror",
         "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "assign", "if", "else", "color", "linear_extrude", "rotate_extrude",
+        "resize", "offset",
         "cube", "sphere", "cylinder", "circle", "polyhedron"
     };
     for (const QString &kw : known)
@@ -1801,6 +1824,10 @@ static bool parseBlock(ParserState *state,
                 group.scale = transformVector; // scale.x() = angle
             } else if (operation == SceneDocument::TreeNode::Resize) {
                 group.scale = transformVector;
+            } else if (operation == SceneDocument::TreeNode::Offset) {
+                group.offsetAmount = transformVector.x();
+                group.offsetUseDelta = transformVector.y() > 0.5f;
+                group.offsetChamfer = transformVector.z() > 0.5f;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate
@@ -2663,6 +2690,10 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
                 group.scale = transformVector;
             } else if (operation == SceneDocument::TreeNode::Resize) {
                 group.scale = transformVector;
+            } else if (operation == SceneDocument::TreeNode::Offset) {
+                group.offsetAmount = transformVector.x();
+                group.offsetUseDelta = transformVector.y() > 0.5f;
+                group.offsetChamfer = transformVector.z() > 0.5f;
             }
             if (operation == SceneDocument::TreeNode::Translate
                 || operation == SceneDocument::TreeNode::Rotate

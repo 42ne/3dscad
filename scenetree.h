@@ -45,7 +45,8 @@ public:
             RotateExtrude, // rotate_extrude(angle=360); angle stored in scale.x()
             Resize,     // resize([x,y,z]) or resize([x,y,z], auto=[x,y,z]); newsize in scale
             Scene, // top-level container; flattened in code generation, never emitted as a block
-            Conditional // if/else; conditionExpression holds condition; children[0]=true branch, children[1]=else branch (isElseBranch=true)
+            Conditional, // if/else; conditionExpression holds condition; children[0]=true branch, children[1]=else branch (isElseBranch=true)
+            Offset // offset(r=) rounded or offset(delta=, chamfer=); grows/shrinks a 2D outline
         };
 
         int id = 0;
@@ -72,6 +73,11 @@ public:
         QString loopRangeExpression = QStringLiteral("[0 : 1 : 3]");
         QString conditionExpression;  // for Conditional nodes
         bool isElseBranch = false;    // marks the else-child of a Conditional node
+
+        // Offset parameters
+        float offsetAmount = 1.0f;   // r (rounded join) or delta, per offsetUseDelta
+        bool  offsetUseDelta = false; // false = r= (rounded), true = delta=
+        bool  offsetChamfer = false;  // chamfered corners (only with delta)
 
         // Resize parameters
         QVector3D resizeAuto = QVector3D(0, 0, 0); // auto=[x,y,z], 0 means not set

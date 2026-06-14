@@ -445,6 +445,24 @@ void OpenScadGenerator::appendTreeNode(QString *code,
         return;
     }
 
+    if (node.operation == SceneDocument::TreeNode::Offset) {
+        QString args;
+        if (node.offsetUseDelta) {
+            args = QStringLiteral("delta=%1").arg(QString::number(node.offsetAmount, 'g'));
+            if (node.offsetChamfer)
+                args += QStringLiteral(", chamfer=true");
+        } else {
+            args = QStringLiteral("r=%1").arg(QString::number(node.offsetAmount, 'g'));
+        }
+        *code += QString("%1offset(%2) {\n").arg(indent, args);
+        for (const SceneDocument::TreeNode &child : node.children)
+            appendTreeNode(code, child, scene, indent + "    ", ranges);
+        *code += indent + "}\n";
+        if (ranges)
+            ranges->append({node.id, start, code->size() - start});
+        return;
+    }
+
     appendTreeGroup(code, SceneTreeGraphics::labelForOperation(node.operation), node, scene, indent, ranges);
     if (ranges)
         ranges->append({node.id, start, code->size() - start});

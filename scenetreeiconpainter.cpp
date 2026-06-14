@@ -338,9 +338,10 @@ void paintFutureImport(QPainter *p, const QRectF &g)
 
 bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect)
 {
+    // offset is now a real Operation (see paintOperationIcon); the remaining
+    // entries stay here until their features are wired.
     const QString n = toolName.toLower();
     if (n == QStringLiteral("text"))       { paintFutureText(painter, rect);       return true; }
-    if (n == QStringLiteral("offset"))     { paintFutureOffset(painter, rect);     return true; }
     if (n == QStringLiteral("projection")) { paintFutureProjection(painter, rect); return true; }
     if (n == QStringLiteral("import"))     { paintFutureImport(painter, rect);     return true; }
     return false;
@@ -596,6 +597,8 @@ void paintOperationIcon(QPainter *painter,
                                     symbolRect.top() + symbolRect.height() * 0.18,
                                     symbolRect.width() * 0.22,
                                     symbolRect.height() * 0.22));
+    } else if (operation == SceneDocument::TreeNode::Offset) {
+        paintFutureOffset(painter, symbolRect);
     } else if (operation == SceneDocument::TreeNode::Scene) {
         // Draw a small grid of dots to represent the top-level scene container.
         painter->setPen(Qt::NoPen);
