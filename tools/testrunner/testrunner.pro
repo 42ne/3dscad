@@ -17,6 +17,7 @@ PARENT = ../..
 
 SOURCES += \
     $$PARENT/scenedocument.cpp \
+    $$PARENT/scenemesh.cpp \
     $$PARENT/scenetree.cpp \
     $$PARENT/scenetreegraphicshelpers.cpp \
     $$PARENT/scenetreegraphicswidget.cpp \
@@ -33,6 +34,7 @@ HEADERS += \
     $$PARENT/groupthumbnailcache.h \
     $$PARENT/nodethumbnailcache.h \
     $$PARENT/scenedocument.h \
+    $$PARENT/scenemesh.h \
     $$PARENT/scenetree.h \
     $$PARENT/scenetreegraphicshelpers.h \
     $$PARENT/scenetreegraphicswidget.h \

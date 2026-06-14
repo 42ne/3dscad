@@ -208,6 +208,12 @@ public:
     UpdateTextContentCommand(SceneDocument *scene, int shapeId, const QString &text, std::function<void()> onChanged);
 };
 
+class UpdateImportPathCommand : public SnapshotCommand
+{
+public:
+    UpdateImportPathCommand(SceneDocument *scene, int shapeId, const QString &filePath, std::function<void()> onChanged);
+};
+
 class UpdateGroupColorCommand : public SnapshotCommand
 {
 public:

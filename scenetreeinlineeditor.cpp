@@ -247,7 +247,8 @@ void SceneTreeInlineEditor::startInlineRename(int nodeId,
 
 void SceneTreeInlineEditor::startInlineTextEdit(int shapeId,
                                                 const QRectF &sceneRect,
-                                                const QString &currentText)
+                                                const QString &currentText,
+                                                std::function<void(int, const QString &)> onCommit)
 {
     if (!m_inlineInput)
         return;
@@ -258,10 +259,13 @@ void SceneTreeInlineEditor::startInlineTextEdit(int shapeId,
     m_inlineInput->startEditing(
         m_widget->mapFromScene(sceneRect).boundingRect(),
         currentText,
-        [this, shapeId](const QString &newText) {
+        [this, shapeId, onCommit](const QString &newText) {
             m_inlineInputActive = false;
             m_inlineInputSceneRect = QRectF();
-            emit m_widget->textContentEdited(shapeId, newText);
+            if (onCommit)
+                onCommit(shapeId, newText);
+            else
+                emit m_widget->textContentEdited(shapeId, newText);
             return true;
         },
         [this]() {

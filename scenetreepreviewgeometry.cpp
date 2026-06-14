@@ -15,6 +15,15 @@ QSizeF primitivePreviewSize(const ShapeNode &shape)
         return QSizeF(190.0, PrimitiveHeight + 10.0 + 22.0 + points * 21.0 + 24.0);
     }
 
+    if (shape.type == ShapeNode::ImportedMesh) {
+        const QFontMetricsF metrics(sceneTreeValueFont());
+        const QString path = shape.importFilePath.isEmpty()
+            ? QStringLiteral("(no file)") : shape.importFilePath;
+        const qreal pathW = metrics.horizontalAdvance(path) + 20.0;
+        const qreal width = qMax<qreal>(PrimitiveWidth, pathW);
+        return QSizeF(width, PrimitiveHeight + 18.0);
+    }
+
     if (shape.type == ShapeNode::Text) {
         const QFontMetricsF metrics(sceneTreeValueFont());
         const QString content = shape.textValue.isEmpty() ? QStringLiteral("Text") : shape.textValue;
@@ -220,6 +229,8 @@ QSizeF previewSizeForTool(const QString &tool)
                       GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
     if (tool == "color")
         return QSizeF(GroupWideMinWidth, GroupHeaderHeight + GroupPadding * 2.0 + PrimitiveHeight);
+    if (tool == "import")
+        return QSizeF(PrimitiveWidth, PrimitiveHeight + 18.0);
     if (tool == "translate" || tool == "rotate" || tool == "scale")
         return transformPreviewSize();
 

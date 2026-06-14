@@ -43,6 +43,7 @@
 #include <QVariantAnimation>
 #include <QWheelEvent>
 #include <QStringList>
+#include <QFileInfo>
 #include <cmath>
 
 using namespace SceneTreeGraphics;
@@ -1190,7 +1191,18 @@ void SceneTreeGraphicsWidget::mouseDoubleClickEvent(QMouseEvent *event)
         const QPointF scenePos = mapToScene(event->pos());
         for (const TextEditZone &zone : m_textEditZones) {
             if (zone.rect.contains(scenePos)) {
-                m_inlineEditor->startInlineTextEdit(zone.shapeId, zone.rect, zone.currentText);
+                const ShapeNode *shape = m_scene ? m_scene->shapeById(zone.shapeId) : nullptr;
+                if (shape && shape->type == ShapeNode::ImportedMesh) {
+                    m_inlineEditor->startInlineTextEdit(zone.shapeId, zone.rect, zone.currentText,
+                        [this](int shapeId, const QString &path) {
+                            emit importPathEdited(shapeId, path);
+                        });
+                } else {
+                    m_inlineEditor->startInlineTextEdit(zone.shapeId, zone.rect, zone.currentText,
+                        [this](int shapeId, const QString &text) {
+                            emit textContentEdited(shapeId, text);
+                        });
+                }
                 event->accept();
                 return;
             }
@@ -1633,6 +1645,36 @@ QRectF SceneTreeGraphicsWidget::drawPrimitive(const SceneDocument::TreeNode &nod
         m_treeItems.append(txt);
 
         m_textEditZones.append({fieldRect, node.shapeId, shape->textValue});
+    }
+
+    if (shape && shape->type == ShapeNode::ImportedMesh) {
+        const qreal fieldH = 20.0;
+        const qreal fieldLeft = rect.left() + PrimitiveCardWidth + 8.0;
+        const qreal fieldRight = rect.right() - 8.0;
+        const QRectF fieldRect(fieldLeft, rect.top() + PrimitiveHeight + 2.0,
+                               qMax<qreal>(24.0, fieldRight - fieldLeft), fieldH);
+        QPainterPath fieldPath;
+        fieldPath.addRoundedRect(fieldRect, 4.0, 4.0);
+        auto *bg = m_graphicsScene->addPath(fieldPath, QPen(QColor(255, 255, 255, 35), 1.0),
+                                            QBrush(QColor(255, 255, 255, 12)));
+        bg->setZValue(6.0);
+        m_treeItems.append(bg);
+
+        auto *txt = m_graphicsScene->addSimpleText(QString());
+        QFont f = txt->font();
+        f.setPointSizeF(9.0);
+        txt->setFont(f);
+        const QString display = shape->importFilePath.isEmpty()
+            ? QStringLiteral("(set path)")
+            : QFileInfo(shape->importFilePath).fileName();
+        const QFontMetricsF fm(f);
+        txt->setText(fm.elidedText(display, Qt::ElideLeft, fieldRect.width() - 12.0));
+        txt->setBrush(shape->importFilePath.isEmpty() ? QColor(170, 180, 195) : QColor(200, 215, 230));
+        txt->setPos(fieldRect.left() + 6.0, fieldRect.top() + (fieldH - fm.height()) * 0.5);
+        txt->setZValue(6.1);
+        m_treeItems.append(txt);
+
+        m_textEditZones.append({fieldRect, node.shapeId, shape->importFilePath});
     }
 
     addNodeDragHandle(node.id, label, rect, rect, size);

@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QRectF>
 #include <QString>
+#include <functional>
 
 class SceneTreeGraphicsWidget;
 class SceneTreeInlineTextInput;
@@ -42,7 +43,8 @@ public:
     explicit SceneTreeInlineEditor(SceneTreeGraphicsWidget *widget);
 
     void startInlineRename(int nodeId, bool isModule, const QRectF &sceneRect, const QString &currentName);
-    void startInlineTextEdit(int shapeId, const QRectF &sceneRect, const QString &currentText);
+    void startInlineTextEdit(int shapeId, const QRectF &sceneRect, const QString &currentText,
+                             std::function<void(int shapeId, const QString &text)> onCommit);
     void startInlineExpressionEdit(const ExpressionEditTarget &target);
     bool validateInlineExpression(const ExpressionEditTarget &target,
                                   const QString &expression, QString *errorMessage) const;

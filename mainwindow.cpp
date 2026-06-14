@@ -341,6 +341,8 @@ void MainWindow::buildUi()
             m_controller, &SceneController::handleRawCodeEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::textContentEdited,
             m_controller, &SceneController::handleTextContentEdited);
+    connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::importPathEdited,
+            m_controller, &SceneController::handleImportPathEdited);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::ctrlReleased,
             m_controller, &SceneController::handleCtrlReleased);
     connect(m_sceneTreeGraphics, &SceneTreeGraphicsWidget::moduleRenameRequested,

@@ -55,6 +55,8 @@ QStringList paletteTools()
         QStringLiteral("projection"),
         QStringLiteral("linear_extrude"),
         QStringLiteral("rotate_extrude"),
+        // ── File I/O ─────────────────────────────────────────────────────────────
+        QStringLiteral("import"),
     };
 }
 

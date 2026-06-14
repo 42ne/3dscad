@@ -16,6 +16,7 @@ PARENT = ../..
 SOURCES += \
     $$PARENT/openscadparser.cpp \
     $$PARENT/scenedocument.cpp \
+    $$PARENT/scenemesh.cpp \
     $$PARENT/scenetree.cpp
 
 HEADERS += \
@@ -24,6 +25,7 @@ HEADERS += \
     $$PARENT/shapenode.h \
     $$PARENT/scenetree.h \
     $$PARENT/scenedocument.h \
+    $$PARENT/scenemesh.h \
     $$PARENT/openscadparser.h
 
 INCLUDEPATH += $$PARENT

@@ -111,6 +111,7 @@ public:
     void handleConditionExpressionEdited(int nodeId, const QString &expression);
     void handleRawCodeEdited(int nodeId, const QString &code);
     void handleTextContentEdited(int shapeId, const QString &text);
+    void handleImportPathEdited(int shapeId, const QString &path);
     void handleCtrlReleased();
     void handlePolyhedronAddPoint(int groupNodeId);
     void handlePolyhedronAddFace(int groupNodeId);

@@ -151,7 +151,8 @@ static Manifold manifoldFromShape(const ShapeNode &shape, int fn = 0, double fa 
         result = Manifold::Cube(vec3(shape.size.x(), shape.size.y(), 0.1f), false);
         if (shape.center)
             result = result.Translate(vec3(-shape.size.x() * 0.5f, -shape.size.y() * 0.5f, 0.0f));
-    } else if (shape.type == ShapeNode::Polyhedron) {
+    } else if (shape.type == ShapeNode::Polyhedron
+               || shape.type == ShapeNode::ImportedMesh) {
         ShapeNode localShape = shape;
         localShape.position = QVector3D();
         localShape.rotation = QVector3D();

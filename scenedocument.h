@@ -71,6 +71,7 @@ public:
     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
     bool updateConditionExpression(int groupId, const QString &conditionExpression);
     bool updateTextContent(int shapeId, const QString &text);
+    bool updateImportPath(int shapeId, const QString &filePath);
     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
     bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,

@@ -27,6 +27,13 @@ QString toolbarToolTip(const QString &tool)
             "A container that builds a polyhedron from the point and face table inside it.");
     }
 
+    if (tool == QStringLiteral("import")) {
+        return QStringLiteral(
+            "Import mesh file (STL)\n"
+            "Drop into the scene, groups, loops, transforms, or module bodies. "
+            "Opens a file dialog to select an STL file.");
+    }
+
     if (ShapeNode::isPrimitiveTool(tool)) {
         const QString name = tool.left(1).toUpper() + tool.mid(1);
         return QStringLiteral(
@@ -99,6 +106,8 @@ ShapeNode::Type primitiveTypeForTool(const QString &tool)
         return ShapeNode::Polyhedron;
     if (normalized == "text")
         return ShapeNode::Text;
+    if (normalized == "import")
+        return ShapeNode::ImportedMesh;
     if (normalized == "point_3d")
         return ShapeNode::Point3D;
     if (normalized == "face_3d")
@@ -124,6 +133,8 @@ QString toolNameForPrimitiveType(ShapeNode::Type type)
         return QStringLiteral("polyhedron");
     if (type == ShapeNode::Text)
         return QStringLiteral("text");
+    if (type == ShapeNode::ImportedMesh)
+        return QStringLiteral("import");
     if (type == ShapeNode::Point3D)
         return QStringLiteral("point_3d");
     if (type == ShapeNode::Face3D)

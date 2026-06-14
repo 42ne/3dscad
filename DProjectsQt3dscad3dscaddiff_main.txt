@@ -1,0 +1,209 @@
+diff --git a/scenecommands.cpp b/scenecommands.cpp
+index c0dc299..d5d550a 100644
+--- a/scenecommands.cpp
++++ b/scenecommands.cpp
+@@ -508,6 +508,23 @@ UpdateTextContentCommand::UpdateTextContentCommand(SceneDocument *scene,
+     m_scene->restoreSnapshot(m_oldSnapshot);
+ }
+ 
++UpdateImportPathCommand::UpdateImportPathCommand(SceneDocument *scene,
++                                                 int shapeId,
++                                                 const QString &filePath,
++                                                 std::function<void()> onChanged)
++    : SnapshotCommand("Edit import path", scene, std::move(onChanged))
++{
++    if (!m_scene)
++        return;
++
++    m_oldSnapshot = m_scene->snapshot();
++    m_valid = m_scene->updateImportPath(shapeId, filePath);
++    if (m_valid)
++        m_newSnapshot = m_scene->snapshot();
++
++    m_scene->restoreSnapshot(m_oldSnapshot);
++}
++
+ UpdateGroupColorCommand::UpdateGroupColorCommand(SceneDocument *scene,
+                                                  int groupId,
+                                                  const QColor &color,
+diff --git a/scenecommands.h b/scenecommands.h
+index f135e27..3518afa 100644
+--- a/scenecommands.h
++++ b/scenecommands.h
+@@ -208,6 +208,12 @@ public:
+     UpdateTextContentCommand(SceneDocument *scene, int shapeId, const QString &text, std::function<void()> onChanged);
+ };
+ 
++class UpdateImportPathCommand : public SnapshotCommand
++{
++public:
++    UpdateImportPathCommand(SceneDocument *scene, int shapeId, const QString &filePath, std::function<void()> onChanged);
++};
++
+ class UpdateGroupColorCommand : public SnapshotCommand
+ {
+ public:
+diff --git a/scenecontroller.cpp b/scenecontroller.cpp
+index 34e4334..2d280ec 100644
+--- a/scenecontroller.cpp
++++ b/scenecontroller.cpp
+@@ -5,6 +5,7 @@
+ #include "scenecommands.h"
+ #include "scenetreegraphicshelpers.h"
+ #include "scenestringutils.h"
++#include "scenemesh.h"
+ 
+ #include <QAction>
+ #include <QApplication>
+@@ -636,6 +637,9 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
+         shape.textValue = QStringLiteral("Text");
+         shape.textSize = 10.0f;
+         shape.parameterExpressions = QStringList({QStringLiteral("10"), QStringLiteral("1")});
++    } else if (toolName == QStringLiteral("import")) {
++        shape.type = ShapeNode::ImportedMesh;
++        shape.name = QStringLiteral("Import %1").arg(shapeNumber);
+     } else {
+         shape.type = ShapeNode::Cube;
+         shape.size = QVector3D(20, 20, 20);
+@@ -2191,6 +2195,14 @@ void SceneController::handleTextContentEdited(int shapeId, const QString &text)
+     m_undoStack->push(command);
+ }
+ 
++void SceneController::handleImportPathEdited(int shapeId, const QString &path)
++{
++    auto *command = new UpdateImportPathCommand(&m_scene, shapeId, path,
++                                                [this]() { emit sceneChanged(); });
++    if (!command->isValid()) { delete command; return; }
++    m_undoStack->push(command);
++}
++
+ void SceneController::handleCtrlReleased()
+ {
+     m_ctrlHighlight.active = false;
+diff --git a/scenecontroller.h b/scenecontroller.h
+index 98ad29f..c79d4cc 100644
+--- a/scenecontroller.h
++++ b/scenecontroller.h
+@@ -111,6 +111,7 @@ public:
+     void handleConditionExpressionEdited(int nodeId, const QString &expression);
+     void handleRawCodeEdited(int nodeId, const QString &code);
+     void handleTextContentEdited(int shapeId, const QString &text);
++    void handleImportPathEdited(int shapeId, const QString &path);
+     void handleCtrlReleased();
+     void handlePolyhedronAddPoint(int groupNodeId);
+     void handlePolyhedronAddFace(int groupNodeId);
+diff --git a/scenedocument.cpp b/scenedocument.cpp
+index 14ee23b..cd74f53 100644
+--- a/scenedocument.cpp
++++ b/scenedocument.cpp
+@@ -538,6 +538,26 @@ bool SceneDocument::updateTextContent(int shapeId, const QString &text)
+     return false;
+ }
+ 
++bool SceneDocument::updateImportPath(int shapeId, const QString &filePath)
++{
++    for (ShapeNode &shape : m_shapes) {
++        if (shape.id == shapeId && shape.type == ShapeNode::ImportedMesh) {
++            if (shape.importFilePath == filePath)
++                return false;
++            shape.importFilePath = filePath;
++            shape.polyhedronPoints.clear();
++            shape.polyhedronFaces.clear();
++            if (!filePath.isEmpty()) {
++                QString loadError;
++                loadStlFile(filePath, &shape.polyhedronPoints,
++                            &shape.polyhedronFaces, &loadError);
++            }
++            return true;
++        }
++    }
++    return false;
++}
++
+ void SceneDocument::reEvaluateDependentVariables(int changedId)
+ {
+     // Collect variable ids in tree order so upstream definitions propagate forward.
+diff --git a/scenedocument.h b/scenedocument.h
+index 47a4ac5..4ca8d31 100644
+--- a/scenedocument.h
++++ b/scenedocument.h
+@@ -71,6 +71,7 @@ public:
+     bool updateForLoop(int groupId, const QString &loopVariable, const QString &rangeExpression);
+     bool updateConditionExpression(int groupId, const QString &conditionExpression);
+     bool updateTextContent(int shapeId, const QString &text);
++    bool updateImportPath(int shapeId, const QString &filePath);
+     bool moveTreeNode(int nodeId, int parentGroupId, int insertIndex = -1, bool moduleParameterZone = false);
+     bool updateGroupTransform(int groupId, const QVector3D &position, const QVector3D &rotation, const QVector3D &scale, const QStringList &transformExpressions = QStringList());
+     bool updateGroupLinearExtrudeParams(int groupId, const QVector3D &scale,
+diff --git a/shapenode.h b/shapenode.h
+index cab460b..f83befb 100644
+--- a/shapenode.h
++++ b/shapenode.h
+@@ -19,7 +19,8 @@ struct ShapeNode
+         Polyhedron,
+         Point3D,
+         Face3D,
+-        Text
++        Text,
++        ImportedMesh
+     };
+ 
+     enum BooleanMode {
+@@ -57,6 +58,9 @@ struct ShapeNode
+     // calling QFont/QPainterPath off the GUI thread. Derived — not in operator==.
+     QVector<QVector<QVector3D>> textContours;
+ 
++    // Imported mesh (type == ImportedMesh). File path and parsed geometry.
++    QString importFilePath;
++
+     // One expression string per parameter, in shapeParameterControls() order.
+     // Empty list = plain numeric mode (use size/radius/height directly).
+     QStringList parameterExpressions;
+@@ -93,6 +97,7 @@ struct ShapeNode
+             break;
+         case Polyhedron:
+         case Polygon2D:
++        case ImportedMesh:
+             break;
+         case Text:
+             if      (paramIndex == 0) textSize = static_cast<float>(qMax<qreal>(0.1, rawValue));
+@@ -147,19 +152,21 @@ struct ShapeNode
+             || toolName == QLatin1String("circle")
+             || toolName == QLatin1String("square")
+             || toolName == QLatin1String("polygon")
+-            || toolName == QLatin1String("text");
++            || toolName == QLatin1String("text")
++            || toolName == QLatin1String("import");
+     }
+ 
+     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
+     static Type typeFromToolName(const QString &toolName)
+     {
+-        if (toolName == QLatin1String("sphere"))   return Sphere;
+-        if (toolName == QLatin1String("cylinder")) return Cylinder;
+-        if (toolName == QLatin1String("cone"))     return Cone;
+-        if (toolName == QLatin1String("circle"))   return Circle;
+-        if (toolName == QLatin1String("square"))   return Square;
+-        if (toolName == QLatin1String("polygon"))  return Polygon2D;
+-        if (toolName == QLatin1String("text"))     return Text;
++        if (toolName == QLatin1String("sphere"))     return Sphere;
++        if (toolName == QLatin1String("cylinder"))   return Cylinder;
++        if (toolName == QLatin1String("cone"))       return Cone;
++        if (toolName == QLatin1String("circle"))     return Circle;
++        if (toolName == QLatin1String("square"))     return Square;
++        if (toolName == QLatin1String("polygon"))    return Polygon2D;
++        if (toolName == QLatin1String("text"))       return Text;
++        if (toolName == QLatin1String("import"))     return ImportedMesh;
+         return Cube;
+     }
+ };
+@@ -188,7 +195,8 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
+            && left.textHalign == right.textHalign
+            && left.textValign == right.textValign
+            && left.textSize == right.textSize
+-           && left.textSpacing == right.textSpacing;
++           && left.textSpacing == right.textSpacing
++           && left.importFilePath == right.importFilePath;
+ }
+ 
+ inline bool operator!=(const ShapeNode &left, const ShapeNode &right)

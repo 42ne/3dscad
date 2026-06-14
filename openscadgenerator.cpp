@@ -611,6 +611,15 @@ QString OpenScadGenerator::shapeToOpenScad(const ShapeNode &shape)
             .arg(p2).arg(paramExpr(1, shape.usesD2 ? shape.radius2 * 2.0 : shape.radius2))
             .arg(centerStr(shape.center));
     }
+    if (shape.type == ShapeNode::ImportedMesh) {
+        if (shape.importFilePath.isEmpty())
+            return QString("// %1 (no file)\n").arg(shape.name);
+        QString escaped = shape.importFilePath;
+        escaped.replace(QLatin1Char('\\'), QStringLiteral("\\\\"))
+               .replace(QLatin1Char('"'), QStringLiteral("\\\""));
+        return QString("import(\"%1\");\n").arg(escaped);
+    }
+
     if (shape.type == ShapeNode::Point3D) {
         // Single point: output as comment (data used by parent Polyhedron group)
         return QString("// Point %1 at [%2,%3,%4]\n")

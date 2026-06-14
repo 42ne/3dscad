@@ -1,6 +1,7 @@
 #include "openscadparser.h"
 #include "expression.h"
 #include "scenestringutils.h"
+#include "scenemesh.h"
 
 #include <QColor>
 #include <QRegularExpression>
@@ -1609,7 +1610,8 @@ static bool startsWithKnownKeyword(const QString &line)
         "translate", "rotate", "scale", "mirror",
         "union", "difference", "intersection", "hull", "minkowski", "for", "intersection_for", "let", "assign", "if", "else", "color", "linear_extrude", "rotate_extrude",
         "resize", "offset", "projection",
-        "cube", "sphere", "cylinder", "circle", "polyhedron"
+        "cube", "sphere", "cylinder", "circle", "square", "polyhedron",
+        "import"
     };
     for (const QString &kw : known)
         if (line.startsWith(kw))
@@ -1698,6 +1700,42 @@ static bool parseBlock(ParserState *state,
 
         // ── echo(...); / assert(...); — no geometry, skip silently ─────────
         if (line.startsWith(QLatin1String("echo")) || line.startsWith(QLatin1String("assert"))) {
+            continue;
+        }
+
+        // ── import("file.stl") — load mesh file ────────────────────────────
+        if (line.startsWith(QLatin1String("import(")) && line.endsWith(QLatin1Char(';'))) {
+            QString argsStr;
+            if (extractCallArgs(line, "import", &argsStr)) {
+                QString path = argsStr.trimmed();
+                if (path.size() >= 2 && path.startsWith(QLatin1Char('"')) && path.endsWith(QLatin1Char('"')))
+                    path = path.mid(1, path.size() - 2);
+                if (!path.isEmpty()) {
+                    QVector<QVector3D> pts;
+                    QVector<QVector<int>> faces;
+                    QString loadError;
+                    if (loadStlFile(path, &pts, &faces, &loadError)) {
+                        ShapeNode shape;
+                        shape.id = state->nextShapeId++;
+                        shape.type = ShapeNode::ImportedMesh;
+                        shape.name = QStringLiteral("Import %1").arg(shape.id);
+                        shape.importFilePath = path;
+                        shape.polyhedronPoints = pts;
+                        shape.polyhedronFaces = faces;
+                        state->shapes.append(shape);
+                        parent->children.append(makePrimitiveNode(shape, state));
+                    } else {
+                        // Failed to load — create a placeholder shape anyway
+                        ShapeNode shape;
+                        shape.id = state->nextShapeId++;
+                        shape.type = ShapeNode::ImportedMesh;
+                        shape.name = QStringLiteral("Import (failed) %1").arg(shape.id);
+                        shape.importFilePath = path;
+                        state->shapes.append(shape);
+                        parent->children.append(makePrimitiveNode(shape, state));
+                    }
+                }
+            }
             continue;
         }
 
@@ -2958,6 +2996,36 @@ bool OpenScadParser::parseScene(const QString &code, SceneDocument::Snapshot *sn
         // ── echo(...); / assert(...); at top level — skip silently ──────────
         if (line.startsWith(QLatin1String("echo")) || line.startsWith(QLatin1String("assert"))) {
             ++state.index;
+            continue;
+        }
+
+        // ── import("file") at top level — load mesh file ───────────────────
+        if (line.startsWith(QLatin1String("import(")) && line.endsWith(QLatin1Char(';'))) {
+            ++state.index;
+            QString argsStr;
+            if (extractCallArgs(line, "import", &argsStr)) {
+                QString path = argsStr.trimmed();
+                if (path.size() >= 2 && path.startsWith(QLatin1Char('"')) && path.endsWith(QLatin1Char('"')))
+                    path = path.mid(1, path.size() - 2);
+                if (!path.isEmpty()) {
+                    QVector<QVector3D> pts;
+                    QVector<QVector<int>> faces;
+                    QString loadError;
+                    ShapeNode shape;
+                    shape.id = state.nextShapeId++;
+                    shape.type = ShapeNode::ImportedMesh;
+                    shape.importFilePath = path;
+                    if (loadStlFile(path, &pts, &faces, &loadError)) {
+                        shape.name = QStringLiteral("Import %1").arg(shape.id);
+                        shape.polyhedronPoints = pts;
+                        shape.polyhedronFaces = faces;
+                    } else {
+                        shape.name = QStringLiteral("Import (failed) %1").arg(shape.id);
+                    }
+                    state.shapes.append(shape);
+                    sceneNode.children.append(makePrimitiveNode(shape, &state));
+                }
+            }
             continue;
         }
 

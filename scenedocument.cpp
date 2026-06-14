@@ -538,6 +538,26 @@ bool SceneDocument::updateTextContent(int shapeId, const QString &text)
     return false;
 }
 
+bool SceneDocument::updateImportPath(int shapeId, const QString &filePath)
+{
+    for (ShapeNode &shape : m_shapes) {
+        if (shape.id == shapeId && shape.type == ShapeNode::ImportedMesh) {
+            if (shape.importFilePath == filePath)
+                return false;
+            shape.importFilePath = filePath;
+            shape.polyhedronPoints.clear();
+            shape.polyhedronFaces.clear();
+            if (!filePath.isEmpty()) {
+                QString loadError;
+                loadStlFile(filePath, &shape.polyhedronPoints,
+                            &shape.polyhedronFaces, &loadError);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 void SceneDocument::reEvaluateDependentVariables(int changedId)
 {
     // Collect variable ids in tree order so upstream definitions propagate forward.

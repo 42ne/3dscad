@@ -106,6 +106,7 @@ signals:
     void conditionExpressionEdited(int nodeId, const QString &expression);
     void rawCodeEdited(int nodeId, const QString &code);
     void textContentEdited(int shapeId, const QString &text);
+    void importPathEdited(int shapeId, const QString &path);
     void ctrlReleased();
     void moduleRenameRequested(int groupId, const QString &newName);
     void variableRenameRequested(int variableId, const QString &newName);

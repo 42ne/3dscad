@@ -5,6 +5,7 @@
 #include "scenecommands.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenestringutils.h"
+#include "scenemesh.h"
 
 #include <QAction>
 #include <QApplication>
@@ -636,6 +637,9 @@ static ShapeNode makeShapeForTool(const QString &toolName, int shapeNumber)
         shape.textValue = QStringLiteral("Text");
         shape.textSize = 10.0f;
         shape.parameterExpressions = QStringList({QStringLiteral("10"), QStringLiteral("1")});
+    } else if (toolName == QStringLiteral("import")) {
+        shape.type = ShapeNode::ImportedMesh;
+        shape.name = QStringLiteral("Import %1").arg(shapeNumber);
     } else {
         shape.type = ShapeNode::Cube;
         shape.size = QVector3D(20, 20, 20);
@@ -2187,6 +2191,14 @@ void SceneController::handleTextContentEdited(int shapeId, const QString &text)
 {
     auto *command = new UpdateTextContentCommand(&m_scene, shapeId, text,
                                                  [this]() { emit sceneChanged(); });
+    if (!command->isValid()) { delete command; return; }
+    m_undoStack->push(command);
+}
+
+void SceneController::handleImportPathEdited(int shapeId, const QString &path)
+{
+    auto *command = new UpdateImportPathCommand(&m_scene, shapeId, path,
+                                                [this]() { emit sceneChanged(); });
     if (!command->isValid()) { delete command; return; }
     m_undoStack->push(command);
 }

@@ -7,6 +7,9 @@
 #include <QFontMetricsF>
 #include <QPainterPath>
 #include <QPolygonF>
+#include <QFile>
+#include <QTextStream>
+#include <QDataStream>
 
 static QVector3D rotatePoint(const QVector3D &point, const QVector3D &degrees)
 {
@@ -533,5 +536,111 @@ SceneMesh buildShapeMesh(const ShapeNode &shape, int fn, double fa, double fs)
     if (shape.type == ShapeNode::Face3D)
         return {};
 
+    if (shape.type == ShapeNode::ImportedMesh) {
+        return buildPolyhedronMesh(shape);
+    }
+
     return buildCubeMesh(shape);
+}
+
+bool loadStlFile(const QString &filePath,
+                 QVector<QVector3D> *outPoints,
+                 QVector<QVector<int>> *outFaces,
+                 QString *errorMessage)
+{
+    outPoints->clear();
+    outFaces->clear();
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (errorMessage) *errorMessage = QStringLiteral("Cannot open file: %1").arg(file.errorString());
+        return false;
+    }
+
+    QByteArray data = file.readAll();
+    file.close();
+
+    if (data.size() < 84) {
+        if (errorMessage) *errorMessage = QStringLiteral("File too small to be a valid STL.");
+        return false;
+    }
+
+    // Check for ASCII STL: starts with "solid" keyword
+    const QString header = QString::fromLatin1(data.left(80).trimmed());
+    if (header.startsWith(QStringLiteral("solid"), Qt::CaseInsensitive)
+        && data.indexOf("facet") > 0) {
+        // ── ASCII STL ──
+        QTextStream in(data);
+        QString line;
+        QVector<QVector3D> verts;
+        int triCount = 0;
+        bool inFacet = false;
+        while (in.readLineInto(&line)) {
+            line = line.trimmed();
+            if (line.isEmpty()) continue;
+
+            if (line.startsWith(QStringLiteral("facet"), Qt::CaseInsensitive)) {
+                inFacet = true;
+                verts.clear();
+            } else if (line.startsWith(QStringLiteral("endfacet"), Qt::CaseInsensitive)) {
+                inFacet = false;
+                if (verts.size() >= 3) {
+                    QVector<int> face(3);
+                    for (int i = 0; i < 3; ++i) {
+                        const int idx = outPoints->size();
+                        outPoints->append(verts[i]);
+                        face[i] = idx;
+                    }
+                    outFaces->append(face);
+                    ++triCount;
+                }
+                verts.clear();
+            } else if (line.startsWith(QStringLiteral("vertex"), Qt::CaseInsensitive) && inFacet) {
+                const QStringList parts = line.split(QStringLiteral(" "), Qt::SkipEmptyParts);
+                if (parts.size() >= 4) {
+                    bool ok1 = false, ok2 = false, ok3 = false;
+                    const float x = parts[1].toFloat(&ok1);
+                    const float y = parts[2].toFloat(&ok2);
+                    const float z = parts[3].toFloat(&ok3);
+                    if (ok1 && ok2 && ok3)
+                        verts.append(QVector3D(x, y, z));
+                }
+            }
+        }
+        return triCount > 0;
+    }
+
+    // ── Binary STL ──
+    // Header: 80 bytes (ignored), 4-byte uint32 triangle count.
+    const quint32 triCount32 = *reinterpret_cast<const quint32*>(data.constData() + 80);
+    const int expectedSize = 84 + static_cast<int>(triCount32) * 50;
+    if (data.size() < expectedSize) {
+        if (errorMessage) *errorMessage = QStringLiteral("Binary STL truncated: expected %1 bytes, got %2.")
+                                               .arg(expectedSize).arg(data.size());
+        return false;
+    }
+
+    const int count = static_cast<int>(triCount32);
+    outPoints->reserve(count * 3);
+    outFaces->reserve(count);
+
+    const uchar *ptr = reinterpret_cast<const uchar*>(data.constData()) + 84;
+    for (int i = 0; i < count; ++i) {
+        // Skip normal (12 bytes), read 3 vertices (36 bytes), skip attribute (2 bytes)
+        ptr += 12;
+        QVector<int> face(3);
+        for (int v = 0; v < 3; ++v) {
+            float x = 0, y = 0, z = 0;
+            memcpy(&x, ptr, sizeof(float)); ptr += 4;
+            memcpy(&y, ptr, sizeof(float)); ptr += 4;
+            memcpy(&z, ptr, sizeof(float)); ptr += 4;
+            const int idx = outPoints->size();
+            outPoints->append(QVector3D(x, y, z));
+            face[v] = idx;
+        }
+        outFaces->append(face);
+        ptr += 2; // attribute byte count
+    }
+
+    return count > 0;
 }

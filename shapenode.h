@@ -19,7 +19,8 @@ struct ShapeNode
         Polyhedron,
         Point3D,
         Face3D,
-        Text
+        Text,
+        ImportedMesh
     };
 
     enum BooleanMode {
@@ -57,6 +58,9 @@ struct ShapeNode
     // calling QFont/QPainterPath off the GUI thread. Derived — not in operator==.
     QVector<QVector<QVector3D>> textContours;
 
+    // Imported mesh (type == ImportedMesh). File path and parsed geometry.
+    QString importFilePath;
+
     // One expression string per parameter, in shapeParameterControls() order.
     // Empty list = plain numeric mode (use size/radius/height directly).
     QStringList parameterExpressions;
@@ -93,6 +97,7 @@ struct ShapeNode
             break;
         case Polyhedron:
         case Polygon2D:
+        case ImportedMesh:
             break;
         case Text:
             if      (paramIndex == 0) textSize = static_cast<float>(qMax<qreal>(0.1, rawValue));
@@ -147,19 +152,21 @@ struct ShapeNode
             || toolName == QLatin1String("circle")
             || toolName == QLatin1String("square")
             || toolName == QLatin1String("polygon")
-            || toolName == QLatin1String("text");
+            || toolName == QLatin1String("text")
+            || toolName == QLatin1String("import");
     }
 
     // Returns the Type corresponding to toolName; falls back to Cube for unknown names.
     static Type typeFromToolName(const QString &toolName)
     {
-        if (toolName == QLatin1String("sphere"))   return Sphere;
-        if (toolName == QLatin1String("cylinder")) return Cylinder;
-        if (toolName == QLatin1String("cone"))     return Cone;
-        if (toolName == QLatin1String("circle"))   return Circle;
-        if (toolName == QLatin1String("square"))   return Square;
-        if (toolName == QLatin1String("polygon"))  return Polygon2D;
-        if (toolName == QLatin1String("text"))     return Text;
+        if (toolName == QLatin1String("sphere"))     return Sphere;
+        if (toolName == QLatin1String("cylinder"))   return Cylinder;
+        if (toolName == QLatin1String("cone"))       return Cone;
+        if (toolName == QLatin1String("circle"))     return Circle;
+        if (toolName == QLatin1String("square"))     return Square;
+        if (toolName == QLatin1String("polygon"))    return Polygon2D;
+        if (toolName == QLatin1String("text"))       return Text;
+        if (toolName == QLatin1String("import"))     return ImportedMesh;
         return Cube;
     }
 };
@@ -188,7 +195,8 @@ inline bool operator==(const ShapeNode &left, const ShapeNode &right)
            && left.textHalign == right.textHalign
            && left.textValign == right.textValign
            && left.textSize == right.textSize
-           && left.textSpacing == right.textSpacing;
+           && left.textSpacing == right.textSpacing
+           && left.importFilePath == right.importFilePath;
 }
 
 inline bool operator!=(const ShapeNode &left, const ShapeNode &right)

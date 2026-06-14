@@ -42,4 +42,11 @@ SceneMesh buildBoxMesh(const QVector3D &minimum, const QVector3D &maximum);
 // cached into ShapeNode::textContours by SceneDocument::snapshot()).
 QVector<QVector<QVector3D>> buildGlyphContours(const ShapeNode &shape);
 
+// Loads an STL file (ASCII or binary), populating points and triangle faces.
+// Returns true on success. On failure, sets *errorMessage.
+bool loadStlFile(const QString &filePath,
+                 QVector<QVector3D> *outPoints,
+                 QVector<QVector<int>> *outFaces,
+                 QString *errorMessage = nullptr);
+
 #endif

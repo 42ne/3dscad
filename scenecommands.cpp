@@ -508,6 +508,23 @@ UpdateTextContentCommand::UpdateTextContentCommand(SceneDocument *scene,
     m_scene->restoreSnapshot(m_oldSnapshot);
 }
 
+UpdateImportPathCommand::UpdateImportPathCommand(SceneDocument *scene,
+                                                 int shapeId,
+                                                 const QString &filePath,
+                                                 std::function<void()> onChanged)
+    : SnapshotCommand("Edit import path", scene, std::move(onChanged))
+{
+    if (!m_scene)
+        return;
+
+    m_oldSnapshot = m_scene->snapshot();
+    m_valid = m_scene->updateImportPath(shapeId, filePath);
+    if (m_valid)
+        m_newSnapshot = m_scene->snapshot();
+
+    m_scene->restoreSnapshot(m_oldSnapshot);
+}
+
 UpdateGroupColorCommand::UpdateGroupColorCommand(SceneDocument *scene,
                                                  int groupId,
                                                  const QColor &color,

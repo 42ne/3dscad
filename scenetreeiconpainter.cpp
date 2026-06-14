@@ -209,6 +209,32 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
         return;
     }
 
+    if (type == ShapeNode::ImportedMesh) {
+        // Open tray with downward arrow — "import file"
+        const qreal w = rect.width(), h = rect.height();
+        const QColor stroke(214, 224, 244);
+        QPen ap(stroke, w * 0.075);
+        ap.setCapStyle(Qt::RoundCap);
+        ap.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(ap);
+        const qreal ax = rect.center().x();
+        const qreal aTop = rect.top() + h * 0.10;
+        const qreal aBot = rect.center().y() + h * 0.10;
+        painter->drawLine(QPointF(ax, aTop), QPointF(ax, aBot));
+        painter->drawLine(QPointF(ax - w * 0.16, aBot - h * 0.16), QPointF(ax, aBot));
+        painter->drawLine(QPointF(ax + w * 0.16, aBot - h * 0.16), QPointF(ax, aBot));
+        QPen tp(QColor(170, 200, 234), w * 0.055);
+        tp.setCapStyle(Qt::RoundCap);
+        tp.setJoinStyle(Qt::RoundJoin);
+        painter->setPen(tp);
+        const qreal tl = rect.left() + w * 0.16, tr = rect.right() - w * 0.16;
+        const qreal ty = rect.bottom() - h * 0.20, tb = rect.bottom() - h * 0.06;
+        painter->drawLine(QPointF(tl, ty), QPointF(tl, tb));
+        painter->drawLine(QPointF(tr, ty), QPointF(tr, tb));
+        painter->drawLine(QPointF(tl, tb), QPointF(tr, tb));
+        return;
+    }
+
     QPolygonF topFace;
     topFace << QPointF(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.34)
             << QPointF(rect.left() + rect.width() * 0.48, rect.top() + rect.height() * 0.12)
@@ -336,12 +362,8 @@ void paintFutureImport(QPainter *p, const QRectF &g)
 
 bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect)
 {
-    // offset is a real Operation (paintOperationIcon), projection is a real
-    // Operation (paintOperationIcon), and text is a real primitive
-    // (paintPrimitiveIcon); the remaining entries stay here until their
-    // features are wired.
-    const QString n = toolName.toLower();
-    if (n == QStringLiteral("import"))     { paintFutureImport(painter, rect);     return true; }
+    // offset, projection are real Operations (paintOperationIcon), text and
+    // import are real primitives (paintPrimitiveIcon).
     return false;
 }
 

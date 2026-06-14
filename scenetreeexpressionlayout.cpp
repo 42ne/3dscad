@@ -53,7 +53,8 @@ QVector<ShapeParameterControl> shapeParameterControls(const ShapeNode &shape)
         return {{QStringLiteral("Sz"), shape.textSize, expr(0, shape.textSize)},
                 {QStringLiteral("Sp"), shape.textSpacing, expr(1, shape.textSpacing)}};
 
-    if (shape.type == ShapeNode::Polyhedron || shape.type == ShapeNode::Polygon2D)
+    if (shape.type == ShapeNode::Polyhedron || shape.type == ShapeNode::Polygon2D
+        || shape.type == ShapeNode::ImportedMesh)
         return {};
 
     if (shape.type == ShapeNode::Point3D)
@@ -758,7 +759,8 @@ QRectF cubeShapeParameterFieldRect(const QRectF &rowRect)
 bool shapeUsesExpressionPillLayout(const ShapeNode &shape)
 {
     return shape.type != ShapeNode::Polygon2D
-        && shape.type != ShapeNode::Polyhedron;
+        && shape.type != ShapeNode::Polyhedron
+        && shape.type != ShapeNode::ImportedMesh;
 }
 
 QRectF shapeParameterFieldRect(const QRectF &rowRect, const ShapeNode &shape)
