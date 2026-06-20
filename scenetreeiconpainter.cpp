@@ -421,15 +421,32 @@ void paintOperationIcon(QPainter *painter,
                         SceneDocument::TreeNode::Operation operation,
                         const QRectF &rect,
                         const QColor &accent,
-                        qreal symbolInset)
+                        qreal symbolInset,
+                        bool onGlass)
 {
-    painter->setPen(QPen(accent.darker(135), 1));
-    painter->setBrush(QColor(255, 255, 255, 135));
-    painter->drawRoundedRect(rect, 3.0, 3.0);
+    // Bright accent used for strokes when drawn on the dark glass panel; the same
+    // hue as `accent` but forced to a high value/saturation so it reads on dark.
+    QColor glassAccent = accent;
+    {
+        int h = 0, s = 0, v = 0;
+        glassAccent.getHsv(&h, &s, &v);
+        glassAccent.setHsv(h < 0 ? 210 : h, qMax(s, 70), 240);
+    }
+    // On glass: skip the opaque backing plate and stroke in the bright accent.
+    // On a light card: keep the white plate and darken the accent for contrast.
+    auto strokeCol = [&](int darkFactor) {
+        return onGlass ? glassAccent : accent.darker(darkFactor);
+    };
+
+    if (!onGlass) {
+        painter->setPen(QPen(accent.darker(135), 1));
+        painter->setBrush(QColor(255, 255, 255, 135));
+        painter->drawRoundedRect(rect, 3.0, 3.0);
+    }
 
     const QPointF center = rect.center();
     const QRectF symbolRect = rect.adjusted(symbolInset, symbolInset, -symbolInset, -symbolInset);
-    QPen pen(accent.darker(160), 2);
+    QPen pen(strokeCol(160), 2);
     pen.setCapStyle(Qt::RoundCap);
     painter->setPen(pen);
     painter->setBrush(Qt::NoBrush);
@@ -440,7 +457,7 @@ void paintOperationIcon(QPainter *painter,
     } else if (operation == SceneDocument::TreeNode::Difference) {
         painter->drawLine(symbolRect.left(), center.y(), symbolRect.right(), center.y());
     } else if (operation == SceneDocument::TreeNode::Intersection) {
-        QPen intersectionPen(accent.darker(150), 2.0);
+        QPen intersectionPen(strokeCol(150), 2.0);
         intersectionPen.setCapStyle(Qt::RoundCap);
         intersectionPen.setJoinStyle(Qt::RoundJoin);
         painter->setPen(intersectionPen);
@@ -465,7 +482,7 @@ void paintOperationIcon(QPainter *painter,
                            symbolRect.top(),
                            symbolRect.width() * 0.72,
                            symbolRect.height() * 0.72);
-        painter->setPen(QPen(accent.darker(160), 1.6));
+        painter->setPen(QPen(strokeCol(160), 1.6));
         painter->drawRect(large);
         painter->drawRect(small);
         painter->drawLine(small.right(), small.top(), large.right(), large.top());
@@ -476,15 +493,15 @@ void paintOperationIcon(QPainter *painter,
         const qreal rw = (symbolRect.width() * 0.5 - gap) * 0.72;
         const qreal rh = symbolRect.height() * 0.55;
         const qreal ry = center.y() - rh * 0.5;
-        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setPen(QPen(strokeCol(155), 1.4));
         painter->setBrush(QColor(255, 255, 255, 55));
         painter->drawRect(QRectF(cx - gap - rw, ry, rw, rh));
         painter->drawRect(QRectF(cx + gap,       ry, rw, rh));
-        painter->setPen(QPen(accent.darker(170), 1.0, Qt::DashLine));
+        painter->setPen(QPen(strokeCol(170), 1.0, Qt::DashLine));
         painter->drawLine(QPointF(cx, symbolRect.top()), QPointF(cx, symbolRect.bottom()));
     } else if (operation == SceneDocument::TreeNode::Hull) {
         // Convex polygon outline (pentagon-ish).
-        painter->setPen(QPen(accent.darker(155), 1.5));
+        painter->setPen(QPen(strokeCol(155), 1.5));
         painter->setBrush(QColor(255, 255, 255, 55));
         const qreal r = symbolRect.height() * 0.46;
         const QPointF c = symbolRect.center();
@@ -497,7 +514,7 @@ void paintOperationIcon(QPainter *painter,
         painter->drawPolygon(poly);
     } else if (operation == SceneDocument::TreeNode::Minkowski) {
         // Two overlapping rounded rectangles (⊕-like Minkowski sum symbol).
-        painter->setPen(QPen(accent.darker(155), 1.4));
+        painter->setPen(QPen(strokeCol(155), 1.4));
         painter->setBrush(QColor(255, 255, 255, 55));
         const qreal hw = symbolRect.width() * 0.42;
         const qreal hh = symbolRect.height() * 0.38;
@@ -506,7 +523,7 @@ void paintOperationIcon(QPainter *painter,
         painter->drawRoundedRect(QRectF(symbolRect.right() - hw - offset, center.y() - hh * 0.5, hw, hh), 2.5, 2.5);
         // Plus sign in the gap between the two shapes
         const qreal gx = symbolRect.left() + hw + (symbolRect.width() - 2 * hw - offset) * 0.3;
-        painter->setPen(QPen(accent.darker(170), 1.2));
+        painter->setPen(QPen(strokeCol(170), 1.2));
         painter->drawLine(QPointF(gx, center.y() - 2.5), QPointF(gx, center.y() + 2.5));
         painter->drawLine(QPointF(gx - 2.5, center.y()), QPointF(gx + 2.5, center.y()));
     } else if (operation == SceneDocument::TreeNode::LinearExtrude) {
@@ -545,7 +562,7 @@ void paintOperationIcon(QPainter *painter,
         painter->setPen(QPen(extStroke, 1.2));
         painter->drawEllipse(c, hx, hy);
     } else if (operation == SceneDocument::TreeNode::Resize) {
-        painter->setPen(QPen(accent.darker(155), 1.3));
+        painter->setPen(QPen(strokeCol(155), 1.3));
         const QRectF r = symbolRect.adjusted(2.0, 2.0, -2.0, -2.0);
         painter->drawRect(r);
         // Diagonal arrows at corners
@@ -564,7 +581,7 @@ void paintOperationIcon(QPainter *painter,
             painter->drawLine(tip, tip - dir * 2.0 - perp * 1.5);
         }
     } else if (operation == SceneDocument::TreeNode::Polyhedron) {
-        painter->setPen(QPen(accent.darker(155), 1.25));
+        painter->setPen(QPen(strokeCol(155), 1.25));
         const QPointF top(symbolRect.center().x(), symbolRect.top() + 1.0);
         const QPointF left(symbolRect.left() + 1.0, symbolRect.center().y() - 0.5);
         const QPointF right(symbolRect.right() - 1.0, symbolRect.center().y() - 0.5);
@@ -585,7 +602,7 @@ void paintOperationIcon(QPainter *painter,
         painter->drawLine(top, bottom);
         painter->drawLine(left, right);
 
-        painter->setBrush(accent.darker(150));
+        painter->setBrush(strokeCol(150));
         painter->setPen(Qt::NoPen);
         for (const QPointF &p : {top, left, right, bottom})
             painter->drawEllipse(p, 1.25, 1.25);
@@ -608,7 +625,7 @@ void paintOperationIcon(QPainter *painter,
         swatch.setColorAt(0.0, QColor(255, 235, 126));
         swatch.setColorAt(0.45, QColor(79, 163, 255));
         swatch.setColorAt(1.0, QColor(106, 222, 148));
-        painter->setPen(QPen(accent.darker(160), 1.4));
+        painter->setPen(QPen(strokeCol(160), 1.4));
         painter->setBrush(swatch);
         painter->drawEllipse(symbolRect.adjusted(1.0, 1.0, -1.0, -1.0));
         painter->setBrush(QColor(255, 255, 255, 150));
@@ -626,14 +643,14 @@ void paintOperationIcon(QPainter *painter,
         rawFont.setBold(true);
         rawFont.setPointSizeF(qMax<qreal>(9.0, rawFont.pointSizeF() + 2.0));
         painter->setFont(rawFont);
-        painter->setPen(accent.darker(165));
+        painter->setPen(strokeCol(165));
         painter->drawText(symbolRect.adjusted(-1.0, -1.0, 1.0, 1.0),
                           Qt::AlignCenter,
                           QStringLiteral("R"));
     } else if (operation == SceneDocument::TreeNode::Scene) {
         // Draw a small grid of dots to represent the top-level scene container.
         painter->setPen(Qt::NoPen);
-        painter->setBrush(accent.darker(150));
+        painter->setBrush(strokeCol(150));
         const qreal dotR = 2.0;
         const qreal cx = center.x(), cy = center.y();
         const qreal gap = 4.5;

@@ -349,7 +349,7 @@ public:
                                                    || operation == SceneDocument::TreeNode::Minkowski
                                                    ? iconAccent
                                                    : iconAccent.lighter(130);
-            paintOperationIcon(painter, operation, glyphRect, operationIconAccent);
+            paintOperationIcon(painter, operation, glyphRect, operationIconAccent, 7.0, /*onGlass=*/true);
         } else if (paintFutureToolIcon(painter, m_label, glyphRect)) {
             // Glyph for an upcoming tool (text/offset/projection/import) drawn.
         } else {

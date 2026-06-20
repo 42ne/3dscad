@@ -23,7 +23,12 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
 bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect);
 QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected = false);
 void paintToolbarPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect, bool selected = false);
-void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent, qreal symbolInset = 7.0);
+// When `onGlass` is true the icon is drawn directly onto the dark glass toolbar
+// panel: the opaque white backing plate is skipped and the symbol is stroked in
+// a bright accent so it reads on the dark frame (matching the primitive icons).
+// When false (default) the white backing plate is drawn — used for the operation
+// icons inside light tree-node group headers.
+void paintOperationIcon(QPainter *painter, SceneDocument::TreeNode::Operation operation, const QRectF &rect, const QColor &accent, qreal symbolInset = 7.0, bool onGlass = false);
 
 } // namespace SceneTreeGraphics
 
