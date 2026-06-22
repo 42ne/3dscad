@@ -426,10 +426,12 @@ bool SceneTree::addPrimitive(int shapeId, TreeNode::Operation operation, int par
 
 bool SceneTree::removePrimitive(int shapeId)
 {
-    const bool removed = removePrimitiveFromTree(&m_root, shapeId);
-    if (removed)
-        pruneEmptyGroups(&m_root);
-    return removed;
+    // Deliberately do NOT prune empty groups here: deleting a primitive must not
+    // cascade-delete its parent operation group (difference/union/intersection/
+    // transforms…). Empty operation groups are a valid state — the tree renders
+    // them with drop zones so a new child can be added. (Group deletion is an
+    // explicit, separate action via RemoveGroupCommand.)
+    return removePrimitiveFromTree(&m_root, shapeId);
 }
 
 bool SceneTree::movePrimitiveToOperation(int shapeId, TreeNode::Operation operation)

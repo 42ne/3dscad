@@ -48,6 +48,49 @@ void collectVariableValueMaps(const SceneDocument::TreeNode &node,
         collectVariableValueMaps(child, scalars, vectors, excludedNodeId);
 }
 
+// Inject the loop variables of every enclosing `for` ancestor of `nodeId` so an
+// expression edited inside a loop body can reference them (e.g. Z = 0 + i). The
+// representative value is the first iteration value of the range — matching what
+// the geometry evaluator uses on the first pass. Outer loops are resolved before
+// inner ones so a nested loop's range may reference an outer loop variable.
+void injectLoopVariables(const SceneDocument *scene, int nodeId,
+                         QHash<QString, qreal> *scalars,
+                         QHash<QString, ExpressionSyntax::Value> *vectors)
+{
+    if (!scene || !scalars || !vectors)
+        return;
+
+    // Walk parents up to the root, collecting for-loop ancestors (innermost first).
+    QVector<const SceneDocument::TreeNode *> loops;
+    int currentId = nodeId;
+    while (true) {
+        int parentId = 0;
+        if (!SceneDocument::findChildParent(scene->treeRoot(), currentId, &parentId, nullptr))
+            break;
+        const SceneDocument::TreeNode *parent = scene->treeNodeById(parentId);
+        if (!parent)
+            break;
+        if (parent->operation == SceneDocument::TreeNode::For)
+            loops.append(parent);
+        currentId = parentId;
+    }
+
+    // Resolve outermost first so inner ranges can see outer loop variables.
+    for (int i = loops.size() - 1; i >= 0; --i) {
+        const SceneDocument::TreeNode *loop = loops[i];
+        const QString name = loop->loopVariable.trimmed().isEmpty()
+                                 ? QStringLiteral("i") : loop->loopVariable.trimmed();
+        const QString rangeExpr = loop->loopRangeExpression.trimmed().isEmpty()
+                                      ? QStringLiteral("[0 : 1 : 3]") : loop->loopRangeExpression.trimmed();
+        QVector<qreal> rangeValues;
+        qreal first = 0.0;
+        if (evaluateRangeExpression(rangeExpr, *scalars, &rangeValues) && !rangeValues.isEmpty())
+            first = rangeValues.first();
+        (*scalars)[name] = first;
+        (*vectors)[name] = ExpressionSyntax::Value(first);
+    }
+}
+
 }
 
 SceneTreeInlineEditor::SceneTreeInlineEditor(SceneTreeGraphicsWidget *widget)
@@ -114,9 +157,11 @@ bool SceneTreeInlineEditor::validateInlineExpression(const SceneTreeGraphicsWidg
 
     QHash<QString, qreal> values;
     QHash<QString, ExpressionSyntax::Value> vectorValues;
-    if (m_widget->m_scene)
+    if (m_widget->m_scene) {
         collectVariableValueMaps(m_widget->m_scene->treeRoot(), &values, &vectorValues,
                                  target.kind == SceneTreeGraphicsWidget::ExpressionEditTarget::Variable ? target.nodeId : 0);
+        injectLoopVariables(m_widget->m_scene, target.nodeId, &values, &vectorValues);
+    }
 
     qreal value = 0.0;
     return ExpressionSyntax::evaluate(trimmed, values, &value, errorMessage, nullptr, &vectorValues);

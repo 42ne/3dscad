@@ -21,7 +21,10 @@ void paintPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &r
 // tool name can be added to the palette and render correctly before the rest of
 // the feature is wired up.
 bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRectF &rect);
-QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected = false);
+// When `withGrid` is true a faint isometric floor grid is drawn inside the glass
+// panel, behind where the glyph will be painted (used for the larger tree-node
+// primitive icons). Returns the centred glyph rect to paint the symbol into.
+QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected = false, bool withGrid = false);
 void paintToolbarPrimitiveIcon(QPainter *painter, ShapeNode::Type type, const QRectF &rect, bool selected = false);
 // When `onGlass` is true the icon is drawn directly onto the dark glass toolbar
 // panel: the opaque white backing plate is skipped and the symbol is stroked in

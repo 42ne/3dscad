@@ -27,6 +27,10 @@ constexpr qreal TransformIconWidth = 36.0;
 constexpr qreal TransformParamLabelArea = 22.0;
 constexpr qreal GroupPadding = 9.0;
 constexpr qreal ChildGap = 5.0;
+// Width of the reserved left gutter in a difference group that holds the
+// vertical "base"/"cut" labels, so they sit flush to the edge without
+// overlapping the child icons.
+constexpr qreal DifferenceLabelGutter = 16.0;
 constexpr qreal CornerRadius = 10.0;
 constexpr qreal DifferenceMinContentHeight = PrimitiveHeight * 2.0 + ChildGap;
 constexpr qreal DragPreviewStartDistance = 6.0;
@@ -48,6 +52,32 @@ inline QRectF centerCheckboxRect(const QRectF &primitiveRect)
     return QRectF(cardRight - cbSize - 2.0,
                   primitiveRect.bottom() - cbSize - 2.0,
                   cbSize, cbSize);
+}
+
+// Vertical "base"/"cut" pill label rect inside the reserved left gutter of a
+// difference group. `baseLabel` selects the upper (base) or lower (cut) section.
+// Returns an empty rect when the section is too short to hold a readable label.
+inline QRectF differenceLabelRect(const QRectF &groupRect, qreal cutSeparatorY, bool baseLabel)
+{
+    constexpr qreal labelWidth = SceneTreeGraphics::DifferenceLabelGutter - 3.0;
+    constexpr qreal maxHeight  = 42.0;
+    const qreal left = groupRect.left() + 2.0;
+
+    qreal top = 0.0;
+    qreal bottom = 0.0;
+    if (baseLabel) {
+        top    = groupRect.top() + SceneTreeGraphics::GroupHeaderHeight + SceneTreeGraphics::GroupPadding;
+        bottom = cutSeparatorY - 4.0;
+    } else {
+        top    = cutSeparatorY + 4.0;
+        bottom = groupRect.bottom() - SceneTreeGraphics::GroupPadding;
+    }
+
+    const qreal height = qMin(maxHeight, bottom - top);
+    if (height < 18.0)
+        return QRectF();
+    const qreal y = top + (bottom - top - height) * 0.5;
+    return QRectF(left, y, labelWidth, height);
 }
 
 inline bool shapeSupportsCenter(int shapeType)

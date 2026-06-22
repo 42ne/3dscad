@@ -164,6 +164,9 @@ private:
     void updateColorEditHighlight(const QPointF &scenePos);
 
     void updateToolbarOverlay();
+    void setToolbarDragSourceDimmed(const QString &toolName, bool dimmed);
+    void setDropPreviewCoveredAreas(const QVector<QRectF> &areas);
+    void clearDropPreviewCoveredAreas();
     void repositionToolbarItems();
     void repositionToolbarItemsSync();
     void beginTreeZoomSnapshot();
@@ -201,6 +204,7 @@ private:
     bool variableNumberControlAt(const QPointF &p, int *nId, int *s, int *l) const;
     bool forLoopRangeControlAt(const QPointF &p, int *nId, int *s, int *l) const;
     bool moduleCallParamControlAt(const QPointF &p, int *mcId, int *pvId, int *s, int *l) const;
+    bool centerBadgeControlAt(const QPointF &p, int *nId, int *sId, bool *active) const;
     void showDropPreview(const QPointF &scenePosition, const QSizeF &previewSize, const QString &previewTool, int movingNodeId = 0);
     void finishDropPreview();
     void clearDropPreview();
@@ -230,6 +234,7 @@ private:
     SceneTreeLayout m_treeLayout;
     QSet<int> m_collapsedGroupIds;
     QVector<QGraphicsItem *> m_treeItems;
+    QHash<QGraphicsItem *, qreal> m_dropPreviewOriginalOpacities;
     QVariantAnimation *m_focusAnimation = nullptr;
 
     // ── Canvas-move drag ───────────────────────────────────────────────────────

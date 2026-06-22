@@ -18,7 +18,9 @@ QRectF groupContentRect(const QRectF &groupRect, SceneDocument::TreeNode::Operat
                                   -GroupPadding);
     }
 
-    return groupRect.adjusted(GroupPadding,
+    const qreal leftGutter = (operation == SceneDocument::TreeNode::Difference)
+                                 ? DifferenceLabelGutter : 0.0;
+    return groupRect.adjusted(GroupPadding + leftGutter,
                              GroupHeaderHeight + GroupPadding,
                              -GroupPadding,
                              -GroupPadding);

@@ -92,18 +92,6 @@ void paintVariableReferenceBlink(QPainter *painter,
                       QBrush(QColor(120, 20, 18, 95)));
 }
 
-QRectF boundedVerticalLabelRect(qreal left, qreal top, qreal bottom, qreal width, qreal preferredHeight)
-{
-    if (bottom <= top)
-        return QRectF();
-
-    const qreal height = qMin(preferredHeight, bottom - top);
-    if (height < 18.0)
-        return QRectF();
-
-    return QRectF(left, top + (bottom - top - height) * 0.5, width, height);
-}
-
 void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF &iconRect)
 {
     const QRectF badgeRect(iconRect.right() - 2.0, iconRect.top(), 15.0, 15.0);
@@ -112,6 +100,54 @@ void paintPrimitiveBadge(QPainter *painter, const QString &number, const QRectF 
     painter->drawEllipse(badgeRect);
     painter->setPen(QColor(30, 58, 90));
     painter->drawText(badgeRect, Qt::AlignCenter, number);
+}
+
+// Center-toggle badge: a target/reticle in the bottom-right corner of the icon.
+// Muted grey when center is off, warm high-contrast when on.
+void paintCenterBadge(QPainter *painter, const QRectF &rect, bool active)
+{
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+
+    // Drop shadow
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 55));
+    painter->drawRoundedRect(rect.translated(0.8, 0.9), 4.0, 4.0);
+
+    // Background plate + symbol colour depending on state.
+    QColor symbol;
+    if (active) {
+        QLinearGradient g(rect.topLeft(), rect.bottomLeft());
+        g.setColorAt(0.0, QColor(248, 236, 198));
+        g.setColorAt(1.0, QColor(226, 204, 148));
+        painter->setBrush(g);
+        painter->setPen(QPen(QColor(208, 186, 128), 1.0));
+        symbol = QColor(26, 78, 92);    // dark teal — strong contrast on tan
+    } else {
+        painter->setBrush(QColor(52, 62, 76, 215));
+        painter->setPen(QPen(QColor(255, 255, 255, 40), 1.0));
+        symbol = QColor(146, 158, 174); // muted grey
+    }
+    painter->drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 4.0, 4.0);
+
+    // Reticle: ring + 4 axis ticks crossing it + centre dot.
+    const QPointF c = rect.center();
+    const qreal r = qMin(rect.width(), rect.height()) * 0.255;
+    QPen pen(symbol, active ? 1.5 : 1.25);
+    pen.setCapStyle(Qt::RoundCap);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawEllipse(c, r, r);
+    const qreal inner = r * 0.55, outer = r * 1.55;
+    painter->drawLine(QPointF(c.x(), c.y() - inner), QPointF(c.x(), c.y() - outer));
+    painter->drawLine(QPointF(c.x(), c.y() + inner), QPointF(c.x(), c.y() + outer));
+    painter->drawLine(QPointF(c.x() - inner, c.y()), QPointF(c.x() - outer, c.y()));
+    painter->drawLine(QPointF(c.x() + inner, c.y()), QPointF(c.x() + outer, c.y()));
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(symbol);
+    painter->drawEllipse(c, r * 0.34, r * 0.34);
+
+    painter->restore();
 }
 
 void paintHeaderGripDots(QPainter *painter, const QRectF &rect, const QColor &color)
@@ -669,7 +705,60 @@ void Polygon2DTableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem
 
 namespace {
 
-class PrimitiveCardItem final : public QGraphicsItem
+// Style/context fields shared by every tree card, grouped so the long card
+// constructors don't repeat the same trailing parameter list.
+struct CardContext
+{
+    int     theme = 0;
+    QImage  thumbnail;
+    QString highlightedVariableReference;
+    bool    variableReferenceBlinkOn = false;
+};
+
+// Common base for all tree-node cards: holds the members shared by every card
+// and the boilerplate paint preamble. Behaviour is unchanged from the previous
+// standalone classes — e.g. the opacity is stored here but each subclass decides
+// whether to apply it in paint() (the group card intentionally does not).
+class TreeCardItem : public QGraphicsItem
+{
+public:
+    TreeCardItem(const QRectF &rect, qreal zValue, bool selected, qreal opacity,
+                 const CardContext &ctx)
+        : m_rect(rect)
+        , m_selected(selected)
+        , m_opacity(opacity)
+        , m_theme(ctx.theme)
+        , m_thumbnail(ctx.thumbnail)
+        , m_highlightedVariableReference(ctx.highlightedVariableReference)
+        , m_variableReferenceBlinkOn(ctx.variableReferenceBlinkOn)
+    {
+        setZValue(zValue);
+    }
+
+    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
+
+protected:
+    // Shared paint preamble: antialiasing + the canonical scene-tree font.
+    // (Opacity is deliberately left to subclasses — see class comment.)
+    void beginCardPaint(QPainter *painter) const
+    {
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setFont(sceneTreeGraphicsFont());
+    }
+
+    // Golden accent used for the selected-card highlight across all card types.
+    static QColor selectionAccent() { return QColor(255, 203, 87); }
+
+    QRectF  m_rect;
+    bool    m_selected = false;
+    qreal   m_opacity = 1.0;
+    int     m_theme = 0;
+    QImage  m_thumbnail;
+    QString m_highlightedVariableReference;
+    bool    m_variableReferenceBlinkOn = false;
+};
+
+class PrimitiveCardItem final : public TreeCardItem
 {
 public:
     PrimitiveCardItem(const QRectF &rect,
@@ -680,26 +769,14 @@ public:
                       int activeNumberStart,
                       qreal opacity,
                       qreal zValue,
-                      int theme = 0,
-                      const QImage &thumbnail = QImage(),
-                      const QString &highlightedVariableReference = QString(),
-                      bool variableReferenceBlinkOn = false)
-        : m_rect(rect)
+                      const CardContext &ctx = {})
+        : TreeCardItem(rect, zValue, selected, opacity, ctx)
         , m_shape(shape ? *shape : ShapeNode())
         , m_number(number)
-        , m_selected(selected)
         , m_activeParamIndex(activeParamIndex)
         , m_activeNumberStart(activeNumberStart)
-        , m_opacity(opacity)
-        , m_theme(theme)
-        , m_thumbnail(thumbnail)
-        , m_highlightedVariableReference(highlightedVariableReference)
-        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
-        setZValue(zValue);
     }
-
-    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
 
     // Rect of the center checkbox in scene coordinates (empty if N/A for this type).
     QRectF centerCheckRect() const
@@ -709,9 +786,8 @@ public:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        painter->setRenderHint(QPainter::Antialiasing, true);
+        beginCardPaint(painter);
         painter->setOpacity(m_opacity);
-        painter->setFont(sceneTreeGraphicsFont());
 
         // Optional user-set background — transparent by default, drawn only when alpha > 0.
         const QColor leafFill = SceneTreePalette::leafCardFill();
@@ -728,7 +804,7 @@ public:
         QRectF iconRect;
 
         if (!m_thumbnail.isNull()) {
-            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected);
+            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected, /*withGrid=*/true);
             QPainterPath clip;
             clip.addRoundedRect(iconRect.adjusted(0.5, 0.5, -0.5, -0.5), 3.5, 3.5);
             painter->save();
@@ -736,52 +812,19 @@ public:
             painter->drawImage(iconRect, m_thumbnail);
             painter->restore();
         } else {
-            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected);
+            iconRect = paintToolbarIconFrame(painter, cardRect, QColor(178, 207, 238), m_selected, /*withGrid=*/true);
             paintPrimitiveIcon(painter, m_shape.type, iconRect);
         }
         if (!m_number.isEmpty())
             paintPrimitiveBadge(painter, m_number, iconRect);
 
-        // ── Center checkbox ──────────────────────────────────────────────
+        // ── Center toggle badge (target reticle, bottom-right of icon) ────
         const bool supportsCenter = (m_shape.type == ShapeNode::Cube
                                      || m_shape.type == ShapeNode::Cylinder
                                      || m_shape.type == ShapeNode::Cone
                                      || m_shape.type == ShapeNode::Square);
-        if (supportsCenter) {
-            const QRectF cbRect = ::centerCheckboxRect(m_rect);
-            const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
-
-            // "c" label to the left of the checkbox
-            painter->save();
-            QFont cbFont = painter->font();
-            cbFont.setPointSizeF(qMax<qreal>(6.0, cbFont.pointSizeF() - 3.0));
-            painter->setFont(cbFont);
-            painter->setPen(SceneTreePalette::numLabelText(pt));
-            painter->drawText(QRectF(cbRect.left() - 12.0, cbRect.top(),
-                                     12.0, cbRect.height()),
-                              Qt::AlignRight | Qt::AlignVCenter,
-                              QStringLiteral("c"));
-            painter->restore();
-
-            // Checkbox square
-            painter->setPen(QPen(SceneTreePalette::pillBorder(QColor(255,255,255,48), pt), 1.2));
-            painter->setBrush(m_shape.center
-                ? SceneTreePalette::pillFillActive().lighter(130)
-                : SceneTreePalette::pillFill(pt));
-            painter->drawRoundedRect(cbRect.adjusted(0.5, 0.5, -0.5, -0.5), 3.0, 3.0);
-
-            if (m_shape.center) {
-                // Draw checkmark
-                painter->setPen(QPen(SceneTreePalette::numText(pt), 2.0, Qt::SolidLine, Qt::RoundCap));
-                const qreal cx = cbRect.center().x();
-                const qreal cy = cbRect.center().y();
-                QPainterPath check;
-                check.moveTo(cx - 3.5, cy);
-                check.lineTo(cx - 1.0, cy + 3.0);
-                check.lineTo(cx + 4.0, cy - 2.5);
-                painter->drawPath(check);
-            }
-        }
+        if (supportsCenter)
+            paintCenterBadge(painter, ::centerCheckboxRect(m_rect), m_shape.center);
 
         // Parameters outside the card border.
         const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
@@ -879,20 +922,13 @@ public:
     }
 
 private:
-    QRectF m_rect;
     ShapeNode m_shape;
     QString m_number;
-    bool m_selected = false;
     int m_activeParamIndex = -1;
     int m_activeNumberStart = -1;
-    qreal m_opacity = 1.0;
-    int m_theme = 0;
-    QImage m_thumbnail;
-    QString m_highlightedVariableReference;
-    bool m_variableReferenceBlinkOn = false;
 };
 
-class VariableCardItem final : public QGraphicsItem
+class VariableCardItem final : public TreeCardItem
 {
 public:
     VariableCardItem(const QRectF &rect,
@@ -904,32 +940,21 @@ public:
                      qreal zValue,
                      bool isParameter = false,
                      int depth = 0,
-                     int theme = 0,
-                     const QString &highlightedVariableReference = QString(),
-                     bool variableReferenceBlinkOn = false)
-        : m_rect(rect)
+                     const CardContext &ctx = {})
+        : TreeCardItem(rect, zValue, selected, opacity, ctx)
         , m_name(name)
         , m_expression(expression)
-        , m_selected(selected)
         , m_activeNumberStart(activeNumberStart)
-        , m_opacity(opacity)
         , m_isParameter(isParameter)
         , m_depth(depth)
-        , m_theme(theme)
-        , m_highlightedVariableReference(highlightedVariableReference)
-        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
         Q_UNUSED(m_depth);  // reserved for future depth-tinted variable rows
-        setZValue(zValue);
     }
-
-    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        painter->setRenderHint(QPainter::Antialiasing, true);
+        beginCardPaint(painter);
         painter->setOpacity(m_opacity);
-        painter->setFont(sceneTreeGraphicsFont());
 
         const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
         const bool dark = SceneTreePalette::isDarkTheme(pt);
@@ -951,7 +976,7 @@ public:
                 paintRoundedPanel(painter,
                                   m_rect.adjusted(-3.0, -3.0, 3.0, 3.0),
                                   7.0,
-                                  QPen(QColor(255, 203, 87), 2.4),
+                                  QPen(selectionAccent(), 2.4),
                                   Qt::NoBrush);
             }
         }
@@ -1024,20 +1049,14 @@ public:
     }
 
 private:
-    QRectF  m_rect;
     QString m_name;
     QString m_expression;
-    bool    m_selected = false;
     int     m_activeNumberStart = -1;
-    qreal   m_opacity = 1.0;
     bool    m_isParameter = false;
     int     m_depth = 0;
-    int     m_theme = 0;
-    QString m_highlightedVariableReference;
-    bool    m_variableReferenceBlinkOn = false;
 };
 
-class GroupCardItem final : public QGraphicsItem
+class GroupCardItem final : public TreeCardItem
 {
 public:
     GroupCardItem(const QRectF &rect,
@@ -1070,7 +1089,8 @@ public:
                   const QString &rawCode = QString(),
                   const QString &highlightedVariableReference = QString(),
                   bool variableReferenceBlinkOn = false)
-        : m_rect(rect)
+        : TreeCardItem(rect, zValue, selected, /*opacity*/ 1.0,
+                       CardContext{theme, thumbnail, highlightedVariableReference, variableReferenceBlinkOn})
         , m_cutSeparatorY(cutSeparatorY)
         , m_transformValues(transformValues)
         , m_transformExpressions(transformExpressions)
@@ -1083,32 +1103,25 @@ public:
         , m_activeTransformAxis(activeTransformAxis)
         , m_activeTransformNumberStart(activeTransformNumberStart)
         , m_color(color)
-        , m_thumbnail(thumbnail)
         , m_moduleName(moduleName)
         , m_operation(operation)
-        , m_selected(selected)
         , m_empty(empty)
         , m_showShadow(showShadow)
         , m_showDifferenceLabels(showDifferenceLabels)
         , m_insertedPreview(insertedPreview)
         , m_depth(depth)
-        , m_theme(theme)
         , m_collapsed(collapsed)
         , m_linearExtrudeCenter(linearExtrudeCenter)
         , m_linearExtrudeSlices(linearExtrudeSlices)
         , m_rawCode(rawCode)
-        , m_highlightedVariableReference(highlightedVariableReference)
-        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
-        setZValue(zValue);
     }
 
     QRectF boundingRect() const override { return m_rect.adjusted(-2.0, -2.0, 6.0, 7.0); }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->setFont(sceneTreeGraphicsFont());
+        beginCardPaint(painter);
 
         // ----- Palette-derived colours -----
         const auto pt   = static_cast<SceneTreePalette::Theme>(m_theme);
@@ -1121,7 +1134,7 @@ public:
 
         // Body border: selected = golden; otherwise use per-op override or derive from fill.
         const QPen bodyBorderPen = m_selected
-            ? QPen(QColor(255, 203, 87), 3)
+            ? QPen(selectionAccent(), 3)
             : QPen(SceneTreePalette::cardBorder(m_operation, fill, pt), 1.5);
 
         const QColor cTextPrimary = SceneTreePalette::cardTextPrimary(m_operation, pt);
@@ -1182,18 +1195,11 @@ public:
                           QPointF(m_rect.right() - GroupPadding, m_cutSeparatorY));
 
         if (m_showDifferenceLabels) {
-            const qreal labelWidth  = 20.0;
-            const qreal labelHeight = 42.0;
-            const qreal labelLeft   = m_rect.left() + GroupPadding * 0.5;
-            const qreal baseTop     = m_rect.top() + GroupHeaderHeight + GroupPadding;
-            const qreal baseBottom  = m_cutSeparatorY - 4.0;
-            const qreal cutTop      = m_cutSeparatorY + 4.0;
-            const qreal cutBottom   = m_rect.bottom() - GroupPadding;
             paintVerticalPillLabel(painter, QStringLiteral("base"),
-                                   boundedVerticalLabelRect(labelLeft, baseTop, baseBottom, labelWidth, labelHeight),
+                                   differenceLabelRect(m_rect, m_cutSeparatorY, true),
                                    cTextMuted.lighter(115));
             paintVerticalPillLabel(painter, QStringLiteral("cut"),
-                                   boundedVerticalLabelRect(labelLeft, cutTop, cutBottom, labelWidth, labelHeight),
+                                   differenceLabelRect(m_rect, m_cutSeparatorY, false),
                                    cTextMuted);
         }
     }
@@ -1659,7 +1665,6 @@ private:
         }
     }
 
-    QRectF      m_rect;
     qreal       m_cutSeparatorY = 0.0;
     QVector3D   m_transformValues;
     QStringList m_transformExpressions;
@@ -1672,26 +1677,21 @@ private:
     int         m_activeTransformAxis        = -1;
     int         m_activeTransformNumberStart = -1;
     QColor      m_color;
-    QImage      m_thumbnail;
     QString     m_moduleName;
     SceneDocument::TreeNode::Operation m_operation = SceneDocument::TreeNode::Union;
-    bool        m_selected            = false;
     bool        m_empty               = false;
     bool        m_showShadow          = false;
     bool        m_showDifferenceLabels = false;
     bool        m_insertedPreview      = false;
     int         m_depth = 0;
-    int         m_theme = 0;
     bool        m_collapsed = false;
     bool        m_linearExtrudeCenter = false;
     int         m_linearExtrudeSlices = 0;
     QString     m_rawCode;
-    QString     m_highlightedVariableReference;
-    bool        m_variableReferenceBlinkOn = false;
 };
 
 
-class ModuleCallCardItem final : public QGraphicsItem
+class ModuleCallCardItem final : public TreeCardItem
 {
 public:
     ModuleCallCardItem(const QRectF &rect,
@@ -1702,32 +1702,19 @@ public:
                        int activeNumberStart,
                        qreal opacity,
                        qreal zValue,
-                       int theme = 0,
-                       const QImage &thumbnail = QImage(),
-                       const QString &highlightedVariableReference = QString(),
-                       bool variableReferenceBlinkOn = false)
-        : m_rect(rect)
+                       const CardContext &ctx = {})
+        : TreeCardItem(rect, zValue, selected, opacity, ctx)
         , m_moduleName(moduleName)
         , m_params(params)
-        , m_selected(selected)
         , m_activeParamVarNodeId(activeParamVarNodeId)
         , m_activeNumberStart(activeNumberStart)
-        , m_opacity(opacity)
-        , m_theme(theme)
-        , m_thumbnail(thumbnail)
-        , m_highlightedVariableReference(highlightedVariableReference)
-        , m_variableReferenceBlinkOn(variableReferenceBlinkOn)
     {
-        setZValue(zValue);
     }
-
-    QRectF boundingRect() const override { return m_rect.adjusted(-6.0, -6.0, 6.0, 6.0); }
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) override
     {
-        painter->setRenderHint(QPainter::Antialiasing, true);
+        beginCardPaint(painter);
         painter->setOpacity(m_opacity);
-        painter->setFont(sceneTreeGraphicsFont());
 
         const auto pt = static_cast<SceneTreePalette::Theme>(m_theme);
         const QColor accent(38, 108, 148);
@@ -1857,17 +1844,10 @@ public:
     }
 
 private:
-    QRectF m_rect;
     QString m_moduleName;
     QVector<ModuleCallParam> m_params;
-    bool m_selected = false;
     int m_activeParamVarNodeId = 0;
     int m_activeNumberStart = -1;
-    qreal m_opacity = 1.0;
-    int m_theme = 0;
-    QImage m_thumbnail;
-    QString m_highlightedVariableReference;
-    bool m_variableReferenceBlinkOn = false;
 };
 
 } // namespace
@@ -1919,14 +1899,14 @@ void SceneTreeNodeRenderer::renderPrimitive(const SceneDocument::TreeNode &node,
         const QRectF cardRect(rect.topLeft(), QSizeF(qMin(rect.width(), PrimitiveWidth), PrimitiveHeight));
         m_scene->addItem(new PrimitiveCardItem(cardRect, shape, primitiveNumberText(label, node.shapeId),
                                                node.id == m_selectedNodeId, activeParamIndex, activeNumberStart,
-                                               1.0, 5.0, m_theme, thumbnail,
-                                               m_highlightedVariableReference, m_variableReferenceBlinkOn));
+                                               1.0, 5.0,
+                                               CardContext{m_theme, thumbnail, m_highlightedVariableReference, m_variableReferenceBlinkOn}));
         return;
     }
     m_scene->addItem(new PrimitiveCardItem(rect, shape, primitiveNumberText(label, node.shapeId),
                                            node.id == m_selectedNodeId, activeParamIndex, activeNumberStart,
-                                           1.0, 5.0, m_theme, thumbnail,
-                                           m_highlightedVariableReference, m_variableReferenceBlinkOn));
+                                           1.0, 5.0,
+                                           CardContext{m_theme, thumbnail, m_highlightedVariableReference, m_variableReferenceBlinkOn}));
 }
 
 void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, const QRectF &rect)
@@ -1936,9 +1916,9 @@ void SceneTreeNodeRenderer::renderVariable(const SceneDocument::TreeNode &node, 
                                           node.id == m_selectedNodeId, activeNumberStart,
                                           1.0, 5.0, node.isParameter,
                                           0,        // depth (variables: no depth-hue shift)
-                                          m_theme,
-                                          m_highlightedVariableReference,
-                                          m_variableReferenceBlinkOn));
+                                          CardContext{m_theme, QImage(),
+                                                      m_highlightedVariableReference,
+                                                      m_variableReferenceBlinkOn}));
 }
 
 void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node,
@@ -1950,8 +1930,8 @@ void SceneTreeNodeRenderer::renderModuleCall(const SceneDocument::TreeNode &node
     const int activeNumStart = node.id == m_activeModuleCallNodeId ? m_activeModuleCallNumberStart : -1;
     m_scene->addItem(new ModuleCallCardItem(rect, node.moduleName, params,
                                             node.id == m_selectedNodeId, activeVarNodeId, activeNumStart,
-                                            1.0, 5.0, m_theme, thumbnail,
-                                            m_highlightedVariableReference, m_variableReferenceBlinkOn));
+                                            1.0, 5.0,
+                                            CardContext{m_theme, thumbnail, m_highlightedVariableReference, m_variableReferenceBlinkOn}));
     m_scene->addItem(createTreeNodeSelectionItem(node.id, rect, 5.0, m_onSelected));
 }
 
@@ -2011,11 +1991,11 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     SceneDocument::TreeNode::Operation operation;
     QGraphicsItem *item = nullptr;
     if (tool == QStringLiteral("par")) {
-        item = new VariableCardItem(rect, QStringLiteral("par"), QStringLiteral("0"), false, -1, 0.78, 58.0, true, 0, theme);
+        item = new VariableCardItem(rect, QStringLiteral("par"), QStringLiteral("0"), false, -1, 0.78, 58.0, true, 0, CardContext{theme});
     } else if (isVariableToolName(tool)) {
-        item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0, false, 0, theme);
+        item = new VariableCardItem(rect, QStringLiteral("var"), QStringLiteral("0"), false, -1, 0.78, 58.0, false, 0, CardContext{theme});
     } else if (tool == QStringLiteral("call")) {
-        item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0, theme);
+        item = new ModuleCallCardItem(rect, QStringLiteral("call"), {}, false, 0, -1, 0.78, 58.0, CardContext{theme});
     } else if (operationForToolName(tool, &operation)) {
         item = new GroupCardItem(rect, operation, 0.0, 56.0, false, false, false, false, true,
                                  QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
@@ -2026,7 +2006,7 @@ void SceneTreeNodeRenderer::renderPreviewTool(QGraphicsScene *scene,
     } else {
         ShapeNode shape;
         shape.type = primitiveTypeForTool(tool);
-        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, -1, 0.78, 58.0, theme);
+        item = new PrimitiveCardItem(rect, &shape, QString(), false, -1, -1, 0.78, 58.0, CardContext{theme});
     }
 
     scene->addItem(item);
@@ -2037,7 +2017,9 @@ void SceneTreeNodeRenderer::renderPreviewPrimitive(QGraphicsScene *scene,
                                                    QVector<QGraphicsItem *> *items,
                                                    const ShapeNode *shape,
                                                    int shapeId,
-                                                   const QRectF &rect)
+                                                   const QRectF &rect,
+                                                   const QImage &thumbnail,
+                                                   int theme)
 {
     auto *item = new PrimitiveCardItem(rect,
                                       shape,
@@ -2047,7 +2029,7 @@ void SceneTreeNodeRenderer::renderPreviewPrimitive(QGraphicsScene *scene,
                                       -1,
                                       0.78,
                                       58.0,
-                                      0);
+                                      CardContext{theme, thumbnail, QString(), false});
     scene->addItem(item);
     appendPreviewItem(items, item);
 }
@@ -2060,7 +2042,7 @@ void SceneTreeNodeRenderer::renderPreviewVariable(QGraphicsScene *scene,
                                                   const QRectF &rect,
                                                   int theme)
 {
-    auto *item = new VariableCardItem(rect, name, expression, false, -1, 0.78, 58.0, isParameter, 0, theme);
+    auto *item = new VariableCardItem(rect, name, expression, false, -1, 0.78, 58.0, isParameter, 0, CardContext{theme});
     scene->addItem(item);
     appendPreviewItem(items, item);
 }
@@ -2072,13 +2054,14 @@ void SceneTreeNodeRenderer::renderPreviewGroup(QGraphicsScene *scene,
                                                qreal cutSeparatorY,
                                                int theme,
                                                int depth,
-                                               const QColor &color)
+                                               const QColor &color,
+                                               const QImage &thumbnail)
 {
     auto *item = new GroupCardItem(rect, operation, cutSeparatorY, 52.0, false, false, false, false, false,
                                    QVector3D(), -1, -1, TransformHeaderWidth, QStringList(),
                                    QString(), QString(), -1,
                                    QString(), false,
-                                   color, QImage(), QString(),
+                                   color, thumbnail, QString(),
                                    depth, theme, false, false, 0);
     scene->addItem(item);
     appendPreviewItem(items, item);

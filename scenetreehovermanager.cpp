@@ -353,6 +353,15 @@ QString SceneTreeHoverManager::hoverHintTextForPosition(const QPointF &scenePosi
             *key = value;
     };
 
+    int centerNodeId = 0;
+    bool centerActive = false;
+    if (m_widget->centerBadgeControlAt(scenePosition, &centerNodeId, nullptr, &centerActive)) {
+        setKey(QStringLiteral("center:%1:%2").arg(centerNodeId).arg(centerActive));
+        return centerActive
+            ? QStringLiteral("Centered on origin\nClick to place on the build plate (center = false)")
+            : QStringLiteral("Placed on the build plate\nClick to center on the origin (center = true)");
+    }
+
     int collapseGroupId = 0;
     if (m_widget->m_canvasDragHandler->groupCollapseControlAt(scenePosition, &collapseGroupId)) {
         const bool collapsed = m_widget->m_collapsedGroupIds.contains(collapseGroupId);
@@ -846,8 +855,12 @@ void SceneTreeHoverManager::updateHighlights(const QPointF &scenePosition)
         && polygonCell.index >= 0;
     updatePolygonPointHover(scenePosition, onPolygonPointLabel);
 
+    const bool onCenterBadge = m_widget->centerBadgeControlAt(scenePosition, nullptr, nullptr, nullptr);
+
     // Update cursor.
-    if (controlDown && newExpressionRect.isValid())
+    if (onCenterBadge)
+        m_widget->setCursor(Qt::ArrowCursor);
+    else if (controlDown && newExpressionRect.isValid())
         m_widget->setCursor(Qt::SizeVerCursor);
     else if (controlDown
              && ((onPolyhedronCell && isPolyhedronEditableNumberCell(polyCell.type))

@@ -49,6 +49,45 @@ static void collectVariableValues(const SceneDocument::TreeNode &node, QHash<QSt
         collectVariableValues(child, values);
 }
 
+// Like collectVariableValues, but also adds the loop variable of every enclosing
+// `for` ancestor of `nodeId` (outer loops first, using each range's first
+// iteration value). Without this, an expression edited inside a loop body — e.g.
+// "0 + i" — fails to evaluate here and the edit is silently discarded. Keep this
+// in sync with the inline editor's validation scope.
+static void collectVariableValuesForNode(const SceneDocument &scene, int nodeId,
+                                         QHash<QString, qreal> *values)
+{
+    if (!values)
+        return;
+    collectVariableValues(scene.treeRoot(), values);
+
+    QVector<const SceneDocument::TreeNode *> loops;
+    int currentId = nodeId;
+    while (true) {
+        int parentId = 0;
+        if (!SceneDocument::findChildParent(scene.treeRoot(), currentId, &parentId, nullptr))
+            break;
+        const SceneDocument::TreeNode *parent = scene.treeNodeById(parentId);
+        if (!parent)
+            break;
+        if (parent->operation == SceneDocument::TreeNode::For)
+            loops.append(parent);
+        currentId = parentId;
+    }
+    for (int i = loops.size() - 1; i >= 0; --i) {
+        const SceneDocument::TreeNode *loop = loops[i];
+        const QString name = loop->loopVariable.trimmed().isEmpty()
+                                 ? QStringLiteral("i") : loop->loopVariable.trimmed();
+        const QString rangeExpr = loop->loopRangeExpression.trimmed().isEmpty()
+                                      ? QStringLiteral("[0 : 1 : 3]") : loop->loopRangeExpression.trimmed();
+        QVector<qreal> rangeValues;
+        qreal first = 0.0;
+        if (evaluateRangeExpression(rangeExpr, *values, &rangeValues) && !rangeValues.isEmpty())
+            first = rangeValues.first();
+        (*values)[name] = first;
+    }
+}
+
 static QString formatNumber(qreal val)
 {
     QString s = QString::number(val, 'f', 3);
@@ -1448,7 +1487,7 @@ void SceneController::handleTransformValueAdjusted(int groupId, int axis,
         }
 
         QHash<QString, qreal> varValues;
-        collectVariableValues(m_scene.treeRoot(), &varValues);
+        collectVariableValuesForNode(m_scene, groupId, &varValues);
 
         qreal newNumeric = replacement.toDouble();
         ExpressionSyntax::evaluate(newExpr, varValues, &newNumeric);
@@ -1536,7 +1575,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
         const QString scStr = parseVal(expression, QStringLiteral("sc"), QStringLiteral("scale"));
 
         QHash<QString, qreal> varValues;
-        collectVariableValues(m_scene.treeRoot(), &varValues);
+        collectVariableValuesForNode(m_scene, groupId, &varValues);
 
         QVector3D scale = group->scale;
         float newTwist   = group->linearExtrudeTwist;
@@ -1612,7 +1651,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
 
         if (axis == 0) { // height
             QHash<QString, qreal> varValues;
-            collectVariableValues(m_scene.treeRoot(), &varValues);
+            collectVariableValuesForNode(m_scene, groupId, &varValues);
             qreal v = 0.0;
             if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
                 return;
@@ -1642,7 +1681,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
             return;
         } else if (axis == 2) { // twist
             QHash<QString, qreal> varValues;
-            collectVariableValues(m_scene.treeRoot(), &varValues);
+            collectVariableValuesForNode(m_scene, groupId, &varValues);
             qreal v = 0.0;
             if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
                 return;
@@ -1657,7 +1696,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
             newExpressions[2] = trimmed;
         } else if (axis == 4) { // scale
             QHash<QString, qreal> varValues;
-            collectVariableValues(m_scene.treeRoot(), &varValues);
+            collectVariableValuesForNode(m_scene, groupId, &varValues);
             qreal v = 0.0;
             if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
                 return;
@@ -1695,7 +1734,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
     // ── RotateExtrude single-angle edit ────────────────────────────────────
     if (isRotExtr && axis == 0) {
         QHash<QString, qreal> varValues;
-        collectVariableValues(m_scene.treeRoot(), &varValues);
+        collectVariableValuesForNode(m_scene, groupId, &varValues);
         qreal v = 0.0;
         if (!ExpressionSyntax::evaluate(trimmed, varValues, &v))
             return;
@@ -1725,7 +1764,7 @@ void SceneController::handleTransformExpressionEdited(int groupId, int axis, con
     if (axis > 2) return;
 
     QHash<QString, qreal> varValues;
-    collectVariableValues(m_scene.treeRoot(), &varValues);
+    collectVariableValuesForNode(m_scene, groupId, &varValues);
 
     qreal numericValue = 0.0;
     if (!ExpressionSyntax::evaluate(trimmed, varValues, &numericValue))
@@ -1854,7 +1893,7 @@ void SceneController::handleShapeParameterAdjusted(int nodeId, int paramIndex,
     setCtrlHighlight(nodeId, contextPrefix, newExpr, numberStart, int(replacement.size()));
 
     QHash<QString, qreal> varValues;
-    collectVariableValues(m_scene.treeRoot(), &varValues);
+    collectVariableValuesForNode(m_scene, nodeId, &varValues);
 
     qreal newNumericValue = replacement.toDouble();
     ExpressionSyntax::evaluate(newExpr, varValues, &newNumericValue);
@@ -1924,7 +1963,7 @@ void SceneController::handleShapeParameterExpressionEdited(int nodeId,
 
     const QString trimmed = expression.trimmed();
     QHash<QString, qreal> varValues;
-    collectVariableValues(m_scene.treeRoot(), &varValues);
+    collectVariableValuesForNode(m_scene, nodeId, &varValues);
 
     qreal numericValue = 0.0;
     if (!ExpressionSyntax::evaluate(trimmed, varValues, &numericValue))
@@ -2038,7 +2077,7 @@ void SceneController::handlePolygon2DPointExpressionEdited(int nodeId, int point
         return;
 
     QHash<QString, qreal> varValues;
-    collectVariableValues(m_scene.treeRoot(), &varValues);
+    collectVariableValuesForNode(m_scene, nodeId, &varValues);
     qreal value = 0.0;
     if (!ExpressionSyntax::evaluate(expression.trimmed(), varValues, &value))
         return;

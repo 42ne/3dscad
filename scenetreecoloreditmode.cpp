@@ -870,27 +870,20 @@ void SceneTreeColorEditMode::updateHighlight(const QPointF &scenePos)
                 sepLine->setVisible(m_blinkOn);
                 m_blinkTargets.append(sepLine);
 
-                const qreal labelLeft  = hit.rect.left() + GroupPadding * 0.5;
-                const qreal baseTop    = hit.rect.top() + GroupHeaderHeight + GroupPadding;
-                const qreal baseBottom = area->cutSeparatorY - 4.0;
-                const qreal baseH      = qMin(42.0, baseBottom - baseTop);
-                if (baseH >= 18.0) {
-                    const qreal baseY = baseTop + (baseBottom - baseTop - baseH) * 0.5;
+                const QRectF baseRect = differenceLabelRect(hit.rect, area->cutSeparatorY, true);
+                if (!baseRect.isEmpty()) {
                     QPainterPath basePath;
-                    basePath.addRoundedRect(QRectF(labelLeft, baseY, 20.0, baseH), 4.0, 4.0);
+                    basePath.addRoundedRect(baseRect, 6.0, 6.0);
                     auto *baseItem = m_widget->m_graphicsScene->addPath(basePath, Qt::NoPen, QBrush(flash));
                     baseItem->setZValue(8801.0);
                     baseItem->setVisible(m_blinkOn);
                     m_blinkTargets.append(baseItem);
                 }
 
-                const qreal cutTop    = area->cutSeparatorY + 4.0;
-                const qreal cutBottom = hit.rect.bottom() - GroupPadding;
-                const qreal cutH      = qMin(42.0, cutBottom - cutTop);
-                if (cutH >= 18.0) {
-                    const qreal cutY = cutTop + (cutBottom - cutTop - cutH) * 0.5;
+                const QRectF cutRect = differenceLabelRect(hit.rect, area->cutSeparatorY, false);
+                if (!cutRect.isEmpty()) {
                     QPainterPath cutPath;
-                    cutPath.addRoundedRect(QRectF(labelLeft, cutY, 20.0, cutH), 4.0, 4.0);
+                    cutPath.addRoundedRect(cutRect, 6.0, 6.0);
                     auto *cutItem = m_widget->m_graphicsScene->addPath(cutPath, Qt::NoPen, QBrush(flash));
                     cutItem->setZValue(8801.0);
                     cutItem->setVisible(m_blinkOn);

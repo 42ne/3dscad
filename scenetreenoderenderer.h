@@ -189,7 +189,9 @@ public:
                                        QVector<QGraphicsItem *> *items,
                                        const ShapeNode *shape,
                                        int shapeId,
-                                       const QRectF &rect);
+                                       const QRectF &rect,
+                                       const QImage &thumbnail = QImage(),
+                                       int theme = 0);
     static void renderPreviewVariable(QGraphicsScene *scene,
                                       QVector<QGraphicsItem *> *items,
                                       const QString &name,
@@ -204,7 +206,8 @@ public:
                                    qreal cutSeparatorY = 0.0,
                                    int theme = 0,
                                    int depth = 0,
-                                   const QColor &color = QColor());
+                                   const QColor &color = QColor(),
+                                   const QImage &thumbnail = QImage());
 
 private:
     qreal zForDepth(int depth, qreal offset) const;

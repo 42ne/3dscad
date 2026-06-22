@@ -43,6 +43,7 @@ private:
                         int movingNodeId, qreal durationMs);
     void advance();
     void renderFrame(const DropTarget &target);
+    void applyPulseOpacity();
 
     SceneTreeGraphicsWidget *m_widget;
     QTimer                  *m_animTimer = nullptr;
@@ -56,6 +57,7 @@ private:
     int        m_movingNodeId  = 0;
     qreal      m_progress      = 0.0;
     qreal      m_durationMs    = 180.0;
+    qreal      m_pulsePhase    = 0.0;
     bool       m_active        = false;
     bool       m_finishing     = false;
 

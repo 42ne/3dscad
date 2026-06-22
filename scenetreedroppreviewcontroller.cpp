@@ -2,6 +2,7 @@
 #include "scenetreegraphicswidget.h"
 #include "scenetreegraphicshelpers.h"
 #include "scenetreepreviewrenderer.h"
+#include "scenetreegraphicsitems.h"
 #include "nodethumbnailcache.h"
 #include "groupthumbnailcache.h"
 #include "scenetreehovermanager.h"
@@ -236,6 +237,8 @@ void SceneTreeDropPreviewController::show(const QPointF &scenePosition,
                                           int movingNodeId)
 {
     m_widget->m_dragActive = true;
+    if (movingNodeId <= 0)
+        m_widget->setToolbarDragSourceDimmed(previewTool, true);
     if (m_widget->m_thumbnailCache)
         m_widget->m_thumbnailCache->setSuspended(true);
     if (m_widget->m_groupThumbnailCache)
@@ -262,14 +265,19 @@ void SceneTreeDropPreviewController::clear()
     if (m_widget->m_hoverManager)
         m_widget->m_hoverManager->clearInvalidDropHint();
     m_animTimer->stop();
+    m_widget->setToolbarDragSourceDimmed(m_tool, false);
+    m_widget->clearDropPreviewCoveredAreas();
     m_widget->m_dragActive = false;
     m_active = m_finishing = false;
     m_progress = 0.0;
+    m_pulsePhase = 0.0;
     m_startTarget = m_target = m_currentTarget = DropTarget();
     m_tool.clear();
     m_movingNodeId = 0;
     SceneTreePreviewRenderer(m_widget->m_graphicsScene, &m_items,
                              m_widget->m_scene, &m_widget->m_treeLayout,
+                             m_widget->m_thumbnailCache,
+                             m_widget->m_groupThumbnailCache,
                              m_widget->m_treeTheme).clear();
     m_widget->setTreeItemsVisible(true);
     if (m_widget->m_thumbnailCache)
@@ -311,9 +319,16 @@ void SceneTreeDropPreviewController::startAnimation(const DropTarget &target,
 void SceneTreeDropPreviewController::advance()
 {
     if (!m_active) return;
-    m_progress = qMin<qreal>(1.0, m_progress + 16.0 / m_durationMs);
-    renderFrame(interpolatedDropTarget(m_startTarget, m_target, m_progress));
-    if (m_progress >= 1.0) m_animTimer->stop();
+    m_pulsePhase += 16.0 / 680.0 * M_PI;
+    if (m_pulsePhase > M_PI * 2.0)
+        m_pulsePhase -= M_PI * 2.0;
+
+    if (m_progress < 1.0) {
+        m_progress = qMin<qreal>(1.0, m_progress + 16.0 / m_durationMs);
+        renderFrame(interpolatedDropTarget(m_startTarget, m_target, m_progress));
+    } else {
+        applyPulseOpacity();
+    }
 }
 
 void SceneTreeDropPreviewController::renderFrame(const DropTarget &target)
@@ -321,10 +336,49 @@ void SceneTreeDropPreviewController::renderFrame(const DropTarget &target)
     m_currentTarget = target;
     SceneTreePreviewRenderer(m_widget->m_graphicsScene, &m_items,
                              m_widget->m_scene, &m_widget->m_treeLayout,
+                             m_widget->m_thumbnailCache,
+                             m_widget->m_groupThumbnailCache,
                              m_widget->m_treeTheme).clear();
     m_widget->setTreeItemsVisible(true);
+
+    QVector<QRectF> coveredAreas;
+    const int rootGroupId = m_widget->m_scene ? m_widget->m_scene->treeRoot().id : -1;
+    for (const SceneTreeLayout::GroupHitArea &area : m_widget->m_treeLayout.groupHitAreas()) {
+        // Never cover the scene/root container: its rect spans every top-level
+        // block, so hiding it would blank the whole scene while dragging a
+        // top-level node (whose source/target area is the root itself).
+        if (area.groupId == rootGroupId)
+            continue;
+        const bool sourceArea = m_movingNodeId > 0
+                                && target.sourceRect.isValid()
+                                && area.rect.contains(target.sourceRect.center());
+        const bool targetArea = target.hasTarget && area.groupId == target.parentGroupId;
+        bool expandedArea = false;
+        for (const SceneTreeLayout::GroupPreview &expanded : target.expandedGroups) {
+            if (expanded.rect.isValid() && expanded.rect.contains(area.rect.center())) {
+                expandedArea = true;
+                break;
+            }
+        }
+        if (sourceArea || targetArea || expandedArea)
+            coveredAreas.append(area.rect);
+    }
+    m_widget->setDropPreviewCoveredAreas(coveredAreas);
+
     SceneTreePreviewRenderer(m_widget->m_graphicsScene, &m_items,
                              m_widget->m_scene, &m_widget->m_treeLayout,
+                             m_widget->m_thumbnailCache,
+                             m_widget->m_groupThumbnailCache,
                              m_widget->m_treeTheme)
         .render(target, m_tool, m_movingNodeId);
+    applyPulseOpacity();
+}
+
+void SceneTreeDropPreviewController::applyPulseOpacity()
+{
+    const qreal opacity = 0.74 + 0.26 * std::cos(m_pulsePhase);
+    for (QGraphicsItem *item : m_items) {
+        if (item && item->data(DragPreviewPulseDataRole).toBool())
+            item->setOpacity(opacity);
+    }
 }

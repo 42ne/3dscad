@@ -4,7 +4,6 @@
 #include "scenetreegraphicsconstants.h"
 
 #include <QColor>
-#include <QPainterPath>
 #include <QRectF>
 #include <QSizeF>
 #include <QString>
@@ -18,9 +17,9 @@ class QPointF;
 
 namespace SceneTreeGraphics {
 
+constexpr int DragPreviewPulseDataRole = 0x3d5;
+
 void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item);
-QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect);
-QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QString &tool, const QRectF &rect, qreal zValue);
 QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene, QVector<QGraphicsItem *> *items, const QRectF &rect, qreal zValue);
 
 QGraphicsItem *createTreeNodeDragHandleItem(int nodeId, const QString &label, const QRectF &rect, const QRectF &sourceRect, std::function<void(int)> onSelected, const QSizeF &previewSize, std::function<void(const QPointF &, const QSizeF &, const QString &)> onPreviewMoved, std::function<void()> onPreviewFinished, std::function<void(int, const QPointF &)> onDropped);

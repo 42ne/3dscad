@@ -367,7 +367,7 @@ bool paintFutureToolIcon(QPainter *painter, const QString &toolName, const QRect
     return false;
 }
 
-QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected)
+QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor &accent, bool selected, bool withGrid)
 {
     constexpr qreal kOuterRadius = 8.0;   // corner radius of the dark mat
     constexpr qreal kGap         = 4.0;   // gap between outer edge and glass panel
@@ -402,6 +402,26 @@ QRectF paintToolbarIconFrame(QPainter *painter, const QRectF &rect, const QColor
     painter->setPen(Qt::NoPen);
     painter->setBrush(tint);
     painter->drawPath(tintPath);
+
+    // Faint isometric floor grid under the glyph (tree-node primitive icons).
+    if (withGrid) {
+        painter->save();
+        QPainterPath gridClip;
+        gridClip.addRoundedRect(frameRect, kGlassRadius, kGlassRadius);
+        painter->setClipPath(gridClip);
+        const qreal w = frameRect.width(), h = frameRect.height();
+        const QPointF c(frameRect.center().x(), frameRect.top() + h * 0.60);
+        const QPointF uA(w * 0.135, h * 0.072);   // down-right iso step
+        const QPointF uB(-w * 0.135, h * 0.072);  // down-left iso step
+        constexpr int N = 3;
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(QColor(150, 188, 230, 38), 0.7));
+        for (int j = -N; j <= N; ++j)
+            painter->drawLine(c + uA * (-N) + uB * j, c + uA * N + uB * j);
+        for (int i = -N; i <= N; ++i)
+            painter->drawLine(c + uB * (-N) + uA * i, c + uB * N + uA * i);
+        painter->restore();
+    }
 
     const qreal side = qMin(rect.width(), rect.height()) * (34.0 / ToolSize);
     const QPointF center = rect.center() + QPointF(0.0, -rect.height() * (1.0 / ToolSize));

@@ -5,14 +5,18 @@
 #include "scenetreepalette.h"
 
 #include <QBrush>
+#include <QEasingCurve>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsOpacityEffect>
 #include <QGraphicsScene>
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QLinearGradient>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPen>
 #include <QPixmap>
+#include <QPropertyAnimation>
 #include <QStyleOptionGraphicsItem>
 #include <QtGlobal>
 #include <QWidget>
@@ -26,29 +30,6 @@ void appendPreviewItem(QVector<QGraphicsItem *> *items, QGraphicsItem *item)
     if (!items || !item)
         return;
     items->append(item);
-}
-
-QPainterPath dragFocusOutlinePath(const QString &tool, const QRectF &rect)
-{
-    Q_UNUSED(tool);
-
-    QPainterPath path;
-    path.addRoundedRect(rect.adjusted(-4.0, -4.0, 4.0, 4.0), CornerRadius + 2.0, CornerRadius + 2.0);
-    return path;
-}
-
-QGraphicsPathItem *addDragFocusOutline(QGraphicsScene *scene,
-                                       QVector<QGraphicsItem *> *items,
-                                       const QString &tool,
-                                       const QRectF &rect,
-                                       qreal zValue)
-{
-    auto *outline = scene->addPath(dragFocusOutlinePath(tool, rect),
-                                   QPen(QColor(74, 190, 116), 2, Qt::DashLine),
-                                   Qt::NoBrush);
-    outline->setZValue(zValue);
-    appendPreviewItem(items, outline);
-    return outline;
 }
 
 QGraphicsPathItem *addDropSlotMarker(QGraphicsScene *scene,
@@ -156,10 +137,7 @@ protected:
         const auto onDropped = m_onDropped;
 
         moveDragSnapshot(dropPosition);
-        delete m_dragSnapshot;
-        m_dragSnapshot = nullptr;
-        delete m_dragOutline;
-        m_dragOutline = nullptr;
+        cleanupDragVisuals();
         m_previewActive = false;
         event->accept();
 
@@ -184,12 +162,20 @@ private:
 
         m_dragOffset = scenePosition - m_sourceRect.topLeft();
         m_dragSnapshot = scene()->addPixmap(pixmap);
-        m_dragSnapshot->setOpacity(0.88);
+        m_dragSnapshot->setOpacity(1.0);
         m_dragSnapshot->setZValue(120.0);
-        m_dragOutline = scene()->addPath(dragFocusOutlinePath(m_label, QRectF(QPointF(0.0, 0.0), m_sourceRect.size())),
-                                         QPen(QColor(74, 190, 116), 2, Qt::DashLine),
-                                         Qt::NoBrush);
-        m_dragOutline->setZValue(121.0);
+
+        auto *opacityEffect = new QGraphicsOpacityEffect;
+        opacityEffect->setOpacity(1.0);
+        m_dragSnapshot->setGraphicsEffect(opacityEffect);
+        auto *pulse = new QPropertyAnimation(opacityEffect, "opacity", opacityEffect);
+        pulse->setStartValue(1.0);
+        pulse->setEndValue(0.48);
+        pulse->setDuration(680);
+        pulse->setEasingCurve(QEasingCurve::InOutSine);
+        pulse->setLoopCount(-1);
+        pulse->start();
+
         moveDragSnapshot(scenePosition);
     }
 
@@ -198,8 +184,12 @@ private:
         const QPointF dragPos = scenePosition - m_dragOffset;
         if (m_dragSnapshot)
             m_dragSnapshot->setPos(dragPos);
-        if (m_dragOutline)
-            m_dragOutline->setPos(dragPos);
+    }
+
+    void cleanupDragVisuals()
+    {
+        delete m_dragSnapshot;
+        m_dragSnapshot = nullptr;
     }
 
     QPointF draggedRectCenter(const QPointF &scenePosition) const
@@ -220,7 +210,6 @@ private:
     std::function<void()> m_onPreviewFinished;
     std::function<void(int, const QPointF &)> m_onDropped;
     QGraphicsPixmapItem *m_dragSnapshot = nullptr;
-    QGraphicsPathItem *m_dragOutline = nullptr;
 };
 
 class TreeNodeSelectionItem : public QGraphicsRectItem
@@ -276,6 +265,7 @@ public:
         setAcceptedMouseButtons(Qt::LeftButton);
         setAcceptHoverEvents(true);
         setZValue(100.0);
+        setData(1, m_label);
     }
 
     QRectF boundingRect() const override { return QRectF(0.0, 0.0, ToolSize, ToolSize); }
@@ -372,7 +362,10 @@ protected:
         event->accept();
     }
 
-    void mousePressEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
+    void mousePressEvent(QGraphicsSceneMouseEvent *event) override
+    {
+        updatePreview(event);
+    }
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override { updatePreview(event); }
 
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override

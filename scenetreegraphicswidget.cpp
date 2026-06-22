@@ -429,9 +429,16 @@ void SceneTreeGraphicsWidget::startDeletePixelAnimation(int nodeId, const QRectF
     //    We hide its scene items so the card disappears from the screen while
     //    its layout space remains — other nodes do not shift yet.
     //    The tiles placed in step 3 will fill that space during the animation.
+    //    Hide only items that belong to the deleted node's own footprint — those
+    //    whose bounding rect fits inside the node rect (a small margin tolerates
+    //    card shadows/badges that overhang slightly). Testing the item *centre*
+    //    alone would also hide enclosing ancestor cards (e.g. the difference or
+    //    scene container) whenever the deleted child is large enough that the
+    //    ancestor's centre happens to fall within the child's rect.
+    const QRectF ownFootprint = rect.adjusted(-6.0, -6.0, 8.0, 8.0);
     for (QGraphicsItem *item : m_treeItems) {
         if (!item) continue;
-        if (clipped.contains(item->sceneBoundingRect().center()))
+        if (ownFootprint.contains(item->sceneBoundingRect()))
             item->setVisible(false);
     }
     viewport()->update();
@@ -977,23 +984,16 @@ void SceneTreeGraphicsWidget::mousePressEvent(QMouseEvent *event)
         }
     }
 
-    // ── Center checkbox ───────────────────────────────────
+    // ── Center toggle badge ───────────────────────────────────
     if (!colorEditMode() && event->button() == Qt::LeftButton) {
         const QPointF scenePos = mapToScene(event->pos());
-        for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
-            for (const ChildLayout &child : area.children) {
-                if (!child.rect.contains(scenePos)) continue;
-                const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(child.nodeId) : nullptr;
-                if (!node || node->type != SceneDocument::TreeNode::Primitive) continue;
-                const ShapeNode *shape = m_scene ? m_scene->shapeById(node->shapeId) : nullptr;
-                if (!shape || !shapeSupportsCenter(static_cast<int>(shape->type))) continue;
-                const QRectF cbRect = centerCheckboxRect(child.rect);
-                if (cbRect.contains(scenePos)) {
-                    emit shapeCenterToggled(node->id, node->shapeId, !shape->center);
-                    event->accept();
-                    return;
-                }
-            }
+        int centerNodeId = 0;
+        int centerShapeId = 0;
+        bool centerActive = false;
+        if (centerBadgeControlAt(scenePos, &centerNodeId, &centerShapeId, &centerActive)) {
+            emit shapeCenterToggled(centerNodeId, centerShapeId, !centerActive);
+            event->accept();
+            return;
         }
     }
 
@@ -1355,6 +1355,53 @@ void SceneTreeGraphicsWidget::updateToolbarOverlay()
         return;
     }
     m_overlay->updateToolbarOverlay();
+}
+
+void SceneTreeGraphicsWidget::setToolbarDragSourceDimmed(const QString &toolName, bool dimmed)
+{
+    if (!m_overlay)
+        return;
+
+    for (QGraphicsItem *item : m_overlay->m_items) {
+        if (item && item->data(1).toString() == toolName)
+            item->setOpacity(dimmed ? 0.38 : 1.0);
+    }
+}
+
+void SceneTreeGraphicsWidget::setDropPreviewCoveredAreas(const QVector<QRectF> &areas)
+{
+    clearDropPreviewCoveredAreas();
+    if (areas.isEmpty())
+        return;
+
+    for (QGraphicsItem *item : m_treeItems) {
+        if (!item)
+            continue;
+
+        const QPointF center = item->sceneBoundingRect().center();
+        bool covered = false;
+        for (const QRectF &area : areas) {
+            if (area.isValid() && area.contains(center)) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered)
+            continue;
+
+        m_dropPreviewOriginalOpacities.insert(item, item->opacity());
+        item->setOpacity(0.0);
+    }
+}
+
+void SceneTreeGraphicsWidget::clearDropPreviewCoveredAreas()
+{
+    for (auto it = m_dropPreviewOriginalOpacities.constBegin();
+         it != m_dropPreviewOriginalOpacities.constEnd(); ++it) {
+        if (it.key())
+            it.key()->setOpacity(it.value());
+    }
+    m_dropPreviewOriginalOpacities.clear();
 }
 
 void SceneTreeGraphicsWidget::repositionToolbarItems()
@@ -1789,7 +1836,10 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
                                       ? transformHeaderWidthForNode(node)
                                       : verticalHeaderGroup ? TransformHeaderWidth : 0.0;
     const qreal headerHeight = verticalHeaderGroup ? 0.0 : GroupHeaderHeight;
-    QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding, topLeft.y() + headerHeight + GroupPadding);
+    // Difference groups reserve a left gutter for the vertical base/cut labels.
+    const qreal diffLabelGutter = (node.operation == SceneDocument::TreeNode::Difference && !collapsedGroup)
+                                      ? DifferenceLabelGutter : 0.0;
+    QPointF childTopLeft(topLeft.x() + headerWidth + GroupPadding + diffLabelGutter, topLeft.y() + headerHeight + GroupPadding);
     qreal maxChildWidth = 0.0;
     int moduleParameterCount = 0;
     qreal moduleParameterSeparatorY = 0.0;
@@ -1955,7 +2005,7 @@ QRectF SceneTreeGraphicsWidget::drawGroup(const SceneDocument::TreeNode &node, c
     const QSizeF size = collapsedGroup
         ? QSizeF(qMax(horizontalHeaderMinWidth(node), parameterHeaderMinWidth), GroupHeaderHeight)
         : QSizeF(qMax(qMax(horizontalHeaderMinWidth(node),
-                           headerWidth + maxChildWidth + GroupPadding * 2.0),
+                           headerWidth + diffLabelGutter + maxChildWidth + GroupPadding * 2.0),
                       parameterHeaderMinWidth),
                  headerHeight + GroupPadding * 2.0 + childrenHeight);
     const QRectF rect(topLeft, size);
@@ -2369,6 +2419,29 @@ bool SceneTreeGraphicsWidget::forLoopRangeControlAt(const QPointF &p, int *nId, 
 { return m_hitTest->forLoopRangeControlAt(p, nId, s, l); }
 bool SceneTreeGraphicsWidget::moduleCallParamControlAt(const QPointF &p, int *mcId, int *pvId, int *s, int *l) const
 { return m_hitTest->moduleCallParamControlAt(p, mcId, pvId, s, l); }
+
+bool SceneTreeGraphicsWidget::centerBadgeControlAt(const QPointF &p, int *nId, int *sId, bool *active) const
+{
+    for (const GroupHitArea &area : m_treeLayout.groupHitAreas()) {
+        for (const ChildLayout &child : area.children) {
+            if (!child.rect.contains(p))
+                continue;
+            const SceneDocument::TreeNode *node = m_scene ? m_scene->treeNodeById(child.nodeId) : nullptr;
+            if (!node || node->type != SceneDocument::TreeNode::Primitive)
+                continue;
+            const ShapeNode *shape = m_scene ? m_scene->shapeById(node->shapeId) : nullptr;
+            if (!shape || !shapeSupportsCenter(static_cast<int>(shape->type)))
+                continue;
+            if (!centerCheckboxRect(child.rect).contains(p))
+                continue;
+            if (nId)    *nId = node->id;
+            if (sId)    *sId = node->shapeId;
+            if (active) *active = shape->center;
+            return true;
+        }
+    }
+    return false;
+}
 
 QRectF SceneTreeGraphicsWidget::debugGroupRect(int groupId) const { return groupRectForNode(groupId); }
 QRectF SceneTreeGraphicsWidget::debugChildRect(int nodeId)  const { return rectForChildNode(nodeId); }

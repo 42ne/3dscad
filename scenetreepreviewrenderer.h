@@ -10,6 +10,9 @@
 #include <QString>
 #include <QVector>
 
+class GroupThumbnailCache;
+class NodeThumbnailCache;
+
 class SceneTreePreviewRenderer
 {
 public:
@@ -22,6 +25,8 @@ public:
                              QVector<QGraphicsItem *> *previewItems,
                              const SceneDocument *document,
                              const SceneTreeLayout *layout,
+                             NodeThumbnailCache *nodeThumbnailCache = nullptr,
+                             GroupThumbnailCache *groupThumbnailCache = nullptr,
                              int theme = 0);
 
     void render(const DropTarget &target, const QString &previewTool, int movingNodeId);
@@ -31,6 +36,7 @@ private:
     void addExpandedGroupPreviews(const DropTarget &target);
     void addSourceGroupPreview(const DropTarget &target);
     void addTargetGroupPreview(const DropTarget &target, const QString &previewTool, int movingNodeId);
+    void addPredictionShadow(const DropTarget &target, int movingNodeId);
     bool addModuleTargetPreview(const DropTarget &target);
     void addPreviewExistingNode(int nodeId, const QRectF &rect);
     void addPreviewTreeItem(const QString &tool, int nodeId, const QRectF &rect);
@@ -44,6 +50,8 @@ private:
     QVector<QGraphicsItem *> *m_previewItems = nullptr;
     const SceneDocument *m_document = nullptr;
     const SceneTreeLayout *m_layout = nullptr;
+    NodeThumbnailCache *m_nodeThumbnailCache = nullptr;
+    GroupThumbnailCache *m_groupThumbnailCache = nullptr;
     int m_theme = 0;
 };
 

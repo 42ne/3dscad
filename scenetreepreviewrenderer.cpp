@@ -4,10 +4,14 @@
 #include "scenetreepreviewgeometry.h"
 #include "scenetreetoolmetadata.h"
 #include "scenetreenoderenderer.h"
+#include "nodethumbnailcache.h"
+#include "groupthumbnailcache.h"
 
 #include <QGraphicsSimpleTextItem>
+#include <QGraphicsPixmapItem>
 #include <QLinearGradient>
 #include <QPen>
+#include <QPixmap>
 
 using namespace SceneTreeGraphics;
 
@@ -81,7 +85,8 @@ void appendModuleCallChip(QGraphicsScene *scene,
                           const QRectF &rect,
                           const QString &moduleName,
                           const QVector<ModuleCallParam> &params,
-                          qreal zValue)
+                          qreal zValue,
+                          const QImage &thumbnail = QImage())
 {
     auto *panel = addRoundedPanel(scene,
                                   rect,
@@ -106,12 +111,23 @@ void appendModuleCallChip(QGraphicsScene *scene,
                                   zValue + 1.0);
     appendPreviewItem(items, badge);
 
-    auto *badgeText = scene->addSimpleText(QStringLiteral("CALL"));
-    badgeText->setBrush(QColor(238, 248, 255));
-    badgeText->setScale(0.66);
-    badgeText->setPos(badgeRect.left() + 3.0, badgeRect.top() + 3.0);
-    badgeText->setZValue(zValue + 2.0);
-    appendPreviewItem(items, badgeText);
+    if (!thumbnail.isNull()) {
+        auto *thumbnailItem = scene->addPixmap(QPixmap::fromImage(thumbnail));
+        const qreal scale = qMin(badgeRect.width() / thumbnail.width(),
+                                 badgeRect.height() / thumbnail.height());
+        thumbnailItem->setScale(scale);
+        thumbnailItem->setPos(badgeRect.center().x() - thumbnail.width() * scale * 0.5,
+                              badgeRect.center().y() - thumbnail.height() * scale * 0.5);
+        thumbnailItem->setZValue(zValue + 2.0);
+        appendPreviewItem(items, thumbnailItem);
+    } else {
+        auto *badgeText = scene->addSimpleText(QStringLiteral("CALL"));
+        badgeText->setBrush(QColor(238, 248, 255));
+        badgeText->setScale(0.66);
+        badgeText->setPos(badgeRect.left() + 3.0, badgeRect.top() + 3.0);
+        badgeText->setZValue(zValue + 2.0);
+        appendPreviewItem(items, badgeText);
+    }
 
     QString text = moduleName.trimmed().isEmpty() ? QStringLiteral("module") : moduleName.trimmed();
     text += QLatin1Char('(');
@@ -135,11 +151,15 @@ SceneTreePreviewRenderer::SceneTreePreviewRenderer(QGraphicsScene *scene,
                                                    QVector<QGraphicsItem *> *previewItems,
                                                    const SceneDocument *document,
                                                    const SceneTreeLayout *layout,
+                                                   NodeThumbnailCache *nodeThumbnailCache,
+                                                   GroupThumbnailCache *groupThumbnailCache,
                                                    int theme)
     : m_scene(scene)
     , m_previewItems(previewItems)
     , m_document(document)
     , m_layout(layout)
+    , m_nodeThumbnailCache(nodeThumbnailCache)
+    , m_groupThumbnailCache(groupThumbnailCache)
     , m_theme(theme)
 {
 }
@@ -173,16 +193,21 @@ void SceneTreePreviewRenderer::addExpandedGroupPreviews(const DropTarget &target
 
         // Match to a GroupHitArea by overlapping center to recover the true depth.
         int depth = 0;
+        int groupId = 0;
         if (m_layout) {
             for (const GroupHitArea &area : m_layout->groupHitAreas()) {
                 if (area.operation == expandedGroup.operation
                     && expandedRect.contains(area.rect.center())) {
                     depth = area.depth;
+                    groupId = area.groupId;
                     break;
                 }
             }
         }
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, expandedGroup.operation, expandedRect, 0.0, m_theme, depth);
+        SceneTreeNodeRenderer::renderPreviewGroup(
+            m_scene, m_previewItems, expandedGroup.operation, expandedRect, 0.0,
+            m_theme, depth, QColor(),
+            m_groupThumbnailCache ? m_groupThumbnailCache->thumbnail(groupId) : QImage());
         addPreviewChildren(expandedGroup.children, target.previewGroupRect);
     }
 }
@@ -204,16 +229,22 @@ void SceneTreePreviewRenderer::addSourceGroupPreview(const DropTarget &target)
 
     if (target.sourceGroupRect.isValid() && !sourceGroupCoveredByTarget && !sourceGroupCoveredByExpandedGroup) {
         int sourceDepth = 0;
+        int sourceGroupId = 0;
         if (m_layout) {
             for (const GroupHitArea &area : m_layout->groupHitAreas()) {
                 if (area.operation == target.sourceGroupOperation
                     && target.sourceGroupRect.contains(area.rect.center())) {
                     sourceDepth = area.depth;
+                    sourceGroupId = area.groupId;
                     break;
                 }
             }
         }
-        SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, target.sourceGroupOperation, target.sourceGroupRect, target.sourceCutSeparatorY, m_theme, sourceDepth);
+        SceneTreeNodeRenderer::renderPreviewGroup(
+            m_scene, m_previewItems, target.sourceGroupOperation,
+            target.sourceGroupRect, target.sourceCutSeparatorY,
+            m_theme, sourceDepth, QColor(),
+            m_groupThumbnailCache ? m_groupThumbnailCache->thumbnail(sourceGroupId) : QImage());
         addPreviewChildren(target.sourceChildren);
     }
 }
@@ -235,11 +266,16 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
                                                       target.previewGroupRect,
                                                       target.previewCutSeparatorY,
                                                       m_theme,
-                                                      depthForGroup(target.parentGroupId));
+                                                      depthForGroup(target.parentGroupId),
+                                                      QColor(),
+                                                      m_groupThumbnailCache
+                                                          ? m_groupThumbnailCache->thumbnail(target.parentGroupId)
+                                                          : QImage());
         }
     }
 
     addPreviewChildren(target.previewChildren);
+    addPredictionShadow(target, movingNodeId);
 
     if (target.hasTarget) {
         addDropSlotMarker(m_scene,
@@ -248,6 +284,7 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
                           88.0);
 
         bool renderedPlaceholder = false;
+        const int placeholderStart = m_previewItems ? m_previewItems->size() : 0;
         if (movingNodeId > 0 && target.placeholderRect.isValid() && m_document) {
             const SceneDocument::TreeNode *moving = m_document->treeNodeById(movingNodeId);
             if (moving) {
@@ -258,12 +295,35 @@ void SceneTreePreviewRenderer::addTargetGroupPreview(const DropTarget &target, c
         if (!renderedPlaceholder)
             SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, previewTool, target.placeholderRect, m_theme);
 
-        addDragFocusOutline(m_scene,
-                            m_previewItems,
-                            previewTool,
-                            target.placeholderRect,
-                            90.0);
+        if (m_previewItems) {
+            for (int i = placeholderStart; i < m_previewItems->size(); ++i) {
+                if (QGraphicsItem *item = m_previewItems->at(i))
+                    item->setData(DragPreviewPulseDataRole, true);
+            }
+        }
     }
+}
+
+void SceneTreePreviewRenderer::addPredictionShadow(const DropTarget &target, int movingNodeId)
+{
+    QRectF predictionRect;
+    if (target.hasTarget && target.placeholderRect.isValid())
+        predictionRect = target.placeholderRect;
+    else if (movingNodeId > 0 && target.sourceRect.isValid())
+        predictionRect = target.sourceRect;
+
+    if (!predictionRect.isValid() || !m_scene)
+        return;
+
+    QPainterPath shadowPath;
+    shadowPath.addRoundedRect(predictionRect.translated(3.0, 4.0),
+                              CornerRadius,
+                              CornerRadius);
+    auto *shadow = m_scene->addPath(shadowPath,
+                                    Qt::NoPen,
+                                    QBrush(QColor(6, 11, 18, 145)));
+    shadow->setZValue(55.0);
+    appendPreviewItem(m_previewItems, shadow);
 }
 
 bool SceneTreePreviewRenderer::addModuleTargetPreview(const DropTarget &target)
@@ -281,7 +341,11 @@ bool SceneTreePreviewRenderer::addModuleTargetPreview(const DropTarget &target)
                                               target.previewGroupRect,
                                               0.0,
                                               m_theme,
-                                              depthForGroup(target.parentGroupId));
+                                              depthForGroup(target.parentGroupId),
+                                              QColor(),
+                                              m_groupThumbnailCache
+                                                  ? m_groupThumbnailCache->thumbnail(target.parentGroupId)
+                                                  : QImage());
 
     const GroupHitArea *area = groupAreaForId(target.parentGroupId);
     qreal separatorY = target.previewGroupRect.top() + GroupHeaderHeight + GroupPadding + 16.0 + VariableHeight + ChildGap + ChildGap * 0.5;
@@ -362,7 +426,10 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
     if (node->type == SceneDocument::TreeNode::Primitive) {
         const ShapeNode *shape = m_document->shapeById(node->shapeId);
         if (shape) {
-            SceneTreeNodeRenderer::renderPreviewPrimitive(m_scene, m_previewItems, shape, node->shapeId, rect);
+            SceneTreeNodeRenderer::renderPreviewPrimitive(
+                m_scene, m_previewItems, shape, node->shapeId, rect,
+                m_nodeThumbnailCache ? m_nodeThumbnailCache->thumbnail(node->id) : QImage(),
+                m_theme);
         } else {
             SceneTreeNodeRenderer::renderPreviewTool(m_scene, m_previewItems, tool, rect, m_theme);
         }
@@ -372,7 +439,9 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
         const SceneDocument::TreeNode *moduleNode = m_document->treeNodeById(node->shapeId);
         const QString moduleName = moduleNode ? moduleNode->moduleName : QStringLiteral("module");
         const QVector<ModuleCallParam> params = moduleParamsForNode(*node);
-        appendModuleCallChip(m_scene, m_previewItems, rect, moduleName, params, 58.0);
+        appendModuleCallChip(
+            m_scene, m_previewItems, rect, moduleName, params, 58.0,
+            m_groupThumbnailCache ? m_groupThumbnailCache->thumbnail(node->id) : QImage());
         return;
     }
 
@@ -388,7 +457,10 @@ void SceneTreePreviewRenderer::addPreviewExistingNode(int nodeId, const QRectF &
     if (area)
         cutSeparatorY = area->cutSeparatorY + (rect.top() - area->rect.top());
 
-    SceneTreeNodeRenderer::renderPreviewGroup(m_scene, m_previewItems, node->operation, rect, cutSeparatorY, m_theme, area ? area->depth : 0, node->color);
+    SceneTreeNodeRenderer::renderPreviewGroup(
+        m_scene, m_previewItems, node->operation, rect, cutSeparatorY,
+        m_theme, area ? area->depth : 0, node->color,
+        m_groupThumbnailCache ? m_groupThumbnailCache->thumbnail(node->id) : QImage());
 
     if (!area)
         return;
